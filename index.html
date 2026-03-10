@@ -2760,7 +2760,7 @@ function renderInfoSheet(projId) {
 // ===== INFO EDIT MODE =====
 
 
-function inlineEditInfoField(projId, key, el, placeholder) {
+async function inlineEditInfoField(projId, key, el, placeholder) {
   if (el.querySelector('input')) return; // already editing
   const info = projectInfo[projId] || {};
   const current = info[key] || '';
@@ -2793,7 +2793,7 @@ function inlineEditInfoField(projId, key, el, placeholder) {
   });
 }
 
-function inlineEditDesc(projId, key, el) {
+async function inlineEditDesc(projId, key, el) {
   if (el.querySelector('textarea')) return; // already editing
   const info = projectInfo[projId] || {};
   const current = info[key] || '';
@@ -2953,7 +2953,7 @@ async function changeProjectStatus(projId, selectEl) {
   toast('Status updated');
 }
 
-function openConditionDropdown(projId, el) {
+async function openConditionDropdown(projId, el) {
   if (el.querySelector('select')) return; // already open
   const sel = document.createElement('select');
   sel.className = 'proj-status-select';
@@ -3467,7 +3467,7 @@ function getInitials(name) {
     : name.slice(0,2).toUpperCase();
 }
 
-function saveEmployee() {
+async function saveEmployee() {
   const name = document.getElementById('empName').value.trim();
   if (!name) {
     const inp = document.getElementById('empName');
@@ -7097,7 +7097,7 @@ function inlineEditName(taskId, projId) {
 }
 
 
-function inlineEditQuoteNum(taskId, projId) {
+async function inlineEditQuoteNum(taskId, projId) {
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
   const t = taskStore.find(x => x._id === taskId);
