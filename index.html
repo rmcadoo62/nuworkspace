@@ -342,7 +342,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 
 
 /* ===== TIMESHEET ===== */
-.ts-wrap{flex:1;overflow-y:auto;padding:28px 32px;display:flex;flex-direction:column;gap:0;min-width:0;}
+.ts-wrap{flex:1;padding:28px 32px;display:flex;flex-direction:column;gap:0;min-width:0;}
 .ts-header{display:flex;align-items:center;gap:14px;margin-bottom:24px;flex-wrap:wrap;}
 .ts-title{font-family:'DM Serif Display',serif;font-size:24px;color:var(--text);}
 .ts-week-nav{display:flex;align-items:center;gap:0;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;overflow:hidden;}
@@ -1123,11 +1123,9 @@ tr:hover .ts-del-row{color:var(--muted);}
       <div style="padding:20px 28px 0;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0">
         <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);margin-bottom:14px">Reports</div>
         <div class="reports-tabs" id="reportsTabs">
-          <div class="reports-tab active" data-tab="tab-overview" onclick="switchReportsTab(this)">&#x1F4CA; Overview</div>
-          <div class="reports-tab" data-tab="tab-tasks" onclick="switchReportsTab(this)">&#x2705; Tasks</div>
+          <div class="reports-tab active" data-tab="tab-billing" onclick="switchReportsTab(this)">&#x1F4B3; Billing Queue</div>
+          <div class="reports-tab" data-tab="tab-overview" onclick="switchReportsTab(this)">&#x1F4CA; Overview</div>
           <div class="reports-tab" data-tab="tab-employees" onclick="switchReportsTab(this)">&#x1F465; Employees</div>
-          <div class="reports-tab" data-tab="tab-billing" onclick="switchReportsTab(this)">&#x1F4B3; Billing Queue</div>
-          <div class="reports-tab" data-tab="tab-ai" onclick="switchReportsTab(this)">&#x2728; AI Analysis</div>
         </div>
       </div>
       <div style="flex:1;overflow-y:auto;padding:24px 28px" id="reportsBody">
@@ -1431,6 +1429,10 @@ tr:hover .ts-del-row{color:var(--muted);}
         <input class="f-input" id="empPhone" type="text" placeholder="+1 (555) 000-0000" maxlength="30" />
       </div>
       <div class="field">
+        <label class="field-label">Hire Date</label>
+        <input class="f-input" id="empHireDate" type="date" />
+      </div>
+      <div class="field">
         <label class="field-label">Avatar Color</label>
         <div class="color-swatches" id="empColorSwatches"></div>
       </div>
@@ -1656,7 +1658,8 @@ function renderProjectsTable() {
 
     // Actual hours from timesheets
     let actualHours = 0;
-    Object.values(tsData).forEach(rows => {
+    Object.entries(tsData).forEach(([k, rows]) => {
+      if (k.startsWith('oh_') || !Array.isArray(rows)) return; // skip overhead keys
       rows.forEach(row => {
         if (row.projId === p.id) actualHours += Object.values(row.hours).reduce((a,b)=>a+b,0);
       });
@@ -3379,6 +3382,7 @@ function renderEmployeesPanel(search) {
             <div class="emp-name">${e.name}</div>
             <div class="emp-role">${e.role}${e.dept ? ' · ' + e.dept : ''}</div>
             ${e.email ? `<div class="emp-email">${e.email}</div>` : ''}
+            ${e.hireDate ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">Hired: ${new Date(e.hireDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>` : ''}
           </div>
           <button class="emp-menu-btn" onclick="openEmployeeModal('${e.id}')" title="Edit">&#x270E;</button>
           <button class="emp-del-btn" onclick="deleteEmployee('${e.id}')" title="Remove">&#x2715;</button>
@@ -3416,7 +3420,8 @@ function openEmployeeModal(id) {
   document.getElementById('empRole').value  = emp ? emp.role  : '';
   document.getElementById('empDept').value  = emp ? emp.dept  : '';
   document.getElementById('empEmail').value = emp ? emp.email : '';
-  document.getElementById('empPhone').value = emp ? emp.phone : '';
+  document.getElementById('empPhone').value    = emp ? emp.phone    : '';
+  document.getElementById('empHireDate').value = emp ? emp.hireDate : '';
 
   buildEmpColorSwatches();
   updateEmpPreview();
@@ -3476,15 +3481,25 @@ function saveEmployee() {
     role:  document.getElementById('empRole').value.trim(),
     dept:  document.getElementById('empDept').value.trim(),
     email: document.getElementById('empEmail').value.trim(),
-    phone: document.getElementById('empPhone').value.trim(),
+    phone:     document.getElementById('empPhone').value.trim(),
+    hireDate:  document.getElementById('empHireDate').value || '',
     color: empColor,
+  };
+  const dbPayload = {
+    name: data.name, initials: data.initials,
+    role: data.role, department: data.dept,
+    email: data.email, phone: data.phone,
+    color: data.color, hire_date: data.hireDate || null,
   };
   if (editingEmpId) {
     const idx = employees.findIndex(e => e.id === editingEmpId);
     if (idx > -1) employees[idx] = {...employees[idx], ...data};
+    if (sb) await sb.from('employees').update(dbPayload).eq('id', editingEmpId);
     toast('Employee updated');
   } else {
-    employees.push({id: 'emp' + Date.now(), ...data});
+    const newEmp = {id: 'emp' + Date.now(), ...data};
+    employees.push(newEmp);
+    if (sb) { const { data: d } = await sb.from('employees').insert(dbPayload).select().single(); if (d) newEmp.id = d.id; }
     toast(data.name + ' added');
   }
   closeEmployeeModal();
@@ -3589,6 +3604,13 @@ function getWeekKey(offset) {
   return d.toISOString().slice(0,10);
 }
 
+function getTsKey(offset) {
+  // Returns empId|weekDate key for tsData store
+  const emp = proxyEmployee || currentEmployee;
+  const empId = emp ? emp.id : '__me__';
+  return empId + '|' + getWeekKey(offset);
+}
+
 function getWeekMonday(offset) {
   const now = new Date();
   const day = now.getDay(); // 0=Sun
@@ -3626,6 +3648,9 @@ function isToday(d) {
 function ensureWeek(key) {
   if (!tsData[key]) tsData[key] = [];
   if (tsData[key].length === 0) addTsRow(key, false);
+  // Ensure overhead sub-key exists
+  const ohKey = 'oh_' + key;
+  if (!tsData[ohKey]) tsData[ohKey] = {};
 }
 
 function addTsRow(key, rerender=true) {
@@ -3638,6 +3663,14 @@ function deleteTsRow(key, idx) {
   tsData[key].splice(idx, 1);
   if (tsData[key].length === 0) tsData[key].push({projId: '', taskName:'', isOverhead:false, overheadCat:'', hours:{0:0,1:0,2:0,3:0,4:0,5:0,6:0}});
   renderTimesheet();
+}
+
+function setOhHours(key, cat, di, val) {
+  const overheadKey = 'oh_' + key;
+  if (!tsData[overheadKey]) tsData[overheadKey] = {};
+  if (!tsData[overheadKey][cat]) tsData[overheadKey][cat] = {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+  tsData[overheadKey][cat][di] = parseFloat(val) || 0;
+  updateTsTotals(key);
 }
 
 function setTsHours(key, rowIdx, dayIdx, val) {
@@ -3692,32 +3725,77 @@ function switchTsToProject(key, rowIdx) {
   }, 50);
 }
 
+function getOhHoursForDay(key, di) {
+  const ohData = tsData['oh_' + key] || {};
+  return OVERHEAD_CATS.reduce((s, cat) => s + ((ohData[cat] || {})[di] || 0), 0);
+}
+
+function getOhGrand(key) {
+  const ohData = tsData['oh_' + key] || {};
+  return OVERHEAD_CATS.reduce((s, cat) => s + Object.values(ohData[cat] || {}).reduce((a,b)=>a+b,0), 0);
+}
+
 function updateTsTotals(key) {
   const rows = tsData[key] || [];
   const days = getWeekDays(tsWeekOffset);
 
-  // Row totals
+  // Row totals (project rows)
   rows.forEach((row, ri) => {
     const rowTotal = Object.values(row.hours).reduce((a,b) => a + b, 0);
     const el = document.getElementById(`ts-rowtotal-${key}-${ri}`);
     if (el) el.textContent = rowTotal > 0 ? rowTotal.toFixed(1) + 'h' : '—';
   });
 
-  // Day totals + grand total
+  // Overhead row totals
+  const ohData = tsData['oh_' + key] || {};
+  OVERHEAD_CATS.forEach(cat => {
+    const ohRow = ohData[cat] || {};
+    const ohRowTotal = Object.values(ohRow).reduce((a,b)=>a+b,0);
+    const ohEl = document.getElementById('oh-rowtotal-' + key + '-' + cat.replace(/[^a-z]/gi,''));
+    if (ohEl) ohEl.textContent = ohRowTotal > 0 ? ohRowTotal.toFixed(1) + 'h' : '—';
+  });
+
+  // Day totals (project + overhead) + grand total
   let grand = 0;
   days.forEach((d, di) => {
-    const dayTotal = rows.reduce((sum, row) => sum + (row.hours[di] || 0), 0);
+    const projDay = rows.reduce((sum, row) => sum + (row.hours[di] || 0), 0);
+    const ohDay   = getOhHoursForDay(key, di);
+    const dayTotal = projDay + ohDay;
     grand += dayTotal;
-    const el = document.getElementById(`ts-daytotal-${key}-${di}`);
+    // Update project-only subtotal
+    const projEl = document.getElementById('proj-daytotal-' + key + '-' + di);
+    if (projEl) projEl.textContent = projDay > 0 ? projDay.toFixed(1) + 'h' : '—';
+    // Update combined daily total
+    const el = document.getElementById('ts-daytotal-' + key + '-' + di);
     if (el) el.textContent = dayTotal > 0 ? dayTotal.toFixed(1) + 'h' : '—';
   });
 
-  const gtEl = document.getElementById(`ts-grandtotal-${key}`);
-  if (gtEl) gtEl.textContent = grand.toFixed(1) + 'h';
+  // Overhead day totals row
+  days.forEach((d, di) => {
+    const ohDay = getOhHoursForDay(key, di);
+    const ohDayEl = document.getElementById('oh-daytotal-' + key + '-' + di);
+    if (ohDayEl) ohDayEl.textContent = ohDay > 0 ? ohDay.toFixed(1) + 'h' : '—';
+  });
+
+  // Overhead grand total
+  const ohGrand = getOhGrand(key);
+  const ohGtEl = document.getElementById('oh-grandtotal-' + key);
+  if (ohGtEl) ohGtEl.textContent = ohGrand > 0 ? ohGrand.toFixed(1) + 'h' : '—';
+
+  const grandWithOh = grand;
+  // Update project-only grand
+  const projGtEl = document.getElementById('proj-grandtotal-' + key);
+  if (projGtEl) {
+    const projOnly = rows.reduce((s,r)=>s+Object.values(r.hours).reduce((a,b)=>a+b,0),0);
+    projGtEl.textContent = projOnly.toFixed(1) + 'h';
+  }
+  // Update combined grand
+  const gtEl = document.getElementById('ts-grandtotal-' + key);
+  if (gtEl) gtEl.textContent = grandWithOh.toFixed(1) + 'h';
 
   // Update header badge
   const badge = document.getElementById('tsTotalBadge');
-  if (badge) badge.textContent = grand.toFixed(1) + 'h this week';
+  if (badge) badge.textContent = grandWithOh.toFixed(1) + 'h this week';
 
   // Update summary cards
   updateTsSummary(key);
@@ -3726,12 +3804,16 @@ function updateTsTotals(key) {
 function updateTsSummary(key) {
   const rows = tsData[key] || [];
   const days = getWeekDays(tsWeekOffset);
-  const grand = rows.reduce((s, r) => s + Object.values(r.hours).reduce((a,b)=>a+b,0), 0);
+  const projGrand = rows.reduce((s, r) => s + Object.values(r.hours).reduce((a,b)=>a+b,0), 0);
+  const ohGrand   = getOhGrand(key);
+  const grand     = projGrand + ohGrand;
+
   const today = new Date().getDay();
   const todayIdx = today === 0 ? 6 : today - 1;
-  const todayHrs = rows.reduce((s, r) => s + (r.hours[todayIdx]||0), 0);
+  const projToday = rows.reduce((s, r) => s + (r.hours[todayIdx]||0), 0);
+  const ohToday   = getOhHoursForDay(key, todayIdx);
+  const todayHrs  = projToday + ohToday;
 
-  // Billable = all for now (can filter by project type later)
   const projsLogged = [...new Set(rows.filter(r => Object.values(r.hours).some(h=>h>0)).map(r=>r.projId))].length;
 
   const s = (id, val) => { const e = document.getElementById(id); if(e) e.textContent = val; };
@@ -3742,14 +3824,10 @@ function updateTsSummary(key) {
 }
 
 function openTimesheetPanel(el) {
-
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
   activeProjectId = null;
-  
-  activeProjectId = null;
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  if (el) el.classList.add('active');
+  proxyEmployee = null; // always reset to own timesheet when opening
   document.getElementById('topbarName').textContent = 'Timesheet';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-timesheet').classList.add('active');
@@ -3767,7 +3845,7 @@ function goTsToday() {
 }
 
 function renderTimesheet() {
-  const key = getWeekKey(tsWeekOffset);
+  const key = getTsKey(tsWeekOffset);
   ensureWeek(key);
   const rows = tsData[key];
   const days = getWeekDays(tsWeekOffset);
@@ -3834,10 +3912,10 @@ function renderTimesheet() {
       '</td></tr>';
   }).join('');
 
-  // Day total row
+  // Day total row (project rows only)
   const dayTotals = days.map((d, di) => {
     const total = rows.reduce((s, r) => s + (r.hours[di]||0), 0);
-    return `<td class="ts-day-total" id="ts-daytotal-${key}-${di}">${total>0?total.toFixed(1)+'h':'—'}</td>`;
+    return `<td class="ts-day-total" id="proj-daytotal-${key}-${di}">${total>0?total.toFixed(1)+'h':'—'}</td>`;
   }).join('');
 
   const grand = rows.reduce((s,r)=>s+Object.values(r.hours).reduce((a,b)=>a+b,0),0);
@@ -3849,16 +3927,22 @@ function renderTimesheet() {
     </th>`).join('');
 
   // Build proxy employee bar (for approvers entering on behalf)
-  const paperEmps = employees.filter(e => e.isPaperTs && e.id !== (currentEmployee ? currentEmployee.id : ''));
-  const showProxy = isApprover && paperEmps.length > 0;
+  // Paper employees: those flagged isPaperTs, OR those whose approverId matches current employee
+  const paperEmps = employees.filter(e => {
+    if (!currentEmployee) return false;
+    if (e.id === currentEmployee.id) return false;
+    return e.isPaperTs === true || e.isPaperTs === 1 || e.is_paper_ts === true;
+  });
+  // Show proxy bar if current user is approver/manager OR if there are paper employees assigned to them
+  const showProxy = (isApprover || paperEmps.length > 0) && paperEmps.length > 0;
   const proxyBar = showProxy ?
     '<div class="ts-proxy-bar">'+
-      '<span class="ts-proxy-label">Entering timesheet for:</span>'+
+      '<span class="ts-proxy-label">&#x1F4CB; Entering timesheet for:</span>'+
       '<select class="ts-proxy-select" onchange="setTsProxy(this.value)">'+
         '<option value="">— My own timesheet —</option>'+
         paperEmps.map(e => '<option value="'+e.id+'" '+(proxyEmployee && proxyEmployee.id===e.id?'selected':'')+'>'+e.name+'</option>').join('')+
       '</select>'+
-      (proxyEmployee ? '<span class="ts-proxy-badge">Entering for '+proxyEmployee.name+'</span>' : '')+
+      (proxyEmployee ? '<span class="ts-proxy-badge">&#x270F; Entering for '+proxyEmployee.name+'</span>' : '')+
     '</div>' : '';
 
   document.getElementById('tsWrap').innerHTML = proxyBar + `
@@ -3874,18 +3958,7 @@ function renderTimesheet() {
     </div>
     ${(function(){
       var locked = isWeekLocked(key);
-      var ws = getWeekStatusObj(key);
-      var out = '';
-      if (!locked) out += '<button class="ts-add-row-btn" onclick="addTsRow(\'' + key + '\')">+ Add Row</button>';
-      if (currentUser && !locked) out += '<button class="ts-add-row-btn" style="background:var(--blue);margin-left:8px" onclick="submitTimesheet()">Submit for Approval</button>';
-      return out;
-    })()}
-    ${(function(){
-      var ws = getWeekStatusObj(key);
-      if (!ws) return '';
-      if (ws.status === 'approved') return '<div class="ts-locked-bar">&#x2713; Timesheet approved and locked.</div>';
-      if (ws.status === 'submitted') return '<div class="ts-locked-bar" style="color:var(--blue);border-color:rgba(91,156,246,.2);background:rgba(91,156,246,.06)">&#x23F3; Submitted - awaiting approval.</div>';
-      if (ws.status === 'rejected') return '<div class="ts-rejected-bar">&#x2717; Rejected' + (ws.rejectionNote ? ': ' + ws.rejectionNote : '') + ' - please correct and resubmit.</div>';
+      if (!locked) return '<div style="margin-bottom:10px"><button class="ts-add-row-btn" onclick="addTsRow(\'' + key + '\')">+ Add Row</button></div>';
       return '';
     })()}
         <div class="ts-summary">
@@ -3911,32 +3984,131 @@ function renderTimesheet() {
       </div>
     </div>
 
-    <div class="ts-grid-wrap">
-      <table class="ts-grid">
-        <thead>
-          <tr>
-            <th style="text-align:left">Project / Task</th>
-            ${dayHeaders}
-            <th style="text-align:center;border-left:1px solid var(--border)">Total</th>
-            <th style="width:32px"></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tableRows}
-        </tbody>
-        <tfoot>
-          <tr class="ts-footer-row">
-            <td class="ts-footer-label">Daily Total</td>
-            ${dayTotals}
-            <td class="ts-grand-total" id="ts-grandtotal-${key}">${grand.toFixed(1)}h</td>
-            <td style="background:var(--surface);border-top:2px solid var(--border)"></td>
-          </tr>
-        </tfoot>
-      </table>
-    </div>
-  `;
+  `; // end summary/header template
+
+  // Build unified single table (projects + overhead perfectly aligned)
+  const tsWrap = document.getElementById('tsWrap');
+  if (tsWrap) {
+    const overheadKey = 'oh_' + key;
+    if (!tsData[overheadKey]) tsData[overheadKey] = {};
+    OVERHEAD_CATS.forEach(cat => {
+      if (!tsData[overheadKey][cat]) tsData[overheadKey][cat] = {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+    });
+    const locked = isWeekLocked(key);
+
+    let html = '<div style="overflow-x:auto;border-radius:10px;border:1px solid var(--border)">';
+    html += '<table class="ts-grid" style="min-width:820px">';
+
+    // Single shared header row
+    html += '<thead><tr>';
+    html += '<th style="text-align:left">Project / Task</th>';
+    days.forEach((d,di) => {
+      html += '<th class="day-col' + (isToday(d)?' today':'') + '">' + fmtDay(d) + '<span class="day-num">' + d.getDate() + '</span></th>';
+    });
+    html += '<th style="text-align:center;border-left:1px solid var(--border)">Total</th>';
+    html += '<th style="width:32px"></th></tr></thead><tbody>';
+
+    // Project rows
+    html += tableRows;
+
+    // Project subtotal row
+    html += '<tr class="ts-footer-row"><td class="ts-footer-label" style="color:var(--muted);font-size:10.5px">Project Total</td>';
+    days.forEach((d,di) => {
+      const total = (tsData[key]||[]).reduce((s,r)=>s+(r.hours[di]||0),0);
+      html += '<td class="ts-day-total" id="proj-daytotal-' + key + '-' + di + '">' + (total>0?total.toFixed(1)+'h':'—') + '</td>';
+    });
+    const projGrand = (tsData[key]||[]).reduce((s,r)=>s+Object.values(r.hours).reduce((a,b)=>a+b,0),0);
+    html += '<td class="ts-grand-total" id="proj-grandtotal-' + key + '" style="font-size:13px">' + (projGrand>0?projGrand.toFixed(1)+'h':'—') + '</td>';
+    html += '<td style="background:var(--surface);border-top:2px solid var(--border)"></td></tr>';
+
+    // Overhead section divider
+    html += '<tr><td colspan="9" style="padding:6px 14px;background:rgba(124,92,191,0.08);border-top:2px solid rgba(124,92,191,0.25);font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--purple)">⬡ Overhead</td></tr>';
+
+    // Overhead rows
+    OVERHEAD_CATS.forEach(cat => {
+      const ohHours = tsData[overheadKey][cat];
+      const ohTotal = Object.values(ohHours).reduce((a,b)=>a+b,0);
+      const escapedCat = cat.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+      html += '<tr><td class="ts-row-label"><span style="font-size:13px">' + cat + '</span></td>';
+      days.forEach((d,di) => {
+        const val = ohHours[di] || 0;
+        html += '<td class="ts-cell"><input class="ts-input ' + (val>0?'has-val':'') + '" type="number" min="0" max="24" step="0.5"' +
+          ' value="' + (val>0?val:'') + '" placeholder="—"' +
+          ' oninput="this.classList.toggle(\'has-val\',!!this.value);setOhHours(\'' + key + '\',\'' + escapedCat + '\',' + di + ',this.value)"' +
+          (locked ? ' disabled' : '') + ' onfocus="this.select()" /></td>';
+      });
+      const ohRowId = 'oh-rowtotal-' + key + '-' + cat.replace(/[^a-z]/gi,'');
+      html += '<td class="ts-row-total" id="' + ohRowId + '">' + (ohTotal>0?ohTotal.toFixed(1)+'h':'—') + '</td>';
+      html += '<td style="background:var(--surface)"></td></tr>';
+    });
+
+    // OH subtotal row
+    html += '<tr class="ts-footer-row"><td class="ts-footer-label" style="color:var(--muted);font-size:10.5px">OH Total</td>';
+    days.forEach((d,di) => {
+      const total = OVERHEAD_CATS.reduce((s,cat)=>s+(tsData[overheadKey][cat][di]||0),0);
+      html += '<td class="ts-day-total" id="oh-daytotal-' + key + '-' + di + '">' + (total>0?total.toFixed(1)+'h':'—') + '</td>';
+    });
+    const ohGrand = OVERHEAD_CATS.reduce((s,cat)=>s+Object.values(tsData[overheadKey][cat]).reduce((a,b)=>a+b,0),0);
+    html += '<td class="ts-grand-total" id="oh-grandtotal-' + key + '" style="font-size:13px">' + (ohGrand>0?ohGrand.toFixed(1)+'h':'—') + '</td>';
+    html += '<td style="background:var(--surface);border-top:2px solid var(--border)"></td></tr>';
+
+    // Daily Total row (amber — project + overhead)
+    const fullGrand = projGrand + ohGrand;
+    html += '<tr class="ts-footer-row" style="background:var(--amber-glow)">';
+    html += '<td class="ts-footer-label" style="color:var(--amber);border-top:2px solid var(--amber-dim)">Daily Total</td>';
+    days.forEach((d,di) => {
+      const projDay = (tsData[key]||[]).reduce((s,r)=>s+(r.hours[di]||0),0);
+      const ohDay   = OVERHEAD_CATS.reduce((s,cat)=>s+((tsData[overheadKey][cat]||{})[di]||0),0);
+      const total   = projDay + ohDay;
+      html += '<td class="ts-day-total" id="ts-daytotal-' + key + '-' + di + '" style="color:var(--amber);font-weight:700;border-top:2px solid var(--amber-dim)">' + (total>0?total.toFixed(1)+'h':'—') + '</td>';
+    });
+    html += '<td class="ts-grand-total" id="ts-grandtotal-' + key + '" style="color:var(--amber);border-top:2px solid var(--amber-dim)">' + fullGrand.toFixed(1) + 'h</td>';
+    html += '<td style="background:var(--amber-glow);border-top:2px solid var(--amber-dim)"></td></tr>';
+
+    html += '</tbody></table></div>';
+
+    // Status indicator — fresh lookup here so it reflects latest data
+    const ws = getWeekStatusObj(key);
+    let statusHTML = '';
+    if (!ws || !ws.status || ws.status === 'open') {
+      statusHTML = '<span style="padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);font-size:12px;color:var(--muted)">📝 Open</span>';
+    } else if (ws.status === 'submitted') {
+      statusHTML = '<span style="padding:6px 12px;border-radius:6px;border:1px solid rgba(91,156,246,.3);background:rgba(91,156,246,.08);font-size:12px;color:var(--blue)">⏳ Submitted — awaiting approval</span>';
+    } else if (ws.status === 'approved') {
+      statusHTML = '<span style="padding:6px 12px;border-radius:6px;border:1px solid rgba(76,175,125,.3);background:rgba(76,175,125,.08);font-size:12px;color:#4caf7d">✓ Approved & Locked</span>';
+    } else if (ws.status === 'rejected') {
+      statusHTML = '<span style="padding:6px 12px;border-radius:6px;border:1px solid rgba(224,92,92,.3);background:rgba(224,92,92,.08);font-size:12px;color:#e05c5c">✗ Rejected' + (ws.rejectionNote ? ': ' + ws.rejectionNote : '') + '</span>';
+    }
+
+    const submitBtn = (currentUser && !locked)
+      ? '<button class="ts-add-row-btn" style="background:var(--blue)" onclick="submitTimesheet()">Submit for Approval</button>'
+      : '';
+
+    const badgeId = 'ts-status-badge-' + key.replace(/[^a-z0-9]/gi,'-');
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-bottom:40px">';
+    html += '<div id="' + badgeId + '">' + statusHTML + '</div>';
+    html += '<div>' + submitBtn + '</div>';
+    html += '</div>';
+
+    tsWrap.insertAdjacentHTML('beforeend', html);
+  }
 
   updateTsSummary(key);
+}
+
+function updateTsStatusBadge(key) {
+  const ws = getWeekStatusObj(key);
+  const badgeEl = document.getElementById('ts-status-badge-' + key.replace(/[^a-z0-9]/gi,'-'));
+  if (!badgeEl) { renderTimesheet(); return; }
+  if (!ws || !ws.status || ws.status === 'open') {
+    badgeEl.innerHTML = '<span style="padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);font-size:12px;color:var(--muted)">📝 Open</span>';
+  } else if (ws.status === 'submitted') {
+    badgeEl.innerHTML = '<span style="padding:6px 12px;border-radius:6px;border:1px solid rgba(91,156,246,.3);background:rgba(91,156,246,.08);font-size:12px;color:var(--blue)">⏳ Submitted — awaiting approval</span>';
+  } else if (ws.status === 'approved') {
+    badgeEl.innerHTML = '<span style="padding:6px 12px;border-radius:6px;border:1px solid rgba(76,175,125,.3);background:rgba(76,175,125,.08);font-size:12px;color:#4caf7d">✓ Approved &amp; Locked</span>';
+  } else if (ws.status === 'rejected') {
+    badgeEl.innerHTML = '<span style="padding:6px 12px;border-radius:6px;border:1px solid rgba(224,92,92,.3);background:rgba(224,92,92,.08);font-size:12px;color:#e05c5c">✗ Rejected' + (ws.rejectionNote ? ': ' + ws.rejectionNote : '') + '</span>';
+  }
 }
 
 
@@ -4695,8 +4867,9 @@ function renderBillingQueue() {
 
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
-  // All complete tasks across all projects
-  const tasks = taskStore.filter(t => t.status === 'complete').map(t => {
+  // Complete tasks from non-closed projects only
+  const closedProjIds = new Set(projects.filter(p => (projectInfo[p.id]||{}).status === 'closed').map(p => p.id));
+  const tasks = taskStore.filter(t => t.status === 'complete' && !closedProjIds.has(t.proj)).map(t => {
     const proj = projects.find(p => p.id === t.proj) || {};
     const info = projectInfo[t.proj] || {};
     const emp  = employees.find(e => e.initials === t.assign) || {};
@@ -4846,9 +5019,13 @@ function openReportsPanel(navEl) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('panel-reports').classList.add('active');
   if (navEl) navEl.classList.add('active');
-  renderReportsOverview();
-  renderReportsTasks();
-  renderReportsEmployees();
+  // Default to billing queue tab
+  document.querySelectorAll('.reports-tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.reports-tab-panel').forEach(t => t.classList.remove('active'));
+  const billingTab = document.querySelector('[data-tab="tab-billing"]');
+  const billingPanel = document.getElementById('tab-billing');
+  if (billingTab) billingTab.classList.add('active');
+  if (billingPanel) billingPanel.classList.add('active');
   renderBillingQueue();
 }
 
@@ -4865,19 +5042,23 @@ function renderReportsOverview() {
   const el = document.getElementById('tab-overview');
   if (!el) return;
 
-  const totalProj = projects.length;
+  // Only include non-closed projects in all calculations
+  const openProjIds = new Set(projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').map(p => p.id));
+  const openTasks   = taskStore.filter(t => openProjIds.has(t.proj));
+
+  const totalProj  = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').length;
   const activeProj = projects.filter(p => (projectInfo[p.id]||{}).status === 'active').length;
-  const totalTasks = taskStore.length;
-  const doneTasks  = taskStore.filter(t => t.done || t.status === 'complete' || t.status === 'billed').length;
-  const overdue    = taskStore.filter(t => t.overdue && !t.done).length;
-  const totalRev   = Object.values(projectInfo).reduce((s,i) => s + (i.contractValue||0), 0);
-  const billedRev  = taskStore.filter(t => t.status==='billed').reduce((s,t) => s+(t.fixedPrice||0), 0);
-  const readyRev   = taskStore.filter(t => t.status==='complete').reduce((s,t) => s+(t.fixedPrice||0), 0);
+  const totalTasks = openTasks.length;
+  const doneTasks  = openTasks.filter(t => t.done || t.status === 'complete' || t.status === 'billed').length;
+  const overdue    = openTasks.filter(t => t.overdue && !t.done).length;
+  const totalRev   = [...openProjIds].reduce((s,id) => s + (projectInfo[id]?.contractValue||0), 0);
+  const billedRev  = openTasks.filter(t => t.status==='billed').reduce((s,t) => s+(t.fixedPrice||0), 0);
+  const readyRev   = openTasks.filter(t => t.status==='complete').reduce((s,t) => s+(t.fixedPrice||0), 0);
   const fmt$ = n => '$' + n.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 
-  // Status breakdown for pie chart
+  // Status breakdown for pie chart (exclude closed)
   const statusCounts = {};
-  projects.forEach(p => {
+  projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').forEach(p => {
     const s = (projectInfo[p.id]||{}).status || 'unknown';
     statusCounts[s] = (statusCounts[s]||0) + 1;
   });
@@ -5480,6 +5661,7 @@ async function loadAllData() {
       role: r.role||'', dept: r.department||'',
       email: r.email||'', phone: r.phone||'', color: r.color||'#5b9cf6',
       isApprover: r.is_approver||false, isPaperTs: r.is_paper_ts||false, approverId: r.approver_id||null,
+      hireDate: r.hire_date||'',
     }));
 
     // Clients & Contacts
@@ -5504,12 +5686,20 @@ async function loadAllData() {
     // Timesheet
     const tsRows = await dbFetch('timesheet_entries');
     tsRows.forEach(r => {
-      const key = r.week_start;
-      if (!tsData[key]) tsData[key] = [];
-      tsData[key].push({
-        _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
-        hours: JSON.parse(r.hours_json||'{}'),
-      });
+      const empId = r.employee_id || '__unknown__';
+      const storeKey = empId + '|' + r.week_start;
+      if (r.is_overhead && r.overhead_cat) {
+        const ohKey = 'oh_' + storeKey;
+        if (!tsData[ohKey]) tsData[ohKey] = {};
+        tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+      } else {
+        if (!tsData[storeKey]) tsData[storeKey] = [];
+        tsData[storeKey].push({
+          _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+          isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
+          hours: JSON.parse(r.hours_json||'{}'),
+        });
+      }
     });
 
   } catch(e) { console.error('loadAllData', e); }
@@ -6328,7 +6518,8 @@ function openClientsPanel(el) {
 
 function renderClientsPanel(search) {
   const q = (search||'').toLowerCase();
-  const filtered = clientStore.filter(c => c.name.toLowerCase().includes(q));
+  const filtered = clientStore.filter(c => c.name.toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const body = document.getElementById('clientsPanelBody');
   if (!body) return;
 
@@ -6457,7 +6648,8 @@ function renderClientPickerList(projId, search) {
   const list = document.getElementById('clientPickerList');
   if (!list) return;
   const q = search.toLowerCase();
-  const filtered = clientStore.filter(c => c.name.toLowerCase().includes(q));
+  const filtered = clientStore.filter(c => c.name.toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const exact = clientStore.find(c => c.name.toLowerCase() === q);
   const addNew = search.trim() && !exact
     ? `<div class="client-picker-item" style="color:var(--amber);font-weight:600;border-top:1px solid var(--border);margin-top:4px;padding-top:8px" onclick="createAndSelectClient('${projId}','${search.trim().replace(/'/g,"\\'")}')">&#xFF0B; Add "${search.trim()}" as new client</div>`
@@ -6614,7 +6806,11 @@ function renderTsProjDropdown(key, ri, search) {
   if (!dd) return;
   // Search on name only — strip any emoji/spaces the user may have typed
   const q = search.replace(/[^a-zA-Z0-9 \-]/g, '').toLowerCase().trim();
-  const filtered = q === '' ? projects : projects.filter(p =>
+  const openProjects = projects.filter(p => {
+    const info = projectInfo[p.id];
+    return !info || info.status !== 'closed';
+  });
+  const filtered = q === '' ? openProjects : openProjects.filter(p =>
     p.name.toLowerCase().includes(q)
   );
   let html = '<div class="ts-proj-drop-list" id="ts-proj-drop-list-'+key+'-'+ri+'">';
@@ -7153,7 +7349,7 @@ async function afterLogin(user) {
   currentUser = user;
   // Match to employee record by email
   currentEmployee = employees.find(e => e.email && e.email.toLowerCase() === user.email.toLowerCase()) || null;
-  isApprover = currentEmployee ? (currentEmployee.role === 'approver' || currentEmployee.isApprover) : false;
+  isApprover = currentEmployee ? (currentEmployee.role === 'approver' || currentEmployee.role === 'manager' || currentEmployee.isApprover === true || currentEmployee.isApprover === 1) : false;
 
   // Update sidebar badge
   const badge = document.getElementById('sidebarUserBadge');
@@ -7204,8 +7400,9 @@ async function loadTsStatuses() {
   const { data } = await sb.from('timesheet_weeks').select('*');
   if (!data) return;
   data.forEach(r => {
-    tsWeekStatuses[r.week_key] = {
+    tsWeekStatuses[r.id] = {
       id: r.id,
+      weekKey: r.week_key,
       status: r.status,
       employeeId: r.employee_id,
       submittedBy: r.submitted_by,
@@ -7225,7 +7422,8 @@ function getTsWeekStatus(key) {
 
 function setTsProxy(empId) {
   proxyEmployee = empId ? employees.find(e => e.id === empId) : null;
-  // Reset week data for new employee context
+  // When switching employee context, renderTimesheet will use getTsKey
+  // which now includes the empId, so each person's data is isolated
   renderTimesheet();
 }
 
@@ -7234,7 +7432,9 @@ const _origGetWeekStatusObj = getWeekStatusObj;
 function getWeekStatusObj(key) {
   const emp = proxyEmployee || currentEmployee;
   if (!emp) return null;
-  return Object.values(tsWeekStatuses).find(s => s.weekKey === key && s.employeeId === emp.id) || null;
+  const weekDate = key.includes('|') ? key.split('|')[1] : key;
+  const match = Object.values(tsWeekStatuses).find(s => s.weekKey === weekDate && s.employeeId === emp.id);
+  return match || null;
 }
 
 // Override isWeekLocked for proxy — paper employees never lock
@@ -7246,53 +7446,79 @@ function isWeekLocked(key) {
 
 
 async function autoApproveProxyTimesheet() {
-  const key = getWeekKey(tsWeekOffset);
+  const key = getTsKey(tsWeekOffset);
   const emp = proxyEmployee;
   if (!emp || !sb) return;
   const rows = tsData[key] || [];
-  const totalHours = rows.reduce((s,r) => s + Object.values(r.hours).reduce((a,b)=>a+b,0), 0);
+  const ohData2 = tsData['oh_' + key] || {};
+  const projHours = rows.reduce((s,r) => s + Object.values(r.hours).reduce((a,b)=>a+b,0), 0);
+  const ohHours2 = OVERHEAD_CATS.reduce((s,cat) => s + Object.values(ohData2[cat]||{}).reduce((a,b)=>a+b,0), 0);
+  const totalHours = projHours + ohHours2;
   if (totalHours === 0) { toast('No hours to save'); return; }
 
-  // Save timesheet entries
+  const weekDateAA = key.includes('|') ? key.split('|')[1] : key;
+
+  // Save project rows
   for (const row of rows) {
     const hasHours = Object.values(row.hours).some(h=>h>0);
     if (!hasHours) continue;
     await sb.from('timesheet_entries').upsert({
-      week_start: key, project_id: row.isOverhead ? null : (row.projId||null),
-      task_name: row.isOverhead ? row.overheadCat : (row.taskName||null),
+      week_start: weekDateAA, project_id: row.isOverhead ? null : (row.projId||null),
+      task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName||null),
       hours_json: JSON.stringify(row.hours),
       employee_id: emp.id,
       is_overhead: row.isOverhead||false, overhead_cat: row.overheadCat||null,
-    }, {onConflict:'week_start,employee_id,project_id,task_name'});
+    }, {onConflict:'week_start,employee_id,task_name'});
+  }
+  // Save pinned overhead rows
+  const ohData = tsData['oh_' + key] || {};
+  for (const cat of OVERHEAD_CATS) {
+    const hours = ohData[cat] || {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+    if (!Object.values(hours).some(h=>h>0)) continue;
+    await sb.from('timesheet_entries').upsert({
+      week_start: weekDateAA, project_id: null,
+      task_name: '⬡ ' + cat,
+      hours_json: JSON.stringify(hours),
+      employee_id: emp.id,
+      is_overhead: true, overhead_cat: cat,
+    }, {onConflict:'week_start,employee_id,task_name'});
   }
 
   // Upsert as approved directly
+  const weekDate2 = key.includes('|') ? key.split('|')[1] : key;
   const weekRow = {
-    week_key: key, week_start: key,
+    week_key: weekDate2, week_start: weekDate2,
     employee_id: emp.id, employee_name: emp.name,
     submitted_by: currentEmployee ? currentEmployee.id : null,
     approver_id: currentEmployee ? currentEmployee.id : null,
     approved_by: currentEmployee ? currentEmployee.id : null,
     status: 'approved',
   };
-  const existing = Object.values(tsWeekStatuses).find(s => s.weekKey === key && s.employeeId === emp.id);
+  const existing = Object.values(tsWeekStatuses).find(s => s.weekKey === weekDate2 && s.employeeId === emp.id);
   if (existing) {
     await sb.from('timesheet_weeks').update(weekRow).eq('id', existing.id);
+    tsWeekStatuses[existing.id] = { ...tsWeekStatuses[existing.id], ...weekRow, weekKey: weekDate2 };
   } else {
     const { data } = await sb.from('timesheet_weeks').insert(weekRow).select().single();
-    if (data) tsWeekStatuses[data.id] = { ...weekRow, id: data.id, weekKey: key, employeeId: emp.id };
+    if (data) tsWeekStatuses[data.id] = { ...weekRow, id: data.id, weekKey: weekDate2, employeeId: emp.id };
   }
   toast('✓ Timesheet saved & approved for ' + emp.name);
-  renderTimesheet();
+  await loadTsStatuses();
+  updateTsStatusBadge(key);
 }
 
 async function submitTimesheet() {
   // For paper employees entered by manager — auto-approve, skip submit flow
-  if (proxyEmployee && proxyEmployee.isPaperTs) {
+  // Only if proxy is actively selected (not own timesheet)
+  // Auto-approve only when proxy dropdown is actively set to a paper TS employee
+  const proxySelect = document.querySelector('.ts-proxy-select');
+  const isInProxyMode = proxySelect && proxySelect.value !== '' && proxyEmployee && proxyEmployee.isPaperTs;
+  if (isInProxyMode) {
     await autoApproveProxyTimesheet();
     return;
   }
-  const key = getWeekKey(tsWeekOffset);
+  const key = getTsKey(tsWeekOffset);
+  const weekDate = key.includes('|') ? key.split('|')[1] : key;
   const emp = currentEmployee;
   if (!emp) { toast('You must be signed in as an employee to submit'); return; }
 
@@ -7303,14 +7529,14 @@ async function submitTimesheet() {
   const approver = employees.find(e => e.id === emp.approverId);
 
   const row = {
-    week_key: key,
+    week_key: weekDate,
     employee_id: emp.id,
     employee_name: emp.name,
     submitted_by: emp.id,
     status: 'submitted',
     rejection_note: null,
     approver_id: approver ? approver.id : null,
-    week_start: key
+    week_start: weekDate
   };
 
   // Upsert
@@ -7324,23 +7550,30 @@ async function submitTimesheet() {
     saved = data;
   }
   if (saved) {
-    tsWeekStatuses[saved.id] = { ...row, id: saved.id, weekKey: key };
+    tsWeekStatuses[saved.id] = { ...row, id: saved.id, weekKey: weekDate, employeeId: emp.id, status: 'submitted' };
   }
   toast('✅ Timesheet submitted for approval');
-  renderTimesheet();
+  await loadTsStatuses();
+  updateTsStatusBadge(getTsKey(tsWeekOffset));
   updateApprovalsBadge();
 }
 
 async function saveTsWeekToSupabase(key) {
   if (!sb || !currentEmployee) return;
+  const empId = currentEmployee.id;
+  const weekDate = key.includes('|') ? key.split('|')[1] : key;
+
+  // Save project rows
   const rows = tsData[key] || [];
   for (const row of rows) {
+    const hasHours = Object.values(row.hours).some(h=>h>0);
+    if (!hasHours && !row._id) continue;
     const payload = {
-      week_start: key,
+      week_start: weekDate,
       project_id: row.projId || null,
       task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName || ''),
       hours_json: JSON.stringify(row.hours),
-      employee_id: currentEmployee.id,
+      employee_id: empId,
       is_overhead: row.isOverhead || false,
       overhead_cat: row.overheadCat || null
     };
@@ -7351,6 +7584,26 @@ async function saveTsWeekToSupabase(key) {
       if (data) row._id = data.id;
     }
   }
+
+  // Save pinned overhead rows
+  const ohData = tsData['oh_' + key] || {};
+  for (const cat of OVERHEAD_CATS) {
+    const hours = ohData[cat] || {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
+    const hasHours = Object.values(hours).some(h=>h>0);
+    if (!hasHours) continue;
+    const payload = {
+      week_start: weekDate,
+      project_id: null,
+      task_name: '⬡ ' + cat,
+      hours_json: JSON.stringify(hours),
+      employee_id: empId,
+      is_overhead: true,
+      overhead_cat: cat
+    };
+    // Use upsert to avoid duplicates
+    await sb.from('timesheet_entries').upsert(payload,
+      {onConflict: 'week_start,employee_id,task_name'});
+  }
 }
 
 function isWeekLocked(key) {
@@ -7360,11 +7613,7 @@ function isWeekLocked(key) {
   return status && (status.status === 'submitted' || status.status === 'approved');
 }
 
-function getWeekStatusObj(key) {
-  const emp = currentEmployee;
-  if (!emp) return null;
-  return Object.values(tsWeekStatuses).find(s => s.weekKey === key && s.employeeId === emp.id) || null;
-}
+// getWeekStatusObj defined earlier
 
 function updateApprovalsBadge() {
   if (!isApprover || !currentEmployee) return;
@@ -7415,10 +7664,13 @@ function renderApprovalsPanel() {
     const weekRows = Object.values(tsData).flat().filter(r => r.employeeId === ws.employeeId);
     const hrs = Object.values(tsWeekStatuses).find(s => s.id === ws.id);
 
-    // Calculate hours for this week
-    const weekEntries = Object.entries(tsData).find(([k]) => k === ws.weekKey);
+    // Calculate hours for this week using empId|weekKey
+    const storeKey = emp.id + '|' + ws.weekKey;
     let totalHrs = 0;
-    if (weekEntries) weekEntries[1].forEach(r => { if (r.employeeId === emp.id || !r.employeeId) Object.values(r.hours).forEach(h => totalHrs += h); });
+    (tsData[storeKey] || []).forEach(r => Object.values(r.hours).forEach(h => totalHrs += h));
+    // Add overhead
+    const ohStore = tsData['oh_' + storeKey] || {};
+    OVERHEAD_CATS.forEach(cat => Object.values(ohStore[cat] || {}).forEach(h => totalHrs += h));
 
     const statusBadge = {
       submitted: '<span class="ts-status-badge ts-status-submitted">⏳ Pending Review</span>',
@@ -7489,14 +7741,22 @@ async function confirmReject(wsId) {
 }
 
 function viewEmployeeTimesheet(empId, weekKey) {
-  // Navigate to timesheet panel showing that week
   const offset = (() => {
     const target = new Date(weekKey+'T00:00:00');
     const thisWeek = getWeekMonday(0);
     return Math.round((target - thisWeek) / (7*24*60*60*1000));
   })();
   tsWeekOffset = offset;
-  openTimesheetPanel(document.getElementById('navTimesheetItem'));
+  // Set proxy to the employee being viewed
+  proxyEmployee = employees.find(e => e.id === empId) || null;
+  // Don't use openTimesheetPanel as it resets proxyEmployee
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const navItem = document.getElementById('navTimesheetItem');
+  if (navItem) navItem.classList.add('active');
+  document.getElementById('topbarName').textContent = 'Timesheet';
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-timesheet').classList.add('active');
+  renderTimesheet();
 }
 
 // ===== STARTUP =====
