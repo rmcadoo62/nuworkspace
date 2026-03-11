@@ -9,7 +9,7 @@
 <style>
 :root{--bg:#f5f5f7;--surface:#ffffff;--surface2:#f0f0f3;--surface3:#e8e8ed;--border:#dcdce0;--text:#1a1a2e;--muted:#6b6b78;--amber:#c07a1a;--amber-dim:#9a6214;--amber-glow:rgba(192,122,26,0.10);--green:#2e9e62;--blue:#3a7fd4;--red:#d04040;--purple:#7c5cbf;--radius:8px;--transition:0.18s ease;}
 *{margin:0;padding:0;box-sizing:border-box;}
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;overflow:hidden;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);height:100vh;display:flex;overflow:hidden;min-width:0;}
 .sidebar{width:224px;min-width:224px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 0;z-index:10;}
 .logo{padding:0 20px 24px;border-bottom:1px solid var(--border);margin-bottom:16px;}
 .logo-text{font-family:'DM Serif Display',serif;font-size:22px;color:var(--amber);letter-spacing:-0.5px;}
@@ -30,7 +30,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .team-members{display:flex;flex-wrap:wrap;gap:4px;padding:10px 8px;}
 .avatar{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;cursor:pointer;transition:transform var(--transition);border:1.5px solid var(--surface);}
 .avatar:hover{transform:scale(1.15);z-index:1;}
-.main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;}
 .topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:0 28px;height:56px;display:flex;align-items:center;gap:20px;flex-shrink:0;}
 .project-name{font-family:'DM Serif Display',serif;font-size:18px;color:var(--text);}
 .topbar-divider{width:1px;height:20px;background:var(--border);}
@@ -50,9 +50,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .s-amber{color:var(--amber);}
 .s-green{color:var(--green);}
 .s-red{color:var(--red);}
-.content{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0;}
+.content{flex:1;overflow:hidden;display:flex;flex-direction:column;min-height:0;min-width:0;}
 .view-panel{display:none;flex:1;overflow:hidden;min-height:0;}
-.view-panel.active{display:flex;overflow-y:auto;}
+.view-panel.active{display:flex;overflow-y:auto;overflow-x:auto;min-width:0;}
 .kanban-wrap{flex:1;overflow-x:auto;padding:24px 28px;display:flex;gap:16px;align-items:flex-start;}
 .kanban-col{min-width:268px;max-width:268px;display:flex;flex-direction:column;gap:10px;}
 .kanban-header{display:flex;align-items:center;gap:8px;padding:0 4px 6px;}
@@ -273,9 +273,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .itf:hover{color:var(--text);border-color:var(--surface3);}
 .itf.active{background:var(--surface2);color:var(--text);border-color:var(--surface3);}
 .info-task-table{width:100%;}
-.itt-head{display:grid;grid-template-columns:36px 28px 1fr 130px 55px 90px 60px 60px 70px 60px 80px 80px 80px 50px;gap:0;padding:6px 10px;border-bottom:1px solid var(--border);margin-bottom:2px;}
-.itt-head-cell{font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:var(--muted);}
-.itt-row{display:grid;grid-template-columns:36px 28px 50px 1fr 130px 80px 90px 75px 60px 60px 70px 75px 80px 50px;gap:0;padding:9px 10px;border-radius:7px;border:1px solid transparent;transition:all var(--transition);align-items:center;margin-bottom:2px;cursor:pointer;}
+.itt-head{display:grid;grid-template-columns:var(--itc-num,36px) var(--itc-pri,28px) var(--itc-cat,50px) var(--itc-task,1fr) var(--itc-status,130px) var(--itc-quote,80px) var(--itc-price,90px) var(--itc-created,75px) var(--itc-hrs,60px) var(--itc-bhrs,60px) var(--itc-assign,70px) var(--itc-start,80px) var(--itc-comp,80px) var(--itc-act,50px);gap:0;padding:6px 10px;border-bottom:1px solid var(--border);margin-bottom:2px;}
+.itt-head-cell{font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:var(--muted);position:relative;user-select:none;}.itt-resizer{position:absolute;right:-3px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:10;}.itt-resizer::after{content:'';position:absolute;left:3px;top:15%;bottom:15%;width:2px;border-radius:2px;background:transparent;transition:background .15s;}.itt-resizer:hover::after,.itt-resizer.active::after{background:#5b9cf6;}
+.itt-row{display:grid;grid-template-columns:var(--itc-num,36px) var(--itc-pri,28px) var(--itc-cat,50px) var(--itc-task,1fr) var(--itc-status,130px) var(--itc-quote,80px) var(--itc-price,90px) var(--itc-created,75px) var(--itc-hrs,60px) var(--itc-bhrs,60px) var(--itc-assign,70px) var(--itc-start,80px) var(--itc-comp,80px) var(--itc-act,50px);gap:0;padding:9px 10px;border-radius:7px;border:1px solid transparent;transition:all var(--transition);align-items:center;margin-bottom:2px;cursor:pointer;}
 .itt-row:hover{background:var(--surface);border-color:var(--border);}
 .itt-check{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all var(--transition);flex-shrink:0;font-size:9px;font-weight:700;}
 .itt-check:hover{border-color:var(--amber);}
@@ -546,8 +546,8 @@ tr:hover .ts-del-row{color:var(--muted);}
 .nav-filter-active-dot{width:6px;height:6px;border-radius:50%;background:var(--amber);display:inline-block;margin-left:2px;}
 
 /* ===== PROJECTS TABLE ===== */
-.projtbl-wrap{padding:28px 32px;}
-.projtbl-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;}
+.projtbl-wrap{padding:28px 32px;min-width:0;width:100%;box-sizing:border-box;}
+.projtbl-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px;min-width:0;}
 .projtbl-title{font-family:'DM Serif Display',serif;font-size:22px;color:var(--text);}
 .projtbl-sub{font-size:12px;color:var(--muted);margin-top:2px;}
 .projtbl-table{width:100%;border-collapse:collapse;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
@@ -1000,7 +1000,6 @@ tr:hover .ts-del-row{color:var(--muted);}
     <div class="stat-chip">Done <span class="s-green" id="statDone">18</span></div>
     <div class="stat-chip">In Progress <span class="s-amber" id="statInprog">11</span></div>
     <div class="stat-chip">Overdue <span class="s-red" id="statOverdue">3</span></div>
-    <div class="stat-chip">Sprint ends in <span>6d</span></div>
   </div>
   <div class="content">
 
@@ -1014,7 +1013,7 @@ tr:hover .ts-del-row{color:var(--muted);}
       <div class="projtbl-wrap">
         <div class="projtbl-toolbar">
           <div>
-            <div class="projtbl-title">Projects</div>
+            <div class="projtbl-title" style="display:flex;align-items:center;gap:10px">Projects <button onclick="toggleProjSort()" style="background:transparent;border:none;padding:0;font-size:13px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600;line-height:1;letter-spacing:.3px" title="Toggle sort order"><span id="projSortIcon" style="font-family:'DM Sans',sans-serif">Z→A</span></button></div>
             <div class="projtbl-sub" id="projtblSub"></div>
           </div>
           <div style="display:flex;align-items:center;gap:8px">
@@ -1041,6 +1040,7 @@ tr:hover .ts-del-row{color:var(--muted);}
             <button class="nav-filter-save" onclick="saveNavFilter()">&#x2713; Save Filter</button>
           </div>
         </div>
+        <div id="projStatBubbles" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
         <div id="projtblContainer"></div>
       </div>
     </div>
@@ -1486,7 +1486,7 @@ tr:hover .ts-del-row{color:var(--muted);}
       <div class="field-row">
         <div class="field">
           <label class="field-label">Status</label>
-          <select class="f-select" id="etStatus">
+          <select class="f-select" id="etStatus" onchange="updateCompletedDateFromStatus()">
             <option value="new">New</option>
             <option value="inprogress">In Progress</option>
             <option value="prohold">Production Hold</option>
@@ -1498,7 +1498,7 @@ tr:hover .ts-del-row{color:var(--muted);}
         </div>
         <div class="field">
           <label class="field-label">Completed Date</label>
-          <input class="f-input" id="etDue" type="date" style="color-scheme:dark" />
+          <input class="f-input" id="etDue" type="date" style="color-scheme:dark" onchange="updateCompletedDateFromStatus()" />
         </div>
       </div>
       <div class="field-row">
@@ -1539,7 +1539,7 @@ tr:hover .ts-del-row{color:var(--muted);}
 <!-- TOAST -->
 <div class="toast" id="toast"><span>&#x2713;</span><span id="toastMsg">Done</span></div>
 
-<script>
+<script>/* v1773263509 */
 // ===== CONSTANTS =====
 const TEAM=[
   {id:'AL',name:'Alex',  c:'#5b4fcf'},{id:'SA',name:'Sam',   c:'#b94d8a'},
@@ -1610,7 +1610,22 @@ function renderProjectsTable() {
   const subEl = document.getElementById('projtblSub');
   if (!container) return;
 
-  let filtered = projects;
+  // ── Stat bubbles ──
+  const bubblesEl = document.getElementById('projStatBubbles');
+  if (bubblesEl) {
+    const openProjs   = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed');
+    const waitingTP   = openProjs.filter(p => (projectInfo[p.id]||{}).phase === 'Waiting on TP Approval');
+    const bubble = (label, count, color, bg) =>
+      `<div style="background:${bg};border:1px solid ${color}44;border-radius:10px;padding:10px 16px;min-width:120px;cursor:default">
+        <div style="font-size:11px;color:${color};font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${label}</div>
+        <div style="font-size:26px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1">${count}</div>
+      </div>`;
+    bubblesEl.innerHTML =
+      bubble('Open Projects', openProjs.length, '#5b9cf6', 'rgba(91,156,246,0.08)') +
+      bubble('Waiting on TP', waitingTP.length, '#a78bfa', 'rgba(167,139,250,0.08)');
+  }
+
+  let filtered = [...projects].sort((a,b) => projSortDir === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name));
   // Always filter out closed unless showClosed is on
   if (!showClosed) {
     filtered = filtered.filter(p => (projectInfo[p.id] || {}).status !== 'closed');
@@ -1738,7 +1753,8 @@ const NAV_FILTER_STATUS = ['jobprep','pending','pendretest','active','onhold','c
 const NAV_FILTER_STATUS_LABELS = {jobprep:'Job Preparation',pending:'Pending',pendretest:'Pending - ReTest',active:'Active',onhold:'On Hold',complete:'Complete',testcomplete:'Testing Complete',closed:'Closed'};
 const NAV_FILTER_PHASE  = ['Waiting on TP Approval','Within 3 Months','3 to 6 Months','No Time Frame'];
 
-let showClosed = false; // default: hide closed projects
+let showClosed = false;
+let projSortDir = "desc"; // "asc" or "desc" // default: hide closed projects
 let navFilter = { status: new Set(), phase: new Set() };
 
 // Load saved filter from localStorage
@@ -2059,8 +2075,6 @@ function saveProject(){
   // Auto-open the new project
   setTimeout(() => {
     selectProjectById(newProjId);
-    // Open in edit mode so user can fill in details immediately
-    setTimeout(() => toggleInfoEdit(newProjId), 200);
   }, 100);
 }
 
@@ -2503,8 +2517,6 @@ function defaultInfo(proj) {
   };
 }
 
-let infoEditMode = false;
-
 // ===== RENDER INFO SHEET =====
 function renderInfoSheet(projId) {
   const proj = projects.find(p => p.id === projId);
@@ -2515,7 +2527,6 @@ function renderInfoSheet(projId) {
   }
   if (!projectInfo[projId]) projectInfo[projId] = defaultInfo(proj);
   const info = projectInfo[projId];
-  infoEditMode = false;
 
   const statusMap = {
     'jobprep':{label:'Job Preparation',bg:'rgba(167,139,250,0.15)',color:'#a78bfa',dot:'#a78bfa'},
@@ -2564,12 +2575,6 @@ function renderInfoSheet(projId) {
       </div>
     </div>`;
 
-  const recentActivity = [
-    {av:'MO', color:'#7a4a9a', text:'<strong>Morgan</strong> updated OAuth migration status to <em>In Review</em>', time:'2h ago'},
-    {av:'SA', color:'#b94d8a', text:'<strong>Sam</strong> uploaded brand guidelines v2.1', time:'Yesterday'},
-    {av:'AL', color:'#5b4fcf', text:'<strong>Alex</strong> added scope change #3 to project notes', time:'Feb 14'},
-    {av:'RI', color:'#c47a25', text:'<strong>Riley</strong> completed notification UI design task', time:'Feb 12'},
-  ];
 
   document.getElementById('infoWrap').innerHTML = `
     <div class="info-hero">
@@ -2598,7 +2603,7 @@ function renderInfoSheet(projId) {
           </div>
           <div class="desc-card">
             <div class="desc-card-header">Test Article Description</div>
-            <div class="desc-card-body" id="info-test-article" onclick="inlineEditDesc('${projId}','testArticleDesc',this)" title="Click to edit" style="cursor:text;min-height:40px">${info.testArticleDesc || '<span style="color:var(--border)">Click to add test article description…</span>'}</div>
+            <div class="desc-card-body info-click-edit" id="info-test-article" onclick="inlineEditDesc('${projId}','testArticleDesc',this)" title="Click to edit" style="cursor:text;min-height:40px">${info.testArticleDesc || '<span style="color:var(--border)">Click to add test article description…</span>'}</div>
           </div>
         </div>
       </div>
@@ -2740,17 +2745,7 @@ function renderInfoSheet(projId) {
 
 <!-- tasks moved to Tasks tab -->
 
-    <div class="info-activity">
-      <div class="info-section-title" style="margin-bottom:8px">Recent Activity</div>
-      ${recentActivity.map(a => `
-        <div class="activity-row">
-          <div class="activity-av" style="background:${a.color}">${a.av}</div>
-          <div class="activity-body">
-            <div class="activity-text">${a.text}</div>
-            <div class="activity-time">${a.time}</div>
-          </div>
-        </div>`).join('')}
-    </div>
+
   `;
 
   renderProjSummary(projId);
@@ -2828,21 +2823,7 @@ async function inlineEditDesc(projId, key, el) {
   });
 }
 
-function toggleInfoEdit(projId) {
-  infoEditMode = !infoEditMode;
-  const btn = document.getElementById('infoEditBtn');
-  if (infoEditMode) {
-    btn.textContent = '✓ Save';
-    btn.classList.add('editing');
-    makeFieldsEditable(projId);
-  } else {
-    btn.innerHTML = '&#x270E; Edit';
-    btn.classList.remove('editing');
-    collectAndSave(projId);
-    renderInfoSheet(projId);
-    toast('Project info saved');
-  }
-}
+
 
 function makeFieldsEditable(projId) {
   const info = projectInfo[projId];
@@ -2912,7 +2893,6 @@ function collectAndSave(projId) {
 }
 
 function editNotes(projId) {
-  if (infoEditMode) return;
   const el = document.getElementById('infoNotes');
   if (!el || el.querySelector('textarea')) return;
   const info = projectInfo[projId];
@@ -3022,7 +3002,8 @@ function renderProjSummary(projId) {
 
   // Hours
   let totalHours = 0;
-  Object.values(tsData).forEach(rows => {
+  Object.entries(tsData).forEach(([k, rows]) => {
+    if (k.startsWith('oh_') || !Array.isArray(rows)) return;
     rows.forEach(row => {
       if (row.projId === projId) {
         totalHours += Object.values(row.hours).reduce((a,b)=>a+b, 0);
@@ -3222,20 +3203,21 @@ function renderInfoTasks(projId, filter) {
   };
 
   container.innerHTML = `
-    <div class="itt-head">
-      <div class="itt-head-cell" style="color:var(--muted);font-size:10px">#</div>
+    <div class="itt-head" id="ittHead">
+      <div class="itt-head-cell" style="color:var(--muted);font-size:10px">#<span class="itt-resizer" data-col="num"></span></div>
+      <div class="itt-head-cell"><span class="itt-resizer" data-col="pri"></span></div>
+      <div class="itt-head-cell">Cat.<span class="itt-resizer" data-col="cat"></span></div>
+      <div class="itt-head-cell">Task<span class="itt-resizer" data-col="task"></span></div>
+      <div class="itt-head-cell">Status<span class="itt-resizer" data-col="status"></span></div>
+      <div class="itt-head-cell">Quote #<span class="itt-resizer" data-col="quote"></span></div>
+      <div class="itt-head-cell">Price<span class="itt-resizer" data-col="price"></span></div>
+      <div class="itt-head-cell">Created<span class="itt-resizer" data-col="created"></span></div>
+      <div class="itt-head-cell">Hrs Logged<span class="itt-resizer" data-col="hrs"></span></div>
+      <div class="itt-head-cell">Budget Hrs<span class="itt-resizer" data-col="bhrs"></span></div>
+      <div class="itt-head-cell">Assignee<span class="itt-resizer" data-col="assign"></span></div>
+      <div class="itt-head-cell">Start Date<span class="itt-resizer" data-col="start"></span></div>
+      <div class="itt-head-cell">Completed<span class="itt-resizer" data-col="comp"></span></div>
       <div class="itt-head-cell"></div>
-      <div class="itt-head-cell">Cat.</div>
-      <div class="itt-head-cell">Task</div>
-      <div class="itt-head-cell">Status</div>
-      <div class="itt-head-cell">Quote #</div>
-      <div class="itt-head-cell">Price</div>
-      <div class="itt-head-cell">Created</div>
-      <div class="itt-head-cell">Hrs Logged</div>
-      <div class="itt-head-cell">Budget Hrs</div>
-      <div class="itt-head-cell">Assignee</div>
-      <div class="itt-head-cell">Start Date</div>
-      <div class="itt-head-cell">Completed</div>
     </div>
     ${tasks.map((t, i) => {
       const m = employees.find(x => x.initials === t.assign) || {color:'#555'};
@@ -3292,6 +3274,33 @@ function renderInfoTasks(projId, filter) {
         </div>`;
     }).join('')}
   `;
+}
+
+// ── Task column resize ──
+const ITT_DEFAULTS={num:'36px',pri:'28px',cat:'50px',task:'1fr',status:'130px',quote:'80px',price:'90px',created:'75px',hrs:'60px',bhrs:'60px',assign:'70px',start:'80px',comp:'80px'};
+const ITT_MINS={num:28,pri:20,cat:36,task:80,status:80,quote:60,price:60,created:60,hrs:50,bhrs:50,assign:50,start:60,comp:60};
+function ittGetW(){try{return Object.assign({},ITT_DEFAULTS,JSON.parse(localStorage.getItem('ittCols')||'{}'));}catch{return Object.assign({},ITT_DEFAULTS);}}
+function ittSetW(w){Object.entries(w).forEach(([k,v])=>document.documentElement.style.setProperty('--itc-'+k,v));}
+function ittSaveW(w){try{const s={};Object.entries(w).forEach(([k,v])=>{if(v!==ITT_DEFAULTS[k])s[k]=v;});localStorage.setItem('ittCols',JSON.stringify(s));}catch{}}
+function ittInitResizers(){
+  const head=document.getElementById('ittHead');
+  if(!head||head._ri)return;
+  head._ri=true;
+  const w=ittGetW();ittSetW(w);
+  head.querySelectorAll('.itt-resizer').forEach(r=>{
+    r.addEventListener('mousedown',e=>{
+      e.preventDefault();e.stopPropagation();
+      const col=r.dataset.col;
+      const startX=e.clientX;
+      const cell=r.closest('.itt-head-cell');
+      const startW=cell?cell.offsetWidth:parseInt(w[col]||80);
+      r.classList.add('active');
+      const mv=m=>{const px=Math.max(ITT_MINS[col]||40,startW+(m.clientX-startX));w[col]=px+'px';ittSetW(w);};
+      const up=()=>{r.classList.remove('active');ittSaveW(w);document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
+      document.addEventListener('mousemove',mv);
+      document.addEventListener('mouseup',up);
+    });
+  });
 }
 
 function toggleInfoTask(idx, projId) {
@@ -4301,9 +4310,10 @@ function renderProjStickyHeader(projId) {
   const phaseColors = {'Waiting on TP Approval':'#e05c5c','Within 3 Months':'#e8a234','3 to 6 Months':'#5b9cf6','No Time Frame':'#7a7a85'};
   const phColor = phaseColors[info.phase] || '#7a7a85';
 
+  hdr.style.display = '';
   bar.innerHTML =
     '<span style="font-size:22px">'+(proj.emoji||'📁')+'</span>'+
-    '<span class="proj-sticky-name">'+proj.name+'</span>'+
+    '<span class="proj-sticky-name" onclick="editProjectName(\''+projId+'\')" title="Click to edit name" style="cursor:pointer">'+proj.name+'</span>'+
     '<select class="proj-status-select" style="background:'+st.bg+';color:'+st.color+';border:1px solid '+st.color+'44;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;outline:none;font-family:\"DM Sans\",sans-serif;" onchange="changeProjectStatus(\x27'+projId+'\x27,this)">'+
       [['jobprep','Job Preparation'],['pending','Pending'],['pendretest','Pending - ReTest'],
        ['active','Active'],['onhold','On Hold'],['complete','Complete'],
@@ -4315,7 +4325,7 @@ function renderProjStickyHeader(projId) {
     (info.creditHold ? '<div class="credit-hold-checkbox-wrap active" onclick="toggleCreditHold(\''+projId+'\')"><span>⚠ CREDIT HOLD</span></div>' :
       '<div class="credit-hold-checkbox-wrap" onclick="toggleCreditHold(\''+projId+'\')"><span>Credit Hold</span></div>')+
     '<div style="margin-left:auto;display:flex;gap:6px;flex-shrink:0">'+
-    '<button class="info-edit-btn" id="infoEditBtn" onclick="toggleInfoEdit(\x27'+projId+'\x27)">&#x270E; Edit</button>'+
+    
     '<button class="info-edit-btn" onclick="confirmDeleteProject(\x27'+projId+'\x27)" style="color:var(--red);border-color:rgba(208,64,64,0.3)">&#x1F5D1; Delete</button>'+
     '</div>';
 
@@ -4764,11 +4774,21 @@ function renderInvoicingPanel(projId) {
 
   function taskRow(t, showMarkBtn) {
     const empM = employees.find(e => e.initials === t.assign) || {color:'#555'};
+    const ptCell = showMarkBtn ? '' : `
+      <td onclick="event.stopPropagation()" style="padding:4px 8px">
+        <input type="text" value="${t.peachtreeInv||''}"
+          placeholder="INV-"
+          style="width:100px;background:${t.peachtreeInv?'var(--surface2)':'rgba(251,191,36,0.08)'};border:1px solid ${t.peachtreeInv?'var(--border)':'#f59e0b'};border-radius:5px;padding:4px 7px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text);outline:none"
+          onchange="savePeachtreeInv('${t._id}', this.value);this.style.background='var(--surface2)';this.style.borderColor='var(--border)'"
+          onfocus="this.style.borderColor='var(--blue)'"
+          onblur="this.style.borderColor=this.value?'var(--border)':'#f59e0b'">
+      </td>`;
     return `<tr>
-      <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.taskNum ? '<span style="font-size:10px;color:var(--muted);font-family:JetBrains Mono,monospace;margin-right:6px">#'+t.taskNum+'</span>' : ''}${t.name}</td>
+      <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.taskNum ? '<span style="font-size:10px;color:var(--muted);font-family:JetBrains Mono,monospace;margin-right:6px">#'+t.taskNum+'</span>' : ''}${t.name}</td>
       <td><div style="display:flex;align-items:center;gap:6px"><div class="itt-av" style="background:${empM.color};width:20px;height:20px;font-size:9px">${t.assign||'?'}</div><span style="font-size:12px">${t.assign||'—'}</span></div></td>
       <td class="inv-amount" style="color:var(--green)">${fmt$(t.fixedPrice||0)}</td>
       <td style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace">${t.due||'—'}</td>
+      ${ptCell}
       <td>
         ${showMarkBtn
           ? `<button class="inv-mark-btn" onclick="markTaskBilled('${t._id}','${projId}')">Mark Billed</button>`
@@ -4812,14 +4832,79 @@ function renderInvoicingPanel(projId) {
 
     ${billedTasks.length > 0 ? `
       <div class="inv-section-title" style="margin-top:28px">&#x1F7E3; Already Billed</div>
-      <table class="inv-table" style="opacity:.75">
+      <table class="inv-table" style="opacity:.85">
         <thead><tr>
-          <th>Task</th><th>Assignee</th><th>Price</th><th>Completed Date</th><th></th>
+          <th>Task</th><th>Assignee</th><th>Price</th><th>Completed Date</th><th>Peachtree Inv #</th><th></th>
         </tr></thead>
         <tbody>${billedTasks.map(t => taskRow(t, false)).join('')}</tbody>
       </table>
     ` : ''}
   `;
+}
+
+function showBilledAuditModal(monthKey, monthLabel) {
+  // Collect all billed tasks for this month
+  const _todayStr = new Date().toISOString().split('T')[0];
+  const tasks = taskStore.filter(t => {
+    if (t.status !== 'billed') return false;
+    const d = t.completedDate || t.due_raw || _todayStr; // match monthMap fallback
+    return d.slice(0,7) === monthKey;
+  });
+  const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const total = tasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
+
+  const rows = tasks.length === 0
+    ? `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">No billed items found for this month.</td></tr>`
+    : tasks.map(t => {
+        const proj = projects.find(p => p.id === t.proj);
+        return `<tr style="border-bottom:1px solid var(--border)">
+          <td style="padding:8px 12px;font-size:13px">${proj ? proj.emoji+' '+proj.name : '—'}</td>
+          <td style="padding:8px 12px;font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.taskNum?'<span style="font-size:10px;color:var(--muted);margin-right:4px">#'+t.taskNum+'</span>':''}${t.name}</td>
+          <td style="padding:8px 12px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${t.peachtreeInv||'—'}</td>
+          <td style="padding:8px 12px;font-size:12px;color:var(--muted)">${t.completedDate||t.due_raw||'—'}</td>
+          <td style="padding:8px 12px;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--green);text-align:right">${fmt$(t.fixedPrice)}</td>
+        </tr>`;
+      }).join('');
+
+  // Use the shared confirm modal overlay as a display container
+  const ov = document.getElementById('confirmModalOverlay') || document.getElementById('contactModalOverlay');
+  // Build our own overlay
+  let auditOv = document.getElementById('billedAuditOverlay');
+  if (!auditOv) {
+    auditOv = document.createElement('div');
+    auditOv.id = 'billedAuditOverlay';
+    auditOv.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);backdrop-filter:blur(6px);z-index:1000;align-items:flex-start;justify-content:center;padding-top:60px';
+    auditOv.onclick = e => { if (e.target === auditOv) auditOv.style.display='none'; };
+    document.body.appendChild(auditOv);
+  }
+  auditOv.innerHTML = `
+    <div class="modal" style="width:700px;max-height:80vh;transform:none;opacity:1">
+      <div class="modal-header">
+        <div class="modal-title">📋 Billed Items — ${monthLabel}</div>
+        <button class="modal-close" onclick="document.getElementById('billedAuditOverlay').style.display='none'">&#x2715;</button>
+      </div>
+      <div class="modal-body" style="padding:0;overflow-y:auto">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="border-bottom:1px solid var(--border);background:var(--surface2)">
+              <th style="padding:8px 12px;font-size:11px;color:var(--muted);text-align:left;font-weight:600">Project</th>
+              <th style="padding:8px 12px;font-size:11px;color:var(--muted);text-align:left;font-weight:600">Task</th>
+              <th style="padding:8px 12px;font-size:11px;color:var(--muted);text-align:left;font-weight:600">Peachtree Inv #</th>
+              <th style="padding:8px 12px;font-size:11px;color:var(--muted);text-align:left;font-weight:600">Date</th>
+              <th style="padding:8px 12px;font-size:11px;color:var(--muted);text-align:right;font-weight:600">Amount</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+          <tfoot>
+            <tr style="border-top:2px solid var(--border);background:var(--surface2)">
+              <td colspan="4" style="padding:10px 12px;font-size:13px;font-weight:700;color:var(--text)">Total</td>
+              <td style="padding:10px 12px;font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--green);text-align:right">${fmt$(total)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>`;
+  auditOv.style.display = 'flex';
 }
 
 function confirmUnbillTask(taskId, projId) {
@@ -4934,6 +5019,7 @@ function renderBillingQueue() {
             <th>Assignee</th>
             <th style="text-align:right">Price</th>
             <th>Completed Date</th>
+            <th>PeachTree Inv #</th>
           </tr></thead>
           <tbody>
             ${tasks.map(t => `
@@ -4955,6 +5041,14 @@ function renderBillingQueue() {
                 </td>
                 <td style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);font-weight:600">${t.fixedPrice ? fmt$(t.fixedPrice) : '—'}</td>
                 <td style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace">${t.due||'—'}</td>
+                <td onclick="event.stopPropagation()" style="padding:4px 8px">
+                  <input type="text" value="${t.peachtreeInv||''}"
+                    placeholder="INV-"
+                    style="width:90px;background:${t.peachtreeInv?'var(--surface2)':'rgba(251,191,36,0.08)'};border:1px solid ${t.peachtreeInv?'var(--border)':'#f59e0b'};border-radius:5px;padding:4px 7px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text);outline:none"
+                    onchange="savePeachtreeInv('${t._id}', this.value)"
+                    onfocus="this.style.borderColor='var(--blue)'"
+                    onblur="this.style.borderColor=this.value?'var(--border)':'#f59e0b'">
+                </td>
               </tr>
             `).join('')}
           </tbody>
@@ -4962,6 +5056,7 @@ function renderBillingQueue() {
             <tr>
               <td colspan="5" style="font-size:11px;color:var(--muted);padding:10px 12px;font-weight:600">TOTAL</td>
               <td style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--green);padding:10px 12px">${fmt$(totalVal)}</td>
+              <td></td>
               <td></td>
             </tr>
           </tfoot>
@@ -4984,10 +5079,22 @@ function bqToggleAll(cb) {
   renderBillingQueue();
 }
 
+async function savePeachtreeInv(taskId, val) {
+  const t = taskStore.find(x => x._id === taskId);
+  if (!t) return;
+  t.peachtreeInv = val.trim();
+  if (sb) await sb.from('tasks').update({ peachtree_inv: t.peachtreeInv || null }).eq('id', taskId);
+}
+
 function confirmBulkBill() {
   if (bqSelected.size === 0) return;
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   const selTasks = taskStore.filter(t => bqSelected.has(t._id));
+  const missing = selTasks.filter(t => !t.peachtreeInv);
+  if (missing.length > 0) {
+    toast(`⚠ ${missing.length} task${missing.length>1?'s':''} missing PeachTree Inv # — required before billing`, 'error');
+    return;
+  }
   const selVal = selTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
   showConfirmModal(
     `Mark ${bqSelected.size} task${bqSelected.size!==1?'s':''} (${fmt$(selVal)}) as Billed? This will update their status across all projects.`,
@@ -5595,13 +5702,24 @@ async function dbDelete(table, id) {
 }
 
 // ===== LOAD ALL DATA =====
+let _dashResizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_dashResizeTimer);
+  _dashResizeTimer = setTimeout(() => {
+    const dashPanel = document.getElementById('panel-dashboard');
+    if (dashPanel && dashPanel.classList.contains('active')) {
+      renderDashboard();
+    }
+  }, 150);
+});
+
 async function loadAllData() {
   showAppLoader(true);
   try {
     // Projects
     const projRows = await dbFetch('projects');
     projects = projRows.map(r => ({
-      id: r.id, name: r.name, color: r.color, emoji: r.emoji, desc: r.description || ''
+      id: r.id, name: r.name, color: r.color, emoji: r.emoji, desc: r.description || '', description: r.description || ''
     }));
 
     // Project info
@@ -5615,7 +5733,7 @@ async function loadAllData() {
         clientEmail: r.client_email||'', clientPhone: r.client_phone||'',
         clientId: r.client_id||null, contactId: r.contact_id||null,
         billingType: r.billing_type||'Fixed Fee', invoiced: r.invoiced||'',
-        remaining: r.remaining||'', notes: r.notes||'', desc: r.description||r.project_desc||'',
+        remaining: r.remaining||'', notes: r.notes||'', desc: r.description||'',
         dcas: r.dcas||'', customerWitness: r.customer_witness||'', tpApproval: r.tp_approval||'', dpas: r.dpas||'', noforn: r.noforn||'',
         testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'', quoteNumber: r.quote_number||'',
         creditHold: r.credit_hold||false,
@@ -5638,6 +5756,7 @@ async function loadAllData() {
       taskStartDate: r.task_start_date||'',
       completedDate: r.completed_date||'',
       quoteNum: r.quote_number||'',
+      peachtreeInv: r.peachtree_inv||'',
       createdAt: r.created_at ? r.created_at.split('T')[0] : '',
     }));
 
@@ -5778,7 +5897,6 @@ window.saveProject = async function() {
   // Auto-open the new project in edit mode
   setTimeout(() => {
     selectProjectById(saved.id);
-    setTimeout(() => toggleInfoEdit(saved.id), 200);
   }, 100);
 };
 
@@ -6052,45 +6170,7 @@ function renderDashboard() {
     pendretest:   {label:'Pend-Retest',   bg:'rgba(251,146,60,0.15)',  color:'#fb923c'},
   };
 
-  // Project cards
-  const projCards = projects.length === 0
-    ? `<div class="dash-empty">No projects yet — click <strong>+ New Project</strong> to get started.</div>`
-    : projects.map(p => {
-        const info   = projectInfo[p.id] || {};
-        const pt     = taskStore.filter(t => t.proj === p.id);
-        const pdone  = pt.filter(t => t.done).length;
-        const ppct   = pt.length ? Math.round(pdone / pt.length * 100) : 0;
-        const pover  = pt.filter(t => t.overdue && !t.done).length;
-        const pactive= pt.filter(t => !t.done).length;
-        const st     = statusStyle[info.status || 'active'] || statusStyle.active;
-        const pm     = employees.find(e => e.name === info.pm);
 
-        return `
-          <div class="dash-proj-card" onclick="selectProjectById('${p.id}')" style="border-color:${p.color}44">
-            <div style="position:absolute;top:0;left:0;right:0;height:3px;background:${p.color};border-radius:12px 12px 0 0"></div>
-            <div class="dash-proj-header">
-              <div class="dash-proj-emoji">${p.emoji}</div>
-              <div class="dash-proj-meta">
-                <div class="dash-proj-name">${p.name}</div>
-                <div class="dash-proj-client">${info.client || (info.pm ? 'PM: ' + info.pm : 'No client set')}</div>
-              </div>
-              <div class="dash-proj-status" style="background:${st.bg};color:${st.color}">${st.label}</div>
-            </div>
-            <div class="dash-proj-progress">
-              <div class="dash-prog-bar"><div class="dash-prog-fill" style="width:${ppct}%;background:${p.color}"></div></div>
-              <div class="dash-prog-labels">
-                <span>${ppct}% complete</span>
-                <span>${pdone}/${pt.length} tasks</span>
-              </div>
-            </div>
-            <div class="dash-proj-footer">
-              ${pactive > 0 ? `<span class="dash-task-pill" style="background:${p.color}18;color:${p.color}">${pactive} active</span>` : ''}
-              ${pover > 0   ? `<span class="dash-task-pill" style="background:rgba(224,92,92,0.15);color:var(--red)">${pover} overdue</span>` : ''}
-              ${info.contract ? `<span class="dash-task-pill" style="background:var(--surface3);color:var(--muted)">${info.contract}</span>` : ''}
-              ${pm ? `<div class="dash-proj-pm"><div class="dash-pm-av" style="background:${pm.color}">${pm.initials}</div>${pm.name}</div>` : (info.pm ? `<div class="dash-proj-pm">${info.pm}</div>` : '')}
-            </div>
-          </div>`;
-      }).join('');
 
   // Due soon rows
   const dueSoonHTML = dueSoon.length === 0
@@ -6149,45 +6229,26 @@ function renderDashboard() {
   });
   const chartLabels  = Object.values(monthMap).map(m => m.label);
   const chartData    = Object.values(monthMap).map(m => m.val);
+  const chartKeys    = Object.keys(monthMap); // e.g. ['2025-03', ...]
+  const totalBilled  = chartData[chartData.length - 1] || 0; // current month from chart
   // Sum ALL billed tasks directly — not just those with a date
-  const totalBilled  = taskStore.filter(t => t.status === 'billed').reduce((s,t) => s + (t.fixedPrice||0), 0);
-  const readyToBill  = taskStore.filter(t => t.status === 'complete').reduce((s,t) => s + (t.fixedPrice||0), 0);
+  const _openProjIds = new Set(projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').map(p => p.id));
+  const readyToBill  = taskStore.filter(t => t.status === 'complete' && _openProjIds.has(t.proj)).reduce((s,t) => s + (t.fixedPrice||0), 0);
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 
   wrap.innerHTML = `
-    <div class="dash-top">
-      <div class="dash-stat">
-        <div class="dash-stat-label">Total Projects</div>
-        <div class="dash-stat-val">${projects.length}</div>
-        <div class="dash-stat-sub">${activeProjCount} active</div>
-      </div>
-      <div class="dash-stat">
-        <div class="dash-stat-label">Total Tasks</div>
-        <div class="dash-stat-val">${totalTasks}</div>
-        <div class="dash-stat-sub">${doneTasks} completed (${pct}%)</div>
-      </div>
-      <div class="dash-stat">
-        <div class="dash-stat-label">Due This Week</div>
-        <div class="dash-stat-val ${dueSoon.length > 0 ? 'dash-stat-accent' : ''}">${dueSoon.length}</div>
-        <div class="dash-stat-sub">tasks in next 7 days</div>
-      </div>
-      <div class="dash-stat">
-        <div class="dash-stat-label">Overdue</div>
-        <div class="dash-stat-val" style="${overdueTasks > 0 ? 'color:var(--red)' : ''}">${overdueTasks}</div>
-        <div class="dash-stat-sub">need attention</div>
-      </div>
-    </div>
-
     <div class="dash-charts-row">
       <div class="dash-chart-card">
-        <div class="dash-chart-title"><span>💰</span> Billed Revenue <span style="margin-left:auto;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--green);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(totalBilled)} total</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#c084fc;letter-spacing:0;text-transform:none;font-weight:600;margin-left:12px">${fmt$(readyToBill)} ready to bill</span></div>
+        <div class="dash-chart-title"><span>💰</span> Billed Revenue <span style="margin-left:auto;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--green);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(totalBilled)} this month</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#c084fc;letter-spacing:0;text-transform:none;font-weight:600;margin-left:12px">${fmt$(readyToBill)} ready to bill</span></div>
         <canvas id="billedByMonthChart" height="110"></canvas>
       </div>
     </div>
 
-    <div>
-      <div class="dash-section-title">Projects</div>
-      <div class="dash-proj-grid">${projCards}</div>
+    <div class="dash-charts-row" style="margin-top:20px">
+      <div class="dash-chart-card">
+        <div class="dash-chart-title"><span>📊</span> Sales by Category</div>
+        <canvas id="salesByCatChart" height="140"></canvas>
+      </div>
     </div>
 
     <div class="dash-bottom">
@@ -6225,6 +6286,12 @@ function renderDashboard() {
       },
       options: {
         responsive: true,
+        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+        onClick: (e, els) => {
+          if (!els.length) return;
+          const idx = els[0].index;
+          showBilledAuditModal(chartKeys[idx], chartLabels[idx]);
+        },
         plugins: {
           legend: { display: false },
           tooltip: {
@@ -6244,9 +6311,160 @@ function renderDashboard() {
             beginAtZero: true
           }
         }
-      }
+      },
+      plugins: [{
+        id: 'barValueLabels',
+        afterDatasetsDraw(chart) {
+          const ctx = chart.ctx;
+          chart.data.datasets.forEach((dataset, i) => {
+            const meta = chart.getDatasetMeta(i);
+            meta.data.forEach((bar, idx) => {
+              const val = dataset.data[idx];
+              if (!val || val <= 0) return;
+              const label = val >= 1000 ? '$' + (val/1000).toFixed(1) + 'k' : '$' + val.toFixed(0);
+              ctx.save();
+              ctx.fillStyle = '#c8c8d8';
+              ctx.font = '600 10px DM Sans, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'bottom';
+              ctx.fillText(label, bar.x, bar.y - 3);
+              ctx.restore();
+            });
+          });
+        }
+      }]
     });
-  }, 80);
+  ////// ── Sales by Category — stacked by month, category on X axis ──
+  setTimeout(() => {
+    const catCanv = document.getElementById('salesByCatChart');
+    if (!catCanv || typeof Chart === 'undefined') return;
+    const existing2 = Chart.getChart(catCanv);
+    if (existing2) existing2.destroy();
+
+    // All billed tasks from non-closed projects, current calendar year
+    const closedIds2 = new Set(projects.filter(p => (projectInfo[p.id]||{}).status === 'closed').map(p => p.id));
+    const curYear = new Date().getFullYear();
+    const billedTasks2 = taskStore.filter(t => {
+      if (t.status !== 'billed' || closedIds2.has(t.proj)) return false;
+      const d = t.completedDate || t.due_raw;
+      if (!d) return true; // include undated — will land in current month
+      return parseInt(d.slice(0,4)) === curYear;
+    });
+
+    // Month colors Jan–Dec
+    const monthColors = [
+      'rgba(91,156,246,0.85)',   // Jan — blue
+      'rgba(124,92,191,0.85)',   // Feb — purple
+      'rgba(76,175,125,0.85)',   // Mar — green
+      'rgba(251,146,60,0.85)',   // Apr — orange
+      'rgba(232,162,52,0.85)',   // May — amber
+      'rgba(224,92,92,0.85)',    // Jun — red
+      'rgba(52,211,153,0.85)',   // Jul — teal
+      'rgba(167,139,250,0.85)',  // Aug — lavender
+      'rgba(251,191,36,0.85)',   // Sep — yellow
+      'rgba(156,163,175,0.85)',  // Oct — grey
+      'rgba(249,115,22,0.85)',   // Nov — deep orange
+      'rgba(59,130,246,0.85)',   // Dec — bright blue
+    ];
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const _todayMonth = new Date().getMonth(); // 0-based
+
+    // Get all unique categories, sorted by total desc
+    const catTotals = {};
+    billedTasks2.forEach(t => {
+      const cat = (t.salesCat||'').trim() || 'Uncategorized';
+      catTotals[cat] = (catTotals[cat]||0) + (t.fixedPrice||0);
+    });
+    const sortedCats = Object.entries(catTotals).sort((a,b) => b[1]-a[1]).map(([k]) => k);
+
+    // Build one dataset per month (only months up to current)
+    const datasets = [];
+    for (let m = 0; m <= _todayMonth; m++) {
+      const data = sortedCats.map(cat => {
+        return billedTasks2.filter(t => {
+          const d = t.completedDate || t.due_raw;
+          const month = d ? new Date(d+'T00:00:00').getMonth() : new Date().getMonth();
+          return ((t.salesCat||'').trim()||'Uncategorized') === cat && month === m;
+        }).reduce((s,t) => s + (t.fixedPrice||0), 0);
+      });
+      datasets.push({
+        label: monthNames[m],
+        data,
+        backgroundColor: monthColors[m],
+        borderColor: monthColors[m].replace('0.85','1'),
+        borderWidth: 1,
+        borderRadius: m === _todayMonth ? 5 : 0,
+        borderSkipped: false,
+        stack: 'cat'
+      });
+    }
+
+    new Chart(catCanv, {
+      type: 'bar',
+      data: { labels: sortedCats, datasets },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: {
+            display: true, position: 'bottom',
+            labels: { color: '#9a9aaa', font: { size: 10 }, boxWidth: 10, padding: 8,
+              filter: item => datasets[item.datasetIndex]?.data.some(v => v > 0)
+            }
+          },
+          tooltip: {
+            callbacks: {
+              label: ctx => ' ' + ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, ticks: { color: '#9a9aaa', font: { size: 10 } }, grid: { display: false } },
+          y: { stacked: true, beginAtZero: true,
+            ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$'+(v/1000).toFixed(0)+'k' : '$'+v },
+            grid: { color: 'rgba(255,255,255,0.05)' }
+          }
+        }
+      },
+      plugins: [{
+        id: 'catStackTotals',
+        afterDatasetsDraw(chart) {
+          const ctx = chart.ctx;
+          const meta0 = chart.getDatasetMeta(chart.data.datasets.length - 1);
+          meta0.data.forEach((bar, idx) => {
+            const total = chart.data.datasets.reduce((s, ds) => s + (ds.data[idx]||0), 0);
+            if (!total) return;
+            const lbl = total >= 1000 ? '$'+(total/1000).toFixed(1)+'k' : '$'+total.toFixed(0);
+            ctx.save();
+            ctx.fillStyle = '#c8c8d8'; ctx.font = '600 10px DM Sans,sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+            ctx.fillText(lbl, bar.x, bar.y - 3);
+            ctx.restore();
+          });
+        }
+      }]
+    });
+  }, 120);
+
+}, 80);
+}
+
+function toggleProjSort() {
+  projSortDir = projSortDir === 'desc' ? 'asc' : 'desc';
+  const icon = document.getElementById('projSortIcon');
+  if (icon) icon.textContent = projSortDir === 'asc' ? '↑' : '↓';
+  renderProjectsTable();
+}
+
+async function editProjectName(projId) {
+  const proj = projects.find(p => p.id === projId);
+  if (!proj) return;
+  const newName = window.prompt('Edit project name:', proj.name);
+  if (!newName || !newName.trim() || newName.trim() === proj.name) return;
+  proj.name = newName.trim();
+  if (sb) await sb.from('projects').update({ name: proj.name }).eq('id', projId);
+  document.getElementById('topbarName').textContent = (proj.emoji||'') + ' ' + proj.name;
+  renderProjStickyHeader(projId);
+  toast('Project name updated');
 }
 
 // Helper — select a project by id and navigate to its info sheet
@@ -6324,7 +6542,8 @@ function setYnField(projId, key, val) {
 function getHoursForTask(taskName) {
   if (!taskName) return 0;
   let total = 0;
-  Object.values(tsData).forEach(rows => {
+  Object.entries(tsData).forEach(([k, rows]) => {
+    if (k.startsWith('oh_') || !Array.isArray(rows)) return;
     rows.forEach(row => {
       if (row.taskName && row.taskName.trim().toLowerCase() === taskName.trim().toLowerCase()) {
         total += Object.values(row.hours).reduce((a, b) => a + b, 0);
@@ -6501,6 +6720,7 @@ function tpToggleDone(taskId, projId) {
   renderTasksPanel(projId);
   renderProjSummary(projId);
   updateStatsBar();
+  setTimeout(ittInitResizers,0);
 }
 
 
@@ -6596,23 +6816,41 @@ async function deleteClient(id) {
 }
 
 // ===== CONTACT MODAL =====
+let _contactModalId = null;
+let _contactModalClientId = null;
+
 function openContactModal(id, clientId) {
   const ct = id ? contactStore.find(x => x.id === id) : null;
-  const cid = clientId || (ct ? ct.clientId : null);
-  const firstName = prompt('First name:', ct ? ct.firstName : '');
-  if (firstName === null) return;
-  const lastName = prompt('Last name:', ct ? ct.lastName : '');
-  if (lastName === null) return;
-  const email = prompt('Email:', ct ? ct.email : '');
-  if (email === null) return;
-  saveContactRecord(id, cid, firstName.trim(), lastName.trim(), email.trim());
+  _contactModalId = id || null;
+  _contactModalClientId = clientId || (ct ? ct.clientId : null);
+  document.getElementById('contactModalTitle').textContent = id ? 'Edit Contact' : 'Add Contact';
+  document.getElementById('ctFirstName').value = ct ? ct.firstName : '';
+  document.getElementById('ctLastName').value  = ct ? ct.lastName  : '';
+  document.getElementById('ctEmail').value     = ct ? ct.email     : '';
+  document.getElementById('ctPhone').value     = ct ? (ct.phone||'') : '';
+  document.getElementById('contactModalOverlay').style.display='flex';
+  setTimeout(() => document.getElementById('ctFirstName').focus(), 50);
 }
 
-async function saveContactRecord(id, clientId, firstName, lastName, email) {
+function closeContactModal() {
+  document.getElementById('contactModalOverlay').style.display='none';
+}
+
+async function saveContactModal() {
+  const firstName = document.getElementById('ctFirstName').value.trim();
+  if (!firstName) { document.getElementById('ctFirstName').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('ctFirstName').style.borderColor='',1500); return; }
+  const lastName = document.getElementById('ctLastName').value.trim();
+  const email    = document.getElementById('ctEmail').value.trim();
+  const phone    = document.getElementById('ctPhone').value.trim();
+  closeContactModal();
+  await saveContactRecord(_contactModalId, _contactModalClientId, firstName, lastName, email, phone);
+}
+
+async function saveContactRecord(id, clientId, firstName, lastName, email, phone) {
   if (id) {
     const ct = contactStore.find(x => x.id === id);
-    if (ct) { ct.firstName = firstName; ct.lastName = lastName; ct.email = email; }
-    if (sb) await dbUpdate('contacts', id, { first_name: firstName, last_name: lastName, email: email||null });
+    if (ct) { ct.firstName = firstName; ct.lastName = lastName; ct.email = email; ct.phone = phone||''; }
+    if (sb) await dbUpdate('contacts', id, { first_name: firstName, last_name: lastName, email: email||null, phone: phone||null });
     toast('Contact updated');
   } else {
     const row = { client_id: clientId, first_name: firstName, last_name: lastName, email: email||null };
@@ -6622,6 +6860,14 @@ async function saveContactRecord(id, clientId, firstName, lastName, email) {
     toast('Contact added');
   }
   renderClientsPanel('');
+  // Refresh project contact picker if we were adding from a project
+  if (window._afterContactSaveProjId) {
+    const _pid = window._afterContactSaveProjId;
+    window._afterContactSaveProjId = null;
+    renderContactPickerList(_pid, '');
+    const dd = document.getElementById('contactPickerDropdown');
+    if (dd) dd.style.display = 'block';
+  }
 }
 
 async function deleteContact(id) {
@@ -6725,6 +6971,20 @@ function renderContactPickerList(projId, search) {
       ${c.email ? `<div style="font-size:11px;color:var(--muted)">${c.email}</div>` : ''}
     </div>`
   ).join('') || `<div class="client-picker-item" style="color:var(--muted)">No contacts found</div>`;
+  // Add "+ New Contact" option at bottom
+  const info2 = projectInfo[projId] || {};
+  list.innerHTML += `<div class="client-picker-item" style="color:var(--blue);border-top:1px solid var(--border);margin-top:4px;padding-top:8px"
+    onclick="closeContactPickerAndAdd('${projId}')">+ New Contact</div>`;
+}
+
+function closeContactPickerAndAdd(projId) {
+  const dd = document.getElementById('contactPickerDropdown');
+  if (dd) dd.style.display = 'none';
+  const info = projectInfo[projId] || {};
+  openContactModal(null, info.clientId || null);
+  // After saving, refresh the contact picker
+  const _origSave = window._afterContactSaveProjId;
+  window._afterContactSaveProjId = projId;
 }
 
 async function selectContact(projId, contactId) {
@@ -7072,6 +7332,7 @@ async function inlineSave(taskId, projId, field, value) {
   renderInfoTasks(projId, currentTaskFilter);
   renderProjSummary(projId);
   updateStatsBar();
+  setTimeout(ittInitResizers,0);
 }
 
 function inlineEditName(taskId, projId) {
@@ -7179,6 +7440,7 @@ async function inlineDeleteTask(taskId, projId) {
   else renderInfoTasks(projId, currentTaskFilter);
   renderProjSummary(projId);
   updateStatsBar();
+  setTimeout(ittInitResizers,0);
 }
 
 // ===== EDIT TASK MODAL =====
@@ -7190,7 +7452,7 @@ function openEditTaskModal(taskId) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
   editingTaskId = taskId;
-  etPri = t.priority || 'medium';
+  etPri = t.priority || 'low';
   etAssign = new Set(t.assign ? [t.assign] : []);
 
   const p = projects.find(x => x.id === t.proj);
@@ -7252,6 +7514,14 @@ function etTogAssign(id, initials, el) {
   el.querySelector('.chip-chk').innerHTML = '&#x2713;';
 }
 
+async function updateCompletedDateFromStatus() {
+  const status = document.getElementById('etStatus').value;
+  const dueFld = document.getElementById('etDue');
+  if ((status === 'complete' || status === 'billed') && !dueFld.value) {
+    dueFld.value = new Date().toISOString().slice(0,10);
+  }
+}
+
 async function saveEditTask() {
   const title = document.getElementById('etTitle').value.trim();
   if (!title) {
@@ -7271,9 +7541,12 @@ async function saveEditTask() {
   const dueLabel   = due ? new Date(due + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'}) : '';
   const isOverdue  = due ? new Date(due + 'T00:00:00') < new Date() && status !== 'done' : false;
 
+  // Auto-set completed date if marking complete/billed with no date
+  const completedDate = due || ((status === 'complete' || status === 'billed') ? new Date().toISOString().slice(0,10) : null);
+
   const updates = {
     name: title, description: desc, assignee: assign,
-    completed_date: due||null, due_date: null, status, priority: etPri,
+    completed_date: completedDate||null, due_date: null, status, priority: etPri,
     sales_category: salesCat||null,
     fixed_price: fixedPrice||null,
     done: status === 'complete',
@@ -7289,7 +7562,7 @@ async function saveEditTask() {
   if (idx > -1) {
     taskStore[idx] = {
       ...taskStore[idx],
-      name: title, desc, assign, due: dueLabel, due_raw: '', completedDate: due,
+      name: title, desc, assign, due: dueLabel, due_raw: '', completedDate: completedDate||'',
       status, priority: etPri, salesCat, fixedPrice,
       done: status === 'complete', overdue: isOverdue,
     };
@@ -7765,6 +8038,7 @@ function viewEmployeeTimesheet(empId, weekKey) {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
     await loadAllData(); // load projects/employees/etc first
     showAppLoader(false);
+    setTimeout(()=>{ if(typeof ittSetW==='function') ittSetW(ittGetW()); },200);
 
     // Check if already logged in (session persists)
     const { data: { session } } = await sb.auth.getSession();
@@ -7799,5 +8073,41 @@ function viewEmployeeTimesheet(empId, weekKey) {
     </div>
   </div>
 </div>
+
+  <!-- Contact Modal -->
+  <!-- Contact Modal -->
+  <div id="contactModalOverlay" onclick="if(event.target===this)closeContactModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);backdrop-filter:blur(6px);z-index:1000;align-items:center;justify-content:center">
+    <div class="modal" style="width:420px;transform:none;opacity:1">
+      <div class="modal-header">
+        <div class="modal-title" id="contactModalTitle">Add Contact</div>
+        <button class="modal-close" onclick="closeContactModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">First Name <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="ctFirstName" type="text" placeholder="First name" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label class="field-label">Last Name</label>
+            <input class="f-input" id="ctLastName" type="text" placeholder="Last name" autocomplete="off" />
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Email</label>
+          <input class="f-input" id="ctEmail" type="email" placeholder="email@company.com" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label class="field-label">Phone</label>
+          <input class="f-input" id="ctPhone" type="text" placeholder="+1 (555) 000-0000" autocomplete="off" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeContactModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveContactModal()">Save Contact</button>
+      </div>
+    </div>
+  </div>
+
 </body>
 </html>
