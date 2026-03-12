@@ -950,7 +950,7 @@ tr:hover .ts-del-row{color:var(--muted);}
   </div>
   <div class="nav-section">
     <div class="nav-label">Reports</div>
-    <div class="nav-item" id="navReports" onclick="openReportsPanel(this)"><span class="icon">&#x1F4CA;</span> Reports</div>
+    <div class="nav-item" id="navReports" onclick="openReportsPanel(this)" style="display:none"><span class="icon">&#x1F4CA;</span> Reports</div>
   </div>
 
   <div class="sidebar-footer">
@@ -991,16 +991,11 @@ tr:hover .ts-del-row{color:var(--muted);}
     <div class="topbar-actions">
       <button class="btn btn-ghost">Filter</button>
       <button class="btn btn-ghost">Sort</button>
-      <button class="btn btn-primary" onclick="openProjectModal()">+ New Project</button>
+      <button class="btn btn-primary" id="addProjBtn1" onclick="openProjectModal()" style="display:none">+ New Project</button>
       <button class="settings-btn" onclick="resetConfig()" title="Reset Supabase connection">⚙</button>
     </div>
   </div>
-  <div class="stats-bar">
-    <div class="stat-chip">Total <span class="s-amber" id="statTotal">42</span> tasks</div>
-    <div class="stat-chip">Done <span class="s-green" id="statDone">18</span></div>
-    <div class="stat-chip">In Progress <span class="s-amber" id="statInprog">11</span></div>
-    <div class="stat-chip">Overdue <span class="s-red" id="statOverdue">3</span></div>
-  </div>
+
   <div class="content">
 
     <!-- ALL PROJECTS DASHBOARD -->
@@ -1023,7 +1018,7 @@ tr:hover .ts-del-row{color:var(--muted);}
             <button id="showClosedBtn" onclick="toggleShowClosed()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s" title="Toggle closed jobs">
               &#x1F512; Show Closed
             </button>
-            <button class="btn btn-primary" style="font-size:12.5px" onclick="openProjectModal()">+ New Project</button>
+            <button class="btn btn-primary" id="addProjBtn2" style="font-size:12.5px;display:none" onclick="openProjectModal()">+ New Project</button>
           </div>
         </div>
         <div class="nav-filter-panel" id="navFilterPanel" style="margin-bottom:14px">
@@ -1126,6 +1121,7 @@ tr:hover .ts-del-row{color:var(--muted);}
           <div class="reports-tab active" data-tab="tab-billing" onclick="switchReportsTab(this)">&#x1F4B3; Billing Queue</div>
           <div class="reports-tab" data-tab="tab-overview" onclick="switchReportsTab(this)">&#x1F4CA; Overview</div>
           <div class="reports-tab" data-tab="tab-employees" onclick="switchReportsTab(this)">&#x1F465; Employees</div>
+          <div class="reports-tab" data-tab="tab-timesheets" onclick="switchReportsTab(this)">&#x1F4C5; Timesheets</div>
         </div>
       </div>
       <div style="flex:1;overflow-y:auto;padding:24px 28px" id="reportsBody">
@@ -1137,6 +1133,8 @@ tr:hover .ts-del-row{color:var(--muted);}
         <div class="reports-tab-panel" id="tab-employees"></div>
         <!-- Billing Queue Tab -->
         <div class="reports-tab-panel" id="tab-billing"></div>
+        <!-- Timesheets Tab -->
+        <div class="reports-tab-panel" id="tab-timesheets"></div>
         <!-- AI Analysis Tab -->
         <div class="reports-tab-panel" id="tab-ai">
           <div style="max-width:860px">
@@ -1431,6 +1429,14 @@ tr:hover .ts-del-row{color:var(--muted);}
       <div class="field">
         <label class="field-label">Hire Date</label>
         <input class="f-input" id="empHireDate" type="date" />
+      </div>
+      <div class="field">
+        <label class="field-label">Permission Level</label>
+        <select class="f-input" id="empPermLevel" style="cursor:pointer">
+          <option value="manager">Manager — full access</option>
+          <option value="engineer">Engineer — limited access</option>
+          <option value="tech">Tech — limited access</option>
+        </select>
       </div>
       <div class="field">
         <label class="field-label">Avatar Color</label>
@@ -2276,7 +2282,7 @@ function showEmptyIfNeeded(containerId, count, msg) {
     c.innerHTML = `<div class="empty-state">
       <div class="empty-icon">&#x1F4CB;</div>
       <div class="empty-msg">${msg}</div>
-      <button class="btn btn-ghost" style="margin-top:10px;font-size:12px" onclick="openTaskModal()">+ Add Task</button>
+      <button class="btn btn-ghost" id="addTaskBtn1" style="margin-top:10px;font-size:12px;display:none" onclick="openTaskModal()">+ Add Task</button>
     </div>`;
   }
 }
@@ -2419,17 +2425,7 @@ function renderIndentedView() {
 }
 
 // ===== STATS BAR =====
-function updateStatsBar() {
-  const tasks = getFilteredTasks();
-  const total = tasks.length;
-  const done = tasks.filter(t => t.done).length;
-  const inprog = tasks.filter(t => !t.done && t.section === 'sprint').length;
-  const overdue = tasks.filter(t => t.overdue).length;
-  document.getElementById('statTotal').textContent = total;
-  document.getElementById('statDone').textContent = done;
-  document.getElementById('statInprog').textContent = inprog;
-  document.getElementById('statOverdue').textContent = overdue;
-}
+function updateStatsBar() { /* stats bar removed */ }
 
 // ===== SAVE TASK — push to store =====
 function saveTask(another=false){
@@ -3216,7 +3212,7 @@ function renderInfoTasks(projId, filter) {
       <div class="itt-head-cell">Budget Hrs<span class="itt-resizer" data-col="bhrs"></span></div>
       <div class="itt-head-cell">Assignee<span class="itt-resizer" data-col="assign"></span></div>
       <div class="itt-head-cell">Start Date<span class="itt-resizer" data-col="start"></span></div>
-      <div class="itt-head-cell">Completed<span class="itt-resizer" data-col="comp"></span></div>
+      <div class="itt-head-cell">Done/Billed<span class="itt-resizer" data-col="comp"></span></div>
       <div class="itt-head-cell"></div>
     </div>
     ${tasks.map((t, i) => {
@@ -3284,7 +3280,7 @@ function ittSetW(w){Object.entries(w).forEach(([k,v])=>document.documentElement.
 function ittSaveW(w){try{const s={};Object.entries(w).forEach(([k,v])=>{if(v!==ITT_DEFAULTS[k])s[k]=v;});localStorage.setItem('ittCols',JSON.stringify(s));}catch{}}
 function ittInitResizers(){
   const head=document.getElementById('ittHead');
-  if(!head||head._ri)return;
+  if(!head||head._ri) return;
   head._ri=true;
   const w=ittGetW();ittSetW(w);
   head.querySelectorAll('.itt-resizer').forEach(r=>{
@@ -3303,11 +3299,27 @@ function ittInitResizers(){
   });
 }
 
-function toggleInfoTask(idx, projId) {
+async function toggleInfoTask(idx, projId) {
   if (idx < 0 || idx >= taskStore.length) return;
-  taskStore[idx].done = !taskStore[idx].done;
-  taskStore[idx].status = taskStore[idx].done ? 'done' : 'inprogress';
+  const t = taskStore[idx];
+  const today = new Date().toISOString().split('T')[0];
+  t.done = !t.done;
+  t.status = t.done ? 'complete' : 'inprogress';
+  const updates = { status: t.status };
+  if (t.done && !t.completedDate) {
+    t.completedDate = today;
+    updates.completed_date = today;
+  }
+  if (t.done && !t.taskStartDate) {
+    t.taskStartDate = today;
+    updates.task_start_date = today;
+  }
+  if (sb) {
+    const { error } = await sb.from('tasks').update(updates).eq('id', t._id);
+    if (error) console.error('toggleInfoTask', error);
+  }
   renderInfoTasks(projId, currentTaskFilter);
+  renderTasksPanel(projId);
   renderProjSummary(projId);
   updateStatsBar();
   // Update progress ring
@@ -3368,6 +3380,90 @@ function openEmployeesPanel(el) {
   renderEmployeesPanel('');
 }
 
+let empDetailOpen = null;
+
+// ── Time-off helpers ────────────────────────────────────────────────────────
+
+function getHolidays(year) {
+  // Compute variable holidays for a given year
+  const easterDate = y => {
+    const f = Math.floor, a = y%19, b = f(y/100), c = y%100,
+      d = f(b/4), e = b%4, g = f((8*b+13)/25), h = (19*a+b-d-g+15)%30,
+      i = f(c/4), k = c%4, l = (32+2*e+2*i-h-k)%7,
+      m = f((a+11*h+19*l)/433), n = f((h+l-7*m+90)/25), p = (h+l-7*m+33*n+19)%32;
+    return new Date(y, n-1, p);
+  };
+  const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate()+n); return r; };
+  const nthWeekday = (y, m, wd, n) => { const d = new Date(y, m, 1); let c = 0; while(d.getMonth()===m){if(d.getDay()===wd){c++;if(c===n)return new Date(d);}d.setDate(d.getDate()+1);} };
+  const lastWeekday = (y, m, wd) => { const d = new Date(y, m+1, 0); while(d.getDay()!==wd)d.setDate(d.getDate()-1); return d; };
+  const fmt = d => d.toISOString().split('T')[0];
+  const easter = easterDate(year);
+  const goodFriday = addDays(easter, -2);
+  const memorialDay = lastWeekday(year, 4, 1); // last Monday of May
+  const laborDay = nthWeekday(year, 8, 1, 1);  // 1st Monday Sep
+  const columbusDay = nthWeekday(year, 9, 1, 2); // 2nd Monday Oct
+  const thanksgiving = nthWeekday(year, 10, 4, 4); // 4th Thursday Nov
+  const blackFriday = addDays(thanksgiving, 1);
+  const holidays = [
+    { name: "New Year's Eve",    date: fmt(new Date(year-1, 11, 31)) },
+    { name: "New Year's Day",    date: fmt(new Date(year, 0, 1)) },
+    { name: "Martin Luther King Jr. Day", date: fmt(nthWeekday(year, 0, 1, 3)) },
+    { name: "Presidents' Day",   date: fmt(nthWeekday(year, 1, 1, 3)) },
+    { name: "Good Friday",       date: fmt(goodFriday) },
+    { name: "Memorial Day",      date: fmt(memorialDay) },
+    { name: "Juneteenth",        date: fmt(new Date(year, 5, 19)) },
+    { name: "Independence Day",  date: fmt(new Date(year, 6, 4)) },
+    { name: "Labor Day",         date: fmt(laborDay) },
+    { name: "Columbus Day",      date: fmt(columbusDay) },
+    { name: "Veterans Day",      date: fmt(new Date(year, 10, 11)) },
+    { name: "Thanksgiving Day",  date: fmt(thanksgiving) },
+    { name: "Black Friday",      date: fmt(blackFriday) },
+    { name: "Christmas Eve",     date: fmt(new Date(year, 11, 24)) },
+    { name: "Christmas Day",     date: fmt(new Date(year, 11, 25)) },
+  ];
+  return holidays;
+}
+
+function getVacationAllotment(hireDateStr) {
+  if (!hireDateStr) return 0;
+  const hire = new Date(hireDateStr + 'T00:00:00');
+  const today = new Date();
+  const yearsWorked = (today - hire) / (365.25 * 24 * 60 * 60 * 1000);
+  if (yearsWorked < 5) return 80; // 2 weeks
+  // After 5 years: 80 + 8hrs per additional year
+  return 80 + Math.floor(yearsWorked - 5) * 8;
+}
+
+function getQuarterlyAccrual(hireDateStr) {
+  // Returns how much vacation has accrued so far this year based on quarters completed
+  const allotment = getVacationAllotment(hireDateStr);
+  const today = new Date();
+  const month = today.getMonth(); // 0-11
+  const quarter = Math.floor(month / 3) + 1; // 1-4
+  return (allotment / 4) * quarter;
+}
+
+function getTimeOffUsed(empId, year) {
+  // Sum overhead hours by category across all weeks in the given year
+  const used = { vacation: 0, sick: 0, holiday: 0 };
+  Object.entries(tsData).forEach(([key, rows]) => {
+    if (!key.startsWith(empId + '|')) return;
+    const weekKey = key.split('|')[1];
+    if (!weekKey || !weekKey.startsWith(String(year))) return;
+    const ohKey = 'oh_' + key;
+    const oh = tsData[ohKey] || {};
+    const vacHrs = Object.values(oh['Vacation Time'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
+    const sickHrs = Object.values(oh['Sick Time'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
+    const holHrs = Object.values(oh['Holiday / Snow Day'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
+    used.vacation += vacHrs;
+    used.sick += sickHrs;
+    used.holiday += holHrs;
+  });
+  return used;
+}
+
+// ── Employee panel ───────────────────────────────────────────────────────────
+
 function renderEmployeesPanel(search) {
   const q = (search || '').toLowerCase();
   const filtered = employees.filter(e =>
@@ -3377,25 +3473,194 @@ function renderEmployeesPanel(search) {
   );
   const body = document.getElementById('empPanelBody');
   body.innerHTML = `
-    <div class="emp-panel-header">
-      <div class="emp-panel-title">Employees <span style="font-size:14px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-weight:400">(${employees.length})</span></div>
-      <input class="emp-search" placeholder="Search by name, role, department…" value="${search||''}" oninput="renderEmployeesPanel(this.value)" />
-      <button class="emp-add-btn" onclick="openEmployeeModal()">+ Add Employee</button>
+    <div style="display:flex;height:100%;gap:0;overflow:hidden">
+      <!-- Left: employee list -->
+      <div style="width:260px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;background:var(--surface)">
+        <div style="padding:16px 14px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+          <input style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none"
+            placeholder="Search…" value="${q}" oninput="renderEmployeesPanel(this.value)" />
+          <button onclick="openEmployeeModal()" style="background:var(--amber);border:none;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;color:#000;cursor:pointer;white-space:nowrap">+ Add</button>
+        </div>
+        <div>
+          ${filtered.map(e => `
+            <div onclick="showEmpProfile('${e.id}')" id="emplistrow-${e.id}"
+              style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .12s;${empDetailOpen===e.id?'background:var(--surface2);border-left:3px solid var(--amber);':'border-left:3px solid transparent;'}"
+              onmouseover="if('${e.id}'!==empDetailOpen)this.style.background='var(--surface2)'" onmouseout="if('${e.id}'!==empDetailOpen)this.style.background=''">
+              <div style="width:34px;height:34px;border-radius:50%;background:${e.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${e.initials}</div>
+              <div style="overflow:hidden">
+                <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.name}</div>
+                <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.role}${e.dept?' · '+e.dept:''}</div>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>
+      <!-- Right: profile -->
+      <div id="empProfilePane" style="flex:1;overflow-y:auto;padding:28px 32px;background:var(--bg)">
+        <div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:14px;flex-direction:column;gap:10px">
+          <div style="font-size:36px">👤</div>
+          <div>Select an employee to view their profile</div>
+        </div>
+      </div>
     </div>
-    ${filtered.length === 0 ? `<div class="emp-empty"><div class="emp-empty-icon">&#x1F465;</div><div>No employees found</div></div>` : ''}
-    <div class="emp-grid">
-      ${filtered.map(e => `
-        <div class="emp-card">
-          <div class="emp-av" style="background:${e.color}">${e.initials}</div>
-          <div class="emp-info">
-            <div class="emp-name">${e.name}</div>
-            <div class="emp-role">${e.role}${e.dept ? ' · ' + e.dept : ''}</div>
-            ${e.email ? `<div class="emp-email">${e.email}</div>` : ''}
-            ${e.hireDate ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">Hired: ${new Date(e.hireDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>` : ''}
+  `;
+  if (empDetailOpen) showEmpProfile(empDetailOpen);
+}
+
+function showEmpProfile(empId) {
+  empDetailOpen = empId;
+  // Highlight in list
+  document.querySelectorAll('[id^="emplistrow-"]').forEach(el => {
+    const eid = el.id.replace('emplistrow-','');
+    el.style.background = eid === empId ? 'var(--surface2)' : '';
+    el.style.borderLeft = eid === empId ? '3px solid var(--amber)' : '3px solid transparent';
+  });
+  const pane = document.getElementById('empProfilePane');
+  if (!pane) return;
+  const emp = employees.find(e => e.id === empId);
+  if (!emp) return;
+
+  const year = new Date().getFullYear();
+  const used = getTimeOffUsed(empId, year);
+  const vacAllotment = getVacationAllotment(emp.hireDate);
+  const vacAccrued = getQuarterlyAccrual(emp.hireDate);
+  const sickAllotment = 48;
+  const holidays = getHolidays(year);
+  const approver = employees.find(e => e.id === emp.approverId);
+
+  const fmtDate = d => d ? new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : '—';
+  const yearsWorked = emp.hireDate ? ((new Date() - new Date(emp.hireDate+'T00:00:00')) / (365.25*24*60*60*1000)).toFixed(1) : null;
+
+  const bar = (used, allotment, color) => {
+    const pct = allotment > 0 ? Math.min(100, (used/allotment)*100) : 0;
+    const over = used > allotment;
+    return `<div style="background:var(--surface2);border-radius:6px;height:8px;overflow:hidden;margin-top:6px">
+      <div style="height:100%;border-radius:6px;width:${pct}%;background:${over?'var(--red)':color};transition:width .4s"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--muted)">
+      <span>${used.toFixed(1)} hrs used${over?' ⚠ Over allotment':''}</span>
+      <span>${allotment} hrs allotted</span>
+    </div>`;
+  };
+
+  // Timesheet history
+  const weeks = Object.values(tsWeekStatuses)
+    .filter(ws => ws.employeeId === empId)
+    .sort((a,b) => b.weekKey.localeCompare(a.weekKey))
+    .slice(0, 10);
+
+  const statusBadge = s => ({
+    submitted: '<span style="background:rgba(232,162,52,0.15);color:#e8a234;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">⏳ Pending</span>',
+    approved:  '<span style="background:rgba(76,175,125,0.15);color:#4caf7d;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✓ Approved</span>',
+    rejected:  '<span style="background:rgba(224,92,92,0.15);color:#e05c5c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✗ Rejected</span>',
+  }[s] || '<span style="color:var(--muted);font-size:10px">Draft</span>');
+
+  const fmtWeek = wk => new Date(wk+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+  const tsRows = weeks.map(ws => {
+    const storeKey = empId + '|' + ws.weekKey;
+    let hrs = 0;
+    (tsData[storeKey]||[]).forEach(r => Object.values(r.hours||{}).forEach(h => hrs+=(parseFloat(h)||0)));
+    const oh = tsData['oh_'+storeKey]||{};
+    OVERHEAD_CATS.forEach(cat => Object.values(oh[cat]||{}).forEach(h => hrs+=(parseFloat(h)||0)));
+    return `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:8px 12px;font-size:12px;font-family:'JetBrains Mono',monospace">${fmtWeek(ws.weekKey)}</td>
+      <td style="padding:8px 12px">${statusBadge(ws.status)}</td>
+      <td style="padding:8px 12px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600">${hrs.toFixed(1)}h</td>
+      <td style="padding:8px 12px;font-size:11px;color:var(--muted)">${ws.rejectionNote?'✗ '+ws.rejectionNote:ws.approvedBy?'✓ Approved':'—'}</td>
+      <td style="padding:8px 12px;text-align:right">
+        <button onclick="viewEmployeeTimesheet('${empId}','${ws.weekKey}')"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--text);cursor:pointer">View</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  pane.innerHTML = `
+    <!-- Header -->
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
+      <div style="display:flex;align-items:center;gap:16px">
+        <div style="width:64px;height:64px;border-radius:50%;background:${emp.color};display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff;flex-shrink:0">${emp.initials}</div>
+        <div>
+          <div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--text)">${emp.name}</div>
+          <div style="font-size:13px;color:var(--muted);margin-top:2px">${emp.role}${emp.dept?' · '+emp.dept:''}</div>
+          ${yearsWorked ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">Hired ${fmtDate(emp.hireDate)} · ${yearsWorked} yrs seniority</div>` : ''}
+        </div>
+      </div>
+      ${isManager() ? `<div style="display:flex;gap:8px">
+        <button onclick="openEmployeeModal('${empId}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--text);cursor:pointer">✎ Edit</button>
+        <button onclick="deleteEmployee('${empId}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--red);cursor:pointer">✕ Remove</button>
+      </div>` : ''}
+    </div>
+
+    <!-- Info cards row -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
+      ${emp.email ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Email</div>
+        <div style="font-size:12px;color:var(--text)">${emp.email}</div>
+      </div>` : ''}
+      ${emp.phone ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Phone</div>
+        <div style="font-size:12px;color:var(--text)">${emp.phone}</div>
+      </div>` : ''}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Approver</div>
+        <div style="font-size:12px;color:var(--text)">${approver ? approver.name : '—'}</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Timesheet</div>
+        <div style="font-size:12px;color:var(--text)">${emp.isPaperTs ? '📄 Paper' : '💻 Digital'}</div>
+      </div>
+    </div>
+
+    <!-- Time off section -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">🏖 Time Off — ${year}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <!-- Vacation -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Vacation</div>
+            <div style="font-size:10px;color:var(--muted)">${vacAccrued.toFixed(0)} hrs accrued so far</div>
           </div>
-          <button class="emp-menu-btn" onclick="openEmployeeModal('${e.id}')" title="Edit">&#x270E;</button>
-          <button class="emp-del-btn" onclick="deleteEmployee('${e.id}')" title="Remove">&#x2715;</button>
-        </div>`).join('')}
+          ${bar(used.vacation, vacAllotment, 'var(--blue)')}
+        </div>
+        <!-- Sick -->
+        <div>
+          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:0">Sick</div>
+          ${bar(used.sick, sickAllotment, 'var(--amber)')}
+        </div>
+      </div>
+      <!-- Holiday -->
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Holidays Used This Year</div>
+          <div style="font-size:11px;color:var(--muted)">${used.holiday.toFixed(1)} hrs logged</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">
+          ${holidays.filter(h=>h.date.startsWith(String(year))).map(h =>
+            `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)">${h.name} <span style="color:var(--text)">${new Date(h.date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span></span>`
+          ).join('')}
+        </div>
+      </div>
+    </div>
+
+    <!-- Timesheet history -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">📅 Timesheet History</div>
+        <div style="font-size:11px;color:var(--muted)">Last 10 weeks</div>
+      </div>
+      ${weeks.length === 0
+        ? `<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No timesheets submitted yet.</div>`
+        : `<table style="width:100%;border-collapse:collapse">
+            <thead><tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Week Of</th>
+              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>
+              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Hours</th>
+              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Notes</th>
+              <th></th>
+            </tr></thead>
+            <tbody>${tsRows}</tbody>
+          </table>`}
     </div>
   `;
 }
@@ -3442,6 +3707,7 @@ function openEmployeeModal(id) {
     ).join('');
   const _isAppr = document.getElementById('empIsApprover'); if(_isAppr) _isAppr.checked = emp ? !!emp.isApprover : false;
   const _isPaper = document.getElementById('empIsPaperTs'); if(_isPaper) _isPaper.checked = emp ? !!emp.isPaperTs : false;
+  const _perm = document.getElementById('empPermLevel'); if(_perm) _perm.value = emp ? (emp.permissionLevel||'engineer') : 'engineer';
   document.getElementById('employeeModal').classList.add('open');
   setTimeout(() => document.getElementById('empName').focus(), 80);
 }
@@ -3600,7 +3866,10 @@ const OVERHEAD_CATS = [
 // ===== AUTH STATE =====
 let currentUser = null;       // Supabase auth user
 let currentEmployee = null;   // matching employees[] record
-let proxyEmployee = null;     // employee being entered on behalf of (manager proxy)
+let proxyEmployee = null;  
+
+function isManager() { return !!(currentEmployee && currentEmployee.permissionLevel === 'manager'); }
+function canEdit()   { return isManager(); }   // employee being entered on behalf of (manager proxy)
 let isApprover = false;
 
 // Timesheet week statuses: { weekKey: { status, submittedBy, rejectionNote, id } }
@@ -4932,12 +5201,21 @@ async function unBillTask(taskId, projId) {
 async function markTaskBilled(taskId, projId) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
+  const today = new Date().toISOString().split('T')[0];
   t.status = 'billed';
+  if (!t.billedDate)    { t.billedDate    = today; }
+  if (!t.completedDate) { t.completedDate = today; }
   if (sb) {
     const { error } = await sb.from('tasks').update({ status: 'billed' }).eq('id', taskId);
-    if (error) console.error('markTaskBilled', error);
+    if (error) console.error('markTaskBilled status', error);
+    const { error: e2 } = await sb.from('tasks').update({
+      billed_date:    t.billedDate,
+      completed_date: t.completedDate,
+    }).eq('id', taskId);
+    if (e2) console.error('markTaskBilled dates (run SQL migration):', e2.message);
   }
   renderInvoicingPanel(projId);
+  renderTasksPanel(projId);
   renderProjSummary(projId);
 }
 
@@ -5105,13 +5383,22 @@ function confirmBulkBill() {
 
 async function bulkMarkBilled() {
   const ids = [...bqSelected];
+  const today = new Date().toISOString().split('T')[0];
   ids.forEach(id => {
     const t = taskStore.find(x => x._id === id);
-    if (t) t.status = 'billed';
+    if (!t) return;
+    t.status = 'billed';
+    if (!t.billedDate)    t.billedDate    = today;
+    if (!t.completedDate) t.completedDate = today;
   });
   if (sb) {
     for (const id of ids) {
-      const { error } = await sb.from('tasks').update({ status: 'billed' }).eq('id', id);
+      const t = taskStore.find(x => x._id === id);
+      const { error } = await sb.from('tasks').update({
+        status:         'billed',
+        billed_date:    t.billedDate,
+        completed_date: t.completedDate,
+      }).eq('id', id);
       if (error) console.error('bulkMarkBilled', error);
     }
   }
@@ -5142,6 +5429,112 @@ function switchReportsTab(el) {
   el.classList.add('active');
   document.getElementById(el.dataset.tab).classList.add('active');
   if (el.dataset.tab === 'tab-billing') renderBillingQueue();
+  if (el.dataset.tab === 'tab-timesheets') renderTimesheetsReport();
+  if (el.dataset.tab === 'tab-employees') renderReportsEmployees();
+}
+
+function renderTimesheetsReport(filterEmp, filterStatus) {
+  const el = document.getElementById('tab-timesheets');
+  if (!el) return;
+
+  const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  // Build list of all week statuses
+  let entries = Object.values(tsWeekStatuses).map(ws => {
+    const emp = employees.find(e => e.id === ws.employeeId) || {};
+    // Calculate total hours for this week
+    const storeKey = ws.employeeId + '|' + ws.weekKey;
+    let totalHrs = 0;
+    (tsData[storeKey] || []).forEach(r => Object.values(r.hours||{}).forEach(h => totalHrs += (parseFloat(h)||0)));
+    const ohStore = tsData['oh_' + storeKey] || {};
+    OVERHEAD_CATS.forEach(cat => Object.values(ohStore[cat]||{}).forEach(h => totalHrs += (parseFloat(h)||0)));
+    return { ...ws, empName: emp.name||'—', empColor: emp.color||'#555', empInitials: emp.initials||'?', totalHrs };
+  });
+
+  // Sort newest week first, then by employee name
+  entries.sort((a,b) => b.weekKey.localeCompare(a.weekKey) || a.empName.localeCompare(b.empName));
+
+  // Filter
+  const selEmp    = filterEmp    || el.dataset.filterEmp    || '';
+  const selStatus = filterStatus || el.dataset.filterStatus || '';
+  el.dataset.filterEmp    = selEmp;
+  el.dataset.filterStatus = selStatus;
+  const filtered = entries.filter(e =>
+    (!selEmp    || e.employeeId === selEmp) &&
+    (!selStatus || e.status === selStatus)
+  );
+
+  const uniqueEmps = [...new Map(entries.map(e => [e.employeeId, {id:e.employeeId,name:e.empName}])).values()]
+    .sort((a,b) => a.name.localeCompare(b.name));
+
+  const statusBadge = s => ({
+    submitted: '<span style="background:rgba(232,162,52,0.15);color:#e8a234;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">⏳ Pending</span>',
+    approved:  '<span style="background:rgba(76,175,125,0.15);color:#4caf7d;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✓ Approved</span>',
+    rejected:  '<span style="background:rgba(224,92,92,0.15);color:#e05c5c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✗ Rejected</span>',
+  }[s] || '<span style="color:var(--muted);font-size:10px">Draft</span>');
+
+  const fmtWeek = wk => { const d = new Date(wk+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
+
+  el.innerHTML = `
+    <div style="max-width:1100px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--text)">&#x1F4C5; Timesheet History</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${entries.length} total submissions across ${uniqueEmps.length} employee${uniqueEmps.length!==1?'s':''}</div>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <select onchange="renderTimesheetsReport(this.value, '${selStatus}')"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif">
+            <option value="">All Employees</option>
+            ${uniqueEmps.map(e => `<option value="${e.id}" ${selEmp===e.id?'selected':''}>${e.name}</option>`).join('')}
+          </select>
+          <select onchange="renderTimesheetsReport('${selEmp}', this.value)"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif">
+            <option value="">All Statuses</option>
+            <option value="submitted" ${selStatus==='submitted'?'selected':''}>Pending</option>
+            <option value="approved"  ${selStatus==='approved' ?'selected':''}>Approved</option>
+            <option value="rejected"  ${selStatus==='rejected' ?'selected':''}>Rejected</option>
+          </select>
+        </div>
+      </div>
+
+      ${filtered.length === 0 ? `<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">📭</div><div>No timesheets match the selected filters.</div></div>` : `
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="border-bottom:2px solid var(--border)">
+            <th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Employee</th>
+            <th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Week Of</th>
+            <th style="text-align:center;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>
+            <th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Hours</th>
+            <th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Notes</th>
+            <th style="padding:8px 12px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map((ws,i) => `
+            <tr style="border-bottom:1px solid var(--border);transition:background .12s" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+              <td style="padding:10px 12px">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <div style="width:28px;height:28px;border-radius:50%;background:${ws.empColor};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${ws.empInitials}</div>
+                  <span style="font-size:13px;font-weight:500">${ws.empName}</span>
+                </div>
+              </td>
+              <td style="padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text)">${fmtWeek(ws.weekKey)}</td>
+              <td style="padding:10px 12px;text-align:center">${statusBadge(ws.status)}</td>
+              <td style="padding:10px 12px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;color:${ws.totalHrs>0?'var(--text)':'var(--muted)'}">${ws.totalHrs.toFixed(1)}h</td>
+              <td style="padding:10px 12px;font-size:11px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ws.rejectionNote ? '✗ '+ws.rejectionNote : ws.approvedBy ? '✓ Approved' : '—'}</td>
+              <td style="padding:10px 12px;text-align:right">
+                <button onclick="viewEmployeeTimesheet('${ws.employeeId}','${ws.weekKey}')"
+                  style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:11px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif">
+                  View
+                </button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>`}
+    </div>
+  `;
 }
 
 // ── Overview Report ──────────────────────────────────────────────────────
@@ -5755,6 +6148,7 @@ async function loadAllData() {
       budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
       taskStartDate: r.task_start_date||'',
       completedDate: r.completed_date||'',
+      billedDate: r.billed_date||'',
       quoteNum: r.quote_number||'',
       peachtreeInv: r.peachtree_inv||'',
       createdAt: r.created_at ? r.created_at.split('T')[0] : '',
@@ -5781,6 +6175,7 @@ async function loadAllData() {
       email: r.email||'', phone: r.phone||'', color: r.color||'#5b9cf6',
       isApprover: r.is_approver||false, isPaperTs: r.is_paper_ts||false, approverId: r.approver_id||null,
       hireDate: r.hire_date||'',
+      permissionLevel: r.permission_level||'engineer',
     }));
 
     // Clients & Contacts
@@ -6236,6 +6631,14 @@ function renderDashboard() {
   const readyToBill  = taskStore.filter(t => t.status === 'complete' && _openProjIds.has(t.proj)).reduce((s,t) => s + (t.fixedPrice||0), 0);
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 
+  // Backlog: sum of all task prices excluding billed
+  const backlogTotal = taskStore.reduce((sum, t) => {
+    if (t.status === 'billed') return sum;
+    const proj = projectInfo[t.proj];
+    if (proj && proj.status === 'closed') return sum;
+    return sum + (parseFloat(t.fixedPrice) || 0);
+  }, 0);
+
   wrap.innerHTML = `
     <div class="dash-charts-row">
       <div class="dash-chart-card">
@@ -6248,6 +6651,17 @@ function renderDashboard() {
       <div class="dash-chart-card">
         <div class="dash-chart-title"><span>📊</span> Sales by Category</div>
         <canvas id="salesByCatChart" height="140"></canvas>
+      </div>
+    </div>
+
+    <div class="dash-charts-row" style="margin-top:20px">
+      <div class="dash-chart-card" style="display:flex;flex-direction:column;align-items:center;padding-bottom:12px">
+        <div class="dash-chart-title" style="width:100%"><span>📦</span> Backlog <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--text);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(backlogTotal)}</span><span style="font-size:11px;color:var(--muted);letter-spacing:0;text-transform:none;font-weight:400;margin-left:8px">excl. billed</span></div>
+        <canvas id="backlogGaugeChart" height="160" style="max-width:500px"></canvas>
+        <div style="display:flex;gap:24px;margin-top:-8px;font-size:11px;color:var(--muted)">
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#e05c5c;display:inline-block"></span>$0 – $1M</span>
+          <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#4caf7d;display:inline-block"></span>$1M – $2M</span>
+        </div>
       </div>
     </div>
 
@@ -6443,6 +6857,123 @@ function renderDashboard() {
         }
       }]
     });
+
+
+    // ── Backlog Gauge ──
+    const gaugeCanv = document.getElementById('backlogGaugeChart');
+    if (gaugeCanv) {
+      const existingG = Chart.getChart(gaugeCanv);
+      if (existingG) existingG.destroy();
+
+      const MAX1 = 1000000;   // $1M threshold (red zone end)
+      const MAX2 = 2000000;   // $2M threshold (green zone end)
+      const val  = backlogTotal;
+      const clampedVal = Math.min(val, MAX2);
+      const seg1 = Math.min(clampedVal, MAX1);         // red portion
+      const seg2 = Math.max(0, clampedVal - MAX1);     // green portion
+      const empty = MAX2 - clampedVal;                  // unfilled
+
+      new Chart(gaugeCanv, {
+        type: 'doughnut',
+        data: {
+          datasets: [{
+            data: [seg1, seg2, empty],
+            backgroundColor: ['#e05c5c', '#4caf7d', 'rgba(255,255,255,0.07)'],
+            borderWidth: 0,
+            circumference: 180,
+            rotation: 270,
+          }]
+        },
+        options: {
+          responsive: true,
+          cutout: '68%',
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          animation: { duration: 900, easing: 'easeOutQuart' }
+        },
+        plugins: [{
+          id: 'gaugeTicks',
+          afterDraw(chart) {
+            const { ctx, chartArea: { left, right, bottom } } = chart;
+            const cx = (left + right) / 2;
+            const cy = bottom;
+            const outerR = (right - left) / 2;
+            const labelR = outerR * 1.08;
+
+            const ticks = [
+              { pct: 0,   label: '$0'  },
+              { pct: 0.5, label: '$1M' },
+              { pct: 1,   label: '$2M' },
+            ];
+            ticks.forEach(({ pct, label }) => {
+              const angle = Math.PI * (1 - pct);  // 180°→0° left to right
+              const tx = cx + Math.cos(angle) * labelR;
+              const ty = cy - Math.sin(angle) * labelR;
+              ctx.save();
+              ctx.fillStyle = '#9a9aaa';
+              ctx.font = '600 10px DM Sans,sans-serif';
+              ctx.textAlign = pct === 0 ? 'right' : pct === 1 ? 'left' : 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(label, tx, ty);
+              ctx.restore();
+            });
+          }
+        }]
+      });
+    }
+    if (gaugeCanv) {
+      const existingG = Chart.getChart(gaugeCanv);
+      if (existingG) existingG.destroy();
+
+      const MAX1 = 1000000;  // 0-1M red
+      const MAX2 = 2000000;  // 1M-2M green
+      const val  = Math.min(backlogTotal, MAX2);
+      const seg1 = Math.min(val, MAX1);
+      const seg2 = Math.max(0, val - MAX1);
+      const empty = MAX2 - val;
+
+      new Chart(gaugeCanv, {
+        type: 'doughnut',
+        data: {
+          datasets: [{
+            data: [seg1, seg2, empty],
+            backgroundColor: ['#e05c5c', '#4caf7d', 'rgba(255,255,255,0.06)'],
+            borderWidth: 0,
+            circumference: 180,
+            rotation: -90,
+          }]
+        },
+        options: {
+          responsive: false,
+          cutout: '72%',
+          plugins: { legend: { display: false }, tooltip: { enabled: false } },
+          animation: { duration: 800, easing: 'easeOutQuart' }
+        },
+        plugins: [{
+          id: 'gaugeNeedle',
+          afterDraw(chart) {
+            const { ctx, chartArea: { left, right, top, bottom } } = chart;
+            const cx = (left + right) / 2;
+            const cy = bottom;
+            const r  = (right - left) / 2 * 0.78;
+            const pct = Math.min(val / MAX2, 1);
+            const angle = Math.PI * (1 - pct);  // 180deg = left (0), 0deg = right (MAX)
+            // Tick marks at 0, 1M, 2M
+            [[0,'$0'],[0.5,'$1M'],[1,'$2M']].forEach(([p, lbl]) => {
+              const a = Math.PI * (1 - p);
+              const tx = cx + Math.cos(a) * (r * 1.18);
+              const ty = cy - Math.sin(a) * (r * 1.18);
+              ctx.save();
+              ctx.fillStyle = '#9a9aaa';
+              ctx.font = '600 9px DM Sans,sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(lbl, tx, ty);
+              ctx.restore();
+            });
+          }
+        }]
+      });
+    }
   }, 120);
 
 }, 80);
@@ -6596,7 +7127,7 @@ function renderTasksPanel(projId) {
     const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : loggedH > 0 ? 'var(--blue)' : 'var(--muted)';
 
     return `
-      <div class="itt-row" data-task-id="${t._id}" style="animation:fadeUp 0.15s ease ${i*0.02}s both">
+      <div class="itt-row" data-task-id="${t._id}" style="animation:fadeUp 0.15s ease ${i*0.02}s both;${t.status==='billed'?'background:rgba(192,132,252,0.08);border-color:rgba(192,132,252,0.2);':''}">
         <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);padding-left:2px">${t.taskNum||''}</div>
         <div class="itt-check ${t.done?'done':''}" onclick="tpToggleDone('${t._id}','${projId}');event.stopPropagation()" title="Mark task complete (draws strikethrough)">${t.done?'&#x2713;':''}</div>
         <div onclick="event.stopPropagation()">
@@ -6628,7 +7159,7 @@ function renderTasksPanel(projId) {
           </select>
         </div>
         <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()" style="font-size:11px;color:var(--muted);cursor:text">${fmtShortDate(t.taskStartDate)}</div>
-        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','completedDate');event.stopPropagation()" style="font-size:11px;color:${t.completedDate?'var(--green)':'var(--muted)'};cursor:text">${fmtShortDate(t.completedDate)}</div>
+        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()" style="font-size:11px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};cursor:text" title="${t.status==='billed'?'Billed date':'Completed date'}">${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
         <div class="itt-row-actions">
           <button class="itt-row-action-btn" onclick="openEditTaskModal('${t._id}');event.stopPropagation()" title="Full edit">&#x270E;</button>
         </div>
@@ -6646,27 +7177,29 @@ function renderTasksPanel(projId) {
           <button class="itf ${activeFilter==='overdue'?'active':''}" onclick="setTasksPanelFilter('overdue','${projId}')">Overdue <span style="font-family:'JetBrains Mono',monospace;font-size:10px;opacity:.7;color:var(--red)">${overdue}</span></button>
         </div>
       </div>
-      <button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button>
+      ${isManager() ? `<button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button>` : ''}
     </div>
-    <div class="itt-head">
-      <div class="itt-head-cell" style="color:var(--muted);font-size:10px">#</div>
+    <div class="itt-head" id="ittHead">
+      <div class="itt-head-cell" style="color:var(--muted);font-size:10px">#<span class="itt-resizer" data-col="num"></span></div>
+      <div class="itt-head-cell"><span class="itt-resizer" data-col="pri"></span></div>
+      <div class="itt-head-cell">Cat.<span class="itt-resizer" data-col="cat"></span></div>
+      <div class="itt-head-cell">Task<span class="itt-resizer" data-col="task"></span></div>
+      <div class="itt-head-cell">Status<span class="itt-resizer" data-col="status"></span></div>
+      <div class="itt-head-cell">Quote #<span class="itt-resizer" data-col="quote"></span></div>
+      <div class="itt-head-cell">Price<span class="itt-resizer" data-col="price"></span></div>
+      <div class="itt-head-cell">Created<span class="itt-resizer" data-col="created"></span></div>
+      <div class="itt-head-cell">Hrs Logged<span class="itt-resizer" data-col="hrs"></span></div>
+      <div class="itt-head-cell">Budget Hrs<span class="itt-resizer" data-col="bhrs"></span></div>
+      <div class="itt-head-cell">Assignee<span class="itt-resizer" data-col="assign"></span></div>
+      <div class="itt-head-cell">Start Date<span class="itt-resizer" data-col="start"></span></div>
+      <div class="itt-head-cell">Done/Billed<span class="itt-resizer" data-col="comp"></span></div>
       <div class="itt-head-cell"></div>
-      <div class="itt-head-cell">Cat.</div>
-      <div class="itt-head-cell">Task</div>
-      <div class="itt-head-cell">Status</div>
-      <div class="itt-head-cell">Quote #</div>
-      <div class="itt-head-cell">Price</div>
-      <div class="itt-head-cell">Created</div>
-      <div class="itt-head-cell">Hrs Logged</div>
-      <div class="itt-head-cell">Budget Hrs</div>
-      <div class="itt-head-cell">Assignee</div>
-      <div class="itt-head-cell">Start Date</div>
-      <div class="itt-head-cell">Completed</div>
     </div>
     ${tasks.length === 0
       ? `<div class="info-tasks-empty"><div class="eico">${activeFilter==='done'?'✅':activeFilter==='overdue'?'🎉':'📋'}</div>${activeFilter==='done'?'No completed tasks yet':activeFilter==='overdue'?'No overdue tasks — great work!':'No tasks yet — add one above'}</div>`
       : taskRows}
   `;
+  setTimeout(ittInitResizers, 0);
 }
 
 
@@ -6721,6 +7254,7 @@ function tpToggleDone(taskId, projId) {
   renderProjSummary(projId);
   updateStatsBar();
   setTimeout(ittInitResizers,0);
+  setTimeout(applyPermissions,0);
 }
 
 
@@ -7296,43 +7830,82 @@ async function inlineSave(taskId, projId, field, value) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
 
-  const dbFieldMap = {
-    status: 'status', salesCat: 'sales_category',
-    priority: 'priority', fixedPrice: 'fixed_price',
-    name: 'name', due_raw: 'due_date', assign: 'assignee',
-  };
+  const today = new Date().toISOString().split('T')[0];
 
-  // Update local store
-  if (field === 'status') { t.status = value; t.done = value === 'done'; }
-  else if (field === 'salesCat') { t.salesCat = value; }
-  else if (field === 'priority') { t.priority = value; }
-  else if (field === 'fixedPrice') { t.fixedPrice = parseFloat(value) || 0; }
-  else if (field === 'name') { t.name = value; }
+  // Update local store first
+  if (field === 'status') {
+    t.status = value;
+    t.done = (value === 'complete' || value === 'done' || value === 'billed');
+
+    // Auto-set dates on status transitions
+    const extraUpdates = {};
+    if (value === 'inprogress' && !t.taskStartDate) {
+      t.taskStartDate = today;
+      extraUpdates.task_start_date = today;
+    }
+    if ((value === 'complete' || value === 'done') && !t.completedDate) {
+      t.completedDate = today;
+      extraUpdates.completed_date = today;
+    }
+    if (value === 'billed') {
+      if (!t.billedDate) {
+        t.billedDate = today;
+        extraUpdates.billed_date = today;
+      }
+      if (!t.completedDate) {
+        t.completedDate = today;
+        extraUpdates.completed_date = today;
+      }
+    }
+    // Save status first (always works), then dates separately (in case columns are new)
+    if (sb) {
+      const { error } = await sb.from('tasks').update({ status: value }).eq('id', taskId);
+      if (error) console.error('status save', error);
+      if (Object.keys(extraUpdates).length > 0) {
+        const { error: e2 } = await sb.from('tasks').update(extraUpdates).eq('id', taskId);
+        if (e2) console.error('date save error (run SQL migration):', e2.message);
+      }
+    }
+  }
+  else if (field === 'salesCat')    { t.salesCat = value; }
+  else if (field === 'priority')    { t.priority = value; }
+  else if (field === 'fixedPrice')  { t.fixedPrice = parseFloat(value) || 0; }
+  else if (field === 'name')        { t.name = value; }
   else if (field === 'due_raw') {
     t.due_raw = value;
     t.due = value ? new Date(value + 'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
     t.overdue = value ? new Date(value + 'T00:00:00') < new Date() && !t.done : false;
   }
-  else if (field === 'budgetHours') { t.budgetHours = parseFloat(value)||0; }
+  else if (field === 'budgetHours')   { t.budgetHours = parseFloat(value)||0; }
   else if (field === 'taskStartDate') { t.taskStartDate = value; }
   else if (field === 'completedDate') { t.completedDate = value; }
-  else if (field === 'quoteNum') { t.quoteNum = value; }
-  else if (field === 'assign') { t.assign = value; t.assignId = (employees.find(e => e.initials === value)||{}).id || ''; }
+  else if (field === 'billedDate')    { t.billedDate = value; }
+  else if (field === 'quoteNum')      { t.quoteNum = value; }
+  else if (field === 'assign')        { t.assign = value; t.assignId = (employees.find(e => e.initials === value)||{}).id || ''; }
 
-  // Persist to Supabase
-  if (sb) {
+  // Persist non-status fields to Supabase
+  if (field !== 'status' && sb) {
+    const dbFieldMap = {
+      salesCat: 'sales_category', priority: 'priority',
+      fixedPrice: 'fixed_price', name: 'name',
+      due_raw: 'due_date', assign: 'assignee',
+      taskStartDate: 'task_start_date', completedDate: 'completed_date',
+      billedDate: 'billed_date', budgetHours: 'budget_hours',
+      quoteNum: 'quote_number',
+    };
     const col = dbFieldMap[field];
     if (col) {
-      const dbVal = field === 'due_raw' ? (value||null) : (value||null);
-      const { error } = await sb.from('tasks').update({ [col]: dbVal }).eq('id', taskId);
+      const { error } = await sb.from('tasks').update({ [col]: value||null }).eq('id', taskId);
       if (error) console.error('inline save', error);
     }
   }
 
   renderInfoTasks(projId, currentTaskFilter);
+  renderTasksPanel(projId);
   renderProjSummary(projId);
   updateStatsBar();
   setTimeout(ittInitResizers,0);
+  setTimeout(applyPermissions,0);
 }
 
 function inlineEditName(taskId, projId) {
@@ -7441,6 +8014,7 @@ async function inlineDeleteTask(taskId, projId) {
   renderProjSummary(projId);
   updateStatsBar();
   setTimeout(ittInitResizers,0);
+  setTimeout(applyPermissions,0);
 }
 
 // ===== EDIT TASK MODAL =====
@@ -7618,6 +8192,35 @@ async function doLogin() {
   await afterLogin(data.user);
 }
 
+function applyPermissions() {
+  if (!currentEmployee) return;
+  const manager = isManager();
+
+  // Reports nav
+  const navRep = document.getElementById('navReports');
+  if (navRep) navRep.style.display = manager ? 'flex' : 'none';
+
+  // Add Project buttons
+  const ap1 = document.getElementById('addProjBtn1');
+  const ap2 = document.getElementById('addProjBtn2');
+  if (ap1) ap1.style.display = manager ? '' : 'none';
+  if (ap2) ap2.style.display = manager ? '' : 'none';
+
+  // Add Task button (standalone)
+  const at1 = document.getElementById('addTaskBtn1');
+  if (at1) at1.style.display = manager ? '' : 'none';
+
+  // Project table row actions (delete/edit) - hide for non-managers
+  document.querySelectorAll('.proj-row-actions').forEach(el => {
+    el.style.display = manager ? '' : 'none';
+  });
+
+  // Task row action buttons - hide for non-managers
+  document.querySelectorAll('.itt-actions').forEach(el => {
+    el.style.display = manager ? '' : 'none';
+  });
+}
+
 async function afterLogin(user) {
   currentUser = user;
   // Match to employee record by email
@@ -7643,6 +8246,9 @@ async function afterLogin(user) {
   // Show approvals nav for approvers
   const navApp = document.getElementById('navApprovals');
   if (navApp) navApp.style.display = isApprover ? 'flex' : 'none';
+
+  // Apply permission-based UI
+  applyPermissions();
 
   // Hide login, show app
   document.getElementById('loginScreen').style.display = 'none';
@@ -7922,12 +8528,11 @@ function renderApprovalsPanel() {
   // Get submitted timesheets for this approver's employees
   const myEmployeeIds = employees.filter(e => e.approverId === currentEmployee?.id).map(e => e.id);
   const pending   = Object.values(tsWeekStatuses).filter(s => s.status === 'submitted' && myEmployeeIds.includes(s.employeeId));
-  const approved  = Object.values(tsWeekStatuses).filter(s => s.status === 'approved'  && myEmployeeIds.includes(s.employeeId));
   const rejected  = Object.values(tsWeekStatuses).filter(s => s.status === 'rejected'  && myEmployeeIds.includes(s.employeeId));
-  const all = [...pending, ...rejected, ...approved];
+  const all = [...pending, ...rejected];
 
   if (all.length === 0) {
-    body.innerHTML = '<div class="approval-queue-title">Approvals</div><div style="color:var(--muted);font-size:13px;padding:20px 0">No timesheets pending review.</div>';
+    body.innerHTML = '<div class="approval-queue-title">Approvals <span style="font-size:14px;color:var(--muted);font-family:monospace;font-weight:400">(0 pending)</span></div><div style="color:var(--muted);font-size:13px;padding:20px 0">✓ All timesheets reviewed — nothing pending.</div>';
     return;
   }
 
