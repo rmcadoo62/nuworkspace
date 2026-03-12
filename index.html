@@ -2909,8 +2909,35 @@ const PHASE_CYCLE = ['Waiting on TP Approval','Within 3 Months','3 to 6 Months',
 async function changeProjectStatus(projId, selectEl) {
   const info = projectInfo[projId];
   if (!info) return;
-  info.status = selectEl.value;
-  if (sb) await dbUpdate('project_info', projId, { status: info.status });
+  const newStatus = selectEl.value;
+
+  // Block closing unless all tasks are complete, billed, or cancelled
+  if (newStatus === 'closed') {
+    const projTasks = taskStore.filter(t => t.proj === projId);
+    const blocking = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
+    if (blocking.length > 0) {
+      toast(`⚠ Cannot close — ${blocking.length} task${blocking.length>1?'s':''} still open. All tasks must be Complete, Billed, or Cancelled first.`, 'error');
+      // Reset dropdown back to current status
+      selectEl.value = info.status;
+      const SM2 = {
+        jobprep:{bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
+        pending:{bg:'rgba(232,162,52,0.15)',color:'#e8a234'},
+        pendretest:{bg:'rgba(251,146,60,0.15)',color:'#fb923c'},
+        active:{bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
+        onhold:{bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
+        complete:{bg:'rgba(91,156,246,0.15)',color:'#5b9cf6'},
+        testcomplete:{bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
+        closed:{bg:'rgba(85,85,102,0.15)',color:'#555566'},
+      };
+      const s2 = SM2[info.status] || SM2.active;
+      selectEl.style.background = s2.bg;
+      selectEl.style.color = s2.color;
+      return;
+    }
+  }
+
+  info.status = newStatus;
+  if (sb) dbUpdate('project_info', projId, { status: info.status });
   // Update select color to match new status
   const SM = {
     jobprep:{bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
@@ -5190,12 +5217,20 @@ async function unBillTask(taskId, projId) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
   t.status = 'complete';
+  t.billedDate = '';
+  t.peachtreeInv = '';
   if (sb) {
-    const { error } = await sb.from('tasks').update({ status: 'complete' }).eq('id', taskId);
+    const { error } = await sb.from('tasks').update({
+      status: 'complete',
+      billed_date: null,
+      peachtree_inv: null,
+    }).eq('id', taskId);
     if (error) console.error('unBillTask', error);
   }
   renderInvoicingPanel(projId);
+  renderTasksPanel(projId);
   renderProjSummary(projId);
+  renderBillingQueue();
 }
 
 async function markTaskBilled(taskId, projId) {
@@ -5361,7 +5396,8 @@ async function savePeachtreeInv(taskId, val) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
   t.peachtreeInv = val.trim();
-  if (sb) await sb.from('tasks').update({ peachtree_inv: t.peachtreeInv || null }).eq('id', taskId);
+  if (sb) sb.from('tasks').update({ peachtree_inv: t.peachtreeInv || null }).eq('id', taskId)
+    .then(({error}) => { if (error) console.error('savePeachtreeInv', error); });
 }
 
 function confirmBulkBill() {
