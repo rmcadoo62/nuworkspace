@@ -871,6 +871,8 @@ tr:hover .ts-del-row{color:var(--muted);}
 .hidden{display:none!important;}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
 
@@ -951,6 +953,7 @@ tr:hover .ts-del-row{color:var(--muted);}
   <div class="nav-section">
     <div class="nav-label">Reports</div>
     <div class="nav-item" id="navReports" onclick="openReportsPanel(this)"><span class="icon">&#x1F4CA;</span> Reports</div>
+    <div class="nav-item" id="navClosingReport" onclick="openClosingReport(this)"><span class="icon">&#x1F4CB;</span> Closing Report</div>
   </div>
 
   <div class="sidebar-footer">
@@ -1174,6 +1177,17 @@ tr:hover .ts-del-row{color:var(--muted);}
       </div>
     </div>
 
+    <!-- Closing Report Panel -->
+    <div class="view-panel" id="panel-closing-report" style="flex-direction:column;overflow-y:auto;">
+      <div style="padding:24px 32px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+          <div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--text)">📋 Closing Report</div>
+          <div style="font-size:12px;color:var(--muted)">Projects in Testing Complete for 60+ days</div>
+        </div>
+        <div id="closingReportBody"></div>
+      </div>
+    </div>
+
     <!-- PROJECT CONTAINER — Info, Tasks, Expenses, Invoicing share this -->
     <div class="view-panel active" id="panel-project" style="flex-direction:column;overflow:hidden">
 
@@ -1186,6 +1200,7 @@ tr:hover .ts-del-row{color:var(--muted);}
         <div class="proj-sticky-tabs" id="projStickyTabs">
           <div class="proj-tab active" data-sub="sub-info">&#x1F4CB; Info</div>
           <div class="proj-tab" data-sub="sub-tasks">&#x2713; Tasks</div>
+          <div class="proj-tab" data-sub="sub-hours">&#x23F1; Hours</div>
           <div class="proj-tab" data-sub="sub-expenses">&#x1F4B0; Expenses</div>
           <div class="proj-tab" data-sub="sub-invoicing">&#x1F4C4; Invoicing</div>
           <div class="proj-tab" data-sub="sub-chatter">&#x1F4AC; Chatter</div>
@@ -1201,7 +1216,13 @@ tr:hover .ts-del-row{color:var(--muted);}
           <div id="tasksPanelWrap"></div>
         </div>
       </div>
-      <div class="proj-sub" id="sub-expenses">
+      <div class="proj-sub" 
+    <div class="proj-sub" id="sub-hours">
+      <div style="padding:24px 32px;max-width:1100px">
+        <div id="hoursPanelBody"></div>
+      </div>
+    </div><!-- /sub-hours -->
+    id="sub-expenses">
         <div style="padding:28px 32px;max-width:900px">
           <div id="expensesPanelSummary" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:28px;"></div>
           <div id="expensesPanelList"></div>
@@ -1438,8 +1459,7 @@ tr:hover .ts-del-row{color:var(--muted);}
         <label class="field-label">Permission Level</label>
         <select class="f-input" id="empPermLevel" style="cursor:pointer">
           <option value="manager">Manager — full access</option>
-          <option value="engineer">Engineer — limited access</option>
-          <option value="tech">Tech — limited access</option>
+          <option value="employee">Employee — limited access</option>
         </select>
       </div>
       <div class="field">
@@ -1662,6 +1682,7 @@ function renderProjectsTable() {
     onhold:      { bg:'#7a7a8522', color:'#7a7a85', dot:'#7a7a85', label:'On Hold' },
     complete:    { bg:'#5b9cf622', color:'#5b9cf6', dot:'#5b9cf6', label:'Complete' },
     testcomplete:{ bg:'#4caf7d22', color:'#4caf7d', dot:'#4caf7d', label:'Testing Complete' },
+    closing:     { bg:'#e8a23422', color:'#e8a234', dot:'#e8a234', label:'Closing (Pending)' },
     closed:      { bg:'#55556622', color:'#555566', dot:'#555566', label:'Closed' },
   };
 
@@ -2902,50 +2923,100 @@ async function changeProjectStatus(projId, selectEl) {
   const info = projectInfo[projId];
   if (!info) return;
   const newStatus = selectEl.value;
+  const currentStatus = info.status;
 
-  // Block closing unless all tasks are complete, billed, or cancelled
-  if (newStatus === 'closed') {
+  // Any manager can set complete or closing
+  const isManager_ = currentEmployee && currentEmployee.permissionLevel === 'manager';
+  // Only Jordan can approve closed
+  const isJordan = currentEmployee && currentEmployee.name === 'Jordan McAdoo';
+
+    const SM = {
+    jobprep:     {bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
+    pending:     {bg:'rgba(232,162,52,0.15)', color:'#e8a234'},
+    pendretest:  {bg:'rgba(251,146,60,0.15)', color:'#fb923c'},
+    active:      {bg:'rgba(76,175,125,0.15)', color:'#4caf7d'},
+    onhold:      {bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
+    complete:    {bg:'rgba(91,156,246,0.15)', color:'#5b9cf6'},
+    testcomplete:{bg:'rgba(76,175,125,0.15)', color:'#4caf7d'},
+    closing:     {bg:'rgba(232,162,52,0.15)', color:'#e8a234'},
+    closed:      {bg:'rgba(85,85,102,0.15)',  color:'#555566'},
+  };
+
+  const resetSelect = () => {
+    selectEl.value = currentStatus;
+    const s = SM[currentStatus] || SM.active;
+    selectEl.style.background = s.bg;
+    selectEl.style.color = s.color;
+    selectEl.style.borderColor = s.color + '44';
+  };
+
+  // Block: only Linda can mark complete
+  if (newStatus === 'complete' && !isManager_) {
+    toast('⚠ Only managers can mark a project Complete.', 'error');
+    resetSelect(); return;
+  }
+
+  // Block: complete requires all tasks complete/billed/cancelled
+  if (newStatus === 'complete') {
     const projTasks = taskStore.filter(t => t.proj === projId);
     const blocking = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
     if (blocking.length > 0) {
-      toast(`⚠ Cannot close — ${blocking.length} task${blocking.length>1?'s':''} still open. All tasks must be Complete, Billed, or Cancelled first.`, 'error');
-      // Reset dropdown back to current status
-      selectEl.value = info.status;
-      const SM2 = {
-        jobprep:{bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
-        pending:{bg:'rgba(232,162,52,0.15)',color:'#e8a234'},
-        pendretest:{bg:'rgba(251,146,60,0.15)',color:'#fb923c'},
-        active:{bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
-        onhold:{bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
-        complete:{bg:'rgba(91,156,246,0.15)',color:'#5b9cf6'},
-        testcomplete:{bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
-        closed:{bg:'rgba(85,85,102,0.15)',color:'#555566'},
-      };
-      const s2 = SM2[info.status] || SM2.active;
-      selectEl.style.background = s2.bg;
-      selectEl.style.color = s2.color;
-      return;
+      toast(`⚠ Cannot mark Complete — ${blocking.length} task${blocking.length>1?'s':''} still open.`, 'error');
+      resetSelect(); return;
     }
   }
 
+  // Block: only Linda can mark closing, and only from complete
+  if (newStatus === 'closing') {
+    if (!isManager_) {
+      toast('⚠ Only managers can mark a project as Closing.', 'error');
+      resetSelect(); return;
+    }
+    if (currentStatus !== 'complete') {
+      toast('⚠ Project must be Complete before marking as Closing.', 'error');
+      resetSelect(); return;
+    }
+  }
+
+  // Block: only Jordan can mark closed, and only from closing
+  if (newStatus === 'closed') {
+    if (!isJordan) {
+      toast('⚠ Only Jordan can approve a project as Closed.', 'error');
+      resetSelect(); return;
+    }
+    if (currentStatus !== 'closing') {
+      toast('⚠ Project must be in Closing status before it can be Closed.', 'error');
+      resetSelect(); return;
+    }
+  }
+
+  // All checks passed — save
   info.status = newStatus;
-  if (sb) dbUpdate('project_info', projId, { status: info.status });
-  // Update select color to match new status
-  const SM = {
-    jobprep:{bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
-    pending:{bg:'rgba(232,162,52,0.15)',color:'#e8a234'},
-    pendretest:{bg:'rgba(251,146,60,0.15)',color:'#fb923c'},
-    active:{bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
-    onhold:{bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
-    complete:{bg:'rgba(91,156,246,0.15)',color:'#5b9cf6'},
-    testcomplete:{bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
-    closed:{bg:'rgba(85,85,102,0.15)',color:'#555566'},
-  };
-  const s = SM[info.status] || SM.active;
+  const dbStatusPayload = { status: newStatus };
+  // Record date when marked testcomplete
+  if (newStatus === 'testcomplete') {
+    const today = new Date().toISOString().slice(0,10);
+    info.testcompleteDate = today;
+    dbStatusPayload.testcomplete_date = today;
+  }
+  if (sb) dbUpdate('project_info', projId, dbStatusPayload);
+
+  const s = SM[newStatus] || SM.active;
   selectEl.style.background = s.bg;
   selectEl.style.color = s.color;
   selectEl.style.borderColor = s.color + '44';
-  toast('Status updated');
+
+  // Notify Jordan when status goes to closing
+  if (newStatus === 'closing') {
+    toast('Project marked as Closing — Jordan has been notified for approval.');
+    // TODO: create notification for Jordan (phase 2)
+  } else if (newStatus === 'closed') {
+    toast('Project closed successfully.');
+  } else {
+    toast('Status updated');
+  }
+
+  renderProjStickyHeader(projId);
 }
 
 async function openConditionDropdown(projId, el) {
@@ -3845,7 +3916,7 @@ function openEmployeeModal(id) {
     ).join('');
   const _isAppr = document.getElementById('empIsApprover'); if(_isAppr) _isAppr.checked = emp ? !!emp.isApprover : false;
   const _isPaper = document.getElementById('empIsPaperTs'); if(_isPaper) _isPaper.checked = emp ? !!emp.isPaperTs : false;
-  const _perm = document.getElementById('empPermLevel'); if(_perm) _perm.value = emp ? (emp.permissionLevel||'engineer') : 'engineer';
+  const _perm = document.getElementById('empPermLevel'); if(_perm) _perm.value = emp ? (emp.permissionLevel||'employee') : 'engineer';
   document.getElementById('employeeModal').classList.add('open');
   setTimeout(() => document.getElementById('empName').focus(), 80);
 }
@@ -3935,7 +4006,7 @@ async function saveEmployee() {
           email: fresh.email||'', phone: fresh.phone||'',
           color: fresh.color, hireDate: fresh.hire_date||'',
           sickBank: parseFloat(fresh.sick_bank)||0,
-          permissionLevel: fresh.permission_level||'engineer',
+          permissionLevel: fresh.permission_level||'employee',
           isOwner: !!fresh.is_owner,
         };
       }
@@ -3952,7 +4023,7 @@ async function saveEmployee() {
           email: d.email||'', phone: d.phone||'',
           color: d.color, hireDate: d.hire_date||'',
           sickBank: parseFloat(d.sick_bank)||0,
-          permissionLevel: d.permission_level||'engineer',
+          permissionLevel: d.permission_level||'employee',
           isOwner: !!d.is_owner,
           approverId: d.approver_id||null,
           isApprover: !!d.is_approver,
@@ -4722,6 +4793,7 @@ function switchProjTab(subId) {
   // Trigger renders
   if (subId === 'sub-info' && activeProjectId) renderInfoSheet(activeProjectId);
   if (subId === 'sub-tasks' && activeProjectId) renderTasksPanel(activeProjectId);
+  if (subId === 'sub-hours' && activeProjectId) renderHoursPanel(activeProjectId);
   if (subId === 'sub-expenses' && activeProjectId) renderExpensesPanel(activeProjectId);
   if (subId === 'sub-chatter' && activeProjectId) loadChatter(activeProjectId);
   if (subId === 'sub-invoicing' && activeProjectId) renderInvoicingPanel(activeProjectId);
@@ -4761,6 +4833,7 @@ function renderProjStickyHeader(projId) {
     onhold:{label:'On Hold',bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
     complete:{label:'Complete',bg:'rgba(91,156,246,0.15)',color:'#5b9cf6'},
     testcomplete:{label:'Testing Complete',bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
+    closing:{label:'Closing (Pending)',bg:'rgba(232,162,52,0.15)',color:'#e8a234'},
     closed:{label:'Closed',bg:'rgba(50,50,60,0.15)',color:'#555566'},
   };
   const st = statusMap[info.status] || statusMap.active;
@@ -4774,7 +4847,7 @@ function renderProjStickyHeader(projId) {
     '<select class="proj-status-select" style="background:'+st.bg+';color:'+st.color+';border:1px solid '+st.color+'44;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;outline:none;font-family:\"DM Sans\",sans-serif;" onchange="changeProjectStatus(\x27'+projId+'\x27,this)">'+
       [['jobprep','Job Preparation'],['pending','Pending'],['pendretest','Pending - ReTest'],
        ['active','Active'],['onhold','On Hold'],['complete','Complete'],
-       ['testcomplete','Testing Complete'],['closed','Closed']]
+       ['testcomplete','Testing Complete'],['closing','Closing (Pending)'],['closed','Closed']]
       .map(([k,l]) => '<option value="'+k+'" '+(info.status===k?'selected':'')+'>'+l+'</option>').join('')+
     '</select>'+
     '<div class="phase-pill" style="background:'+phColor+'22;color:'+phColor+';cursor:pointer;flex-shrink:0;position:relative" onclick="openConditionDropdown(\x27'+projId+'\x27,this)" title="Click to change condition">'+( info.phase||'Waiting on TP Approval')+'</div>'+
@@ -6327,6 +6400,7 @@ async function loadAllData() {
         dcas: r.dcas||'', customerWitness: r.customer_witness||'', tpApproval: r.tp_approval||'', dpas: r.dpas||'', noforn: r.noforn||'',
         testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'', quoteNumber: r.quote_number||'',
         creditHold: r.credit_hold||false,
+        testcompleteDate: r.testcomplete_date||'',
       };
     });
 
@@ -6372,7 +6446,7 @@ async function loadAllData() {
       email: r.email||'', phone: r.phone||'', color: r.color||'#5b9cf6',
       isApprover: r.is_approver||false, isPaperTs: r.is_paper_ts||false, approverId: r.approver_id||null,
       hireDate: r.hire_date||'',
-      permissionLevel: r.permission_level||'engineer',
+      permissionLevel: r.permission_level||'employee',
       sickBank: parseFloat(r.sick_bank)||0,
       isOwner: !!r.is_owner,
     }));
@@ -7365,6 +7439,104 @@ function renderTasksPanel(projId) {
       : taskRows}
   `;
   setTimeout(ittInitResizers, 0);
+}
+
+
+function renderHoursPanel(projId) {
+  const body = document.getElementById('hoursPanelBody');
+  if (!body) return;
+
+  const tasks = taskStore.filter(t => t.proj === projId);
+  if (tasks.length === 0) {
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No tasks found for this project.</div>';
+    return;
+  }
+
+  // Build: { taskName: [ { date, empId, hrs } ] }
+  const data = {};
+
+  Object.entries(tsData).forEach(([key, rows]) => {
+    if (!key.includes('|')) return;
+    const [empId, weekKey] = key.split('|');
+    if (!weekKey) return;
+    const emp = employees.find(e => e.id === empId);
+    if (!emp) return;
+    const weekStart = new Date(weekKey + 'T00:00:00');
+
+    rows.forEach(row => {
+      if (row.projId !== projId || !row.taskName) return;
+      // Each day index
+      Object.entries(row.hours||{}).forEach(([di, hrs]) => {
+        const h = parseFloat(hrs)||0;
+        if (h <= 0) return;
+        const d = new Date(weekStart);
+        d.setDate(weekStart.getDate() + parseInt(di));
+        const dateStr = d.toISOString().slice(0,10);
+        if (!data[row.taskName]) data[row.taskName] = [];
+        data[row.taskName].push({ date: dateStr, empId, hrs: h });
+      });
+    });
+  });
+
+  const taskNames = Object.keys(data);
+  if (taskNames.length === 0) {
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No hours logged for this project yet.</div>';
+    return;
+  }
+
+  const fmtDate = ds => new Date(ds+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+
+  let grandTotal = 0;
+  let html = '';
+
+  // Sort tasks in same order as taskStore
+  tasks.forEach(task => {
+    if (!data[task.name]) return;
+    const entries = data[task.name].sort((a,b) => a.date.localeCompare(b.date));
+    const taskTotal = entries.reduce((s,e)=>s+e.hrs,0);
+    grandTotal += taskTotal;
+
+    html += `<div style="margin-bottom:24px;border:1px solid var(--border);border-radius:10px;overflow:hidden">`;
+    // Task header
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--surface2);border-bottom:1px solid var(--border)">`;
+    html += `<div style="font-size:13px;font-weight:700;color:var(--text)">📋 ${task.name}</div>`;
+    html += `<div style="font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--blue)">${taskTotal.toFixed(1)}h total</div>`;
+    html += `</div>`;
+
+    // Entries table
+    html += `<table style="width:100%;border-collapse:collapse">`;
+    html += `<thead><tr style="border-bottom:1px solid var(--border)">
+      <th style="text-align:left;padding:7px 16px;font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)">Date</th>
+      <th style="text-align:left;padding:7px 16px;font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)">Employee</th>
+      <th style="text-align:right;padding:7px 16px;font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)">Hours</th>
+    </tr></thead><tbody>`;
+
+    entries.forEach((entry, i) => {
+      const emp = employees.find(e => e.id === entry.empId);
+      if (!emp) return;
+      const bg = i % 2 === 0 ? '' : 'background:var(--surface2)';
+      html += `<tr style="border-bottom:1px solid var(--border);${bg}">`;
+      html += `<td style="padding:7px 16px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${fmtDate(entry.date)}</td>`;
+      html += `<td style="padding:7px 16px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <div style="width:22px;height:22px;border-radius:50%;background:${emp.color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0">${emp.initials}</div>
+          <span style="font-size:12.5px;color:var(--text)">${emp.name}</span>
+        </div>
+      </td>`;
+      html += `<td style="text-align:right;padding:7px 16px;font-size:12.5px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--text)">${entry.hrs.toFixed(1)}h</td>`;
+      html += '</tr>';
+    });
+
+    html += '</tbody></table></div>';
+  });
+
+  // Grand total
+  html += `<div style="display:flex;justify-content:flex-end;padding:12px 16px;border:1px solid var(--border);border-radius:10px;background:var(--surface2)">
+    <span style="font-size:13px;font-weight:700;color:var(--text);margin-right:16px">Project Total</span>
+    <span style="font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--blue)">${grandTotal.toFixed(1)}h</span>
+  </div>`;
+
+  body.innerHTML = html;
 }
 
 
@@ -8800,6 +8972,384 @@ function viewEmployeeTimesheet(empId, weekKey) {
   document.getElementById('panel-timesheet').classList.add('active');
   renderTimesheet();
 }
+
+// ===== CLOSING REPORT =====
+function openClosingReport(el) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
+  activeProjectId = null;
+  document.getElementById('topbarName').textContent = 'Closing Report';
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-closing-report').classList.add('active');
+  renderClosingReport();
+}
+
+function renderClosingReport() {
+  const body = document.getElementById('closingReportBody');
+  if (!body) return;
+
+  const today = new Date();
+  const msPerDay = 24 * 60 * 60 * 1000;
+
+  const getDays = (dateStr) => {
+    if (!dateStr) return null;
+    return Math.floor((today - new Date(dateStr + 'T00:00:00')) / msPerDay);
+  };
+
+  const fmtDate = ds => ds ? new Date(ds+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+
+  // Categorize projects
+  const testComplete60 = [];
+  const readyToClose = [];
+  const pendingJordan = [];
+
+  projects.forEach(p => {
+    const info = projectInfo[p.id];
+    if (!info) return;
+    if (info.status === 'testcomplete') {
+      const days = getDays(info.testcompleteDate);
+      if (days === null || days >= 60) testComplete60.push({p, info, days});
+    } else if (info.status === 'complete') {
+      readyToClose.push({p, info});
+    } else if (info.status === 'closing') {
+      pendingJordan.push({p, info});
+    }
+  });
+
+  const projectCard = ({p, info, days, section}) => {
+    const projTasks = taskStore.filter(t => t.proj === p.id);
+    const openTasks = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
+    const canClose = openTasks.length === 0;
+
+    let buttons = '';
+    if (section === 'testcomplete' && canClose && isManager()) {
+      buttons += `<button onclick="markProjectComplete('${p.id}')"
+        style="background:rgba(91,156,246,0.15);border:1px solid rgba(91,156,246,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--blue);cursor:pointer;font-weight:600">
+        Mark Complete
+      </button>`;
+    }
+    if (section === 'readytoclose' && isManager()) {
+      buttons += `<button onclick="generateClosingPdf('${p.id}')"
+        style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600">
+        📄 Generate PDF &amp; Mark Closing
+      </button>`;
+    }
+    if (section === 'pending') {
+      buttons += `<span style="font-size:11px;color:var(--amber);padding:6px 12px;background:rgba(232,162,52,0.1);border:1px solid rgba(232,162,52,0.3);border-radius:8px">⏳ Awaiting Jordan</span>`;
+      if (currentEmployee && currentEmployee.name === 'Jordan McAdoo') {
+        buttons += `<button onclick="approveClosing('${p.id}')"
+          style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600;margin-left:6px">
+          ✓ Approve Close
+        </button>
+        <button onclick="rejectClosing('${p.id}')"
+          style="background:rgba(224,92,92,0.1);border:1px solid rgba(224,92,92,0.3);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--red);cursor:pointer;margin-left:6px">
+          ✗ Reject
+        </button>`;
+      }
+    }
+
+    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
+      <div style="flex:1;min-width:200px">
+        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px">${p.emoji||'📁'} ${p.name}</div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap">
+          ${info.client ? `<span style="font-size:12px;color:var(--muted)">🏢 ${info.client}</span>` : ''}
+          ${info.pm ? `<span style="font-size:12px;color:var(--muted)">👤 ${info.pm}</span>` : ''}
+          ${info.testcompleteDate ? `<span style="font-size:12px;color:var(--muted)">📅 TC: ${fmtDate(info.testcompleteDate)}</span>` : ''}
+          ${days !== null && days !== undefined ? `<span style="font-size:12px;font-weight:700;color:${days>=90?'var(--red)':'var(--amber)'}">${days} days</span>` : ''}
+        </div>
+        ${!canClose && section !== 'pending' ? `<div style="margin-top:6px;font-size:11px;color:var(--red)">⚠ ${openTasks.length} open task${openTasks.length>1?'s':''} remaining</div>` : ''}
+        ${canClose && section === 'testcomplete' ? `<div style="margin-top:6px;font-size:11px;color:#4caf7d">✓ All tasks complete</div>` : ''}
+      </div>
+      <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;align-items:center">
+        <button onclick="selectProject('${p.id}',null);document.getElementById('navProjects')?.classList.add('active')"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--text);cursor:pointer">
+          View
+        </button>
+        ${buttons}
+      </div>
+    </div>`;
+  };
+
+  const section = (title, color, icon, items, sectionKey, emptyMsg) => {
+    let html = `<div style="margin-bottom:32px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid ${color}22">
+        <span style="font-size:18px">${icon}</span>
+        <div style="font-size:14px;font-weight:700;color:var(--text)">${title}</div>
+        <div style="font-size:12px;font-weight:600;color:${color};background:${color}22;padding:2px 10px;border-radius:20px">${items.length}</div>
+      </div>`;
+    if (items.length === 0) {
+      html += `<div style="font-size:13px;color:var(--muted);padding:16px;text-align:center;background:var(--surface);border-radius:8px;border:1px solid var(--border)">${emptyMsg}</div>`;
+    } else {
+      html += `<div style="display:flex;flex-direction:column;gap:10px">`;
+      items.forEach(item => { html += projectCard({...item, section: sectionKey}); });
+      html += `</div>`;
+    }
+    html += `</div>`;
+    return html;
+  };
+
+  let html = '';
+  html += section('Testing Complete — 60+ Days', '#e8a234', '🕐', testComplete60, 'testcomplete', 'No projects have been in Testing Complete for 60+ days.');
+  html += section('Ready to Close', '#4caf7d', '✅', readyToClose, 'readytoclose', 'No projects are ready to close yet.');
+  html += section("Pending Jordan's Approval", '#5b9cf6', '⏳', pendingJordan, 'pending', 'No projects pending approval.');
+
+  body.innerHTML = html;
+}
+
+function markProjectComplete(projId) {
+  const info = projectInfo[projId];
+  if (!info) return;
+  const projTasks = taskStore.filter(t => t.proj === projId);
+  const blocking = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
+  if (blocking.length > 0) {
+    toast(`⚠ Cannot mark Complete — ${blocking.length} open task${blocking.length>1?'s':''} remaining.`, 'error');
+    return;
+  }
+  info.status = 'complete';
+  if (sb) dbUpdate('project_info', projId, { status: 'complete' });
+  toast('Project marked Complete');
+  renderClosingReport();
+}
+
+function approveClosing(projId) {
+  const info = projectInfo[projId];
+  if (!info) return;
+  info.status = 'closed';
+  if (sb) dbUpdate('project_info', projId, { status: 'closed' });
+  toast('Project approved and closed.');
+  renderClosingReport();
+}
+
+function rejectClosing(projId) {
+  const reason = prompt('Reason for rejection (will be noted):');
+  if (reason === null) return; // cancelled
+  const info = projectInfo[projId];
+  if (!info) return;
+  info.status = 'complete';
+  if (sb) dbUpdate('project_info', projId, { status: 'complete' });
+  toast('Closing rejected — project returned to Complete.');
+  renderClosingReport();
+}
+
+function generateClosingPdf(projId) {
+  const info = projectInfo[projId];
+  if (!info) return;
+
+  // Block if open tasks
+  const projTasks = taskStore.filter(t => t.proj === projId);
+  const blocking = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
+  if (blocking.length > 0) {
+    toast('⚠ Cannot close — ' + blocking.length + ' open task(s) remaining.', 'error');
+    return;
+  }
+
+  const proj = projects.find(p => p.id === projId);
+  if (!proj) return;
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 48;
+  const contentW = pageW - margin * 2;
+  let y = margin;
+
+  const fmtDate = ds => ds ? new Date(ds+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+
+  // ── Header ──
+  doc.setFillColor(30, 30, 40);
+  doc.rect(0, 0, pageW, 72, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text('NUWorkspace — Project Closing Report', margin, 30);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Generated: ' + new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}), margin, 50);
+  doc.text('Status: Closing (Pending Approval)', pageW - margin, 50, {align:'right'});
+  y = 90;
+
+  // ── Project Title ──
+  doc.setTextColor(20, 20, 30);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text(proj.name, margin, y);
+  y += 8;
+  doc.setDrawColor(91, 156, 246);
+  doc.setLineWidth(2);
+  doc.line(margin, y, margin + contentW, y);
+  y += 16;
+
+  // ── Project Info Grid ──
+  const infoItems = [
+    ['Client', info.client || '—'],
+    ['Project Manager', info.pm || '—'],
+    ['Quote Number', info.quoteNumber || '—'],
+    ['PO Number', info.po || '—'],
+    ['Start Date', fmtDate(info.startDate)],
+    ['End Date', fmtDate(info.endDate)],
+    ['Billing Type', info.billingType || '—'],
+    ['Contract Amount', info.contract ? '$' + parseFloat(info.contract).toLocaleString() : '—'],
+  ];
+
+  doc.setFontSize(10);
+  const colW = contentW / 2;
+  infoItems.forEach((item, i) => {
+    const x = margin + (i % 2 === 0 ? 0 : colW);
+    const rowY = y + Math.floor(i / 2) * 22;
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 100, 120);
+    doc.text(item[0].toUpperCase(), x, rowY);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(20, 20, 30);
+    doc.text(String(item[1]), x, rowY + 12);
+  });
+  y += Math.ceil(infoItems.length / 2) * 22 + 20;
+
+  // ── Section helper ──
+  const sectionHeader = (title) => {
+    if (y > pageH - 120) { doc.addPage(); y = margin; }
+    doc.setFillColor(240, 242, 255);
+    doc.rect(margin, y - 12, contentW, 20, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(60, 80, 160);
+    doc.text(title, margin + 6, y + 2);
+    y += 16;
+    doc.setTextColor(20, 20, 30);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+  };
+
+  // ── Tasks ──
+  sectionHeader('TASKS');
+  const taskData = projTasks.map(t => [
+    t.name.length > 50 ? t.name.substring(0,50)+'...' : t.name,
+    t.status.charAt(0).toUpperCase() + t.status.slice(1),
+    t.assignee || '—',
+    t.dueDate ? fmtDate(t.dueDate) : '—',
+    t.fixedPrice ? '$' + parseFloat(t.fixedPrice).toLocaleString() : '—',
+  ]);
+
+  doc.autoTable({
+    startY: y,
+    head: [['Task Name', 'Status', 'Assigned To', 'Due Date', 'Value']],
+    body: taskData,
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 9, cellPadding: 4 },
+    headStyles: { fillColor: [50, 50, 70], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [248, 248, 252] },
+    columnStyles: { 0: { cellWidth: 'auto' }, 1: { cellWidth: 60 }, 2: { cellWidth: 80 }, 3: { cellWidth: 65 }, 4: { cellWidth: 65 } },
+  });
+  y = doc.lastAutoTable.finalY + 20;
+
+  // ── Expenses ──
+  sectionHeader('EXPENSES');
+  const expenses = (window.expenseStore || []).filter(e => e.projId === projId);
+  if (expenses.length === 0) {
+    doc.text('No expenses recorded.', margin + 6, y + 4);
+    y += 20;
+  } else {
+    const expTotal = expenses.reduce((s,e) => s + (parseFloat(e.amount)||0), 0);
+    const expData = expenses.map(e => [
+      e.date ? fmtDate(e.date) : '—',
+      e.description || '—',
+      e.category || '—',
+      e.vendor || '—',
+      '$' + (parseFloat(e.amount)||0).toLocaleString('en-US',{minimumFractionDigits:2}),
+    ]);
+    expData.push(['', '', '', 'TOTAL', '$' + expTotal.toLocaleString('en-US',{minimumFractionDigits:2})]);
+    doc.autoTable({
+      startY: y,
+      head: [['Date', 'Description', 'Category', 'Vendor', 'Amount']],
+      body: expData,
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: [50, 50, 70], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 248, 252] },
+    });
+    y = doc.lastAutoTable.finalY + 20;
+  }
+
+  // ── Invoice Summary ──
+  sectionHeader('INVOICE SUMMARY');
+  const billedTasks = projTasks.filter(t => t.status === 'billed');
+  const totalBilled = billedTasks.reduce((s,t) => s + (parseFloat(t.fixedPrice)||0), 0);
+  const totalContract = parseFloat(info.contract) || 0;
+  const invData = [
+    ['Contract Amount', '$' + totalContract.toLocaleString('en-US',{minimumFractionDigits:2})],
+    ['Total Billed (tasks)', '$' + totalBilled.toLocaleString('en-US',{minimumFractionDigits:2})],
+    ['Remaining', '$' + (totalContract - totalBilled).toLocaleString('en-US',{minimumFractionDigits:2})],
+  ];
+  doc.autoTable({
+    startY: y,
+    body: invData,
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 10, cellPadding: 5 },
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 200 }, 1: { cellWidth: 150 } },
+    alternateRowStyles: { fillColor: [248, 248, 252] },
+  });
+  y = doc.lastAutoTable.finalY + 20;
+
+  // ── Hours Summary ──
+  sectionHeader('HOURS SUMMARY');
+  const hoursMap = {};
+  Object.entries(tsData).forEach(([key, rows]) => {
+    if (!key.includes('|') || key.startsWith('oh_')) return;
+    if (!Array.isArray(rows)) return;
+    const empId = key.split('|')[0];
+    rows.forEach(row => {
+      if (row.projId !== projId) return;
+      const hrs = Object.values(row.hours||{}).reduce((s,h)=>s+(parseFloat(h)||0),0);
+      if (hrs > 0) hoursMap[empId] = (hoursMap[empId]||0) + hrs;
+    });
+  });
+  const grandHrs = Object.values(hoursMap).reduce((s,h)=>s+h,0);
+  const hrsData = Object.entries(hoursMap).map(([empId, hrs]) => {
+    const emp = employees.find(e => e.id === empId);
+    return [emp ? emp.name : empId, hrs.toFixed(1) + ' hrs'];
+  });
+  if (hrsData.length === 0) {
+    doc.text('No hours logged.', margin + 6, y + 4);
+    y += 20;
+  } else {
+    hrsData.push(['TOTAL', grandHrs.toFixed(1) + ' hrs']);
+    doc.autoTable({
+      startY: y,
+      head: [['Employee', 'Total Hours']],
+      body: hrsData,
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 10, cellPadding: 5 },
+      headStyles: { fillColor: [50, 50, 70], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 248, 252] },
+      columnStyles: { 0: { cellWidth: 200 }, 1: { cellWidth: 120 } },
+    });
+    y = doc.lastAutoTable.finalY + 20;
+  }
+
+  // ── Footer on each page ──
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 160);
+    doc.text('NUWorkspace — CONFIDENTIAL', margin, pageH - 20);
+    doc.text('Page ' + i + ' of ' + pageCount, pageW - margin, pageH - 20, {align:'right'});
+    doc.text(proj.name, pageW/2, pageH - 20, {align:'center'});
+  }
+
+  // ── Save PDF ──
+  const safeName = proj.name.replace(/[^a-z0-9]/gi,'_');
+  doc.save('Closing_' + safeName + '_' + new Date().toISOString().slice(0,10) + '.pdf');
+
+  // ── Mark as closing in app ──
+  info.status = 'closing';
+  if (sb) dbUpdate('project_info', projId, { status: 'closing' });
+  toast('PDF downloaded — project marked as Closing.');
+  renderClosingReport();
+}
+
 
 // ===== STARTUP =====
 (async function startup() {
