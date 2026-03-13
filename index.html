@@ -950,7 +950,7 @@ tr:hover .ts-del-row{color:var(--muted);}
   </div>
   <div class="nav-section">
     <div class="nav-label">Reports</div>
-    <div class="nav-item" id="navReports" onclick="openReportsPanel(this)" style="display:none"><span class="icon">&#x1F4CA;</span> Reports</div>
+    <div class="nav-item" id="navReports" onclick="openReportsPanel(this)"><span class="icon">&#x1F4CA;</span> Reports</div>
   </div>
 
   <div class="sidebar-footer">
@@ -1431,6 +1431,10 @@ tr:hover .ts-del-row{color:var(--muted);}
         <input class="f-input" id="empHireDate" type="date" />
       </div>
       <div class="field">
+        <label class="field-label">Sick Bank (hrs)</label>
+        <input class="f-input" id="empSickBank" type="number" min="0" step="0.5" placeholder="0" />
+      </div>
+      <div class="field">
         <label class="field-label">Permission Level</label>
         <select class="f-input" id="empPermLevel" style="cursor:pointer">
           <option value="manager">Manager — full access</option>
@@ -1849,19 +1853,7 @@ function renderProjectNav(){
   if (document.getElementById('panel-projects')?.classList.contains('active')) renderProjectsTable();
 }
 
-function selectProject(id,el){
-  activeProjectId = id;
-  const p = projects.find(x => x.id === id);
-  if (!p) return;
-  document.getElementById('topbarName').textContent = p.emoji + ' ' + p.name;
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  if (el) el.classList.add('active');
-  showProjectView('panel-info');
-  renderAllViews();
-  renderInfoSheet(id);
-  renderProjStickyHeader(id);
-  switchProjTab('sub-info');
-}
+
 
 // ===== TASK LIST DATA =====
 const sprintTasks = [];   // loaded from Supabase
@@ -3457,8 +3449,8 @@ function getVacationAllotment(hireDateStr) {
   const today = new Date();
   const yearsWorked = (today - hire) / (365.25 * 24 * 60 * 60 * 1000);
   if (yearsWorked < 5) return 80; // 2 weeks
-  // After 5 years: 80 + 8hrs per additional year
-  return 80 + Math.floor(yearsWorked - 5) * 8;
+  // After 5 years: 80 + 8hrs (1 day) per additional year, max 120hrs (3 weeks)
+  return Math.min(120, 80 + Math.floor(yearsWorked - 5) * 8);
 }
 
 function getQuarterlyAccrual(hireDateStr) {
@@ -3471,20 +3463,38 @@ function getQuarterlyAccrual(hireDateStr) {
 }
 
 function getTimeOffUsed(empId, year) {
-  // Sum overhead hours by category across all weeks in the given year
-  const used = { vacation: 0, sick: 0, holiday: 0 };
-  Object.entries(tsData).forEach(([key, rows]) => {
-    if (!key.startsWith(empId + '|')) return;
+  const used = { vacation: 0, sick: 0, holiday: 0, holidayDays: [] };
+  // Include weeks from prior year too (week of Dec 29 spans into Jan)
+  const allKeys = Object.keys(tsData).filter(k => k.startsWith(empId + '|'));
+  allKeys.forEach(key => {
     const weekKey = key.split('|')[1];
-    if (!weekKey || !weekKey.startsWith(String(year))) return;
+    if (!weekKey) return;
+    const weekDate = new Date(weekKey + 'T00:00:00');
+    // Include if week starts in target year or prior year Dec
+    const weekYear = weekDate.getFullYear();
+    if (weekYear !== year && !(weekYear === year - 1 && weekDate.getMonth() === 11)) return;
     const ohKey = 'oh_' + key;
     const oh = tsData[ohKey] || {};
+    // Vacation
     const vacHrs = Object.values(oh['Vacation Time'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
-    const sickHrs = Object.values(oh['Sick Time'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
-    const holHrs = Object.values(oh['Holiday / Snow Day'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
     used.vacation += vacHrs;
+    // Sick
+    const sickHrs = Object.values(oh['Sick Time'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
     used.sick += sickHrs;
-    used.holiday += holHrs;
+    // Holiday / Snow Day - track per day
+    const holByDay = oh['Holiday / Snow Day'] || {};
+    Object.entries(holByDay).forEach(([di, hrs]) => {
+      const h = parseFloat(hrs) || 0;
+      if (h <= 0) return;
+      // di is 0=Mon...6=Sun, week starts Monday
+      const d = new Date(weekDate);
+      d.setDate(weekDate.getDate() + parseInt(di));
+      const dayYear = d.getFullYear();
+      if (dayYear !== year) return;
+      const dateStr = d.toISOString().slice(0,10);
+      used.holiday += h;
+      used.holidayDays.push({ date: dateStr, hrs: h });
+    });
   });
   return used;
 }
@@ -3506,7 +3516,7 @@ function renderEmployeesPanel(search) {
         <div style="padding:16px 14px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
           <input style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none"
             placeholder="Search…" value="${q}" oninput="renderEmployeesPanel(this.value)" />
-          <button onclick="openEmployeeModal()" style="background:var(--amber);border:none;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;color:#000;cursor:pointer;white-space:nowrap">+ Add</button>
+          <button onclick="openEmployeeModal(null)" style="background:var(--amber);border:none;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;color:#000;cursor:pointer;white-space:nowrap">+ Add</button>
         </div>
         <div>
           ${filtered.map(e => `
@@ -3550,7 +3560,9 @@ function showEmpProfile(empId) {
   const used = getTimeOffUsed(empId, year);
   const vacAllotment = getVacationAllotment(emp.hireDate);
   const vacAccrued = getQuarterlyAccrual(emp.hireDate);
-  const sickAllotment = 48;
+  // Sick accrual: 24 hrs Jan 1, another 24 hrs May 1
+  const today = new Date();
+  const sickAllotment = (today >= new Date(year, 4, 1)) ? 48 : 24;
   const holidays = getHolidays(year);
   const approver = employees.find(e => e.id === emp.approverId);
 
@@ -3600,6 +3612,81 @@ function showEmpProfile(empId) {
       </td>
     </tr>`;
   }).join('');
+
+  const timeOffSection = emp.isOwner ? '' : `    <!-- Time off section -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">🏖 Time Off — ${year}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+        <!-- Vacation -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Vacation</div>
+            <div style="font-size:10px;color:var(--muted)">${vacAccrued.toFixed(0)} hrs accrued so far</div>
+          </div>
+          ${bar(used.vacation, vacAllotment, 'var(--blue)')}
+        </div>
+        <!-- Sick -->
+        <div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Sick</div>
+            ${emp.sickBank > 0 ? `<div style="font-size:10px;color:var(--amber)">${emp.sickBank} hrs banked</div>` : ''}
+          </div>
+          ${bar(used.sick, sickAllotment, 'var(--amber)')}
+          ${emp.sickBank > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:4px">Total available: <span style="color:var(--amber);font-weight:600">${Math.max(0, sickAllotment - used.sick + emp.sickBank).toFixed(1)} hrs</span></div>` : ''}
+        </div>
+      </div>
+      <!-- Holiday -->
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Holidays</div>
+          <div style="font-size:11px;color:var(--muted)">${used.holiday.toFixed(1)} hrs logged</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+          ${holidays.filter(h=>h.date.startsWith(String(year))).map(h => {
+            const taken = (used.holidayDays||[]).find(d => d.date === h.date);
+            return taken
+              ? `<span title="${taken.hrs}hrs logged" style="font-size:10px;padding:3px 8px;border-radius:8px;background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);color:#4caf7d">✓ ${h.name}</span>`
+              : `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)">${h.name}</span>`;
+          }).join('')}
+        </div>
+        ${(() => {
+          const knownDates = new Set(holidays.map(h => h.date));
+          const extraDays = (used.holidayDays||[]).filter(d => !knownDates.has(d.date));
+          if (extraDays.length === 0) return '';
+          return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--amber);margin-bottom:6px">Extra Paid Days</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              ${extraDays.map(d =>
+                `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:rgba(232,162,52,0.12);border:1px solid rgba(232,162,52,0.35);color:#e8a234">
+                  ${new Date(d.date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})} — ${d.hrs}hrs
+                </span>`
+              ).join('')}
+            </div>
+          </div>`;
+        })()}
+      </div>
+    </div>
+
+    <!-- Timesheet history -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">📅 Timesheet History</div>
+        <div style="font-size:11px;color:var(--muted)">Last 10 weeks</div>
+      </div>
+      ${weeks.length === 0
+        ? `<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No timesheets submitted yet.</div>`
+        : `<table style="width:100%;border-collapse:collapse">
+            <thead><tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Week Of</th>
+              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>
+              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Hours</th>
+              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Notes</th>
+              <th></th>
+            </tr></thead>
+            <tbody>${tsRows}</tbody>
+          </table>`}
+    </div>
+  `;
 
   pane.innerHTML = `
     <!-- Header -->
@@ -3652,21 +3739,43 @@ function showEmpProfile(empId) {
         </div>
         <!-- Sick -->
         <div>
-          <div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:0">Sick</div>
+          <div style="display:flex;justify-content:space-between;align-items:baseline">
+            <div style="font-size:12px;font-weight:600;color:var(--text)">Sick</div>
+            ${emp.sickBank > 0 ? `<div style="font-size:10px;color:var(--amber)">${emp.sickBank} hrs banked</div>` : ''}
+          </div>
           ${bar(used.sick, sickAllotment, 'var(--amber)')}
+          ${emp.sickBank > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:4px">Total available: <span style="color:var(--amber);font-weight:600">${Math.max(0, sickAllotment - used.sick + emp.sickBank).toFixed(1)} hrs</span></div>` : ''}
         </div>
       </div>
       <!-- Holiday -->
       <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
-          <div style="font-size:12px;font-weight:600;color:var(--text)">Holidays Used This Year</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+          <div style="font-size:12px;font-weight:600;color:var(--text)">Holidays</div>
           <div style="font-size:11px;color:var(--muted)">${used.holiday.toFixed(1)} hrs logged</div>
         </div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px">
-          ${holidays.filter(h=>h.date.startsWith(String(year))).map(h =>
-            `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)">${h.name} <span style="color:var(--text)">${new Date(h.date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span></span>`
-          ).join('')}
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
+          ${holidays.filter(h=>h.date.startsWith(String(year))).map(h => {
+            const taken = (used.holidayDays||[]).find(d => d.date === h.date);
+            return taken
+              ? `<span title="${taken.hrs}hrs logged" style="font-size:10px;padding:3px 8px;border-radius:8px;background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);color:#4caf7d">✓ ${h.name}</span>`
+              : `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)">${h.name}</span>`;
+          }).join('')}
         </div>
+        ${(() => {
+          const knownDates = new Set(holidays.map(h => h.date));
+          const extraDays = (used.holidayDays||[]).filter(d => !knownDates.has(d.date));
+          if (extraDays.length === 0) return '';
+          return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
+            <div style="font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--amber);margin-bottom:6px">Extra Paid Days</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              ${extraDays.map(d =>
+                `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:rgba(232,162,52,0.12);border:1px solid rgba(232,162,52,0.35);color:#e8a234">
+                  ${new Date(d.date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})} — ${d.hrs}hrs
+                </span>`
+              ).join('')}
+            </div>
+          </div>`;
+        })()}
       </div>
     </div>
 
@@ -3702,7 +3811,8 @@ function deleteEmployee(id) {
 
 // ===== EMPLOYEE MODAL =====
 function openEmployeeModal(id) {
-  editingEmpId = id || null;
+  editingEmpId = null; // always reset first
+  editingEmpId = (id && id !== 'undefined' && id !== 'null') ? id : null;
   const emp = id ? employees.find(e => e.id === id) : null;
   if (emp) {
     empColor = emp.color;
@@ -3723,6 +3833,7 @@ function openEmployeeModal(id) {
   document.getElementById('empEmail').value = emp ? emp.email : '';
   document.getElementById('empPhone').value    = emp ? emp.phone    : '';
   document.getElementById('empHireDate').value = emp ? emp.hireDate : '';
+  if (document.getElementById('empSickBank')) document.getElementById('empSickBank').value = emp ? (emp.sickBank || 0) : 0;
 
   buildEmpColorSwatches();
   updateEmpPreview();
@@ -3770,38 +3881,87 @@ function getInitials(name) {
 }
 
 async function saveEmployee() {
-  const name = document.getElementById('empName').value.trim();
-  if (!name) {
+  // Capture ALL field values synchronously before any async work
+  const _name      = document.getElementById('empName').value.trim();
+  const _role      = document.getElementById('empRole').value.trim();
+  const _dept      = document.getElementById('empDept').value.trim();
+  const _email     = document.getElementById('empEmail').value.trim();
+  const _phone     = document.getElementById('empPhone').value.trim();
+  const _hireDate  = document.getElementById('empHireDate').value || '';
+  const _sickBank  = parseFloat(document.getElementById('empSickBank') ? document.getElementById('empSickBank').value : 0) || 0;
+  const _permLevel = document.getElementById('empPermLevel').value || 'engineer';
+  const _color     = empColor;
+  const _editingId = editingEmpId; // only use explicitly set editingEmpId, never fall back
+
+  if (!_name) {
     const inp = document.getElementById('empName');
     inp.style.borderColor = 'var(--red)'; inp.style.boxShadow = '0 0 0 3px rgba(224,92,92,0.18)';
     inp.focus(); setTimeout(() => { inp.style.borderColor=''; inp.style.boxShadow=''; }, 1800);
     return;
   }
+
   const data = {
-    name,
-    initials: getInitials(name),
-    role:  document.getElementById('empRole').value.trim(),
-    dept:  document.getElementById('empDept').value.trim(),
-    email: document.getElementById('empEmail').value.trim(),
-    phone:     document.getElementById('empPhone').value.trim(),
-    hireDate:  document.getElementById('empHireDate').value || '',
-    color: empColor,
+    name: _name, initials: getInitials(_name),
+    role: _role, dept: _dept, email: _email, phone: _phone,
+    hireDate: _hireDate, sickBank: _sickBank, color: _color,
   };
+
   const dbPayload = {
     name: data.name, initials: data.initials,
     role: data.role, department: data.dept,
     email: data.email, phone: data.phone,
-    color: data.color, hire_date: data.hireDate || null,
+    color: data.color,
+    hire_date: data.hireDate || null,
+    sick_bank: data.sickBank,
+    permission_level: _permLevel,
+    approver_id: document.getElementById('empApprover') ? (document.getElementById('empApprover').value || null) : null,
+    is_approver: document.getElementById('empIsApprover') ? document.getElementById('empIsApprover').checked : false,
+    is_paper_ts: document.getElementById('empIsPaperTs') ? document.getElementById('empIsPaperTs').checked : false,
   };
-  if (editingEmpId) {
-    const idx = employees.findIndex(e => e.id === editingEmpId);
-    if (idx > -1) employees[idx] = {...employees[idx], ...data};
-    if (sb) await sb.from('employees').update(dbPayload).eq('id', editingEmpId);
+
+  if (_editingId) {
+    editingEmpId = _editingId;
+    const idx = employees.findIndex(e => e.id === _editingId);
+    if (idx > -1) employees[idx] = {...employees[idx], ...data, permissionLevel: _permLevel};
+    if (sb) {
+      const { error } = await sb.from('employees').update(dbPayload).eq('id', _editingId);
+      if (error) { console.error('saveEmployee update error:', error); toast('⚠ Save error: ' + error.message); return; }
+      const { data: fresh } = await sb.from('employees').select('*').eq('id', _editingId).single();
+      if (fresh) {
+        const idx2 = employees.findIndex(e => e.id === _editingId);
+        if (idx2 > -1) employees[idx2] = { ...employees[idx2],
+          name: fresh.name, initials: fresh.initials,
+          role: fresh.role, dept: fresh.department||'',
+          email: fresh.email||'', phone: fresh.phone||'',
+          color: fresh.color, hireDate: fresh.hire_date||'',
+          sickBank: parseFloat(fresh.sick_bank)||0,
+          permissionLevel: fresh.permission_level||'engineer',
+          isOwner: !!fresh.is_owner,
+        };
+      }
+    }
     toast('Employee updated');
   } else {
-    const newEmp = {id: 'emp' + Date.now(), ...data};
-    employees.push(newEmp);
-    if (sb) { const { data: d } = await sb.from('employees').insert(dbPayload).select().single(); if (d) newEmp.id = d.id; }
+    if (sb) {
+      const { data: d, error } = await sb.from('employees').insert(dbPayload).select().single();
+      if (error) { console.error('saveEmployee insert error:', error); toast('⚠ Save error: ' + error.message); return; }
+      if (d) {
+        employees.push({
+          id: d.id, name: d.name, initials: d.initials,
+          role: d.role, dept: d.department||'',
+          email: d.email||'', phone: d.phone||'',
+          color: d.color, hireDate: d.hire_date||'',
+          sickBank: parseFloat(d.sick_bank)||0,
+          permissionLevel: d.permission_level||'engineer',
+          isOwner: !!d.is_owner,
+          approverId: d.approver_id||null,
+          isApprover: !!d.is_approver,
+          isPaperTs: !!d.is_paper_ts,
+        });
+      }
+    } else {
+      employees.push({id: 'emp'+Date.now(), ...data, permissionLevel: _permLevel});
+    }
     toast(data.name + ' added');
   }
   closeEmployeeModal();
@@ -4129,6 +4289,7 @@ function updateTsSummary(key) {
 }
 
 function openTimesheetPanel(el) {
+  if (currentEmployee && currentEmployee.isOwner) { toast('Timesheets are not tracked for owners'); return; }
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
   activeProjectId = null;
@@ -6212,6 +6373,8 @@ async function loadAllData() {
       isApprover: r.is_approver||false, isPaperTs: r.is_paper_ts||false, approverId: r.approver_id||null,
       hireDate: r.hire_date||'',
       permissionLevel: r.permission_level||'engineer',
+      sickBank: parseFloat(r.sick_bank)||0,
+      isOwner: !!r.is_owner,
     }));
 
     // Clients & Contacts
@@ -6413,40 +6576,6 @@ window.toggleInfoTask = async function(idx, projId) {
     if (ring) ring.setAttribute('stroke-dashoffset', circ-(pct/100)*circ);
     if (pctEl) pctEl.textContent = pct+'%';
   }
-};
-
-// Patch saveEmployee
-const _origSaveEmployee = saveEmployee;
-window.saveEmployee = async function() {
-  const name = document.getElementById('empName').value.trim();
-  if (!name) { document.getElementById('empName').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('empName').style.borderColor='',1800); return; }
-
-  const data = {
-    name, initials: getInitials(name),
-    role:       document.getElementById('empRole').value.trim(),
-    department: document.getElementById('empDept').value.trim(),
-    email:      document.getElementById('empEmail').value.trim(),
-    phone:      document.getElementById('empPhone').value.trim(),
-    color:      empColor,
-    approver_id:  document.getElementById('empApprover').value || null,
-    is_approver:  document.getElementById('empIsApprover').checked,
-    is_paper_ts:  document.getElementById('empIsPaperTs') ? document.getElementById('empIsPaperTs').checked : false,
-  };
-
-  if (editingEmpId) {
-    await dbUpdate('employees', editingEmpId, data);
-    const idx = employees.findIndex(e => e.id === editingEmpId);
-    if (idx > -1) employees[idx] = { ...employees[idx], ...data, dept: data.department, approverId: data.approver_id, isApprover: data.is_approver, isPaperTs: data.is_paper_ts };
-    toast('Employee updated');
-  } else {
-    const saved = await dbInsert('employees', data);
-    if (!saved) { toast('⚠ Could not save employee'); return; }
-    employees.push({ id: saved.id, ...data, dept: data.department, approverId: data.approver_id, isApprover: data.is_approver, isPaperTs: data.is_paper_ts });
-    toast(name + ' added');
-  }
-  closeEmployeeModal();
-  renderEmployeesPanel('');
-  renderSidebarTeam();
 };
 
 // Patch deleteEmployee
@@ -8282,6 +8411,9 @@ async function afterLogin(user) {
   // Show approvals nav for approvers
   const navApp = document.getElementById('navApprovals');
   if (navApp) navApp.style.display = isApprover ? 'flex' : 'none';
+  // Hide timesheet nav for owners
+  const navTs = document.getElementById('navTimesheetItem');
+  if (navTs && currentEmployee && currentEmployee.isOwner) navTs.style.display = 'none';
 
   // Apply permission-based UI
   applyPermissions();
@@ -8353,11 +8485,7 @@ function getWeekStatusObj(key) {
 }
 
 // Override isWeekLocked for proxy — paper employees never lock
-function isWeekLocked(key) {
-  if (proxyEmployee && proxyEmployee.isPaperTs) return false; // paper = always editable
-  const ws = getWeekStatusObj(key);
-  return ws && (ws.status === 'approved' || ws.status === 'submitted');
-}
+
 
 
 async function autoApproveProxyTimesheet() {
