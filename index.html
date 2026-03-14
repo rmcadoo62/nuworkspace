@@ -273,9 +273,9 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .itf:hover{color:var(--text);border-color:var(--surface3);}
 .itf.active{background:var(--surface2);color:var(--text);border-color:var(--surface3);}
 .info-task-table{width:100%;}
-.itt-head{display:grid;grid-template-columns:var(--itc-num,36px) var(--itc-pri,28px) var(--itc-cat,50px) var(--itc-task,1fr) var(--itc-status,130px) var(--itc-quote,80px) var(--itc-price,90px) var(--itc-created,75px) var(--itc-hrs,60px) var(--itc-bhrs,60px) var(--itc-assign,70px) var(--itc-start,80px) var(--itc-comp,80px) var(--itc-act,50px);gap:0;padding:6px 10px;border-bottom:1px solid var(--border);margin-bottom:2px;}
+.itt-head{display:grid;grid-template-columns:var(--itc-num,36px) var(--itc-pri,28px) var(--itc-cat,50px) var(--itc-task,1fr) var(--itc-status,130px) var(--itc-quote,80px) var(--itc-po,80px) var(--itc-price,90px) var(--itc-created,75px) var(--itc-hrs,60px) var(--itc-bhrs,60px) var(--itc-assign,70px) var(--itc-start,80px) var(--itc-comp,80px) var(--itc-act,50px);gap:0;padding:6px 10px;border-bottom:1px solid var(--border);margin-bottom:2px;}
 .itt-head-cell{font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:var(--muted);position:relative;user-select:none;}.itt-resizer{position:absolute;right:-3px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:10;}.itt-resizer::after{content:'';position:absolute;left:3px;top:15%;bottom:15%;width:2px;border-radius:2px;background:transparent;transition:background .15s;}.itt-resizer:hover::after,.itt-resizer.active::after{background:#5b9cf6;}
-.itt-row{display:grid;grid-template-columns:var(--itc-num,36px) var(--itc-pri,28px) var(--itc-cat,50px) var(--itc-task,1fr) var(--itc-status,130px) var(--itc-quote,80px) var(--itc-price,90px) var(--itc-created,75px) var(--itc-hrs,60px) var(--itc-bhrs,60px) var(--itc-assign,70px) var(--itc-start,80px) var(--itc-comp,80px) var(--itc-act,50px);gap:0;padding:9px 10px;border-radius:7px;border:1px solid transparent;transition:all var(--transition);align-items:center;margin-bottom:2px;cursor:pointer;}
+.itt-row{display:grid;grid-template-columns:var(--itc-num,36px) var(--itc-pri,28px) var(--itc-cat,50px) var(--itc-task,1fr) var(--itc-status,130px) var(--itc-quote,80px) var(--itc-po,80px) var(--itc-price,90px) var(--itc-created,75px) var(--itc-hrs,60px) var(--itc-bhrs,60px) var(--itc-assign,70px) var(--itc-start,80px) var(--itc-comp,80px) var(--itc-act,50px);gap:0;padding:9px 10px;border-radius:7px;border:1px solid transparent;transition:all var(--transition);align-items:center;margin-bottom:2px;cursor:pointer;}
 .itt-row:hover{background:var(--surface);border-color:var(--border);}
 .itt-check{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all var(--transition);flex-shrink:0;font-size:9px;font-weight:700;}
 .itt-check:hover{border-color:var(--amber);}
@@ -484,7 +484,7 @@ tr:hover .ts-del-row{color:var(--muted);}
 .itt-row .inline-edit-select option{background:var(--surface);color:var(--text);}
 .itt-cell-edit{cursor:text;}
 .itt-cell-edit:hover{background:var(--surface2);border-radius:4px;}
-.itt-row-actions{position:absolute;right:6px;top:50%;transform:translateY(-50%);display:none;gap:4px;align-items:center;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:3px 6px;}
+.itt-row-actions{display:none;gap:4px;align-items:center;justify-content:flex-end;}
 .itt-row:hover .itt-row-actions{display:flex;}
 .itt-row-action-btn{background:transparent;border:none;color:var(--muted);font-size:12px;cursor:pointer;padding:2px 5px;border-radius:4px;transition:all var(--transition);}
 .itt-row-action-btn:hover{color:var(--amber);background:var(--amber-glow);}
@@ -502,7 +502,7 @@ tr:hover .ts-del-row{color:var(--muted);}
 .expenses-section{margin-bottom:24px;}
 .expenses-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
 .expenses-title{font-family:'DM Serif Display',serif;font-size:16px;color:var(--text);}
-.expense-grid{display:grid;grid-template-columns:1fr 120px 120px 36px;gap:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+.expense-grid{display:grid;grid-template-columns:1fr 160px 100px 100px 36px;gap:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;}
 .expense-grid-head{display:contents;}
 .expense-head-cell{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);padding:8px 12px;background:var(--surface2);border-bottom:1px solid var(--border);}
 .expense-row{display:contents;}
@@ -518,7 +518,7 @@ tr:hover .ts-del-row{color:var(--muted);}
 .expense-del-btn{background:transparent;border:none;color:transparent;cursor:pointer;font-size:13px;padding:0 8px;transition:color var(--transition);}
 .expense-row:hover .expense-del-btn{color:var(--muted);}
 .expense-del-btn:hover{color:var(--red) !important;}
-.expense-footer{display:grid;grid-template-columns:1fr 120px 120px 36px;background:var(--surface2);border-top:2px solid var(--border);}
+.expense-footer{display:grid;grid-template-columns:1fr 160px 100px 100px 36px;background:var(--surface2);border-top:2px solid var(--border);}
 .expense-footer-cell{padding:10px 12px;font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;}
 .expense-add-btn{display:flex;align-items:center;gap:6px;background:transparent;border:1px dashed var(--border);border-radius:7px;color:var(--muted);font-size:12.5px;padding:8px 14px;cursor:pointer;margin-top:8px;transition:all var(--transition);font-family:'DM Sans',sans-serif;width:100%;}
 .expense-add-btn:hover{border-color:var(--amber-dim);color:var(--amber);background:var(--amber-glow);}
@@ -1212,7 +1212,7 @@ tr:hover .ts-del-row{color:var(--muted);}
         <div class="info-wrap" id="infoWrap"></div>
       </div>
       <div class="proj-sub" id="sub-tasks">
-        <div style="padding:24px 32px;max-width:1100px">
+        <div style="padding:24px 32px;overflow-x:auto;">
           <div id="tasksPanelWrap"></div>
         </div>
       </div>
@@ -1222,7 +1222,7 @@ tr:hover .ts-del-row{color:var(--muted);}
         <div id="hoursPanelBody"></div>
       </div>
     </div><!-- /sub-hours -->
-    id="sub-expenses">
+    <div class="proj-sub" id="sub-expenses">
         <div style="padding:28px 32px;max-width:900px">
           <div id="expensesPanelSummary" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:28px;"></div>
           <div id="expensesPanelList"></div>
@@ -3189,6 +3189,7 @@ function renderExpensesSection(projId) {
     <div class="expense-grid">
       <div class="expense-grid-head">
         <div class="expense-head-cell">Description</div>
+        <div class="expense-head-cell">Task</div>
         <div class="expense-head-cell" style="text-align:right">Planned ($)</div>
         <div class="expense-head-cell" style="text-align:right">Actual ($)</div>
         <div class="expense-head-cell"></div>
@@ -3197,12 +3198,13 @@ function renderExpensesSection(projId) {
       ${expenses.length > 0 ? `
       <div class="expense-footer">
         <div class="expense-footer-cell" style="color:var(--muted);font-size:10px;letter-spacing:1px;text-transform:uppercase;font-family:'DM Sans',sans-serif">Total</div>
+        <div class="expense-footer-cell"></div>
         <div class="expense-footer-cell" style="text-align:right;color:var(--text)">${plannedTotal > 0 ? fmt$(plannedTotal) : '—'}</div>
         <div class="expense-footer-cell ${over?'exp-over':'exp-under'}" style="text-align:right">${actualTotal > 0 ? fmt$(actualTotal) : '—'}</div>
         <div class="expense-footer-cell"></div>
       </div>` : ''}
     </div>
-    <button class="expense-add-btn" onclick="addExpense('${projId}')">+ Add Expense</button>
+    <button class="expense-add-btn" onclick="addExpense('${projId}',true)">+ Add Expense</button>
   `;
 }
 
@@ -3296,6 +3298,7 @@ function renderInfoTasks(projId, filter) {
       <div class="itt-head-cell">Task<span class="itt-resizer" data-col="task"></span></div>
       <div class="itt-head-cell">Status<span class="itt-resizer" data-col="status"></span></div>
       <div class="itt-head-cell">Quote #<span class="itt-resizer" data-col="quote"></span></div>
+      <div class="itt-head-cell">PO #<span class="itt-resizer" data-col="po"></span></div>
       <div class="itt-head-cell">Price<span class="itt-resizer" data-col="price"></span></div>
       <div class="itt-head-cell">Created<span class="itt-resizer" data-col="created"></span></div>
       <div class="itt-head-cell">Hrs Logged<span class="itt-resizer" data-col="hrs"></span></div>
@@ -6421,6 +6424,7 @@ async function loadAllData() {
       completedDate: r.completed_date||'',
       billedDate: r.billed_date||'',
       quoteNum: r.quote_number||'',
+      poNumber: r.po_number||'',
       peachtreeInv: r.peachtree_inv||'',
       createdAt: r.created_at ? r.created_at.split('T')[0] : '',
     }));
@@ -7380,6 +7384,9 @@ function renderTasksPanel(projId) {
         <div class="itt-cell-edit" onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);cursor:text" title="Click to set quote number">
           ${t.quoteNum||'—'}
         </div>
+        <div class="itt-cell-edit" onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:text" title="Click to set PO number">
+          ${t.poNumber||'—'}
+        </div>
         <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--green);cursor:text">
           ${t.fixedPrice ? '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
         </div>
@@ -7425,6 +7432,7 @@ function renderTasksPanel(projId) {
       <div class="itt-head-cell">Task<span class="itt-resizer" data-col="task"></span></div>
       <div class="itt-head-cell">Status<span class="itt-resizer" data-col="status"></span></div>
       <div class="itt-head-cell">Quote #<span class="itt-resizer" data-col="quote"></span></div>
+      <div class="itt-head-cell">PO #<span class="itt-resizer" data-col="po"></span></div>
       <div class="itt-head-cell">Price<span class="itt-resizer" data-col="price"></span></div>
       <div class="itt-head-cell">Created<span class="itt-resizer" data-col="created"></span></div>
       <div class="itt-head-cell">Hrs Logged<span class="itt-resizer" data-col="hrs"></span></div>
@@ -7543,11 +7551,11 @@ function renderHoursPanel(projId) {
 function inlineEditBudgetHours(taskId, projId) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
-  const row = document.querySelector(`[data-task-id="${taskId}"]`);
+  const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
   // Find the budget hours cell (7th child after check)
   const cells = [...row.children];
-  const cell = cells[6]; // 0=check,1=name,2=status,3=cat,4=price,5=hrs,6=budget
+  const cell = cells[10]; // budget hours cell
   if (!cell) return;
   const orig = t.budgetHours || 0;
   cell.innerHTML = `<input class="inline-edit-input" type="text" inputmode="decimal" value="${orig||''}" placeholder="0" style="font-family:'JetBrains Mono',monospace;width:50px" />`;
@@ -7561,9 +7569,9 @@ function inlineEditBudgetHours(taskId, projId) {
 function inlineEditTaskDate(taskId, projId, field) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
-  const row = document.querySelector(`[data-task-id="${taskId}"]`);
+  const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
-  const fieldIdx = {taskStartDate:8, completedDate:11};
+  const fieldIdx = {taskStartDate:12, completedDate:13};
   const cell = [...row.children][fieldIdx[field]];
   if (!cell) return;
   const orig = t[field] || '';
@@ -8019,126 +8027,106 @@ function tsProjKeydown(e, key, ri) {
 // ===== EXPENSES PANEL =====
 function renderExpensesPanel(projId) {
   if (!projId) return;
+  const body = document.getElementById('expensesPanelList');
   const summaryEl = document.getElementById('expensesPanelSummary');
-  const listEl    = document.getElementById('expensesPanelList');
-  if (!summaryEl || !listEl) return;
+  if (!body) return;
 
-  const expenses     = expenseStore.filter(e => e.projId === projId);
-  const plannedTotal = expenses.reduce((s,e) => s+(e.planned||0), 0);
-  const actualTotal  = expenses.reduce((s,e) => s+(e.actual||0), 0);
-  const over = actualTotal > plannedTotal && plannedTotal > 0;
-  const diff = Math.abs(plannedTotal - actualTotal);
-
-  summaryEl.innerHTML =
-    '<div class="proj-sum-card">'+
-      '<div class="proj-sum-label">Planned Budget</div>'+
-      '<div class="proj-sum-val" style="color:var(--amber)">'+(plannedTotal > 0 ? fmt$(plannedTotal) : '—')+'</div>'+
-      '<div class="proj-sum-sub">'+expenses.length+' expense'+(expenses.length!==1?'s':'')+' planned</div>'+
-    '</div>'+
-    '<div class="proj-sum-card">'+
-      '<div class="proj-sum-label">Actual Spend</div>'+
-      '<div class="proj-sum-val" style="color:'+(over?'var(--red)':'var(--green)')+'">'+(actualTotal > 0 ? fmt$(actualTotal) : '—')+'</div>'+
-      '<div class="proj-sum-sub">'+(plannedTotal > 0 ? (over ? fmt$(diff)+' over budget' : fmt$(diff)+' under budget') : 'No actuals logged yet')+'</div>'+
-    '</div>';
-
-  // Group expenses by task
+  const expenses = expenseStore.filter(e => e.projId === projId);
   const projTasks = taskStore.filter(t => t.proj === projId).sort((a,b)=>(a.taskNum||0)-(b.taskNum||0));
-  const unassigned = expenses.filter(e => !e.taskId);
+  const plannedTotal = expenses.reduce((s,e) => s+(parseFloat(e.planned)||0), 0);
+  const actualTotal  = expenses.reduce((s,e) => s+(parseFloat(e.actual)||0), 0);
+  const over = actualTotal > plannedTotal && plannedTotal > 0;
 
-  function expenseRowHtml(e) {
-    const taskOpts = '<option value="">— No task —</option>' +
-      projTasks.map(t => '<option value="'+t._id+'" '+(e.taskId===t._id?'selected':'')+'>'+
-        '#'+(t.taskNum||'?')+' '+t.name+'</option>').join('');
-    const ovr = (e.actual||0) > (e.planned||0) && (e.planned||0) > 0;
-    return '<div class="expense-row">'+
-      '<div class="expense-cell" style="flex:2">'+
-        '<input class="expense-name-input" value="'+(e.name||'').replace(/"/g,'&quot;')+'" placeholder="Expense description…"'+
-          ' onblur="saveExpenseField(\x27'+e._id+'\x27,\x27'+projId+'\x27,\x27name\x27,this.value)"'+
-          ' onkeydown="if(event.key===\"Enter\")this.blur()" />'+
+  // Summary cards
+  if (summaryEl) {
+    summaryEl.innerHTML =
+      '<div class="proj-sum-card">'+
+        '<div class="proj-sum-label">Planned Budget</div>'+
+        '<div class="proj-sum-val" style="color:var(--amber)">'+(plannedTotal > 0 ? fmt$(plannedTotal) : '—')+'</div>'+
+        '<div class="proj-sum-sub">'+expenses.length+' expense'+(expenses.length!==1?'s':'')+' total</div>'+
       '</div>'+
-      '<div class="expense-cell" style="flex:1.5">'+
-        '<select class="inline-edit-select" style="font-size:11px" onchange="saveExpenseTask(\x27'+e._id+'\x27,\x27'+projId+'\x27,this.value)">'+taskOpts+'</select>'+
-      '</div>'+
-      '<div class="expense-cell" style="justify-content:flex-end;flex:1">'+
-        '<input class="expense-amt-input" type="text" inputmode="decimal" value="'+(e.planned||'')+'" placeholder="0.00"'+
-          ' onfocus="this.select()"'+
-          ' onblur="saveExpenseField(\x27'+e._id+'\x27,\x27'+projId+'\x27,\x27planned\x27,this.value)"'+
-          ' onkeydown="if(event.key===\"Enter\")this.blur()"'+
-          ' oninput="this.value=this.value.replace(/[^0-9.]/g,"")" />'+
-      '</div>'+
-      '<div class="expense-cell" style="justify-content:flex-end;flex:1">'+
-        '<input class="expense-amt-input" type="text" inputmode="decimal" value="'+(e.actual||'')+'" placeholder="0.00"'+
-          (ovr?' style="color:var(--red)"':'')+
-          ' onfocus="this.select()"'+
-          ' onblur="saveExpenseField(\x27'+e._id+'\x27,\x27'+projId+'\x27,\x27actual\x27,this.value)"'+
-          ' onkeydown="if(event.key===\"Enter\")this.blur()"'+
-          ' oninput="this.value=this.value.replace(/[^0-9.]/g,"")" />'+
-      '</div>'+
-      '<div class="expense-cell" style="padding:0;flex:0 0 32px">'+
-        '<button class="expense-del-btn" onclick="deleteExpenseFromPanel(\x27'+e._id+'\x27,\x27'+projId+'\x27)">&#x2715;</button>'+
-      '</div>'+
-    '</div>';
-  }
-
-  // Build grouped sections
-  let groupedHtml = '';
-
-  // Tasks with expenses
-  projTasks.forEach(t => {
-    const tExpenses = expenses.filter(e => e.taskId === t._id);
-    if (!tExpenses.length) return;
-    const tPlanned = tExpenses.reduce((s,e)=>s+(e.planned||0),0);
-    const tActual  = tExpenses.reduce((s,e)=>s+(e.actual||0),0);
-    const tOver = tActual > tPlanned && tPlanned > 0;
-    groupedHtml +=
-      '<div style="margin-bottom:18px">'+
-        '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 4px;border-bottom:1px solid var(--border);margin-bottom:6px">'+
-          '<span style="font-size:11px;font-weight:700;color:var(--muted);font-family:\"JetBrains Mono\",monospace">#'+t.taskNum+'</span>'+
-          '<span style="font-size:13px;font-weight:600;color:var(--text)">'+t.name+'</span>'+
-          '<span style="margin-left:auto;font-size:11px;font-family:\"JetBrains Mono\",monospace;color:'+(tOver?'var(--red)':'var(--green)')+'">'+
-            (tPlanned>0?fmt$(tPlanned):'')+' plan · '+(tActual>0?fmt$(tActual):'$0')+' actual</span>'+
+      '<div class="proj-sum-card">'+
+        '<div class="proj-sum-label">Actual Spend</div>'+
+        '<div class="proj-sum-val" style="color:'+(over?'var(--red)':'var(--green)')+'">'+
+          (actualTotal > 0 ? fmt$(actualTotal) : '—')+
         '</div>'+
-        tExpenses.map(expenseRowHtml).join('')+
-      '</div>';
-  });
-
-  // Unassigned expenses
-  if (unassigned.length) {
-    groupedHtml +=
-      '<div style="margin-bottom:18px">'+
-        '<div style="display:flex;align-items:center;gap:8px;padding:6px 0 4px;border-bottom:1px solid var(--border);margin-bottom:6px">'+
-          '<span style="font-size:12px;font-weight:600;color:var(--muted)">Unassigned</span>'+
-        '</div>'+
-        unassigned.map(expenseRowHtml).join('')+
+        '<div class="proj-sum-sub">'+(plannedTotal > 0 ? (over ? fmt$(Math.abs(plannedTotal-actualTotal))+' over budget' : fmt$(Math.abs(plannedTotal-actualTotal))+' under budget') : 'No actuals yet')+'</div>'+
       '</div>';
   }
 
-  const headerRow =
-    '<div class="expense-row" style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px">'+
-      '<div style="flex:2">Description</div>'+
-      '<div style="flex:1.5">Task</div>'+
-      '<div style="flex:1;text-align:right">Planned</div>'+
-      '<div style="flex:1;text-align:right">Actual</div>'+
-      '<div style="flex:0 0 32px"></div>'+
-    '</div>';
+  const taskOpts = (selId) => '<option value="">— No task —</option>' +
+    projTasks.map(t => '<option value="'+t._id+'" '+(selId===t._id?'selected':'')+'>'+
+      '#'+(t.taskNum||'?')+' '+t.name+'</option>').join('');
 
-  const footerRow = expenses.length > 0 ?
-    '<div class="expense-row" style="border-top:2px solid var(--border);padding-top:10px;margin-top:4px;font-weight:600">'+
-      '<div style="flex:2;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px">Total</div>'+
-      '<div style="flex:1.5"></div>'+
-      '<div style="flex:1;text-align:right;font-family:\"JetBrains Mono\",monospace;font-size:13px">'+fmt$(plannedTotal)+'</div>'+
-      '<div style="flex:1;text-align:right;font-family:\"JetBrains Mono\",monospace;font-size:13px;color:'+(over?'var(--red)':'var(--green)')+'">'+fmt$(actualTotal)+'</div>'+
-      '<div style="flex:0 0 32px"></div>'+
-    '</div>' : '';
+  const rows = expenses.map((e,i) => {
+    const ovr = (parseFloat(e.actual)||0) > (parseFloat(e.planned)||0) && (parseFloat(e.planned)||0) > 0;
+    const bg = i%2===0 ? '' : 'background:var(--surface2)';
+    return `<tr style="border-bottom:1px solid var(--border);${bg}">
+      <td style="padding:8px 12px">
+        <input class="expense-name-input" style="width:100%" value="${(e.name||'').replace(/"/g,'&quot;')}" placeholder="Description…"
+          onblur="saveExpenseField('${e._id}','${projId}','name',this.value)"
+          onkeydown="if(event.key==='Enter')this.blur()" />
+      </td>
+      <td style="padding:8px 12px">
+        <select class="inline-edit-select" style="font-size:11px;width:100%" onchange="saveExpenseTask('${e._id}','${projId}',this.value)">
+          ${taskOpts(e.taskId)}
+        </select>
+      </td>
+      <td style="padding:8px 12px;text-align:right;white-space:nowrap">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:2px">
+          <span style="font-size:11px;color:var(--muted)">$</span>
+          <input class="expense-amt-input" type="number" min="0" step="0.01" value="${e.planned||''}" placeholder="0.00"
+            style="text-align:right;width:90px"
+            onfocus="this.select()"
+            onblur="saveExpenseField('${e._id}','${projId}','planned',this.value)"
+            onkeydown="if(event.key==='Enter')this.blur()" />
+        </div>
+      </td>
+      <td style="padding:8px 12px;text-align:right;white-space:nowrap">
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:2px">
+          <span style="font-size:11px;color:${ovr?'var(--red)':'var(--muted)'}">$</span>
+          <input class="expense-amt-input" type="number" min="0" step="0.01" value="${e.actual||''}" placeholder="0.00"
+            style="text-align:right;width:90px;${ovr?'color:var(--red)':''}"
+            onfocus="this.select()"
+            onblur="saveExpenseField('${e._id}','${projId}','actual',this.value)"
+            onkeydown="if(event.key==='Enter')this.blur()" />
+        </div>
+      </td>
+      <td style="padding:8px 6px;text-align:center;width:36px">
+        <button class="expense-del-btn" onclick="deleteExpenseFromPanel('${e._id}','${projId}')">&#x2715;</button>
+      </td>
+    </tr>`;
+  }).join('');
 
-  listEl.innerHTML =
-    '<div class="expenses-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">'+
-      '<div class="expenses-title">Expense Log</div>'+
-      '<button class="btn btn-primary" style="font-size:12px" onclick="addExpense(\x27'+projId+'\x27,true)">+ Add Expense</button>'+
-    '</div>'+
-    (expenses.length === 0
-      ? '<div style="color:var(--muted);font-size:13px;text-align:center;padding:32px">No expenses yet — click Add Expense to get started.</div>'
-      : headerRow + groupedHtml + footerRow);
+  body.innerHTML = `
+    <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:var(--surface2);border-bottom:2px solid var(--border)">
+            <th style="text-align:left;padding:9px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Description</th>
+            <th style="text-align:left;padding:9px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);width:180px">Task</th>
+            <th style="text-align:right;padding:9px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);width:120px">Planned</th>
+            <th style="text-align:right;padding:9px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);width:120px">Actual</th>
+            <th style="width:36px"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows || '<tr><td colspan="5" style="padding:24px;text-align:center;color:var(--muted);font-size:13px">No expenses yet — click Add Expense below</td></tr>'}
+        </tbody>
+        ${expenses.length > 0 ? `
+        <tfoot>
+          <tr style="background:var(--surface2);border-top:2px solid var(--border)">
+            <td style="padding:10px 12px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)">Total</td>
+            <td></td>
+            <td style="text-align:right;padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--text)">${plannedTotal > 0 ? fmt$(plannedTotal) : '—'}</td>
+            <td style="text-align:right;padding:10px 12px;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:${over?'var(--red)':'#4caf7d'}">${actualTotal > 0 ? fmt$(actualTotal) : '—'}</td>
+            <td></td>
+          </tr>
+        </tfoot>` : ''}
+      </table>
+    </div>
+    <button class="expense-add-btn" onclick="addExpense('${projId}',true)">+ Add Expense</button>
+  `;
 }
 
 async function saveExpenseTask(expId, projId, taskId) {
@@ -8218,6 +8206,7 @@ async function inlineSave(taskId, projId, field, value) {
   else if (field === 'completedDate') { t.completedDate = value; }
   else if (field === 'billedDate')    { t.billedDate = value; }
   else if (field === 'quoteNum')      { t.quoteNum = value; }
+  else if (field === 'poNumber')      { t.poNumber = value; }
   else if (field === 'assign')        { t.assign = value; t.assignId = (employees.find(e => e.initials === value)||{}).id || ''; }
 
   // Persist non-status fields to Supabase
@@ -8227,7 +8216,7 @@ async function inlineSave(taskId, projId, field, value) {
       fixedPrice: 'fixed_price', name: 'name',
       due_raw: 'due_date', assign: 'assignee',
       taskStartDate: 'task_start_date', completedDate: 'completed_date',
-      billedDate: 'billed_date', budgetHours: 'budget_hours',
+      billedDate: 'billed_date', budgetHours: 'budget_hours', poNumber: 'po_number',
       quoteNum: 'quote_number',
     };
     const col = dbFieldMap[field];
@@ -8248,7 +8237,7 @@ async function inlineSave(taskId, projId, field, value) {
 function inlineEditName(taskId, projId) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
-  const row = document.querySelector(`[data-task-id="${taskId}"]`);
+  const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
   const nameEl = row.querySelector('.itt-name');
   const orig = t.name;
@@ -8296,10 +8285,27 @@ async function inlineEditQuoteNum(taskId, projId) {
   inp.addEventListener('keydown', e => { if (e.key==='Enter') inp.blur(); if (e.key==='Escape') { cell.innerHTML=prev; } });
 }
 
+function inlineEditPoNum(taskId, projId) {
+  const t = taskStore.find(x => x._id === taskId);
+  if (!t) return;
+  const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
+  if (!row) return;
+  const cells = [...row.children];
+  const cell = cells[6]; // PO # cell
+  if (!cell) return;
+  const orig = t.poNumber || '';
+  cell.innerHTML = `<input class="inline-edit-input" type="text" value="${orig}" placeholder="PO #" style="width:80px" />`;
+  const inp = cell.querySelector('input');
+  inp.focus(); inp.select();
+  const commit = () => { inlineSave(taskId, projId, 'poNumber', inp.value); };
+  inp.addEventListener('blur', commit);
+  inp.addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();inp.blur();} if(e.key==='Escape'){renderTasksPanel(projId);} });
+}
+
 function inlineEditPrice(taskId, projId) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
-  const row = document.querySelector(`[data-task-id="${taskId}"]`);
+  const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
   const cells = row.querySelectorAll('div');
   // Price is the 5th cell (index 4 after check, name, status, cat)
@@ -8323,7 +8329,7 @@ function inlineEditPrice(taskId, projId) {
 function inlineEditDue(taskId, projId) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
-  const row = document.querySelector(`[data-task-id="${taskId}"]`);
+  const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
   const dueCell = row.querySelector('.itt-due');
   if (!dueCell) return;
@@ -9246,23 +9252,27 @@ function generateClosingPdf(projId) {
 
   // ── Expenses ──
   sectionHeader('EXPENSES');
-  const expenses = (window.expenseStore || []).filter(e => e.projId === projId);
+  const expenses = (window.expenseStore || expenseStore || []).filter(e => e.projId === projId);
   if (expenses.length === 0) {
     doc.text('No expenses recorded.', margin + 6, y + 4);
     y += 20;
   } else {
-    const expTotal = expenses.reduce((s,e) => s + (parseFloat(e.amount)||0), 0);
+    const plannedTotal = expenses.reduce((s,e) => s + (parseFloat(e.planned)||0), 0);
+    const actualTotal  = expenses.reduce((s,e) => s + (parseFloat(e.actual)||0), 0);
+    const taskName = (taskId) => { const t = taskStore.find(t=>t._id===taskId); return t ? t.name : '—'; };
     const expData = expenses.map(e => [
-      e.date ? fmtDate(e.date) : '—',
-      e.description || '—',
-      e.category || '—',
-      e.vendor || '—',
-      '$' + (parseFloat(e.amount)||0).toLocaleString('en-US',{minimumFractionDigits:2}),
+      e.name || '—',
+      e.taskId ? taskName(e.taskId) : '—',
+      e.planned > 0 ? '$' + parseFloat(e.planned).toLocaleString('en-US',{minimumFractionDigits:2}) : '—',
+      e.actual > 0 ? '$' + parseFloat(e.actual).toLocaleString('en-US',{minimumFractionDigits:2}) : '—',
     ]);
-    expData.push(['', '', '', 'TOTAL', '$' + expTotal.toLocaleString('en-US',{minimumFractionDigits:2})]);
+    expData.push(['', 'TOTAL',
+      '$' + plannedTotal.toLocaleString('en-US',{minimumFractionDigits:2}),
+      '$' + actualTotal.toLocaleString('en-US',{minimumFractionDigits:2}),
+    ]);
     doc.autoTable({
       startY: y,
-      head: [['Date', 'Description', 'Category', 'Vendor', 'Amount']],
+      head: [['Description', 'Task', 'Planned', 'Actual']],
       body: expData,
       margin: { left: margin, right: margin },
       styles: { fontSize: 9, cellPadding: 4 },
