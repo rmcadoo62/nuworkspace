@@ -1452,14 +1452,17 @@ tr:hover .ts-del-row{color:var(--muted);}
         <input class="f-input" id="empHireDate" type="date" />
       </div>
       <div class="field">
-        <label class="field-label">Sick Bank (hrs)</label>
-        <input class="f-input" id="empSickBank" type="number" min="0" step="0.5" placeholder="0" />
-      </div>
-      <div class="field">
         <label class="field-label">Permission Level</label>
         <select class="f-input" id="empPermLevel" style="cursor:pointer">
           <option value="manager">Manager — full access</option>
           <option value="employee">Employee — limited access</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Employment Type</label>
+        <select class="f-input" id="empType" style="cursor:pointer">
+          <option value="fulltime">Full Time</option>
+          <option value="parttime">Part Time</option>
         </select>
       </div>
       <div class="field">
@@ -3244,8 +3247,49 @@ async function saveExpenseField(expId, projId, field, value) {
     const { error } = await sb.from('expenses').update({ [col]: e[field]||null }).eq('id', expId);
     if (error) console.error('expense save', error);
   }
+  // Update summary cards and totals without re-rendering the whole table
+  updateExpenseSummary(projId);
+}
+
+function updateExpenseSummary(projId) {
+  const expenses = expenseStore.filter(e => e.projId === projId);
+  const plannedTotal = expenses.reduce((s,e) => s+(parseFloat(e.planned)||0), 0);
+  const actualTotal  = expenses.reduce((s,e) => s+(parseFloat(e.actual)||0), 0);
+  const over = actualTotal > plannedTotal && plannedTotal > 0;
+
+  // Update summary cards
+  const summaryEl = document.getElementById('expensesPanelSummary');
+  if (summaryEl) {
+    summaryEl.innerHTML =
+      '<div class="proj-sum-card">'+
+        '<div class="proj-sum-label">Planned Budget</div>'+
+        '<div class="proj-sum-val" style="color:var(--amber)">'+(plannedTotal > 0 ? fmt$(plannedTotal) : '—')+'</div>'+
+        '<div class="proj-sum-sub">'+expenses.length+' expense'+(expenses.length!==1?'s':'')+' total</div>'+
+      '</div>'+
+      '<div class="proj-sum-card">'+
+        '<div class="proj-sum-label">Actual Spend</div>'+
+        '<div class="proj-sum-val" style="color:'+(over?'var(--red)':'var(--green)')+'">'+
+          (actualTotal > 0 ? fmt$(actualTotal) : '—')+
+        '</div>'+
+        '<div class="proj-sum-sub">'+(plannedTotal > 0 ? (over ? fmt$(Math.abs(plannedTotal-actualTotal))+' over budget' : fmt$(Math.abs(plannedTotal-actualTotal))+' under budget') : 'No actuals yet')+'</div>'+
+      '</div>';
+  }
+
+  // Update totals row in table footer
+  const tfoot = document.querySelector('#expensesPanelList tfoot');
+  if (tfoot) {
+    const cells = tfoot.querySelectorAll('td');
+    if (cells[2]) cells[2].textContent = plannedTotal > 0 ? fmt$(plannedTotal) : '—';
+    if (cells[3]) {
+      cells[3].textContent = actualTotal > 0 ? fmt$(actualTotal) : '—';
+      cells[3].style.color = over ? 'var(--red)' : '#4caf7d';
+    }
+  } else if (expenses.length > 0) {
+    // No footer yet - re-render to add it
+    renderExpensesPanel(projId);
+  }
+
   renderProjSummary(projId);
-  if (document.getElementById('panel-expenses')?.classList.contains('active')) renderExpensesPanel(projId);
 }
 
 async function deleteExpense(expId, projId) {
@@ -3687,7 +3731,66 @@ function showEmpProfile(empId) {
     </tr>`;
   }).join('');
 
-  const timeOffSection = emp.isOwner ? '' : `    <!-- Time off section -->
+  // Build weekly hours data for bar chart (52 weeks from anniversary or year start)
+  const weeklyHours = {};
+  // Rolling 52-week window ending today
+  const chartStart = new Date();
+  chartStart.setDate(chartStart.getDate() - 364);
+
+  // Collect all unique week keys for this employee (from both project rows and overhead)
+  const empWeekKeys = new Set();
+  Object.keys(tsData).forEach(key => {
+    if (key.startsWith(empId + '|') && !key.startsWith('oh_')) empWeekKeys.add(key.split('|')[1]);
+    if (key.startsWith('oh_' + empId + '|')) empWeekKeys.add(key.split('|')[1]);
+  });
+
+  empWeekKeys.forEach(weekKey => {
+    const key = empId + '|' + weekKey;
+    const rows = tsData[key] || [];
+    if (!weekKey || weekKey.length < 10) return;
+    const weekDate = new Date(weekKey + 'T00:00:00');
+    if (weekDate < chartStart) return;
+    let hrs = 0;
+    rows.forEach(r => { if (r && r.hours) hrs += Object.values(r.hours).reduce((s,h)=>s+(parseFloat(h)||0),0); });
+    const ohKey = 'oh_' + key;
+    const oh = tsData[ohKey] || {};
+    Object.values(oh).forEach(dayMap => { if (dayMap) hrs += Object.values(dayMap).reduce((s,h)=>s+(parseFloat(h)||0),0); });
+    if (hrs > 0) weeklyHours[weekKey] = (weeklyHours[weekKey]||0) + hrs;
+  });
+
+  const chartWeeks = Object.keys(weeklyHours).sort();
+  const maxHrs = Math.max(40, ...Object.values(weeklyHours));
+
+  
+  // Build weekly hours bar chart HTML
+  let weeklyHoursChartHtml = '';
+  if (!emp.isOwner && emp.empType !== 'parttime' && chartWeeks.length > 0) {
+    const bars = chartWeeks.map(wk => {
+      const hrs = weeklyHours[wk];
+      const pct = Math.min(100, (hrs / maxHrs) * 100);
+      const color = hrs >= 40 ? '#4caf7d' : hrs >= 32 ? 'var(--amber)' : 'var(--red)';
+      const label = new Date(wk+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});
+      return '<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:20px" title="'+label+': '+hrs.toFixed(1)+'h">'+
+        '<div style="font-size:8px;color:var(--muted);">'+hrs.toFixed(0)+'</div>'+
+        '<div style="width:14px;background:'+color+';border-radius:3px 3px 0 0;height:'+pct+'%;min-height:2px"></div>'+
+      '</div>';
+    }).join('');
+    weeklyHoursChartHtml =
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'+
+          '<div style="font-size:13px;font-weight:700;color:var(--text)">📊 Weekly Hours</div>'+
+          '<div style="font-size:11px;color:var(--muted)">'+chartWeeks.length+' weeks logged</div>'+
+        '</div>'+
+        '<div style="display:flex;align-items:flex-end;gap:3px;height:80px;overflow-x:auto;padding-bottom:4px">'+bars+'</div>'+
+        '<div style="display:flex;gap:12px;margin-top:8px">'+
+          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:#4caf7d;border-radius:2px"></div>40h+</div>'+
+          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:var(--amber);border-radius:2px"></div>32–39h</div>'+
+          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:var(--red);border-radius:2px"></div>&lt;32h</div>'+
+        '</div>'+
+      '</div>';
+  }
+
+    const timeOffSection = (emp.isOwner || emp.empType === 'parttime') ? '' : `    <!-- Time off section -->
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
       <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">🏖 Time Off — ${year}</div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
@@ -3741,6 +3844,9 @@ function showEmpProfile(empId) {
       </div>
     </div>
 
+    <!-- Weekly hours bar chart -->
+    ${weeklyHoursChartHtml}
+
     <!-- Timesheet history -->
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -3762,7 +3868,8 @@ function showEmpProfile(empId) {
     </div>
   `;
 
-  pane.innerHTML = `
+
+    pane.innerHTML = `
     <!-- Header -->
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
       <div style="display:flex;align-items:center;gap:16px">
@@ -3852,6 +3959,9 @@ function showEmpProfile(empId) {
         })()}
       </div>
     </div>
+
+    <!-- Weekly hours bar chart -->
+    ${weeklyHoursChartHtml}
 
     <!-- Timesheet history -->
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
@@ -3963,7 +4073,8 @@ async function saveEmployee() {
   const _phone     = document.getElementById('empPhone').value.trim();
   const _hireDate  = document.getElementById('empHireDate').value || '';
   const _sickBank  = parseFloat(document.getElementById('empSickBank') ? document.getElementById('empSickBank').value : 0) || 0;
-  const _permLevel = document.getElementById('empPermLevel').value || 'engineer';
+  const _permLevel = document.getElementById('empPermLevel').value || 'employee';
+  const _empType   = document.getElementById('empType') ? document.getElementById('empType').value : 'fulltime';
   const _color     = empColor;
   const _editingId = editingEmpId; // only use explicitly set editingEmpId, never fall back
 
@@ -3988,6 +4099,7 @@ async function saveEmployee() {
     hire_date: data.hireDate || null,
     sick_bank: data.sickBank,
     permission_level: _permLevel,
+    employment_type: _empType,
     approver_id: document.getElementById('empApprover') ? (document.getElementById('empApprover').value || null) : null,
     is_approver: document.getElementById('empIsApprover') ? document.getElementById('empIsApprover').checked : false,
     is_paper_ts: document.getElementById('empIsPaperTs') ? document.getElementById('empIsPaperTs').checked : false,
@@ -4010,6 +4122,7 @@ async function saveEmployee() {
           color: fresh.color, hireDate: fresh.hire_date||'',
           sickBank: parseFloat(fresh.sick_bank)||0,
           permissionLevel: fresh.permission_level||'employee',
+          empType: fresh.employment_type||'fulltime',
           isOwner: !!fresh.is_owner,
         };
       }
@@ -4027,6 +4140,7 @@ async function saveEmployee() {
           color: d.color, hireDate: d.hire_date||'',
           sickBank: parseFloat(d.sick_bank)||0,
           permissionLevel: d.permission_level||'employee',
+          empType: d.employment_type||'fulltime',
           isOwner: !!d.is_owner,
           approverId: d.approver_id||null,
           isApprover: !!d.is_approver,
@@ -6451,6 +6565,7 @@ async function loadAllData() {
       isApprover: r.is_approver||false, isPaperTs: r.is_paper_ts||false, approverId: r.approver_id||null,
       hireDate: r.hire_date||'',
       permissionLevel: r.permission_level||'employee',
+      empType: r.employment_type||'fulltime',
       sickBank: parseFloat(r.sick_bank)||0,
       isOwner: !!r.is_owner,
     }));
