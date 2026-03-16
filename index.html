@@ -84,7 +84,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .task-check:hover{border-color:var(--amber);}
 .task-check.done{background:var(--green);border-color:var(--green);color:#fff;font-size:10px;font-weight:700;}
 .task-name{font-size:13.5px;flex:1;}
-.task-name.done{text-decoration:line-through;color:var(--muted);}
+.task-name.done{color:var(--muted);}
 .task-proj-tag{font-size:10px;padding:2px 8px;border-radius:4px;font-weight:600;white-space:nowrap;flex-shrink:0;}
 .task-assign-av{width:22px;height:22px;border-radius:50%;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
 .task-due{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);white-space:nowrap;flex-shrink:0;}
@@ -114,7 +114,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .tier3-check:hover{border-color:var(--amber);}
 .tier3-check.done{background:var(--green);border-color:var(--green);color:#fff;font-size:9px;font-weight:700;}
 .tier3-label{font-size:12.5px;}
-.tier3-label.done{text-decoration:line-through;color:var(--muted);}
+.tier3-label.done{color:var(--muted);}
 .tier3-av{width:20px;height:20px;border-radius:50%;font-size:8px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-left:auto;}
 .tier3-due{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);}
 .prog-wrap{flex:1;max-width:80px;height:4px;background:var(--surface3);border-radius:2px;overflow:hidden;}
@@ -281,7 +281,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .itt-check:hover{border-color:var(--amber);}
 .itt-check.done{background:var(--green);border-color:var(--green);color:#fff;}
 .itt-name{font-size:13px;font-weight:400;padding-right:12px;}
-.itt-name.done{text-decoration:line-through;color:var(--muted);}
+.itt-name.done{color:var(--muted);}
 .itt-status{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;}
 .itt-av{width:22px;height:22px;border-radius:50%;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;color:#fff;}
 .itt-due{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);}
@@ -1378,6 +1378,13 @@ tr:hover .ts-del-row{color:var(--muted);}
         </select>
       </div>
       <div class="field">
+        <label class="field-label">Revenue Type</label>
+        <select class="f-input" id="taskRevenueType" style="cursor:pointer" onchange="toggleTaskFixedPriceField(this.value)">
+          <option value="fixed">Fixed Price</option>
+          <option value="nocharge">No Charge</option>
+        </select>
+      </div>
+      <div class="field" id="taskFixedPriceField">
         <label class="field-label">Fixed Price ($)</label>
         <input class="f-input" id="taskFixedPrice" type="number" min="0" step="0.01" placeholder="0.00" style="font-family:'JetBrains Mono',monospace" />
       </div>
@@ -1546,7 +1553,9 @@ tr:hover .ts-del-row{color:var(--muted);}
             <option value="nocharge">No Charge</option>
           </select>
         </div>
-        <div class="field" id="etFixedPriceField">
+      </div>
+      <div class="field-row" id="etFixedPriceField">
+        <div class="field">
           <label class="field-label">Fixed Price ($)</label>
           <input class="f-input" id="etFixedPrice" type="number" min="0" step="0.01" placeholder="0.00" style="font-family:'JetBrains Mono',monospace" />
         </div>
@@ -2077,7 +2086,7 @@ function buildProjTeam(){
     grid.innerHTML = '<div style="font-size:12.5px;color:var(--muted);padding:8px 4px">No employees yet — add some in the Employees panel first.</div>';
     return;
   }
-  grid.innerHTML = employees.map(e=>`
+  grid.innerHTML = employees.filter(e => e.isActive !== false).map(e=>`
     <div class="chip ${pTeam.has(e.id)?'sel':''}" onclick="togProjMember('${e.id}',this)">
       <div class="chip-av" style="background:${e.color}">${e.initials}</div>
       <span class="chip-name">${e.name}</span>
@@ -2144,6 +2153,7 @@ function openTaskModal(){
   document.getElementById('taskDue').value='';
   document.getElementById('taskSalesCat').value='';
   document.getElementById('taskFixedPrice').value='';
+  if (document.getElementById('taskRevenueType')) { document.getElementById('taskRevenueType').value='fixed'; toggleTaskFixedPriceField('fixed'); }
   document.getElementById('tTitleCnt').textContent='0';
   document.getElementById('tDescCnt').textContent='0';
   document.querySelectorAll('.pp').forEach(b=>b.className='pp');
@@ -2161,7 +2171,7 @@ function buildTaskChips(){
     grid.innerHTML = '<div style="font-size:12.5px;color:var(--muted);padding:8px 4px">No employees yet — add some in the Employees panel first.</div>';
     return;
   }
-  grid.innerHTML = employees.map(e=>`
+  grid.innerHTML = employees.filter(e => e.isActive !== false).map(e=>`
     <div class="chip ${tAssign.has(e.id)?'sel':''}" onclick="togAssign('${e.id}',this)">
       <div class="chip-av" style="background:${e.color}">${e.initials}</div>
       <span class="chip-name">${e.name}</span>
@@ -3383,7 +3393,7 @@ function renderInfoTasks(projId, filter) {
         `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
       return `
         <div class="itt-row" data-task-id="${t._id}" style="animation:fadeUp 0.2s ease ${i*0.03}s both">
-          <div class="itt-check ${t.done?'done':''}" onclick="toggleInfoTask(${taskStore.indexOf(t)}, '${projId}');event.stopPropagation()" title="Mark task complete (draws strikethrough)">${t.done?'&#x2713;':''}</div>
+          <div class="itt-check ${t.done?'done':''}" onclick="toggleInfoTask(${taskStore.indexOf(t)}, '${projId}');event.stopPropagation()" title="Mark task complete">${t.done?'&#x2713;':''}</div>
           <div class="itt-name ${t.done?'done':''} itt-cell-edit" onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()" title="Click to edit">${t.name}</div>
           <div onclick="event.stopPropagation()">
             <select class="status-pill-select" style="color:${statusColor(t.status||'new')};background:${statusColor(t.status||'new')}18;border-color:${statusColor(t.status||'new')}55"
@@ -3406,7 +3416,7 @@ function renderInfoTasks(projId, filter) {
             <div class="itt-av" style="background:${empM.color}">${t.assign||'?'}</div>
             <select class="inline-edit-select" style="font-size:10px;padding:2px 2px;border:none;background:transparent;color:var(--muted);width:auto;max-width:70px" onchange="inlineSave('${t._id}','${projId}','assign',this.value)">
               <option value="">—</option>
-              ${employees.map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
+              ${employees.filter(e=>e.isActive!==false).map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
             </select>
           </div>
           <div class="itt-due ${t.overdue?'overdue':''} itt-cell-edit" onclick="inlineEditDue('${t._id}','${projId}');event.stopPropagation()" title="Click to edit date">${t.due || '—'}</div>
@@ -5630,9 +5640,18 @@ async function markTaskBilled(taskId, projId) {
 // ===== BILLING QUEUE REPORT =====
 let bqSelected = new Set();
 
-function renderBillingQueue() {
+async function renderBillingQueue() {
   const el = document.getElementById('tab-billing');
   if (!el) return;
+
+  // Refresh revenue_type from DB for complete tasks
+  if (sb) {
+    const { data: rtRows } = await sb.from('tasks').select('id, revenue_type').eq('status', 'complete');
+    if (rtRows) rtRows.forEach(r => {
+      const t = taskStore.find(x => x._id === r.id);
+      if (t) t.revenueType = r.revenue_type || 'fixed';
+    });
+  }
 
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
 
@@ -5760,8 +5779,7 @@ function bqToggleRow(taskId) {
 async function bulkMarkNoCharge() {
   const noCh = taskStore.filter(t =>
     t.status === 'complete' && t.revenueType !== 'nocharge' &&
-    (t.name.toLowerCase().includes('no charge') || t.name.toLowerCase().includes('(no charge)') ||
-     t.name.toLowerCase().includes('no-charge') || t.name.toLowerCase().includes('rev') && t.name.toLowerCase().includes('no charge'))
+    (t.name.toLowerCase().includes('no charge') || t.name.toLowerCase().includes('(no charge)') || t.name.toLowerCase().includes('no-charge'))
   );
   if (!noCh.length) { toast('No "No Charge" tasks found in billing queue'); return; }
   if (!confirm('Mark ' + noCh.length + ' tasks as No Charge and remove from billing queue?')) return;
@@ -6626,6 +6644,7 @@ async function loadAllData() {
       poNumber: r.po_number||'',
       peachtreeInv: r.peachtree_inv||'',
       createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+      revenueType: r.revenue_type||'fixed',
     }));
 
     // Assign task_num per project (sequential by created_at order)
@@ -6813,6 +6832,7 @@ window.saveTask = async function(another=false) {
     section: 'sprint', done: status==='done',
     sales_category: salesCat||null,
     fixed_price: fixedPrice||null,
+    revenue_type: document.getElementById('taskRevenueType') ? document.getElementById('taskRevenueType').value : 'fixed',
     task_num: _nextNum,
     created_at: new Date().toISOString(),
   };
@@ -7585,7 +7605,7 @@ function renderTasksPanel(projId) {
     return `
       <div class="itt-row" data-task-id="${t._id}" style="animation:fadeUp 0.15s ease ${i*0.02}s both;${t.status==='billed'?'background:rgba(192,132,252,0.08);border-color:rgba(192,132,252,0.2);':''}">
         <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);padding-left:2px">${t.taskNum||''}</div>
-        <div class="itt-check ${t.done?'done':''}" onclick="tpToggleDone('${t._id}','${projId}');event.stopPropagation()" title="Mark task complete (draws strikethrough)">${t.done?'&#x2713;':''}</div>
+        <div class="itt-check ${t.done?'done':''}" onclick="tpToggleDone('${t._id}','${projId}');event.stopPropagation()" title="Mark task complete">${t.done?'&#x2713;':''}</div>
         <div onclick="event.stopPropagation()">
           <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%">${salesOpts}</select>
         </div>
@@ -7614,7 +7634,7 @@ function renderTasksPanel(projId) {
           <div class="itt-av" style="background:${empM.color}" id="av_${t._id}">${t.assign||'?'}</div>
           <select class="inline-edit-select" style="font-size:10px;padding:2px 2px;border:none;background:transparent;color:var(--muted);width:auto;max-width:70px" onchange="inlineSave('${t._id}','${projId}','assign',this.value);document.getElementById('av_${t._id}').style.background=(employees.find(e=>e.initials===this.value)||{color:'#555'}).color;document.getElementById('av_${t._id}').textContent=this.value||'?'">
             <option value="">—</option>
-            ${employees.map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
+            ${employees.filter(e=>e.isActive!==false).map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
           </select>
         </div>
         <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()" style="font-size:11px;color:var(--muted);cursor:text">${fmtShortDate(t.taskStartDate)}</div>
@@ -8578,9 +8598,18 @@ let editingTaskId = null;
 let etPri = 'medium';
 let etAssign = new Set();
 
-function openEditTaskModal(taskId) {
-  const t = taskStore.find(x => x._id === taskId);
+async function openEditTaskModal(taskId) {
+  let t = taskStore.find(x => x._id === taskId);
   if (!t) return;
+  // Refresh revenue_type from DB in case it was updated
+  if (sb && !taskId.startsWith('local-')) {
+    const { data: fresh } = await sb.from('tasks').select('revenue_type').eq('id', taskId).single();
+    if (fresh) {
+      t.revenueType = fresh.revenue_type || 'fixed';
+      const idx = taskStore.findIndex(x => x._id === taskId);
+      if (idx > -1) taskStore[idx].revenueType = t.revenueType;
+    }
+  }
   editingTaskId = taskId;
   etPri = t.priority || 'low';
   etAssign = new Set(t.assign ? [t.assign] : []);
@@ -8625,13 +8654,31 @@ function etSelPri(btn) {
   btn.classList.add('sel-' + etPri);
 }
 
+function toggleTaskFixedPriceField(val) {
+  const field = document.getElementById('taskFixedPriceField');
+  if (field) field.style.display = val === 'nocharge' ? 'none' : '';
+  if (val === 'nocharge') {
+    const inp = document.getElementById('taskFixedPrice');
+    if (inp) inp.value = '0';
+  }
+}
+
+function toggleFixedPriceField(val) {
+  const field = document.getElementById('etFixedPriceField');
+  if (field) field.style.display = val === 'nocharge' ? 'none' : 'flex';
+  if (val === 'nocharge') {
+    const inp = document.getElementById('etFixedPrice');
+    if (inp) inp.value = '0';
+  }
+}
+
 function buildEditTaskChips() {
   const grid = document.getElementById('etChipGrid');
   if (employees.length === 0) {
     grid.innerHTML = '<div style="font-size:12.5px;color:var(--muted);padding:8px 4px">No employees yet.</div>';
     return;
   }
-  grid.innerHTML = employees.map(e => `
+  grid.innerHTML = employees.filter(e => e.isActive !== false).map(e => `
     <div class="chip ${etAssign.has(e.id) || etAssign.has(e.initials) ? 'sel' : ''}" onclick="etTogAssign('${e.id}','${e.initials}',this)">
       <div class="chip-av" style="background:${e.color}">${e.initials}</div>
       <span class="chip-name">${e.name}</span>
