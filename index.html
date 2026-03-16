@@ -794,6 +794,12 @@ tr:hover .ts-del-row{color:var(--muted);}
 .credit-hold-checkbox-wrap.active{background:#d04040;border-color:#d04040;}
 .credit-hold-checkbox-wrap.active span{color:#fff;}
 .credit-hold-checkbox-wrap span{font-size:11.5px;font-weight:600;color:var(--red);user-select:none;}
+.need-po-checkbox-wrap{display:flex;align-items:center;gap:6px;padding:3px 10px;border-radius:20px;border:1.5px solid var(--amber);background:rgba(192,122,26,0.08);cursor:pointer;transition:all .15s;margin-left:8px;}
+.need-po-checkbox-wrap:hover{background:rgba(192,122,26,0.16);}
+.need-po-checkbox-wrap.active{background:var(--amber);border-color:var(--amber);}
+.need-po-checkbox-wrap.active span{color:#0e0e0f;}
+.need-po-checkbox-wrap span{font-size:11.5px;font-weight:600;color:var(--amber);user-select:none;}
+.need-po-banner{background:var(--amber);color:#0e0e0f;font-size:12.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:6px 24px;display:flex;align-items:center;gap:8px;flex-shrink:0;}
 .status-pill-select{border-radius:20px;border:1.5px solid;font-family:'DM Sans',sans-serif;font-size:11px;font-weight:600;padding:3px 8px;outline:none;cursor:pointer;transition:all .15s;}
 .status-pill-select option{background:var(--surface);color:var(--text);font-weight:500;}
 
@@ -1195,6 +1201,7 @@ tr:hover .ts-del-row{color:var(--muted);}
           <!-- filled by renderProjStickyHeader() -->
         </div>
         <div class="credit-hold-banner" id="creditHoldBanner" style="display:none">⚠ CREDIT HOLD — All work must stop until resolved</div>
+        <div class="need-po-banner" id="needPoBanner" style="display:none">⚠ UPDATED PO REQUIRED — Please provide an updated Purchase Order to continue</div>
         <div class="proj-sticky-tabs" id="projStickyTabs">
           <div class="proj-tab active" data-sub="sub-info">&#x1F4CB; Info</div>
           <div class="proj-tab" data-sub="sub-tasks">&#x2713; Tasks</div>
@@ -1444,9 +1451,15 @@ tr:hover .ts-del-row{color:var(--muted);}
           <input class="f-input" id="empDept" type="text" placeholder="e.g. Engineering" maxlength="60" />
         </div>
       </div>
-      <div class="field">
-        <label class="field-label">Email</label>
-        <input class="f-input" id="empEmail" type="email" placeholder="name@company.com" maxlength="100" />
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Work Email</label>
+          <input class="f-input" id="empEmail" type="email" placeholder="name@company.com" maxlength="100" />
+        </div>
+        <div class="field">
+          <label class="field-label">Personal Email</label>
+          <input class="f-input" id="empPersonalEmail" type="email" placeholder="personal@email.com" maxlength="100" />
+        </div>
       </div>
       <div class="field">
         <label class="field-label">Phone</label>
@@ -3621,12 +3634,26 @@ function getTimeOffUsed(empId, year) {
     if (weekYear !== year && !(weekYear === year - 1 && weekDate.getMonth() === 11)) return;
     const ohKey = 'oh_' + empId + '|' + weekKey;
     const oh = tsData[ohKey] || {};
-    // Vacation
-    const vacHrs = Object.values(oh['Vacation Time'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
-    used.vacation += vacHrs;
-    // Sick
-    const sickHrs = Object.values(oh['Sick'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
-    used.sick += sickHrs;
+    // Vacation — check each day individually so Dec weeks don't bleed into next year
+    const vacByDay = oh['Vacation Time'] || {};
+    Object.entries(vacByDay).forEach(([di, hrs]) => {
+      const h = parseFloat(hrs) || 0;
+      if (h <= 0) return;
+      const d = new Date(weekDate);
+      d.setDate(weekDate.getDate() + parseInt(di));
+      if (d.getFullYear() !== year) return;
+      used.vacation += h;
+    });
+    // Sick — check each day individually too
+    const sickByDay = oh['Sick'] || {};
+    Object.entries(sickByDay).forEach(([di, hrs]) => {
+      const h = parseFloat(hrs) || 0;
+      if (h <= 0) return;
+      const d = new Date(weekDate);
+      d.setDate(weekDate.getDate() + parseInt(di));
+      if (d.getFullYear() !== year) return;
+      used.sick += h;
+    });
     // Holiday / Snow Day - track per day
     const holByDay = oh['Holiday'] || {};
     Object.entries(holByDay).forEach(([di, hrs]) => {
@@ -3806,9 +3833,20 @@ function showEmpProfile(empId) {
   // Build weekly hours data for bar chart
   const weeklyHours = {};      // weekKey -> total hours
   const weeklySick = {};       // weekKey -> sick hours
-  const weeklyVacation = {};   // weekKey -> vacation/holiday/personal hours
-  const chartStart = new Date();
-  chartStart.setDate(chartStart.getDate() - 364);
+  const weeklyVacation = {};   // weekKey -> vacation hours only
+  const weeklyHoliday = {};    // weekKey -> holiday hours only
+  // Chart starts at hire date in the current year (or Jan 1 if no hire date)
+  const chartStart = (() => {
+    if (emp.hireDate) {
+      const hire = new Date(emp.hireDate + 'T00:00:00');
+      const start = new Date(hire);
+      start.setFullYear(new Date().getFullYear());
+      // If this year's anniversary hasn't happened yet, use last year's
+      if (start > new Date()) start.setFullYear(new Date().getFullYear() - 1);
+      return start;
+    }
+    return new Date(new Date().getFullYear(), 0, 1);
+  })();
 
   const SICK_CATS = ['Sick'];
   const VAC_CATS  = ['Vacation Time', 'Holiday', 'Personal Time'];
@@ -3825,7 +3863,7 @@ function showEmpProfile(empId) {
     if (!weekKey || weekKey.length < 10) return;
     const weekDate = new Date(weekKey + 'T00:00:00');
     if (weekDate < chartStart) return;
-    let projHrs = 0, sickHrs = 0, vacHrs = 0;
+    let projHrs = 0, sickHrs = 0, vacHrs = 0, holHrs = 0;
     rows.forEach(r => { if (r && r.hours) projHrs += Object.values(r.hours).reduce((s,h)=>s+(parseFloat(h)||0),0); });
     const ohKey = 'oh_' + key;
     const oh = tsData[ohKey] || {};
@@ -3833,76 +3871,101 @@ function showEmpProfile(empId) {
       if (!dayMap) return;
       const catHrs = Object.values(dayMap).reduce((s,h)=>s+(parseFloat(h)||0),0);
       if (SICK_CATS.includes(cat)) sickHrs += catHrs;
-      else if (VAC_CATS.includes(cat)) vacHrs += catHrs;
+      else if (cat === 'Vacation Time' || cat === 'Personal Time') vacHrs += catHrs;
+      else if (cat === 'Holiday') holHrs += catHrs;
       else projHrs += catHrs; // General Overhead etc counts as work
     });
-    const total = projHrs + sickHrs + vacHrs;
+    const total = projHrs + sickHrs + vacHrs + holHrs;
     if (total > 0) {
       weeklyHours[weekKey] = projHrs;
       weeklySick[weekKey] = sickHrs;
       weeklyVacation[weekKey] = vacHrs;
+      weeklyHoliday[weekKey] = holHrs;
     }
   });
 
   const chartWeeks = Object.keys(weeklyHours).concat(
     Object.keys(weeklySick).filter(k => !weeklyHours[k]),
-    Object.keys(weeklyVacation).filter(k => !weeklyHours[k] && !weeklySick[k])
+    Object.keys(weeklyVacation).filter(k => !weeklyHours[k] && !weeklySick[k]),
+    Object.keys(weeklyHoliday).filter(k => !weeklyHours[k] && !weeklySick[k] && !weeklyVacation[k])
   ).filter((v,i,a)=>a.indexOf(v)===i).sort();
 
-  const maxHrs = Math.max(40, ...chartWeeks.map(wk => (weeklyHours[wk]||0)+(weeklySick[wk]||0)+(weeklyVacation[wk]||0)));
+  const maxHrs = Math.max(40, ...chartWeeks.map(wk => (weeklyHours[wk]||0)+(weeklySick[wk]||0)+(weeklyVacation[wk]||0)+(weeklyHoliday[wk]||0)));
 
   // Build chart HTML
+  const weeklyChartId = 'empHoursChart_' + empId;
   let weeklyHoursChartHtml = '';
   if (chartWeeks.length > 0) {
-    // Get week number helper
-    function getWeekNum(dateStr) {
-      const d = new Date(dateStr + 'T00:00:00');
-      d.setHours(0,0,0,0);
-      d.setDate(d.getDate() + 3 - (d.getDay()+6)%7);
-      const w1 = new Date(d.getFullYear(),0,4);
-      return 1 + Math.round(((d.getTime()-w1.getTime())/86400000 - 3 + (w1.getDay()+6)%7)/7);
-    }
-
-    const bars = chartWeeks.map(wk => {
-      const proj = weeklyHours[wk] || 0;
-      const sick = weeklySick[wk] || 0;
-      const vac  = weeklyVacation[wk] || 0;
-      const total = proj + sick + vac;
-      const totalPct = Math.min(100, (total / maxHrs) * 100);
-      const projPct  = total > 0 ? (proj/total)*100 : 0;
-      const sickPct  = total > 0 ? (sick/total)*100 : 0;
-      const vacPct   = total > 0 ? (vac/total)*100 : 0;
-      const wkNum = getWeekNum(wk);
-      const label = new Date(wk+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});
-      const tooltip = label+': '+total.toFixed(1)+'h total'+(proj>0?' ('+proj.toFixed(1)+'h work)':'')+(sick>0?' ('+sick.toFixed(1)+'h sick)':'')+(vac>0?' ('+vac.toFixed(1)+'h vac/hol)':'');
-
-      // Stacked bar segments from bottom up: work (green), vac (amber), sick (red)
-      let bar = '<div style="width:16px;height:'+totalPct+'%;min-height:3px;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden">';
-      if (proj > 0)  bar += '<div style="flex:'+(projPct)+';background:#4caf7d;min-height:1px"></div>';
-      if (vac > 0)   bar += '<div style="flex:'+(vacPct)+';background:var(--amber);min-height:1px"></div>';
-      if (sick > 0)  bar += '<div style="flex:'+(sickPct)+';background:var(--red);min-height:1px"></div>';
-      bar += '</div>';
-
-      return '<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:22px" title="'+tooltip+'">'+
-        '<div style="font-size:8px;color:var(--muted);line-height:1">'+total.toFixed(0)+'</div>'+
-        bar+
-        '<div style="font-size:7px;color:var(--muted);line-height:1">W'+wkNum+'</div>'+
-      '</div>';
-    }).join('');
+    const chartLabels = chartWeeks.map(wk => new Date(wk+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+    const chartWork   = chartWeeks.map(wk => weeklyHours[wk]   || 0);
+    const chartVac    = chartWeeks.map(wk => weeklyVacation[wk] || 0);
+    const chartHol    = chartWeeks.map(wk => weeklyHoliday[wk]  || 0);
+    const chartSick   = chartWeeks.map(wk => weeklySick[wk]     || 0);
 
     weeklyHoursChartHtml =
       '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'+
-          '<div style="font-size:13px;font-weight:700;color:var(--text)">📊 Weekly Hours</div>'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'+
+          '<div style="font-size:13px;font-weight:700;color:var(--text)">📊 Weekly Hours — Last 12 Months</div>'+
           '<div style="font-size:11px;color:var(--muted)">'+chartWeeks.length+' weeks</div>'+
         '</div>'+
-        '<div style="display:flex;align-items:flex-end;gap:2px;height:120px;overflow-x:auto;padding-bottom:4px">'+bars+'</div>'+
-        '<div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap">'+
-          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:#4caf7d;border-radius:2px"></div>Work</div>'+
-          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:var(--amber);border-radius:2px"></div>Vacation/Holiday</div>'+
-          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:var(--red);border-radius:2px"></div>Sick</div>'+
+        '<div style="position:relative;height:260px">'+
+          '<canvas id="'+weeklyChartId+'"></canvas>'+
         '</div>'+
       '</div>';
+
+    // Draw chart after HTML is injected
+    setTimeout(() => {
+      const canvas = document.getElementById(weeklyChartId);
+      if (!canvas || !window.Chart) return;
+      // Destroy existing instance if any
+      const existing = Chart.getChart(canvas);
+      if (existing) existing.destroy();
+      new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: chartLabels,
+          datasets: [
+            { label: 'Work',      data: chartWork, backgroundColor: '#4caf7dcc', borderRadius: 3, stack: 'a' },
+            { label: 'Vacation',  data: chartVac,  backgroundColor: '#c07a1acc', borderRadius: 3, stack: 'a' },
+            { label: 'Holiday',   data: chartHol,  backgroundColor: '#3a7fd4cc', borderRadius: 3, stack: 'a' },
+            { label: 'Sick',      data: chartSick, backgroundColor: '#d04040cc', borderRadius: 3, stack: 'a' },
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: {
+              position: 'bottom',
+              labels: { color: '#6b6b78', font: { size: 11 }, boxWidth: 12, padding: 16 }
+            },
+            tooltip: {
+              callbacks: {
+                footer: items => {
+                  const total = items.reduce((s, i) => s + i.raw, 0);
+                  return 'Total: ' + total.toFixed(1) + 'h';
+                }
+              }
+            }
+          },
+          scales: {
+            x: {
+              stacked: true,
+              ticks: { color: '#6b6b78', font: { size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 20 },
+              grid: { display: false }
+            },
+            y: {
+              stacked: true,
+              beginAtZero: true,
+              suggestedMax: 50,
+              ticks: { color: '#6b6b78', font: { size: 11 }, stepSize: 10 },
+              grid: { color: 'rgba(220,220,224,0.3)' }
+            }
+          }
+        }
+      });
+    }, 80);
   }
 
     pane.innerHTML = `
@@ -3925,8 +3988,12 @@ function showEmpProfile(empId) {
     <!-- Info cards row -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
       ${emp.email ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
-        <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Email</div>
+        <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Work Email</div>
         <div style="font-size:12px;color:var(--text)">${emp.email}</div>
+      </div>` : ''}
+      ${emp.personalEmail ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
+        <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Personal Email</div>
+        <div style="font-size:12px;color:var(--text)">${emp.personalEmail}</div>
       </div>` : ''}
       ${emp.phone ? `<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 14px">
         <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Phone</div>
@@ -3953,6 +4020,38 @@ function showEmpProfile(empId) {
             <div style="font-size:10px;color:var(--muted)">${vacAccrued.toFixed(0)} hrs accrued so far</div>
           </div>
           ${bar(used.vacation, vacAllotment, 'var(--blue)')}
+          ${(() => {
+            // Build vacation drill-down from weekly data
+            const vacEntries = [];
+            Object.keys(tsData).forEach(key => {
+              if (!key.startsWith('oh_' + empId + '|')) return;
+              const weekKey = key.split('|')[1];
+              if (!weekKey) return;
+              const weekDate = new Date(weekKey + 'T00:00:00');
+              if (weekDate.getFullYear() !== year && !(weekDate.getFullYear() === year-1 && weekDate.getMonth() === 11)) return;
+              const oh = tsData[key] || {};
+              const vacByDay = oh['Vacation Time'] || {};
+              Object.entries(vacByDay).forEach(([di, hrs]) => {
+                const h = parseFloat(hrs)||0;
+                if (h <= 0) return;
+                const d = new Date(weekDate);
+                d.setDate(weekDate.getDate() + parseInt(di));
+                if (d.getFullYear() !== year) return;
+                vacEntries.push({ date: d.toISOString().slice(0,10), hrs: h });
+              });
+            });
+            vacEntries.sort((a,b) => a.date.localeCompare(b.date));
+            if (vacEntries.length === 0) return '';
+            return '<div style="margin-top:8px;padding:8px 10px;background:var(--surface2);border-radius:6px;border:1px solid var(--border)">' +
+              '<div style="font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Vacation Days Used</div>' +
+              '<div style="display:flex;flex-wrap:wrap;gap:5px">' +
+              vacEntries.map(e =>
+                '<span style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(58,127,212,0.12);border:1px solid rgba(58,127,212,0.3);color:var(--blue)">' +
+                new Date(e.date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',weekday:'short'}) + ' — ' + e.hrs + 'h' +
+                '</span>'
+              ).join('') +
+              '</div></div>';
+          })()}
         </div>
         <!-- Sick -->
         <div>
@@ -4051,6 +4150,7 @@ function openEmployeeModal(id) {
   document.getElementById('empRole').value  = emp ? emp.role  : '';
   document.getElementById('empDept').value  = emp ? emp.dept  : '';
   document.getElementById('empEmail').value = emp ? emp.email : '';
+  if (document.getElementById('empPersonalEmail')) document.getElementById('empPersonalEmail').value = emp ? (emp.personalEmail || '') : '';
   document.getElementById('empPhone').value    = emp ? emp.phone    : '';
   document.getElementById('empHireDate').value = emp ? emp.hireDate : '';
   if (document.getElementById('empTermDate')) document.getElementById('empTermDate').value = emp ? (emp.terminationDate || '') : '';
@@ -4108,7 +4208,8 @@ async function saveEmployee() {
   const _name      = document.getElementById('empName').value.trim();
   const _role      = document.getElementById('empRole').value.trim();
   const _dept      = document.getElementById('empDept').value.trim();
-  const _email     = document.getElementById('empEmail').value.trim();
+  const _email         = document.getElementById('empEmail').value.trim();
+  const _personalEmail = document.getElementById('empPersonalEmail') ? document.getElementById('empPersonalEmail').value.trim() : '';
   const _phone     = document.getElementById('empPhone').value.trim();
   const _hireDate  = document.getElementById('empHireDate').value || '';
   const _sickBank  = parseFloat(document.getElementById('empSickBank') ? document.getElementById('empSickBank').value : 0) || 0;
@@ -4128,14 +4229,14 @@ async function saveEmployee() {
 
   const data = {
     name: _name, initials: getInitials(_name),
-    role: _role, dept: _dept, email: _email, phone: _phone,
+    role: _role, dept: _dept, email: _email, phone: _phone, personalEmail: _personalEmail,
     hireDate: _hireDate, sickBank: _sickBank, color: _color,
   };
 
   const dbPayload = {
     name: data.name, initials: data.initials,
     role: data.role, department: data.dept,
-    email: data.email, phone: data.phone,
+    email: data.email, phone: data.phone, personal_email: _personalEmail||null,
     color: data.color,
     hire_date: data.hireDate || null,
     sick_bank: data.sickBank,
@@ -5014,6 +5115,8 @@ function renderProjStickyHeader(projId) {
     (info.startDate||info.endDate ? '<span style="font-size:11px;color:var(--muted);font-family:\"JetBrains Mono\",monospace">'+fmtDate(info.startDate)+(info.startDate&&info.endDate?' → ':'')+fmtDate(info.endDate)+'</span>' : '')+
     (info.creditHold ? '<div class="credit-hold-checkbox-wrap active" onclick="toggleCreditHold(\''+projId+'\')"><span>⚠ CREDIT HOLD</span></div>' :
       '<div class="credit-hold-checkbox-wrap" onclick="toggleCreditHold(\''+projId+'\')"><span>Credit Hold</span></div>')+
+    (info.needUpdatedPo ? '<div class="need-po-checkbox-wrap active" onclick="toggleNeedUpdatedPo(\''+projId+'\')" ><span>⚠ Need Updated PO</span></div>' :
+      '<div class="need-po-checkbox-wrap" onclick="toggleNeedUpdatedPo(\''+projId+'\')" ><span>Need Updated PO</span></div>')+
     '<div style="margin-left:auto;display:flex;gap:6px;flex-shrink:0">'+
     
     '<button class="info-edit-btn" onclick="confirmDeleteProject(\x27'+projId+'\x27)" style="color:var(--red);border-color:rgba(208,64,64,0.3)">&#x1F5D1; Delete</button>'+
@@ -5022,6 +5125,9 @@ function renderProjStickyHeader(projId) {
   // Show/hide credit hold banner
   const banner = document.getElementById('creditHoldBanner');
   if (banner) banner.style.display = info.creditHold ? '' : 'none';
+  // Show/hide need PO banner
+  const poBanner = document.getElementById('needPoBanner');
+  if (poBanner) poBanner.style.display = info.needUpdatedPo ? '' : 'none';
   hdr.style.display = '';
 }
 
@@ -5377,6 +5483,17 @@ async function toggleCreditHold(projId) {
     await supabase.from('project_info')
       .upsert({ project_id: projId, credit_hold: newVal }, { onConflict: 'project_id' });
   } catch(e) { console.warn('Credit hold save error:', e); }
+}
+
+async function toggleNeedUpdatedPo(projId) {
+  if (!projectInfo[projId]) return;
+  const newVal = !projectInfo[projId].needUpdatedPo;
+  projectInfo[projId].needUpdatedPo = newVal;
+  renderProjStickyHeader(projId);
+  try {
+    if (sb) await sb.from('project_info')
+      .upsert({ project_id: projId, need_updated_po: newVal }, { onConflict: 'project_id' });
+  } catch(e) { console.warn('Need PO save error:', e); }
 }
 
 
@@ -6304,7 +6421,8 @@ function buildDataContext() {
         overdueTasks: tasks.filter(t=>t.overdue&&!t.done).length,
         expenses: expTotal,
         client: info.clientName || '',
-        creditHold: info.creditHold || false
+        creditHold: info.creditHold || false,
+        needUpdatedPo: info.needUpdatedPo || false
       };
     }),
     tasks: taskStore.map(t => ({
@@ -6648,6 +6766,7 @@ async function loadAllData() {
         dcas: r.dcas||'', customerWitness: r.customer_witness||'', tpApproval: r.tp_approval||'', dpas: r.dpas||'', noforn: r.noforn||'',
         testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'', quoteNumber: r.quote_number||'',
         creditHold: r.credit_hold||false,
+        needUpdatedPo: r.need_updated_po||false,
         testcompleteDate: r.testcomplete_date||'',
       };
     });
@@ -6691,7 +6810,7 @@ async function loadAllData() {
     employees = empRows.map(r => ({
       id: r.id, name: r.name, initials: r.initials||getInitials(r.name),
       role: r.role||'', dept: r.department||'',
-      email: r.email||'', phone: r.phone||'', color: r.color||'#5b9cf6',
+      email: r.email||'', personalEmail: r.personal_email||'', phone: r.phone||'', color: r.color||'#5b9cf6',
       isApprover: r.is_approver||false, isPaperTs: r.is_paper_ts||false, approverId: r.approver_id||null,
       hireDate: r.hire_date||'',
       permissionLevel: r.permission_level||'employee',
