@@ -6841,11 +6841,12 @@ window.saveTask = async function(another=false) {
 
   const dueLabel = due ? new Date(due+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
   // 'due' field is now Completed Date
+  const _revType = document.getElementById('taskRevenueType') ? document.getElementById('taskRevenueType').value : 'fixed';
   taskStore.push({
     _id: saved.id, taskNum: _nextNum, name: title, assign, assignId, due: dueLabel, due_raw: '', completedDate: due, salesCat, fixedPrice,
     overdue: due ? new Date(due+'T00:00:00') < new Date() && status!=='done' : false,
     done: status==='done', proj: projId, status, priority: tPri, section:'sprint',
-    createdAt: today,
+    createdAt: today, revenueType: _revType,
   });
 
   closeTaskModal();
