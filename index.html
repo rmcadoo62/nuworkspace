@@ -3394,7 +3394,7 @@ function renderInfoTasks(projId, filter) {
       return `
         <div class="itt-row" data-task-id="${t._id}" style="animation:fadeUp 0.2s ease ${i*0.03}s both">
           <div class="itt-check ${t.done?'done':''}" onclick="toggleInfoTask(${taskStore.indexOf(t)}, '${projId}');event.stopPropagation()" title="Mark task complete">${t.done?'&#x2713;':''}</div>
-          <div class="itt-name ${t.done?'done':''} itt-cell-edit" onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()" title="Click to edit">${t.name}</div>
+          <div class="itt-name ${t.done?'done':''} itt-cell-edit" onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()" title="Click to edit">${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;letter-spacing:0.6px;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red);vertical-align:middle;flex-shrink:0">NC</span>':''}</div>
           <div onclick="event.stopPropagation()">
             <select class="status-pill-select" style="color:${statusColor(t.status||'new')};background:${statusColor(t.status||'new')}18;border-color:${statusColor(t.status||'new')}55"
               onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color=statusColor(this.value);this.style.background=statusColor(this.value)+'18';this.style.borderColor=statusColor(this.value)+'55'">
@@ -7604,13 +7604,13 @@ function renderTasksPanel(projId) {
     const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : loggedH > 0 ? 'var(--blue)' : 'var(--muted)';
 
     return `
-      <div class="itt-row" data-task-id="${t._id}" style="animation:fadeUp 0.15s ease ${i*0.02}s both;${t.status==='billed'?'background:rgba(192,132,252,0.08);border-color:rgba(192,132,252,0.2);':''}">
+      <div class="itt-row" data-task-id="${t._id}" style="animation:fadeUp 0.15s ease ${i*0.02}s both;${t.status==='billed'?'background:rgba(192,132,252,0.08);border-color:rgba(192,132,252,0.2);':t.status==='complete'||t.done?'background:rgba(120,120,130,0.10);border-color:rgba(120,120,130,0.18);':''}">
         <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);padding-left:2px">${t.taskNum||''}</div>
-        <div class="itt-check ${t.done?'done':''}" onclick="tpToggleDone('${t._id}','${projId}');event.stopPropagation()" title="Mark task complete">${t.done?'&#x2713;':''}</div>
+        <div class="itt-check" onclick="tpToggleDone('${t._id}','${projId}');event.stopPropagation()" title="Mark complete"></div>
         <div onclick="event.stopPropagation()">
           <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%">${salesOpts}</select>
         </div>
-        <div class="itt-name ${t.done?'done':''} itt-cell-edit" onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()" title="Click to edit">${t.name}</div>
+        <div class="itt-name ${t.done?'done':''} itt-cell-edit" onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()" title="Click to edit">${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;letter-spacing:0.6px;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red);vertical-align:middle;flex-shrink:0">NC</span>':''}</div>
         <div onclick="event.stopPropagation()">
           <select class="status-pill-select" style="color:${statusColor(t.status||'new')};background:${statusColor(t.status||'new')}18;border-color:${statusColor(t.status||'new')}55"
             onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color=statusColor(this.value);this.style.background=statusColor(this.value)+'18';this.style.borderColor=statusColor(this.value)+'55'">${statusOpts}</select>
