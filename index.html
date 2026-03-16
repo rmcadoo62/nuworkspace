@@ -1540,6 +1540,13 @@ tr:hover .ts-del-row{color:var(--muted);}
           <select class="f-select" id="etSalesCat"><option value="">— select —</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="33">33</option><option value="41">41</option><option value="42">42</option><option value="43">43</option><option value="44">44</option><option value="51">51</option><option value="52">52</option><option value="53">53</option><option value="54">54</option><option value="55">55</option><option value="56">56</option><option value="57">57</option><option value="58">58</option><option value="59">59</option><option value="67">67</option><option value="91">91</option><option value="92">92</option><option value="93">93</option><option value="94">94</option><option value="95">95</option><option value="96">96</option><option value="98">98</option><option value="99">99</option></select>
         </div>
         <div class="field">
+          <label class="field-label">Revenue Type</label>
+          <select class="f-input" id="etRevenueType" style="cursor:pointer" onchange="toggleFixedPriceField(this.value)">
+            <option value="fixed">Fixed Price</option>
+            <option value="nocharge">No Charge</option>
+          </select>
+        </div>
+        <div class="field" id="etFixedPriceField">
           <label class="field-label">Fixed Price ($)</label>
           <input class="f-input" id="etFixedPrice" type="number" min="0" step="0.01" placeholder="0.00" style="font-family:'JetBrains Mono',monospace" />
         </div>
@@ -3589,25 +3596,27 @@ function getQuarterlyAccrual(hireDateStr) {
 
 function getTimeOffUsed(empId, year) {
   const used = { vacation: 0, sick: 0, holiday: 0, holidayDays: [] };
-  // Include weeks from prior year too (week of Dec 29 spans into Jan)
-  const allKeys = Object.keys(tsData).filter(k => k.startsWith(empId + '|'));
-  allKeys.forEach(key => {
-    const weekKey = key.split('|')[1];
+  // Collect all unique week keys for this employee from both project and overhead keys
+  const allWeekKeys = new Set();
+  Object.keys(tsData).forEach(k => {
+    if (k.startsWith(empId + '|') && !k.startsWith('oh_')) allWeekKeys.add(k.split('|')[1]);
+    if (k.startsWith('oh_' + empId + '|')) allWeekKeys.add(k.split('|')[1]);
+  });
+  allWeekKeys.forEach(weekKey => {
     if (!weekKey) return;
     const weekDate = new Date(weekKey + 'T00:00:00');
-    // Include if week starts in target year or prior year Dec
     const weekYear = weekDate.getFullYear();
     if (weekYear !== year && !(weekYear === year - 1 && weekDate.getMonth() === 11)) return;
-    const ohKey = 'oh_' + key;
+    const ohKey = 'oh_' + empId + '|' + weekKey;
     const oh = tsData[ohKey] || {};
     // Vacation
     const vacHrs = Object.values(oh['Vacation Time'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
     used.vacation += vacHrs;
     // Sick
-    const sickHrs = Object.values(oh['Sick Time'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
+    const sickHrs = Object.values(oh['Sick'] || {}).reduce((s,h)=>s+(parseFloat(h)||0),0);
     used.sick += sickHrs;
     // Holiday / Snow Day - track per day
-    const holByDay = oh['Holiday / Snow Day'] || {};
+    const holByDay = oh['Holiday'] || {};
     Object.entries(holByDay).forEach(([di, hrs]) => {
       const h = parseFloat(hrs) || 0;
       if (h <= 0) return;
@@ -3626,13 +3635,22 @@ function getTimeOffUsed(empId, year) {
 
 // ── Employee panel ───────────────────────────────────────────────────────────
 
+let showInactiveEmployees = false;
+
+function toggleInactiveEmployees() {
+  showInactiveEmployees = !showInactiveEmployees;
+  renderEmployeesPanel(document.getElementById('empSearch')?.value || '');
+}
+
 function renderEmployeesPanel(search) {
   const q = (search || '').toLowerCase();
-  const filtered = employees.filter(e =>
-    e.name.toLowerCase().includes(q) ||
-    e.role.toLowerCase().includes(q) ||
-    e.dept.toLowerCase().includes(q)
-  );
+  const filtered = employees.filter(e => {
+    if (!showInactiveEmployees && e.isActive === false) return false;
+    return e.name.toLowerCase().includes(q) ||
+      e.role.toLowerCase().includes(q) ||
+      e.dept.toLowerCase().includes(q);
+  });
+  const inactiveCount = employees.filter(e => e.isActive === false).length;
   const body = document.getElementById('empPanelBody');
   body.innerHTML = `
     <div style="display:flex;height:100%;gap:0;overflow:hidden">
@@ -3643,6 +3661,11 @@ function renderEmployeesPanel(search) {
             placeholder="Search…" value="${q}" oninput="renderEmployeesPanel(this.value)" />
           <button onclick="openEmployeeModal(null)" style="background:var(--amber);border:none;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;color:#000;cursor:pointer;white-space:nowrap">+ Add</button>
         </div>
+        ${inactiveCount > 0 ? `<div style="padding:6px 14px;border-bottom:1px solid var(--border)">
+          <button onclick="toggleInactiveEmployees()" style="width:100%;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--muted);cursor:pointer;text-align:left">
+            ${showInactiveEmployees ? '👁 Hide' : '👁 Show'} ${inactiveCount} inactive employee${inactiveCount!==1?'s':''}
+          </button>
+        </div>` : ''}
         <div>
           ${filtered.map(e => `
             <div onclick="showEmpProfile('${e.id}')" id="emplistrow-${e.id}"
@@ -3685,9 +3708,31 @@ function showEmpProfile(empId) {
   const used = getTimeOffUsed(empId, year);
   const vacAllotment = getVacationAllotment(emp.hireDate);
   const vacAccrued = getQuarterlyAccrual(emp.hireDate);
-  // Sick accrual: 24 hrs Jan 1, another 24 hrs May 1
+  // Sick accrual: 24hrs on first May 1 in hire year, 24hrs on first Jan 1 in hire year
+  // Sick: 24hrs drops May 1 of hire year, then Jan 1 + May 1 every year
+  // Once past 2nd drop (Jan 1 after first May 1), always 48/yr
   const today = new Date();
-  const sickAllotment = (today >= new Date(year, 4, 1)) ? 48 : 24;
+  let sickAllotment = 0;
+  if (emp.hireDate) {
+    const hire = new Date(emp.hireDate + 'T00:00:00');
+    // Find most recent hire anniversary on or before today
+    let ann = new Date(hire); ann.setFullYear(today.getFullYear());
+    if (ann > today) ann.setFullYear(today.getFullYear() - 1);
+    const hireYearStart = ann;
+    const hireYearEnd = new Date(ann); hireYearEnd.setFullYear(ann.getFullYear() + 1);
+    // Count Jan 1 and May 1 drops within hire year window that have already passed
+    for (let y = hireYearStart.getFullYear(); y <= hireYearEnd.getFullYear(); y++) {
+      for (const mo of [0, 4]) {
+        const drop = new Date(y, mo, 1);
+        if (drop > hireYearStart && drop <= hireYearEnd && drop <= today) {
+          sickAllotment += 24;
+        }
+      }
+    }
+  } else {
+    if (today >= new Date(year, 0, 1)) sickAllotment += 24;
+    if (today >= new Date(year, 4, 1)) sickAllotment += 24;
+  }
   const holidays = getHolidays(year);
   const approver = employees.find(e => e.id === emp.approverId);
 
@@ -3738,13 +3783,16 @@ function showEmpProfile(empId) {
     </tr>`;
   }).join('');
 
-  // Build weekly hours data for bar chart (52 weeks from anniversary or year start)
-  const weeklyHours = {};
-  // Rolling 52-week window ending today
+  // Build weekly hours data for bar chart
+  const weeklyHours = {};      // weekKey -> total hours
+  const weeklySick = {};       // weekKey -> sick hours
+  const weeklyVacation = {};   // weekKey -> vacation/holiday/personal hours
   const chartStart = new Date();
   chartStart.setDate(chartStart.getDate() - 364);
 
-  // Collect all unique week keys for this employee (from both project rows and overhead)
+  const SICK_CATS = ['Sick'];
+  const VAC_CATS  = ['Vacation Time', 'Holiday', 'Personal Time'];
+
   const empWeekKeys = new Set();
   Object.keys(tsData).forEach(key => {
     if (key.startsWith(empId + '|') && !key.startsWith('oh_')) empWeekKeys.add(key.split('|')[1]);
@@ -3757,124 +3805,85 @@ function showEmpProfile(empId) {
     if (!weekKey || weekKey.length < 10) return;
     const weekDate = new Date(weekKey + 'T00:00:00');
     if (weekDate < chartStart) return;
-    let hrs = 0;
-    rows.forEach(r => { if (r && r.hours) hrs += Object.values(r.hours).reduce((s,h)=>s+(parseFloat(h)||0),0); });
+    let projHrs = 0, sickHrs = 0, vacHrs = 0;
+    rows.forEach(r => { if (r && r.hours) projHrs += Object.values(r.hours).reduce((s,h)=>s+(parseFloat(h)||0),0); });
     const ohKey = 'oh_' + key;
     const oh = tsData[ohKey] || {};
-    Object.values(oh).forEach(dayMap => { if (dayMap) hrs += Object.values(dayMap).reduce((s,h)=>s+(parseFloat(h)||0),0); });
-    if (hrs > 0) weeklyHours[weekKey] = (weeklyHours[weekKey]||0) + hrs;
+    Object.entries(oh).forEach(([cat, dayMap]) => {
+      if (!dayMap) return;
+      const catHrs = Object.values(dayMap).reduce((s,h)=>s+(parseFloat(h)||0),0);
+      if (SICK_CATS.includes(cat)) sickHrs += catHrs;
+      else if (VAC_CATS.includes(cat)) vacHrs += catHrs;
+      else projHrs += catHrs; // General Overhead etc counts as work
+    });
+    const total = projHrs + sickHrs + vacHrs;
+    if (total > 0) {
+      weeklyHours[weekKey] = projHrs;
+      weeklySick[weekKey] = sickHrs;
+      weeklyVacation[weekKey] = vacHrs;
+    }
   });
 
-  const chartWeeks = Object.keys(weeklyHours).sort();
-  const maxHrs = Math.max(40, ...Object.values(weeklyHours));
+  const chartWeeks = Object.keys(weeklyHours).concat(
+    Object.keys(weeklySick).filter(k => !weeklyHours[k]),
+    Object.keys(weeklyVacation).filter(k => !weeklyHours[k] && !weeklySick[k])
+  ).filter((v,i,a)=>a.indexOf(v)===i).sort();
 
-  
-  // Build weekly hours bar chart HTML
+  const maxHrs = Math.max(40, ...chartWeeks.map(wk => (weeklyHours[wk]||0)+(weeklySick[wk]||0)+(weeklyVacation[wk]||0)));
+
+  // Build chart HTML
   let weeklyHoursChartHtml = '';
-  if (!emp.isOwner && emp.empType !== 'parttime' && chartWeeks.length > 0) {
+  if (chartWeeks.length > 0) {
+    // Get week number helper
+    function getWeekNum(dateStr) {
+      const d = new Date(dateStr + 'T00:00:00');
+      d.setHours(0,0,0,0);
+      d.setDate(d.getDate() + 3 - (d.getDay()+6)%7);
+      const w1 = new Date(d.getFullYear(),0,4);
+      return 1 + Math.round(((d.getTime()-w1.getTime())/86400000 - 3 + (w1.getDay()+6)%7)/7);
+    }
+
     const bars = chartWeeks.map(wk => {
-      const hrs = weeklyHours[wk];
-      const pct = Math.min(100, (hrs / maxHrs) * 100);
-      const color = hrs >= 40 ? '#4caf7d' : hrs >= 32 ? 'var(--amber)' : 'var(--red)';
+      const proj = weeklyHours[wk] || 0;
+      const sick = weeklySick[wk] || 0;
+      const vac  = weeklyVacation[wk] || 0;
+      const total = proj + sick + vac;
+      const totalPct = Math.min(100, (total / maxHrs) * 100);
+      const projPct  = total > 0 ? (proj/total)*100 : 0;
+      const sickPct  = total > 0 ? (sick/total)*100 : 0;
+      const vacPct   = total > 0 ? (vac/total)*100 : 0;
+      const wkNum = getWeekNum(wk);
       const label = new Date(wk+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'});
-      return '<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:20px" title="'+label+': '+hrs.toFixed(1)+'h">'+
-        '<div style="font-size:8px;color:var(--muted);">'+hrs.toFixed(0)+'</div>'+
-        '<div style="width:14px;background:'+color+';border-radius:3px 3px 0 0;height:'+pct+'%;min-height:2px"></div>'+
+      const tooltip = label+': '+total.toFixed(1)+'h total'+(proj>0?' ('+proj.toFixed(1)+'h work)':'')+(sick>0?' ('+sick.toFixed(1)+'h sick)':'')+(vac>0?' ('+vac.toFixed(1)+'h vac/hol)':'');
+
+      // Stacked bar segments from bottom up: work (green), vac (amber), sick (red)
+      let bar = '<div style="width:16px;height:'+totalPct+'%;min-height:3px;display:flex;flex-direction:column-reverse;border-radius:3px 3px 0 0;overflow:hidden">';
+      if (proj > 0)  bar += '<div style="flex:'+(projPct)+';background:#4caf7d;min-height:1px"></div>';
+      if (vac > 0)   bar += '<div style="flex:'+(vacPct)+';background:var(--amber);min-height:1px"></div>';
+      if (sick > 0)  bar += '<div style="flex:'+(sickPct)+';background:var(--red);min-height:1px"></div>';
+      bar += '</div>';
+
+      return '<div style="display:flex;flex-direction:column;align-items:center;gap:2px;flex-shrink:0;width:22px" title="'+tooltip+'">'+
+        '<div style="font-size:8px;color:var(--muted);line-height:1">'+total.toFixed(0)+'</div>'+
+        bar+
+        '<div style="font-size:7px;color:var(--muted);line-height:1">W'+wkNum+'</div>'+
       '</div>';
     }).join('');
+
     weeklyHoursChartHtml =
       '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'+
           '<div style="font-size:13px;font-weight:700;color:var(--text)">📊 Weekly Hours</div>'+
-          '<div style="font-size:11px;color:var(--muted)">'+chartWeeks.length+' weeks logged</div>'+
+          '<div style="font-size:11px;color:var(--muted)">'+chartWeeks.length+' weeks</div>'+
         '</div>'+
-        '<div style="display:flex;align-items:flex-end;gap:3px;height:80px;overflow-x:auto;padding-bottom:4px">'+bars+'</div>'+
-        '<div style="display:flex;gap:12px;margin-top:8px">'+
-          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:#4caf7d;border-radius:2px"></div>40h+</div>'+
-          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:var(--amber);border-radius:2px"></div>32–39h</div>'+
-          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:var(--red);border-radius:2px"></div>&lt;32h</div>'+
+        '<div style="display:flex;align-items:flex-end;gap:2px;height:120px;overflow-x:auto;padding-bottom:4px">'+bars+'</div>'+
+        '<div style="display:flex;gap:14px;margin-top:10px;flex-wrap:wrap">'+
+          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:#4caf7d;border-radius:2px"></div>Work</div>'+
+          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:var(--amber);border-radius:2px"></div>Vacation/Holiday</div>'+
+          '<div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--muted)"><div style="width:10px;height:10px;background:var(--red);border-radius:2px"></div>Sick</div>'+
         '</div>'+
       '</div>';
   }
-
-    const timeOffSection = (emp.isOwner || emp.empType === 'parttime') ? '' : `    <!-- Time off section -->
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
-      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">🏖 Time Off — ${year}</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-        <!-- Vacation -->
-        <div>
-          <div style="display:flex;justify-content:space-between;align-items:baseline">
-            <div style="font-size:12px;font-weight:600;color:var(--text)">Vacation</div>
-            <div style="font-size:10px;color:var(--muted)">${vacAccrued.toFixed(0)} hrs accrued so far</div>
-          </div>
-          ${bar(used.vacation, vacAllotment, 'var(--blue)')}
-        </div>
-        <!-- Sick -->
-        <div>
-          <div style="display:flex;justify-content:space-between;align-items:baseline">
-            <div style="font-size:12px;font-weight:600;color:var(--text)">Sick</div>
-            ${emp.sickBank > 0 ? `<div style="font-size:10px;color:var(--amber)">${emp.sickBank} hrs banked</div>` : ''}
-          </div>
-          ${bar(used.sick, sickAllotment, 'var(--amber)')}
-          ${emp.sickBank > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:4px">Total available: <span style="color:var(--amber);font-weight:600">${Math.max(0, sickAllotment - used.sick + emp.sickBank).toFixed(1)} hrs</span></div>` : ''}
-        </div>
-      </div>
-      <!-- Holiday -->
-      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
-          <div style="font-size:12px;font-weight:600;color:var(--text)">Holidays</div>
-          <div style="font-size:11px;color:var(--muted)">${used.holiday.toFixed(1)} hrs logged</div>
-        </div>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
-          ${holidays.filter(h=>h.date.startsWith(String(year))).map(h => {
-            const taken = (used.holidayDays||[]).find(d => d.date === h.date);
-            return taken
-              ? `<span title="${taken.hrs}hrs logged" style="font-size:10px;padding:3px 8px;border-radius:8px;background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);color:#4caf7d">✓ ${h.name}</span>`
-              : `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)">${h.name}</span>`;
-          }).join('')}
-        </div>
-        ${(() => {
-          const knownDates = new Set(holidays.map(h => h.date));
-          const extraDays = (used.holidayDays||[]).filter(d => !knownDates.has(d.date));
-          if (extraDays.length === 0) return '';
-          return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
-            <div style="font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--amber);margin-bottom:6px">Extra Paid Days</div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px">
-              ${extraDays.map(d =>
-                `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:rgba(232,162,52,0.12);border:1px solid rgba(232,162,52,0.35);color:#e8a234">
-                  ${new Date(d.date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'})} — ${d.hrs}hrs
-                </span>`
-              ).join('')}
-            </div>
-          </div>`;
-        })()}
-      </div>
-    </div>
-
-    <!-- Weekly hours bar chart -->
-    ${weeklyHoursChartHtml}
-
-    <!-- Timesheet history -->
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <div style="font-size:13px;font-weight:700;color:var(--text)">📅 Timesheet History</div>
-        <div style="font-size:11px;color:var(--muted)">Last 10 weeks</div>
-      </div>
-      ${weeks.length === 0
-        ? `<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px">No timesheets submitted yet.</div>`
-        : `<table style="width:100%;border-collapse:collapse">
-            <thead><tr style="border-bottom:1px solid var(--border)">
-              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Week Of</th>
-              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>
-              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Hours</th>
-              <th style="text-align:left;padding:6px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Notes</th>
-              <th></th>
-            </tr></thead>
-            <tbody>${tsRows}</tbody>
-          </table>`}
-    </div>
-  `;
-
 
     pane.innerHTML = `
     <!-- Header -->
@@ -4024,6 +4033,8 @@ function openEmployeeModal(id) {
   document.getElementById('empEmail').value = emp ? emp.email : '';
   document.getElementById('empPhone').value    = emp ? emp.phone    : '';
   document.getElementById('empHireDate').value = emp ? emp.hireDate : '';
+  if (document.getElementById('empType')) document.getElementById('empType').value = emp ? (emp.empType || 'fulltime') : 'fulltime';
+  if (document.getElementById('empActive')) document.getElementById('empActive').value = emp ? (emp.isActive !== false ? 'true' : 'false') : 'true';
   if (document.getElementById('empSickBank')) document.getElementById('empSickBank').value = emp ? (emp.sickBank || 0) : 0;
 
   buildEmpColorSwatches();
@@ -4082,6 +4093,7 @@ async function saveEmployee() {
   const _sickBank  = parseFloat(document.getElementById('empSickBank') ? document.getElementById('empSickBank').value : 0) || 0;
   const _permLevel = document.getElementById('empPermLevel').value || 'employee';
   const _empType   = document.getElementById('empType') ? document.getElementById('empType').value : 'fulltime';
+  const _isActive  = document.getElementById('empActive') ? document.getElementById('empActive').value !== 'false' : true;
   const _color     = empColor;
   const _editingId = editingEmpId; // only use explicitly set editingEmpId, never fall back
 
@@ -4107,6 +4119,7 @@ async function saveEmployee() {
     sick_bank: data.sickBank,
     permission_level: _permLevel,
     employment_type: _empType,
+    is_active: _isActive,
     approver_id: document.getElementById('empApprover') ? (document.getElementById('empApprover').value || null) : null,
     is_approver: document.getElementById('empIsApprover') ? document.getElementById('empIsApprover').checked : false,
     is_paper_ts: document.getElementById('empIsPaperTs') ? document.getElementById('empIsPaperTs').checked : false,
@@ -5625,7 +5638,7 @@ function renderBillingQueue() {
 
   // Complete tasks from non-closed projects only
   const closedProjIds = new Set(projects.filter(p => (projectInfo[p.id]||{}).status === 'closed').map(p => p.id));
-  const tasks = taskStore.filter(t => t.status === 'complete' && !closedProjIds.has(t.proj)).map(t => {
+  const tasks = taskStore.filter(t => t.status === 'complete' && !closedProjIds.has(t.proj) && t.revenueType !== 'nocharge').map(t => {
     const proj = projects.find(p => p.id === t.proj) || {};
     const info = projectInfo[t.proj] || {};
     const emp  = employees.find(e => e.initials === t.assign) || {};
@@ -5644,6 +5657,7 @@ function renderBillingQueue() {
           <div style="font-size:12px;color:var(--muted);margin-top:2px">All completed tasks ready to be billed — select and mark billed in bulk</div>
         </div>
         <button class="btn btn-ghost" style="font-size:12px" onclick="renderBillingQueue()">&#x21BB; Refresh</button>
+        <button class="btn btn-ghost" style="font-size:12px;color:var(--red)" onclick="bulkMarkNoCharge()">🚫 Remove No Charge</button>
       </div>
 
       <div class="bq-summary">
@@ -5740,6 +5754,25 @@ function renderBillingQueue() {
 function bqToggleRow(taskId) {
   if (bqSelected.has(taskId)) bqSelected.delete(taskId);
   else bqSelected.add(taskId);
+  renderBillingQueue();
+}
+
+async function bulkMarkNoCharge() {
+  const noCh = taskStore.filter(t =>
+    t.status === 'complete' && t.revenueType !== 'nocharge' &&
+    (t.name.toLowerCase().includes('no charge') || t.name.toLowerCase().includes('(no charge)') ||
+     t.name.toLowerCase().includes('no-charge') || t.name.toLowerCase().includes('rev') && t.name.toLowerCase().includes('no charge'))
+  );
+  if (!noCh.length) { toast('No "No Charge" tasks found in billing queue'); return; }
+  if (!confirm('Mark ' + noCh.length + ' tasks as No Charge and remove from billing queue?')) return;
+  let done = 0;
+  for (const t of noCh) {
+    if (sb) await sb.from('tasks').update({ revenue_type: 'nocharge' }).eq('id', t._id);
+    const i = taskStore.findIndex(x => x._id === t._id);
+    if (i > -1) taskStore[i].revenueType = 'nocharge';
+    done++;
+  }
+  toast('✓ ' + done + ' tasks marked as No Charge');
   renderBillingQueue();
 }
 
@@ -6620,6 +6653,7 @@ async function loadAllData() {
       empType: r.employment_type||'fulltime',
       sickBank: parseFloat(r.sick_bank)||0,
       isOwner: !!r.is_owner,
+      isActive: r.is_active !== false,
     }));
 
     // Clients & Contacts
@@ -7038,7 +7072,7 @@ function renderDashboard() {
   // Tally billed tasks — fall back to today if no date set
   const todayStr = new Date().toISOString().split('T')[0];
   billedTasks.forEach(t => {
-    const dateStr = t.completedDate || t.due_raw || todayStr;
+    const dateStr = t.billedDate || t.completedDate || todayStr;
     const d = new Date(dateStr + 'T00:00:00');
     const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
     if (monthMap[key]) monthMap[key].val += (t.fixedPrice || 0);
@@ -7217,7 +7251,7 @@ function renderDashboard() {
     for (let m = 0; m <= _todayMonth; m++) {
       const data = sortedCats.map(cat => {
         return billedTasks2.filter(t => {
-          const d = t.completedDate || t.due_raw;
+          const d = t.billedDate || t.completedDate;
           const month = d ? new Date(d+'T00:00:00').getMonth() : new Date().getMonth();
           return ((t.salesCat||'').trim()||'Uncategorized') === cat && month === m;
         }).reduce((s,t) => s + (t.fixedPrice||0), 0);
@@ -7446,12 +7480,13 @@ function renderSidebarTeam() {
   const container = document.getElementById('sidebarTeam');
   const label = document.getElementById('teamLabel');
   if (!container) return;
-  if (label) label.textContent = 'Team · ' + employees.length + ' member' + (employees.length !== 1 ? 's' : '');
-  if (employees.length === 0) {
+  const activeEmps = employees.filter(e => e.isActive !== false);
+  if (label) label.textContent = 'Team · ' + activeEmps.length + ' member' + (activeEmps.length !== 1 ? 's' : '');
+  if (activeEmps.length === 0) {
     container.innerHTML = '<div style="padding:6px 8px;font-size:11.5px;color:var(--muted)">No employees yet</div>';
     return;
   }
-  container.innerHTML = employees.map(e =>
+  container.innerHTML = activeEmps.map(e =>
     `<div class="avatar" style="background:${e.color};color:#fff" title="${e.name}" onclick="openEmployeesPanel(null)">${e.initials}</div>`
   ).join('');
 }
@@ -8560,6 +8595,10 @@ function openEditTaskModal(taskId) {
   document.getElementById('etDue').value = t.completedDate || t.due_raw || '';
   document.getElementById('etSalesCat').value = t.salesCat || '';
   document.getElementById('etFixedPrice').value = t.fixedPrice || '';
+  if (document.getElementById('etRevenueType')) {
+    document.getElementById('etRevenueType').value = t.revenueType || 'fixed';
+    toggleFixedPriceField(t.revenueType || 'fixed');
+  }
   document.getElementById('etTitleCnt').textContent = (t.name||'').length;
   document.getElementById('etDescCnt').textContent = (t.desc||'').length;
 
@@ -8629,6 +8668,7 @@ async function saveEditTask() {
   const status     = document.getElementById('etStatus').value;
   const salesCat   = document.getElementById('etSalesCat').value;
   const fixedPrice = parseFloat(document.getElementById('etFixedPrice').value) || 0;
+  const revenueType = document.getElementById('etRevenueType') ? document.getElementById('etRevenueType').value : 'fixed';
   const assignId   = [...etAssign][0] || '';
   const assignEmp  = employees.find(e => e.id === assignId) || employees.find(e => e.initials === assignId);
   const assign     = assignEmp ? assignEmp.initials : assignId;
@@ -9609,6 +9649,7 @@ async function loadClosedProjects(el) {
             salesCategory: r.sales_category||'', quoteNum: r.quote_number||'',
             poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
             done: r.done||false, priority: r.priority||'medium',
+      revenueType: r.revenue_type||'fixed',
           });
         });
         if (data.length < 1000) break;
