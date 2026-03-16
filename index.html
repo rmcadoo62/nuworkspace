@@ -8732,6 +8732,7 @@ async function saveEditTask() {
     completed_date: completedDate||null, due_date: null, status, priority: etPri,
     sales_category: salesCat||null,
     fixed_price: fixedPrice||null,
+    revenue_type: revenueType,
     done: status === 'complete',
   };
 
@@ -8746,7 +8747,7 @@ async function saveEditTask() {
     taskStore[idx] = {
       ...taskStore[idx],
       name: title, desc, assign, due: dueLabel, due_raw: '', completedDate: completedDate||'',
-      status, priority: etPri, salesCat, fixedPrice,
+      status, priority: etPri, salesCat, fixedPrice, revenueType,
       done: status === 'complete', overdue: isOverdue,
     };
   }
