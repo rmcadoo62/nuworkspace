@@ -992,8 +992,6 @@ tr:hover .ts-del-row{color:var(--muted);}
       </div>
     </div>
     <div class="topbar-actions">
-      <button class="btn btn-ghost">Filter</button>
-      <button class="btn btn-ghost">Sort</button>
       <button class="btn btn-primary" id="addProjBtn1" onclick="openProjectModal()" style="display:none">+ New Project</button>
       <button class="settings-btn" onclick="resetConfig()" title="Reset Supabase connection">⚙</button>
     </div>
@@ -1457,6 +1455,10 @@ tr:hover .ts-del-row{color:var(--muted);}
       <div class="field">
         <label class="field-label">Hire Date</label>
         <input class="f-input" id="empHireDate" type="date" />
+      </div>
+      <div class="field">
+        <label class="field-label">Termination Date <span style="font-size:10px;color:var(--muted);font-weight:400">(sets employee as inactive)</span></label>
+        <input class="f-input" id="empTermDate" type="date" />
       </div>
       <div class="field">
         <label class="field-label">Permission Level</label>
@@ -3409,8 +3411,8 @@ function renderInfoTasks(projId, filter) {
           <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" title="Click to edit price" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--green);cursor:text">
             ${t.fixedPrice ? '$' + t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
           </div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${getHoursForTask(t.name) > 0 ? 'var(--blue)' : 'var(--muted)'}">
-            ${getHoursForTask(t.name) > 0 ? getHoursForTask(t.name).toFixed(1) + 'h' : '—'}
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${getHoursForTask(t.name,t.proj) > 0 ? 'var(--blue)' : 'var(--muted)'}">
+            ${getHoursForTask(t.name,t.proj) > 0 ? getHoursForTask(t.name,t.proj).toFixed(1) + 'h' : '—'}
           </div>
           <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px">
             <div class="itt-av" style="background:${empM.color}">${t.assign||'?'}</div>
@@ -3655,12 +3657,17 @@ function toggleInactiveEmployees() {
 function renderEmployeesPanel(search) {
   const q = (search || '').toLowerCase();
   const filtered = employees.filter(e => {
-    if (!showInactiveEmployees && e.isActive === false) return false;
+    const _empInactive = e.isActive === false || !!e.terminationDate;
+    if (!showInactiveEmployees && _empInactive) return false;
     return e.name.toLowerCase().includes(q) ||
       e.role.toLowerCase().includes(q) ||
       e.dept.toLowerCase().includes(q);
+  }).sort((a, b) => {
+    const lastA = a.name.trim().split(' ').slice(-1)[0].toLowerCase();
+    const lastB = b.name.trim().split(' ').slice(-1)[0].toLowerCase();
+    return lastA.localeCompare(lastB);
   });
-  const inactiveCount = employees.filter(e => e.isActive === false).length;
+  const inactiveCount = employees.filter(e => e.isActive === false || !!e.terminationDate).length;
   const body = document.getElementById('empPanelBody');
   body.innerHTML = `
     <div style="display:flex;height:100%;gap:0;overflow:hidden">
@@ -3677,16 +3684,19 @@ function renderEmployeesPanel(search) {
           </button>
         </div>` : ''}
         <div>
-          ${filtered.map(e => `
+          ${filtered.map(e => {
+            const isInactive = e.isActive === false || !!e.terminationDate;
+            const termLabel = e.terminationDate ? 'Terminated ' + new Date(e.terminationDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Inactive';
+            return `
             <div onclick="showEmpProfile('${e.id}')" id="emplistrow-${e.id}"
-              style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .12s;${empDetailOpen===e.id?'background:var(--surface2);border-left:3px solid var(--amber);':'border-left:3px solid transparent;'}"
+              style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .12s;opacity:${isInactive?'0.55':'1'};${empDetailOpen===e.id?'background:var(--surface2);border-left:3px solid var(--amber);':'border-left:3px solid transparent;'}"
               onmouseover="if('${e.id}'!==empDetailOpen)this.style.background='var(--surface2)'" onmouseout="if('${e.id}'!==empDetailOpen)this.style.background=''">
               <div style="width:34px;height:34px;border-radius:50%;background:${e.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${e.initials}</div>
               <div style="overflow:hidden">
                 <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.name}</div>
-                <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.role}${e.dept?' · '+e.dept:''}</div>
+                <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isInactive ? '<span style="color:var(--red);font-weight:600">'+termLabel+'</span>' : e.role+(e.dept?' · '+e.dept:'')}</div>
               </div>
-            </div>`).join('')}
+            </div>`;}).join('')}
         </div>
       </div>
       <!-- Right: profile -->
@@ -4043,6 +4053,7 @@ function openEmployeeModal(id) {
   document.getElementById('empEmail').value = emp ? emp.email : '';
   document.getElementById('empPhone').value    = emp ? emp.phone    : '';
   document.getElementById('empHireDate').value = emp ? emp.hireDate : '';
+  if (document.getElementById('empTermDate')) document.getElementById('empTermDate').value = emp ? (emp.terminationDate || '') : '';
   if (document.getElementById('empType')) document.getElementById('empType').value = emp ? (emp.empType || 'fulltime') : 'fulltime';
   if (document.getElementById('empActive')) document.getElementById('empActive').value = emp ? (emp.isActive !== false ? 'true' : 'false') : 'true';
   if (document.getElementById('empSickBank')) document.getElementById('empSickBank').value = emp ? (emp.sickBank || 0) : 0;
@@ -4103,7 +4114,8 @@ async function saveEmployee() {
   const _sickBank  = parseFloat(document.getElementById('empSickBank') ? document.getElementById('empSickBank').value : 0) || 0;
   const _permLevel = document.getElementById('empPermLevel').value || 'employee';
   const _empType   = document.getElementById('empType') ? document.getElementById('empType').value : 'fulltime';
-  const _isActive  = document.getElementById('empActive') ? document.getElementById('empActive').value !== 'false' : true;
+  const _termDate  = document.getElementById('empTermDate') ? document.getElementById('empTermDate').value : '';
+  const _isActive  = _termDate ? false : (document.getElementById('empActive') ? document.getElementById('empActive').value !== 'false' : true);
   const _color     = empColor;
   const _editingId = editingEmpId; // only use explicitly set editingEmpId, never fall back
 
@@ -4130,6 +4142,7 @@ async function saveEmployee() {
     permission_level: _permLevel,
     employment_type: _empType,
     is_active: _isActive,
+    termination_date: _termDate || null,
     approver_id: document.getElementById('empApprover') ? (document.getElementById('empApprover').value || null) : null,
     is_approver: document.getElementById('empIsApprover') ? document.getElementById('empIsApprover').checked : false,
     is_paper_ts: document.getElementById('empIsPaperTs') ? document.getElementById('empIsPaperTs').checked : false,
@@ -4138,7 +4151,7 @@ async function saveEmployee() {
   if (_editingId) {
     editingEmpId = _editingId;
     const idx = employees.findIndex(e => e.id === _editingId);
-    if (idx > -1) employees[idx] = {...employees[idx], ...data, permissionLevel: _permLevel};
+    if (idx > -1) employees[idx] = {...employees[idx], ...data, permissionLevel: _permLevel, terminationDate: _termDate, isActive: _isActive};
     if (sb) {
       const { error } = await sb.from('employees').update(dbPayload).eq('id', _editingId);
       if (error) { console.error('saveEmployee update error:', error); toast('⚠ Save error: ' + error.message); return; }
@@ -5776,6 +5789,30 @@ function bqToggleRow(taskId) {
   renderBillingQueue();
 }
 
+async function bulkNoChargeByProject(...namePatterns) {
+  const patterns = namePatterns.map(n => n.toLowerCase());
+  const matched = taskStore.filter(t => {
+    const proj = projects.find(p => p.id === t.proj);
+    if (!proj) return false;
+    return patterns.some(pat => proj.name.toLowerCase().includes(pat));
+  });
+  if (!matched.length) { alert('No tasks found for: ' + namePatterns.join(', ')); return; }
+  const already = matched.filter(t => t.revenueType === 'nocharge').length;
+  const toUpdate = matched.filter(t => t.revenueType !== 'nocharge');
+  if (!confirm(`Found ${matched.length} tasks across matched projects (${already} already No Charge).\nMark ${toUpdate.length} tasks as No Charge?`)) return;
+  let done = 0;
+  for (const t of toUpdate) {
+    if (sb) await sb.from('tasks').update({ revenue_type: 'nocharge' }).eq('id', t._id);
+    const i = taskStore.findIndex(x => x._id === t._id);
+    if (i > -1) taskStore[i].revenueType = 'nocharge';
+    done++;
+  }
+  alert('✓ ' + done + ' tasks marked as No Charge.');
+  renderAllViews();
+  if (activeProjectId) { renderTasksPanel(activeProjectId); renderInfoTasks(activeProjectId, currentTaskFilter); }
+}
+window.bulkNoChargeByProject = bulkNoChargeByProject;
+
 async function bulkMarkNoCharge() {
   const noCh = taskStore.filter(t =>
     t.status === 'complete' && t.revenueType !== 'nocharge' &&
@@ -6564,37 +6601,39 @@ window.addEventListener('resize', () => {
 async function loadAllData() {
   showAppLoader(true);
   try {
-    // Projects
-    // Load ALL projects with pagination
-    let projRows = [];
-    let projPage = 0;
-    while (true) {
-      const { data: projBatch } = await sb.from('projects')
-        .select('*')
-        .order('created_at', { ascending: true })
-        .range(projPage * 1000, projPage * 1000 + 999);
-      if (!projBatch || projBatch.length === 0) break;
-      projRows = projRows.concat(projBatch);
-      if (projBatch.length < 1000) break;
-      projPage++;
+    // Helper: paginate any table
+    async function fetchAllPages(table, selectCols, orderCol) {
+      let rows = [], page = 0;
+      while (true) {
+        let q = sb.from(table).select(selectCols).range(page * 1000, page * 1000 + 999);
+        if (orderCol) q = q.order(orderCol, { ascending: true });
+        const { data } = await q;
+        if (!data || data.length === 0) break;
+        rows = rows.concat(data);
+        if (data.length < 1000) break;
+        page++;
+      }
+      return rows;
     }
+
+    // Fire all fetches simultaneously
+    const [projRows, infoRows, taskRows, empRows, clientRows, contactRows, expRows, tsRows] = await Promise.all([
+      fetchAllPages('projects',          '*', 'created_at'),
+      fetchAllPages('project_info',      '*', null),
+      fetchAllPages('tasks',             '*', null),
+      dbFetch('employees'),
+      dbFetch('clients'),
+      dbFetch('contacts'),
+      fetchAllPages('expenses',          '*', null),
+      dbFetch('timesheet_entries'),
+    ]);
+
+    // Projects
     projects = projRows.map(r => ({
       id: r.id, name: r.name, color: r.color, emoji: r.emoji, desc: r.description || '', description: r.description || ''
     }));
 
     // Project info
-    // Load ALL project_info with pagination
-    let infoRows = [];
-    let infoPage = 0;
-    while (true) {
-      const { data: infoBatch } = await sb.from('project_info')
-        .select('*')
-        .range(infoPage * 1000, infoPage * 1000 + 999);
-      if (!infoBatch || infoBatch.length === 0) break;
-      infoRows = infoRows.concat(infoBatch);
-      if (infoBatch.length < 1000) break;
-      infoPage++;
-    }
     const loadedProjectIds = new Set(infoRows.map(r => r.project_id));
     infoRows.forEach(r => {
       projectInfo[r.project_id] = {
@@ -6614,18 +6653,6 @@ async function loadAllData() {
     });
 
     // Tasks
-    // Load ALL tasks with pagination
-    let taskRows = [];
-    let taskPage = 0;
-    while (true) {
-      const { data: taskBatch } = await sb.from('tasks')
-        .select('*')
-        .range(taskPage * 1000, taskPage * 1000 + 999);
-      if (!taskBatch || taskBatch.length === 0) break;
-      taskRows = taskRows.concat(taskBatch);
-      if (taskBatch.length < 1000) break;
-      taskPage++;
-    }
     taskStore = taskRows.map(r => ({
       _id: r.id, taskNum: r.task_num||0, name: r.name, assign: r.assignee||'',
       due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
@@ -6647,7 +6674,7 @@ async function loadAllData() {
       revenueType: r.revenue_type||'fixed',
     }));
 
-    // Assign task_num per project (sequential by created_at order)
+    // Assign task_num per project
     const projTaskNums = {};
     taskStore.forEach(t => {
       if (!projTaskNums[t.proj]) projTaskNums[t.proj] = 0;
@@ -6661,7 +6688,6 @@ async function loadAllData() {
     window._projTaskNums = projTaskNums;
 
     // Employees
-    const empRows = await dbFetch('employees');
     employees = empRows.map(r => ({
       id: r.id, name: r.name, initials: r.initials||getInitials(r.name),
       role: r.role||'', dept: r.department||'',
@@ -6673,12 +6699,11 @@ async function loadAllData() {
       sickBank: parseFloat(r.sick_bank)||0,
       isOwner: !!r.is_owner,
       isActive: r.is_active !== false,
+      terminationDate: r.termination_date||'',
     }));
 
     // Clients & Contacts
-    const clientRows = await dbFetch('clients');
     clientStore = clientRows.map(r => ({ id: r.id, name: r.name||'' }));
-    const contactRows = await dbFetch('contacts');
     contactStore = contactRows.map(r => ({
       id: r.id, clientId: r.client_id||null,
       firstName: r.first_name||'', lastName: r.last_name||'',
@@ -6686,18 +6711,6 @@ async function loadAllData() {
     }));
 
     // Expenses
-    // Load ALL expenses with pagination
-    let expRows = [];
-    let expPage = 0;
-    while (true) {
-      const { data: expBatch } = await sb.from('expenses')
-        .select('*')
-        .range(expPage * 1000, expPage * 1000 + 999);
-      if (!expBatch || expBatch.length === 0) break;
-      expRows = expRows.concat(expBatch);
-      if (expBatch.length < 1000) break;
-      expPage++;
-    }
     expenseStore = expRows.map(r => ({
       _id: r.id, projId: r.proj_id,
       taskId: r.task_id||null,
@@ -6706,7 +6719,6 @@ async function loadAllData() {
     }));
 
     // Timesheet
-    const tsRows = await dbFetch('timesheet_entries');
     tsRows.forEach(r => {
       const empId = r.employee_id || '__unknown__';
       const storeKey = empId + '|' + r.week_start;
@@ -7547,12 +7559,14 @@ function setYnField(projId, key, val) {
 
 
 // ===== HOURS CHARGED PER TASK =====
-function getHoursForTask(taskName) {
+function getHoursForTask(taskName, projId) {
   if (!taskName) return 0;
   let total = 0;
   Object.entries(tsData).forEach(([k, rows]) => {
     if (k.startsWith('oh_') || !Array.isArray(rows)) return;
     rows.forEach(row => {
+      // If looking for a specific project, only count rows that explicitly belong to it
+      if (projId && row.projId !== projId) return;
       if (row.taskName && row.taskName.trim().toLowerCase() === taskName.trim().toLowerCase()) {
         total += Object.values(row.hours).reduce((a, b) => a + b, 0);
       }
@@ -7599,7 +7613,7 @@ function renderTasksPanel(projId) {
       }).join('');
     const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
       `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
-    const loggedH = getHoursForTask(t.name);
+    const loggedH = getHoursForTask(t.name, t.proj);
     const budgetH = t.budgetHours || 0;
     const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : loggedH > 0 ? 'var(--blue)' : 'var(--muted)';
 
