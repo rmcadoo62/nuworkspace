@@ -3933,13 +3933,36 @@ function showEmpProfile(empId) {
     const chartHol    = chartWeeks.map(wk => weeklyHoliday[wk]  || 0);
     const chartSick   = chartWeeks.map(wk => weeklySick[wk]     || 0);
 
+    // Utilization: project hours / total hours, only for weeks on/after Mar 15 2026
+    const utilCutoff = new Date('2026-03-09T00:00:00');
+    const chartUtil = chartWeeks.map((wk, i) => {
+      const wkDate = new Date(wk + 'T00:00:00');
+      if (wkDate < utilCutoff) return null;
+      const total = (chartWork[i]||0) + (chartVac[i]||0) + (chartHol[i]||0) + (chartSick[i]||0);
+      if (total === 0) return null;
+      // project hours only (work includes overhead like General Overhead — need pure project)
+      // weeklyHours already excludes sick/vac/hol but includes General Overhead
+      // Re-derive pure project hours from tsData for this week
+      const key = empId + '|' + wk;
+      const rows2 = tsData[key] || [];
+      const projOnly = rows2.reduce((s, r) => s + Object.values(r.hours||{}).reduce((a,b)=>a+(parseFloat(b)||0),0), 0);
+      return total > 0 ? Math.round((projOnly / total) * 100) : null;
+    });
+
+    // Running average utilization from cutoff to latest week with data
+    const utilWeeks = chartUtil.filter(v => v !== null);
+    const utilAvg = utilWeeks.length > 0 ? Math.round(utilWeeks.reduce((s,v)=>s+v,0) / utilWeeks.length) : null;
+
     weeklyHoursChartHtml =
       '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'+
           '<div style="font-size:13px;font-weight:700;color:var(--text)">📊 Weekly Hours — Last 12 Months</div>'+
-          '<div style="font-size:11px;color:var(--muted)">'+chartWeeks.length+' weeks</div>'+
+          '<div style="display:flex;align-items:center;gap:12px">'+
+            (utilAvg !== null ? '<div style="font-size:12px;color:var(--muted)">Avg utilization <span style="font-weight:700;color:var(--green)">'+utilAvg+'%</span></div>' : '')+
+            '<div style="font-size:11px;color:var(--muted)">'+chartWeeks.length+' weeks</div>'+
+          '</div>'+
         '</div>'+
-        '<div style="position:relative;height:260px">'+
+        '<div style="position:relative;height:280px">'+
           '<canvas id="'+weeklyChartId+'"></canvas>'+
         '</div>'+
       '</div>';
@@ -3948,7 +3971,6 @@ function showEmpProfile(empId) {
     setTimeout(() => {
       const canvas = document.getElementById(weeklyChartId);
       if (!canvas || !window.Chart) return;
-      // Destroy existing instance if any
       const existing = Chart.getChart(canvas);
       if (existing) existing.destroy();
       new Chart(canvas, {
@@ -3975,10 +3997,13 @@ function showEmpProfile(empId) {
               callbacks: {
                 footer: items => {
                   const total = items.reduce((s, i) => s + i.raw, 0);
-                  return 'Total: ' + total.toFixed(1) + 'h';
+                  const idx = items[0]?.dataIndex;
+                  const util = chartUtil[idx];
+                  return 'Total: ' + total.toFixed(1) + 'h' + (util !== null ? '  |  Utilization: ' + util + '%' : '');
                 }
               }
-            }
+            },
+            afterDraw: undefined
           },
           scales: {
             x: {
@@ -3992,6 +4017,35 @@ function showEmpProfile(empId) {
               suggestedMax: 50,
               ticks: { color: '#6b6b78', font: { size: 11 }, stepSize: 10 },
               grid: { color: 'rgba(220,220,224,0.3)' }
+            }
+          },
+          animation: {
+            onComplete: function() {
+              const chart = this;
+              const ctx = chart.ctx;
+              ctx.save();
+              ctx.font = '600 10px DM Sans, sans-serif';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'bottom';
+              chart.data.datasets[0].data.forEach((_, i) => {
+                const util = chartUtil[i];
+                if (util === null) return;
+                const meta = chart.getDatasetMeta(chart.data.datasets.length - 1);
+                // find topmost visible bar for this index
+                let topY = Infinity;
+                chart.data.datasets.forEach((ds, di) => {
+                  const m = chart.getDatasetMeta(di);
+                  if (!m.hidden && m.data[i]) {
+                    topY = Math.min(topY, m.data[i].y);
+                  }
+                });
+                if (topY === Infinity) return;
+                const x = chart.getDatasetMeta(0).data[i]?.x;
+                if (x === undefined) return;
+                ctx.fillStyle = util >= 80 ? '#2e9e62' : util >= 60 ? '#c07a1a' : '#d04040';
+                ctx.fillText(util + '%', x, topY - 4);
+              });
+              ctx.restore();
             }
           }
         }
@@ -4540,7 +4594,11 @@ function setTsProject(key, rowIdx, val) {
   if (taskSel) {
     const tasks = taskStore.filter(t => t.proj === val);
     taskSel.innerHTML = '<option value="">— select task —</option>' +
-      tasks.map(t => '<option value="'+t.name+'">'+(t.name.length > 38 ? t.name.slice(0,38)+'…' : t.name)+'</option>').join('');
+      tasks.map(t => {
+        const statusLabels = {new:'New',inprogress:'In Progress',prohold:'Pro Hold',accthold:'Acct Hold',complete:'Complete',cancelled:'Cancelled',billed:'Billed'};
+        const label = '#'+(t.taskNum||'?')+' ['+(statusLabels[t.status]||t.status)+'] '+(t.name.length>38?t.name.slice(0,38)+'…':t.name);
+        return '<option value="'+t.name+'">'+label+'</option>';
+      }).join('');
   }
 }
 
@@ -4727,8 +4785,11 @@ function renderTimesheet() {
     } else {
       const projTasks = taskStore.filter(t => t.proj === row.projId);
       const taskOpts = '<option value="">— select task —</option>' +
-        projTasks.map(t => '<option value="'+t.name+'" '+(t.name===row.taskName?'selected':'')+'>'+
-          (t.name.length>38?t.name.slice(0,38)+'…':t.name)+'</option>').join('');
+        projTasks.map(t => {
+          const statusLabels = {new:'New',inprogress:'In Progress',prohold:'Pro Hold',accthold:'Acct Hold',complete:'Complete',cancelled:'Cancelled',billed:'Billed'};
+          const label = '#'+(t.taskNum||'?')+' ['+(statusLabels[t.status]||t.status)+'] '+(t.name.length>38?t.name.slice(0,38)+'…':t.name);
+          return '<option value="'+t.name+'" '+(t.name===row.taskName?'selected':'')+'>'+label+'</option>';
+        }).join('');
       const selProj = projects.find(p => p.id === row.projId);
       const projDisplayName = selProj ? selProj.emoji+' '+selProj.name : '';
       labelCell = '<td class="ts-row-label">'+
