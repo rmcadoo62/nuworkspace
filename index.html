@@ -3767,31 +3767,50 @@ function showEmpProfile(empId) {
   const used = getTimeOffUsed(empId, year, _annivRange?.start, _annivRange?.end);
   const vacAllotment = getVacationAllotment(emp.hireDate);
   const vacAccrued = getQuarterlyAccrual(emp.hireDate);
-  // Sick accrual: 24hrs on first May 1 in hire year, 24hrs on first Jan 1 in hire year
-  // Sick: 24hrs drops May 1 of hire year, then Jan 1 + May 1 every year
-  // Once past 2nd drop (Jan 1 after first May 1), always 48/yr
   const today = new Date();
+
+  // Sick accrual: opening balance (sick_bank) + drops on Jan 1 and May 1 within anniversary year, capped at 48h
   let sickAllotment = 0;
-  if (emp.hireDate) {
-    const hire = new Date(emp.hireDate + 'T00:00:00');
-    // Find most recent hire anniversary on or before today
-    let ann = new Date(hire); ann.setFullYear(today.getFullYear());
-    if (ann > today) ann.setFullYear(today.getFullYear() - 1);
-    const hireYearStart = ann;
-    const hireYearEnd = new Date(ann); hireYearEnd.setFullYear(ann.getFullYear() + 1);
-    // Count Jan 1 and May 1 drops within hire year window that have already passed
-    for (let y = hireYearStart.getFullYear(); y <= hireYearEnd.getFullYear(); y++) {
-      for (const mo of [0, 4]) {
+  const sickOpeningBalance = emp.sickBank || 0;
+  if (emp.hireDate && _annivRange) {
+    const annivStart = _annivRange.start;
+    const annivEnd   = _annivRange.end;
+    let running = sickOpeningBalance;
+    // Add drops that have already occurred since anniv start up to today
+    for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
+      for (const mo of [0, 4]) { // Jan=0, May=4
         const drop = new Date(y, mo, 1);
-        if (drop > hireYearStart && drop <= hireYearEnd && drop <= today) {
-          sickAllotment += 24;
+        if (drop > annivStart && drop <= annivEnd && drop <= today) {
+          running = Math.min(48, running + 24);
         }
       }
     }
+    sickAllotment = running;
   } else {
     if (today >= new Date(year, 0, 1)) sickAllotment += 24;
     if (today >= new Date(year, 4, 1)) sickAllotment += 24;
   }
+
+  // sickAllotment = what's been accrued/available to take this year (capped at 48)
+  // sickBankBalance = true running balance (opening + all drops - used), no cap
+  const sickBankBalance = (() => {
+    if (!emp.hireDate || !_annivRange) return sickOpeningBalance - used.sick;
+    let running = sickOpeningBalance;
+    const annivStart = _annivRange.start;
+    const annivEnd   = _annivRange.end;
+    for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
+      for (const mo of [0, 4]) {
+        const drop = new Date(y, mo, 1);
+        if (drop > annivStart && drop <= annivEnd && drop <= today) {
+          running += 24; // no cap on bank balance
+        }
+      }
+    }
+    return Math.max(0, running - used.sick);
+  })();
+
+  // Calculate sick overage and how much flows to vacation
+  const sickOverage = Math.max(0, used.sick - sickAllotment);
   const holidays = getHolidays(year);
   const approver = employees.find(e => e.id === emp.approverId);
 
@@ -4031,7 +4050,7 @@ function showEmpProfile(empId) {
             <div style="font-size:12px;font-weight:600;color:var(--text)">Vacation</div>
             <div style="font-size:10px;color:var(--muted)">${vacAccrued.toFixed(0)} hrs accrued so far</div>
           </div>
-          ${bar(used.vacation, vacAllotment, 'var(--blue)')}
+          ${bar(used.vacation + sickOverage, vacAllotment, 'var(--blue)')}
           ${(() => {
             // Build vacation drill-down using anniversary range
             const vacEntries = [];
@@ -4067,15 +4086,20 @@ function showEmpProfile(empId) {
               ).join('') +
               '</div></div>';
           })()}
+          ${sickOverage > 0 ? `<div style="margin-top:6px;padding:5px 9px;border-radius:6px;background:rgba(208,64,64,0.08);border:1px solid rgba(208,64,64,0.25);font-size:11px;color:var(--red)">+ ${sickOverage.toFixed(1)}h charged from sick overage</div>` : ''}
         </div>
         <!-- Sick -->
         <div>
           <div style="display:flex;justify-content:space-between;align-items:baseline">
             <div style="font-size:12px;font-weight:600;color:var(--text)">Sick</div>
-            ${emp.sickBank > 0 ? `<div style="font-size:10px;color:var(--amber)">${emp.sickBank} hrs banked</div>` : ''}
+            <div style="font-size:13px;font-weight:600;color:var(--amber)">${sickBankBalance.toFixed(1)}h bank balance</div>
           </div>
-          ${bar(used.sick, sickAllotment, 'var(--amber)')}
-          ${emp.sickBank > 0 ? `<div style="font-size:10px;color:var(--muted);margin-top:4px">Total available: <span style="color:var(--amber);font-weight:600">${Math.max(0, sickAllotment - used.sick + emp.sickBank).toFixed(1)} hrs</span></div>` : ''}
+          ${bar(Math.min(used.sick, sickAllotment), sickAllotment, 'var(--amber)')}
+          <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--muted)">
+            <span>${used.sick.toFixed(1)}h used this year · 48h annual limit</span>
+            <span>opened at ${sickOpeningBalance}h</span>
+          </div>
+          ${sickOverage > 0 ? `<div style="margin-top:6px;padding:5px 9px;border-radius:6px;background:rgba(208,64,64,0.1);border:1px solid rgba(208,64,64,0.3);font-size:11px;color:var(--red)">⚠ ${sickOverage.toFixed(1)}h overage — charged against vacation</div>` : ''}
         </div>
       </div>
       <!-- Holiday -->
