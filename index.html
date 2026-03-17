@@ -3648,9 +3648,14 @@ function getTimeOffUsed(empId, year, annivStart, annivEnd) {
       used.vacation += h;
     });
     // Sick — check each day individually too
-    const sickByDay = oh['Sick'] || {};
-    Object.entries(sickByDay).forEach(([di, hrs]) => {
-      const h = parseFloat(hrs) || 0;
+    // Merge all sick category variants into one map per day
+    const sickMerged = {};
+    ['Sick', 'Sick Time', '⬡ Sick Time'].forEach(cat => {
+      Object.entries(oh[cat] || {}).forEach(([di, hrs]) => {
+        sickMerged[di] = (sickMerged[di] || 0) + (parseFloat(hrs) || 0);
+      });
+    });
+    Object.entries(sickMerged).forEach(([di, h]) => {
       if (h <= 0) return;
       const d = new Date(weekDate);
       d.setDate(weekDate.getDate() + parseInt(di));
@@ -3658,7 +3663,14 @@ function getTimeOffUsed(empId, year, annivStart, annivEnd) {
       used.sick += h;
     });
     // Holiday / Snow Day - track per day
-    const holByDay = oh['Holiday'] || {};
+    // Merge Holiday and Snow Day into one map
+    const holMerged = {};
+    ['Holiday', 'Snow Day'].forEach(cat => {
+      Object.entries(oh[cat] || {}).forEach(([di, hrs]) => {
+        holMerged[di] = (holMerged[di] || 0) + (parseFloat(hrs) || 0);
+      });
+    });
+    const holByDay = holMerged;
     Object.entries(holByDay).forEach(([di, hrs]) => {
       const h = parseFloat(hrs) || 0;
       if (h <= 0) return;
@@ -3879,7 +3891,7 @@ function showEmpProfile(empId) {
     return new Date(new Date().getFullYear(), 0, 1);
   })();
 
-  const SICK_CATS = ['Sick'];
+  const SICK_CATS = ['Sick', 'Sick Time', '⬡ Sick Time'];
   const VAC_CATS  = ['Vacation Time', 'Holiday', 'Personal Time'];
 
   const empWeekKeys = new Set();
@@ -3903,7 +3915,7 @@ function showEmpProfile(empId) {
       const catHrs = Object.values(dayMap).reduce((s,h)=>s+(parseFloat(h)||0),0);
       if (SICK_CATS.includes(cat)) sickHrs += catHrs;
       else if (cat === 'Vacation Time' || cat === 'Personal Time') vacHrs += catHrs;
-      else if (cat === 'Holiday') holHrs += catHrs;
+      else if (cat === 'Holiday' || cat === 'Snow Day') holHrs += catHrs;
       else projHrs += catHrs; // General Overhead etc counts as work
     });
     const total = projHrs + sickHrs + vacHrs + holHrs;
@@ -3938,15 +3950,15 @@ function showEmpProfile(empId) {
     const chartUtil = chartWeeks.map((wk, i) => {
       const wkDate = new Date(wk + 'T00:00:00');
       if (wkDate < utilCutoff) return null;
-      const total = (chartWork[i]||0) + (chartVac[i]||0) + (chartHol[i]||0) + (chartSick[i]||0);
-      if (total === 0) return null;
-      // project hours only (work includes overhead like General Overhead — need pure project)
-      // weeklyHours already excludes sick/vac/hol but includes General Overhead
-      // Re-derive pure project hours from tsData for this week
+      // Hours in building = everything minus sick, vacation, holiday
+      // chartWork already includes project hours + General Overhead (both count as in-building)
+      const inBuilding = (chartWork[i]||0);
+      if (inBuilding <= 0) return null;
+      // Pure project hours only (exclude General Overhead from denominator's numerator)
       const key = empId + '|' + wk;
       const rows2 = tsData[key] || [];
       const projOnly = rows2.reduce((s, r) => s + Object.values(r.hours||{}).reduce((a,b)=>a+(parseFloat(b)||0),0), 0);
-      return total > 0 ? Math.round((projOnly / total) * 100) : null;
+      return Math.round((projOnly / inBuilding) * 100);
     });
 
     // Running average utilization from cutoff to latest week with data
@@ -4475,8 +4487,8 @@ function clearPm() {
 // ===== TIMESHEET =====
 // Data: tsData[weekKey][rowIndex] = {projId, taskName, hours:{Mon:..,Tue:..,..}}
 const OVERHEAD_CATS = [
-  'General Overhead','Sales Support','Sick Time',
-  'Vacation Time','Personal Time','Holiday / Snow Day'
+  'General Overhead','Sales Support','Sick',
+  'Vacation Time','Personal Time','Holiday','Snow Day'
 ];
 
 
