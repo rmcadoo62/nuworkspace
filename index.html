@@ -274,19 +274,19 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .itf.active{background:var(--surface2);color:var(--text);border-color:var(--surface3);}
 .info-task-table{width:100%;}
 .itt-head{display:grid;grid-template-columns:var(--itc-num,36px) var(--itc-pri,28px) var(--itc-cat,50px) var(--itc-task,1fr) var(--itc-status,130px) var(--itc-quote,80px) var(--itc-po,80px) var(--itc-price,90px) var(--itc-created,75px) var(--itc-hrs,60px) var(--itc-bhrs,60px) var(--itc-assign,70px) var(--itc-start,80px) var(--itc-comp,80px) var(--itc-act,50px);gap:0;padding:6px 10px;border-bottom:1px solid var(--border);margin-bottom:2px;}
-.itt-head-cell{font-size:10px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:var(--muted);position:relative;user-select:none;}.itt-resizer{position:absolute;right:-3px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:10;}.itt-resizer::after{content:'';position:absolute;left:3px;top:15%;bottom:15%;width:2px;border-radius:2px;background:transparent;transition:background .15s;}.itt-resizer:hover::after,.itt-resizer.active::after{background:#5b9cf6;}
+.itt-head-cell{font-size:11px;font-weight:600;letter-spacing:0.8px;text-transform:uppercase;color:var(--muted);position:relative;user-select:none;}.itt-resizer{position:absolute;right:-3px;top:0;bottom:0;width:8px;cursor:col-resize;z-index:10;}.itt-resizer::after{content:'';position:absolute;left:3px;top:15%;bottom:15%;width:2px;border-radius:2px;background:transparent;transition:background .15s;}.itt-resizer:hover::after,.itt-resizer.active::after{background:#5b9cf6;}
 .itt-row{display:grid;grid-template-columns:var(--itc-num,36px) var(--itc-pri,28px) var(--itc-cat,50px) var(--itc-task,1fr) var(--itc-status,130px) var(--itc-quote,80px) var(--itc-po,80px) var(--itc-price,90px) var(--itc-created,75px) var(--itc-hrs,60px) var(--itc-bhrs,60px) var(--itc-assign,70px) var(--itc-start,80px) var(--itc-comp,80px) var(--itc-act,50px);gap:0;padding:9px 10px;border-radius:7px;border:1px solid transparent;transition:all var(--transition);align-items:center;margin-bottom:2px;cursor:pointer;}
 .itt-row:hover{background:var(--surface);border-color:var(--border);}
 .itt-check{width:16px;height:16px;border-radius:4px;border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all var(--transition);flex-shrink:0;font-size:9px;font-weight:700;}
 .itt-check:hover{border-color:var(--amber);}
 .itt-check.done{background:var(--green);border-color:var(--green);color:#fff;}
-.itt-name{font-size:13px;font-weight:400;padding-right:12px;}
+.itt-name{font-size:14px;font-weight:400;padding-right:12px;}
 .itt-name.done{color:var(--muted);}
-.itt-status{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:500;}
+.itt-status{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:500;}
 .itt-av{width:22px;height:22px;border-radius:50%;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;color:#fff;}
-.itt-due{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);}
+.itt-due{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);}
 .itt-due.overdue{color:var(--red);}
-.itt-pri{font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;}
+.itt-pri{font-size:11px;font-weight:600;padding:2px 7px;border-radius:4px;}
 .info-tasks-empty{text-align:center;padding:32px;color:var(--muted);font-size:13px;}
 .info-tasks-empty .eico{font-size:28px;margin-bottom:8px;opacity:.4;}
 
@@ -479,8 +479,8 @@ tr:hover .ts-del-row{color:var(--muted);}
 
 /* ===== INLINE TASK EDITING ===== */
 .itt-row{position:relative;}
-.itt-row .inline-edit-input{background:var(--surface2);border:1.5px solid var(--amber-dim);border-radius:5px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:3px 7px;outline:none;width:100%;box-shadow:0 0 0 3px var(--amber-glow);}
-.itt-row .inline-edit-select{background:var(--surface);border:1.5px solid var(--border);border-radius:5px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:11.5px;padding:2px 6px;outline:none;cursor:pointer;width:100%;max-width:100%;font-weight:600;}
+.itt-row .inline-edit-input{background:var(--surface2);border:1.5px solid var(--amber-dim);border-radius:5px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:14px;padding:3px 7px;outline:none;width:100%;box-shadow:0 0 0 3px var(--amber-glow);}
+.itt-row .inline-edit-select{background:var(--surface);border:1.5px solid var(--border);border-radius:5px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:2px 6px;outline:none;cursor:pointer;width:100%;max-width:100%;font-weight:600;}
 .itt-row .inline-edit-select option{background:var(--surface);color:var(--text);}
 .itt-cell-edit{cursor:text;}
 .itt-cell-edit:hover{background:var(--surface2);border-radius:4px;}
@@ -3421,7 +3421,7 @@ function renderInfoTasks(projId, filter) {
               ${salesOpts}
             </select>
           </div>
-          <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" title="Click to edit price" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--green);cursor:text">
+          <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" title="Click to edit price" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);cursor:text">
             ${t.fixedPrice ? '$' + t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
           </div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${getHoursForTask(t.name,t.proj) > 0 ? 'var(--blue)' : 'var(--muted)'}">
@@ -3619,9 +3619,11 @@ function getQuarterlyAccrual(hireDateStr) {
   return (allotment / 4) * quarter;
 }
 
-function getTimeOffUsed(empId, year) {
+function getTimeOffUsed(empId, year, annivStart, annivEnd) {
   const used = { vacation: 0, sick: 0, holiday: 0, holidayDays: [] };
-  // Collect all unique week keys for this employee from both project and overhead keys
+  // If anniversary dates provided, use them; otherwise fall back to calendar year
+  const rangeStart = annivStart || new Date(year, 0, 1);
+  const rangeEnd   = annivEnd   || new Date(year + 1, 0, 1);
   const allWeekKeys = new Set();
   Object.keys(tsData).forEach(k => {
     if (k.startsWith(empId + '|') && !k.startsWith('oh_')) allWeekKeys.add(k.split('|')[1]);
@@ -3630,8 +3632,9 @@ function getTimeOffUsed(empId, year) {
   allWeekKeys.forEach(weekKey => {
     if (!weekKey) return;
     const weekDate = new Date(weekKey + 'T00:00:00');
-    const weekYear = weekDate.getFullYear();
-    if (weekYear !== year && !(weekYear === year - 1 && weekDate.getMonth() === 11)) return;
+    // Include week if any day of it could fall in range (week spans Mon-Sun)
+    const weekEnd = new Date(weekDate); weekEnd.setDate(weekDate.getDate() + 6);
+    if (weekEnd < rangeStart || weekDate >= rangeEnd) return;
     const ohKey = 'oh_' + empId + '|' + weekKey;
     const oh = tsData[ohKey] || {};
     // Vacation — check each day individually so Dec weeks don't bleed into next year
@@ -3641,7 +3644,7 @@ function getTimeOffUsed(empId, year) {
       if (h <= 0) return;
       const d = new Date(weekDate);
       d.setDate(weekDate.getDate() + parseInt(di));
-      if (d.getFullYear() !== year) return;
+      if (d < rangeStart || d >= rangeEnd) return;
       used.vacation += h;
     });
     // Sick — check each day individually too
@@ -3651,7 +3654,7 @@ function getTimeOffUsed(empId, year) {
       if (h <= 0) return;
       const d = new Date(weekDate);
       d.setDate(weekDate.getDate() + parseInt(di));
-      if (d.getFullYear() !== year) return;
+      if (d < rangeStart || d >= rangeEnd) return;
       used.sick += h;
     });
     // Holiday / Snow Day - track per day
@@ -3662,8 +3665,7 @@ function getTimeOffUsed(empId, year) {
       // di is 0=Mon...6=Sun, week starts Monday
       const d = new Date(weekDate);
       d.setDate(weekDate.getDate() + parseInt(di));
-      const dayYear = d.getFullYear();
-      if (dayYear !== year) return;
+      if (d < rangeStart || d >= rangeEnd) return;
       const dateStr = d.toISOString().slice(0,10);
       used.holiday += h;
       used.holidayDays.push({ date: dateStr, hrs: h });
@@ -3752,7 +3754,17 @@ function showEmpProfile(empId) {
   if (!emp) return;
 
   const year = new Date().getFullYear();
-  const used = getTimeOffUsed(empId, year);
+  // Calculate anniversary year window from hire date
+  const _annivRange = (() => {
+    if (!emp.hireDate) return null;
+    const hire = new Date(emp.hireDate + 'T00:00:00');
+    const now = new Date();
+    let annivStart = new Date(hire); annivStart.setFullYear(now.getFullYear());
+    if (annivStart > now) annivStart.setFullYear(now.getFullYear() - 1);
+    const annivEnd = new Date(annivStart); annivEnd.setFullYear(annivStart.getFullYear() + 1);
+    return { start: annivStart, end: annivEnd };
+  })();
+  const used = getTimeOffUsed(empId, year, _annivRange?.start, _annivRange?.end);
   const vacAllotment = getVacationAllotment(emp.hireDate);
   const vacAccrued = getQuarterlyAccrual(emp.hireDate);
   // Sick accrual: 24hrs on first May 1 in hire year, 24hrs on first Jan 1 in hire year
@@ -3896,7 +3908,7 @@ function showEmpProfile(empId) {
   const weeklyChartId = 'empHoursChart_' + empId;
   let weeklyHoursChartHtml = '';
   if (chartWeeks.length > 0) {
-    const chartLabels = chartWeeks.map(wk => new Date(wk+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}));
+    const chartLabels = chartWeeks.map(wk => { const sat=new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+5); return sat.toLocaleDateString('en-US',{month:'short',day:'numeric'}); });
     const chartWork   = chartWeeks.map(wk => weeklyHours[wk]   || 0);
     const chartVac    = chartWeeks.map(wk => weeklyVacation[wk] || 0);
     const chartHol    = chartWeeks.map(wk => weeklyHoliday[wk]  || 0);
@@ -4021,14 +4033,17 @@ function showEmpProfile(empId) {
           </div>
           ${bar(used.vacation, vacAllotment, 'var(--blue)')}
           ${(() => {
-            // Build vacation drill-down from weekly data
+            // Build vacation drill-down using anniversary range
             const vacEntries = [];
+            const _vrs = _annivRange?.start || new Date(year, 0, 1);
+            const _vre = _annivRange?.end   || new Date(year + 1, 0, 1);
             Object.keys(tsData).forEach(key => {
               if (!key.startsWith('oh_' + empId + '|')) return;
               const weekKey = key.split('|')[1];
               if (!weekKey) return;
               const weekDate = new Date(weekKey + 'T00:00:00');
-              if (weekDate.getFullYear() !== year && !(weekDate.getFullYear() === year-1 && weekDate.getMonth() === 11)) return;
+              const weekEnd = new Date(weekDate); weekEnd.setDate(weekDate.getDate() + 6);
+              if (weekEnd < _vrs || weekDate >= _vre) return;
               const oh = tsData[key] || {};
               const vacByDay = oh['Vacation Time'] || {};
               Object.entries(vacByDay).forEach(([di, hrs]) => {
@@ -4036,7 +4051,7 @@ function showEmpProfile(empId) {
                 if (h <= 0) return;
                 const d = new Date(weekDate);
                 d.setDate(weekDate.getDate() + parseInt(di));
-                if (d.getFullYear() !== year) return;
+                if (d < _vrs || d >= _vre) return;
                 vacEntries.push({ date: d.toISOString().slice(0,10), hrs: h });
               });
             });
@@ -7738,7 +7753,7 @@ function renderTasksPanel(projId) {
 
     return `
       <div class="itt-row" data-task-id="${t._id}" style="animation:fadeUp 0.15s ease ${i*0.02}s both;${t.status==='billed'?'background:rgba(192,132,252,0.08);border-color:rgba(192,132,252,0.2);':t.status==='complete'||t.done?'background:rgba(120,120,130,0.10);border-color:rgba(120,120,130,0.18);':''}">
-        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);padding-left:2px">${t.taskNum||''}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);padding-left:2px">${t.taskNum||''}</div>
         <div class="itt-check" onclick="tpToggleDone('${t._id}','${projId}');event.stopPropagation()" title="Mark complete"></div>
         <div onclick="event.stopPropagation()">
           <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%">${salesOpts}</select>
@@ -7748,20 +7763,20 @@ function renderTasksPanel(projId) {
           <select class="status-pill-select" style="color:${statusColor(t.status||'new')};background:${statusColor(t.status||'new')}18;border-color:${statusColor(t.status||'new')}55"
             onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color=statusColor(this.value);this.style.background=statusColor(this.value)+'18';this.style.borderColor=statusColor(this.value)+'55'">${statusOpts}</select>
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);cursor:text" title="Click to set quote number">
+        <div class="itt-cell-edit" onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);cursor:text" title="Click to set quote number">
           ${t.quoteNum||'—'}
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);cursor:text" title="Click to set PO number">
+        <div class="itt-cell-edit" onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);cursor:text" title="Click to set PO number">
           ${t.poNumber||'—'}
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--green);cursor:text">
+        <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);cursor:text">
           ${t.fixedPrice ? '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
         </div>
-        <div style="font-size:11px;color:var(--muted)">${fmtShortDate(t.createdAt)}</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${hColor}">
+        <div style="font-size:12px;color:var(--muted)">${fmtShortDate(t.createdAt)}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${hColor}">
           ${loggedH > 0 ? loggedH.toFixed(1)+'h' : '—'}${budgetH > 0 ? '<span style="color:var(--muted);font-size:10px"> /'+budgetH+'</span>' : ''}
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditBudgetHours('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);cursor:text" title="Click to set budget hours">
+        <div class="itt-cell-edit" onclick="inlineEditBudgetHours('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);cursor:text" title="Click to set budget hours">
           ${budgetH > 0 ? budgetH+'h' : '—'}
         </div>
         <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px">
@@ -7771,8 +7786,8 @@ function renderTasksPanel(projId) {
             ${employees.filter(e=>e.isActive!==false).map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
           </select>
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()" style="font-size:11px;color:var(--muted);cursor:text">${fmtShortDate(t.taskStartDate)}</div>
-        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()" style="font-size:11px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};cursor:text" title="${t.status==='billed'?'Billed date':'Completed date'}">${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
+        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()" style="font-size:12px;color:var(--muted);cursor:text">${fmtShortDate(t.taskStartDate)}</div>
+        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()" style="font-size:12px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};cursor:text" title="${t.status==='billed'?'Billed date':'Completed date'}">${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
         <div class="itt-row-actions">
           <button class="itt-row-action-btn" onclick="openEditTaskModal('${t._id}');event.stopPropagation()" title="Full edit">&#x270E;</button>
         </div>
