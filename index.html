@@ -4291,7 +4291,7 @@ async function saveEmployee() {
   if (_editingId) {
     editingEmpId = _editingId;
     const idx = employees.findIndex(e => e.id === _editingId);
-    if (idx > -1) employees[idx] = {...employees[idx], ...data, permissionLevel: _permLevel, terminationDate: _termDate, isActive: _isActive};
+    if (idx > -1) employees[idx] = {...employees[idx], ...data, permissionLevel: _permLevel, terminationDate: _termDate, isActive: _isActive, isPaperTs: document.getElementById('empIsPaperTs')?.checked||false, isApprover: document.getElementById('empIsApprover')?.checked||false, approverId: document.getElementById('empApprover')?.value||null};
     if (sb) {
       const { error } = await sb.from('employees').update(dbPayload).eq('id', _editingId);
       if (error) { console.error('saveEmployee update error:', error); toast('⚠ Save error: ' + error.message); return; }
@@ -4307,6 +4307,11 @@ async function saveEmployee() {
           permissionLevel: fresh.permission_level||'employee',
           empType: fresh.employment_type||'fulltime',
           isOwner: !!fresh.is_owner,
+          isPaperTs: !!fresh.is_paper_ts,
+          isApprover: !!fresh.is_approver,
+          approverId: fresh.approver_id||null,
+          terminationDate: fresh.termination_date||'',
+          personalEmail: fresh.personal_email||'',
         };
       }
     }
