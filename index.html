@@ -7698,15 +7698,51 @@ function renderInvoicingPanel(projId) {
       </table>
     ` : `<div class="inv-empty">&#x2714; No completed tasks waiting to be billed.</div>`}
 
-    ${billedTasks.length > 0 ? `
-      <div class="inv-section-title" style="margin-top:28px">&#x1F7E3; Already Billed</div>
-      <table class="inv-table" style="opacity:.85">
-        <thead><tr>
-          <th>Task</th><th>Assignee</th><th>Price</th><th>Completed Date</th><th>Peachtree Inv #</th><th></th>
-        </tr></thead>
-        <tbody>${billedTasks.map(t => taskRow(t, false)).join('')}</tbody>
-      </table>
-    ` : ''}
+    ${billedTasks.length > 0 ? (() => {
+      const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+      // Group by Peachtree Inv # (blank = "No Invoice #")
+      const groups = {};
+      billedTasks.forEach(t => {
+        const key = t.peachtreeInv || '';
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(t);
+      });
+      // Sort: numbered invoices first (numerically), then blank
+      const sortedKeys = Object.keys(groups).sort((a,b) => {
+        if (!a && !b) return 0;
+        if (!a) return 1;
+        if (!b) return -1;
+        const na = parseFloat(a), nb = parseFloat(b);
+        if (!isNaN(na) && !isNaN(nb)) return na - nb;
+        return a.localeCompare(b);
+      });
+      const grandTotal = billedTasks.reduce((s,t) => s+(t.fixedPrice||0), 0);
+      return `
+        <div class="inv-section-title" style="margin-top:28px">&#x1F7E3; Already Billed</div>
+        ${sortedKeys.map(invNum => {
+          const grpTasks = groups[invNum];
+          const grpTotal = grpTasks.reduce((s,t) => s+(t.fixedPrice||0), 0);
+          return `
+            <div style="margin-bottom:14px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px 8px 0 0;border-bottom:none;">
+                <div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);">
+                  ${invNum ? '&#x1F4CB; Peachtree Inv # <span style="color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:600;text-transform:none;letter-spacing:0">'+invNum+'</span>' : '<span style="color:var(--muted);font-style:italic">No Invoice # Assigned</span>'}
+                </div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--green);">${fmt$(grpTotal)}</div>
+              </div>
+              <table class="inv-table" style="opacity:.85;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">
+                <thead><tr>
+                  <th>Task</th><th>Assignee</th><th>Price</th><th>Billed Date</th><th>Peachtree Inv #</th><th></th>
+                </tr></thead>
+                <tbody>${grpTasks.map(t => taskRow(t, false)).join('')}</tbody>
+              </table>
+            </div>`;
+        }).join('')}
+        <div style="display:flex;justify-content:flex-end;padding:10px 12px;border-top:2px solid var(--border);margin-top:4px;">
+          <span style="font-size:13px;font-weight:700;color:var(--muted);margin-right:16px;">Grand Total Billed</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--green);">${fmt$(grandTotal)}</span>
+        </div>`;
+    })() : ''}
   `;
 }
 
@@ -7715,7 +7751,7 @@ function showBilledAuditModal(monthKey, monthLabel) {
   const _todayStr = new Date().toISOString().split('T')[0];
   const tasks = taskStore.filter(t => {
     if (t.status !== 'billed') return false;
-    const d = t.completedDate || t.due_raw || _todayStr; // match monthMap fallback
+    const d = t.billedDate || t.completedDate || t.due_raw || _todayStr;
     return d.slice(0,7) === monthKey;
   });
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -7729,7 +7765,7 @@ function showBilledAuditModal(monthKey, monthLabel) {
           <td style="padding:8px 12px;font-size:13px">${proj ? proj.emoji+' '+proj.name : '—'}</td>
           <td style="padding:8px 12px;font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.taskNum?'<span style="font-size:10px;color:var(--muted);margin-right:4px">#'+t.taskNum+'</span>':''}${t.name}</td>
           <td style="padding:8px 12px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${t.peachtreeInv||'—'}</td>
-          <td style="padding:8px 12px;font-size:12px;color:var(--muted)">${t.completedDate||t.due_raw||'—'}</td>
+          <td style="padding:8px 12px;font-size:12px;color:var(--muted)">${t.billedDate||t.completedDate||t.due_raw||'—'}</td>
           <td style="padding:8px 12px;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--green);text-align:right">${fmt$(t.fixedPrice)}</td>
         </tr>`;
       }).join('');
