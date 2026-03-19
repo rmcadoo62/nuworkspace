@@ -7757,17 +7757,42 @@ function showBilledAuditModal(monthKey, monthLabel) {
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   const total = tasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
 
+  // Group by Peachtree Inv #
+  const groups = {};
+  tasks.forEach(t => {
+    const key = t.peachtreeInv || '';
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(t);
+  });
+  const sortedKeys = Object.keys(groups).sort((a,b) => {
+    if (!a && !b) return 0; if (!a) return 1; if (!b) return -1;
+    const na = parseFloat(a), nb = parseFloat(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+
   const rows = tasks.length === 0
     ? `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:20px">No billed items found for this month.</td></tr>`
-    : tasks.map(t => {
-        const proj = projects.find(p => p.id === t.proj);
-        return `<tr style="border-bottom:1px solid var(--border)">
-          <td style="padding:8px 12px;font-size:13px">${proj ? proj.emoji+' '+proj.name : '—'}</td>
-          <td style="padding:8px 12px;font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.taskNum?'<span style="font-size:10px;color:var(--muted);margin-right:4px">#'+t.taskNum+'</span>':''}${t.name}</td>
-          <td style="padding:8px 12px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${t.peachtreeInv||'—'}</td>
-          <td style="padding:8px 12px;font-size:12px;color:var(--muted)">${t.billedDate||t.completedDate||t.due_raw||'—'}</td>
-          <td style="padding:8px 12px;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--green);text-align:right">${fmt$(t.fixedPrice)}</td>
-        </tr>`;
+    : sortedKeys.map(invNum => {
+        const grpTasks = groups[invNum];
+        const grpTotal = grpTasks.reduce((s,t) => s+(t.fixedPrice||0), 0);
+        return `
+          <tr style="background:var(--surface2)">
+            <td colspan="4" style="padding:7px 12px;font-size:11px;font-weight:700;letter-spacing:.5px;color:var(--muted);">
+              ${invNum ? '📋 Inv # <span style="color:var(--text);font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:600;letter-spacing:0">'+invNum+'</span>' : '<em style="font-weight:400">No Invoice # Assigned</em>'}
+            </td>
+            <td style="padding:7px 12px;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:var(--green);text-align:right;">${fmt$(grpTotal)}</td>
+          </tr>
+          ${grpTasks.map(t => {
+            const proj = projects.find(p => p.id === t.proj);
+            return `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:8px 12px;font-size:13px">${proj ? proj.emoji+' '+proj.name : '—'}</td>
+              <td style="padding:8px 12px;font-size:13px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.taskNum?'<span style="font-size:10px;color:var(--muted);margin-right:4px">#'+t.taskNum+'</span>':''}${t.name}</td>
+              <td style="padding:8px 12px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${t.peachtreeInv||'—'}</td>
+              <td style="padding:8px 12px;font-size:12px;color:var(--muted)">${t.billedDate||t.completedDate||t.due_raw||'—'}</td>
+              <td style="padding:8px 12px;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--green);text-align:right">${fmt$(t.fixedPrice)}</td>
+            </tr>`;
+          }).join('')}`;
       }).join('');
 
   // Use the shared confirm modal overlay as a display container
