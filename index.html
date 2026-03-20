@@ -1042,21 +1042,18 @@ tr:hover .ts-del-row{color:var(--muted);}
 /* ===== SCHEDULER CALENDAR VIEW ===== */
 .sched-cal-grid{display:grid;grid-template-columns:repeat(7,1fr);border-left:1px solid var(--border);border-top:1px solid var(--border);min-width:700px;}
 .sched-cal-dow{background:var(--surface);border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:8px 10px;font-size:10px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);text-align:center;}
-.sched-cal-day{border-right:1px solid var(--border);border-bottom:1px solid var(--border);min-height:110px;padding:6px 6px 4px;vertical-align:top;background:var(--surface);transition:background var(--transition);position:relative;cursor:pointer;}
-.sched-cal-day:hover{background:var(--surface2);}
+.sched-cal-day{border-right:1px solid var(--border);border-bottom:1px solid var(--border);min-height:110px;padding:5px 5px 4px;vertical-align:top;background:var(--surface);position:relative;cursor:default;overflow:hidden;}
+.sched-cal-day:hover{background:var(--surface);}
 .sched-cal-day.other-month{background:var(--bg);opacity:.55;}
 .sched-cal-day.today-cell{background:rgba(192,122,26,0.06);}
 .sched-cal-day.today-cell .sched-cal-daynum{background:var(--amber);color:#0e0e0f;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;}
 .sched-cal-day.weekend-cell{background:rgba(0,0,0,0.018);}
 .sched-cal-daynum{font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:4px;width:24px;height:24px;display:flex;align-items:center;justify-content:center;}
-.sched-cal-chip{border-radius:4px;padding:2px 7px;font-size:10.5px;font-weight:600;color:#fff;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;transition:filter .12s;text-shadow:0 1px 2px rgba(0,0,0,0.3);}
-.sched-cal-chip:hover{filter:brightness(1.15);}
-.sched-cal-chip.chip-start{border-radius:4px 0 0 4px;margin-right:0;}
-.sched-cal-chip.chip-mid{border-radius:0;margin-left:0;margin-right:0;}
-.sched-cal-chip.chip-end{border-radius:0 4px 4px 0;margin-left:0;}
-.sched-cal-chip.chip-lone{border-radius:4px;}
-.sched-cal-more{font-size:10px;color:var(--muted);padding:1px 4px;cursor:pointer;}
-.sched-cal-more:hover{color:var(--amber);}
+.sched-cal-entry{font-size:10px;line-height:1.3;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 1px;display:flex;align-items:baseline;gap:3px;}
+.sched-cal-entry-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;display:inline-block;margin-top:1px;}
+.sched-cal-entry-body{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:10px;color:var(--text);}
+.sched-cal-entry-time{font-weight:700;flex-shrink:0;font-size:10px;}
+.sched-cal-more{font-size:9.5px;color:var(--muted);padding:0 2px;}
 .sched-holiday-stripe{position:absolute;top:0;bottom:0;pointer-events:none;z-index:3;background:rgba(0,210,80,0.10);border-left:2px solid rgba(0,210,80,0.55);}
 .sched-holiday-label{position:absolute;top:3px;font-size:8.5px;font-weight:700;color:#00a844;letter-spacing:.3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none;z-index:4;padding:0 3px;}
 .sched-cal-day.holiday-day{background:rgba(0,210,80,0.10);}
@@ -9228,15 +9225,19 @@ window.addEventListener('resize', () => {
   }, 150);
 });
 
+// Track which closed projects have been lazy-loaded this session
+const _loadedClosedProjects = new Set();
+
 async function loadAllData() {
   showAppLoader(true);
   try {
-    // Helper: paginate any table
-    async function fetchAllPages(table, selectCols, orderCol) {
+    // Helper: paginate any table with optional filter
+    async function fetchAllPages(table, selectCols, orderCol, filterFn) {
       let rows = [], page = 0;
       while (true) {
         let q = sb.from(table).select(selectCols).range(page * 1000, page * 1000 + 999);
         if (orderCol) q = q.order(orderCol, { ascending: true });
+        if (filterFn)  q = filterFn(q);
         const { data } = await q;
         if (!data || data.length === 0) break;
         rows = rows.concat(data);
@@ -9246,18 +9247,23 @@ async function loadAllData() {
       return rows;
     }
 
-    // Fire all fetches simultaneously
+    // 8-week timesheet window
+    const tsWeekCutoff = new Date();
+    tsWeekCutoff.setDate(tsWeekCutoff.getDate() - 56);
+    const tsCutoffStr = tsWeekCutoff.toISOString().split('T')[0];
+
+    // Fire all fetches simultaneously — active projects only for heavy tables
     const [projRows, infoRows, taskRows, empRows, clientRows, contactRows, expRows, tsRows, sectionRows, roleRows] = await Promise.all([
-      fetchAllPages('projects',          '*', 'created_at'),
-      fetchAllPages('project_info',      '*', null),
-      fetchAllPages('tasks',             '*', null),
+      fetchAllPages('projects',       '*', 'created_at'),
+      fetchAllPages('project_info',   '*', null,  null),  // load all — needed for status filtering in UI
+      fetchAllPages('tasks',          '*', null,  q => q.not('status', 'eq', 'cancelled')),
       dbFetch('employees'),
       dbFetch('clients'),
       dbFetch('contacts'),
-      fetchAllPages('expenses',          '*', null),
-      dbFetch('timesheet_entries'),
-      fetchAllPages('task_sections',     '*', null),
-      fetchAllPages('permission_roles',   '*', null),
+      fetchAllPages('expenses',       '*', null,  null),  // expenses are small, load all
+      sb.from('timesheet_entries').select('*').gte('week_start', tsCutoffStr).then(r => r.data || []),
+      fetchAllPages('task_sections',  '*', null,  null),
+      fetchAllPages('permission_roles','*', null, null),
     ]);
 
     // Projects
@@ -9403,11 +9409,91 @@ function bootApp() {
   rebuildProjDropdown();
   renderAllViews();
   if (activeProjectId && projects.find(p => p.id === activeProjectId)) {
-    // Re-open the active project now that data is fully loaded
     selectProjectById(activeProjectId);
   } else {
-    // Default to Dashboard
     openDashboardPanel(document.getElementById('navDashboard'));
+  }
+}
+
+// Lazy-load a closed project's tasks, expenses, and info on demand
+async function loadClosedProject(projId) {
+  if (_loadedClosedProjects.has(projId)) return; // already loaded this session
+  _loadedClosedProjects.add(projId);
+
+  try {
+    // Show subtle loading indicator on project panel
+    const loadingEl = document.getElementById('panel-project');
+    if (loadingEl) loadingEl.style.opacity = '0.6';
+
+    const [infoRows, taskRows, expRows, sectionRows] = await Promise.all([
+      sb.from('project_info').select('*').eq('project_id', projId).then(r => r.data || []),
+      sb.from('tasks').select('*').eq('project_id', projId).then(r => r.data || []),
+      sb.from('expenses').select('*').eq('proj_id', projId).then(r => r.data || []),
+      sb.from('task_sections').select('*').eq('project_id', projId).then(r => r.data || []),
+    ]);
+
+    // Merge project_info
+    infoRows.forEach(r => {
+      projectInfo[r.project_id] = {
+        pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
+        phase: r.phase||'Waiting on TP Approval', status: r.status||'active',
+        startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
+        client: r.client||'', clientContact: r.client_contact||'',
+        clientEmail: r.client_email||'', clientPhone: r.client_phone||'',
+        clientId: r.client_id||null, contactId: r.contact_id||null,
+        billingType: r.billing_type||'Fixed Fee', invoiced: r.invoiced||'',
+        remaining: r.remaining||'', notes: r.notes||'', desc: r.description||'',
+        dcas: r.dcas||'', customerWitness: r.customer_witness||'',
+        tpApproval: r.tp_approval||'', dpas: r.dpas||'', noforn: r.noforn||'',
+        testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'',
+        quoteNumber: r.quote_number||'', creditHold: r.credit_hold||false,
+        needUpdatedPo: r.need_updated_po||false, testcompleteDate: r.testcomplete_date||'',
+      };
+    });
+
+    // Merge tasks (avoid duplicates)
+    const existingIds = new Set(taskStore.map(t => t._id));
+    taskRows.forEach(r => {
+      if (existingIds.has(r.id)) return;
+      taskStore.push({
+        _id: r.id, taskNum: r.task_num||0, name: r.name, assign: r.assignee||'',
+        due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
+        due_raw: r.due_date||'', overdue: false, done: r.done||false,
+        proj: r.project_id||'', status: r.status||'new', priority: r.priority||'medium',
+        section: r.section||'sprint', sectionId: r.section_id||null,
+        salesCat: r.sales_category||'',
+        fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
+        budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
+        taskStartDate: r.task_start_date||'', completedDate: r.completed_date||'',
+        billedDate: r.billed_date||'', quoteNum: r.quote_number||'',
+        poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
+        createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+        revenueType: r.revenue_type||'fixed',
+      });
+    });
+
+    // Merge expenses
+    const existingExpIds = new Set(expenseStore.map(e => e._id));
+    expRows.forEach(r => {
+      if (existingExpIds.has(r.id)) return;
+      expenseStore.push({
+        _id: r.id, projId: r.proj_id, taskId: r.task_id||null,
+        name: r.name||'', planned: r.planned_amount ? parseFloat(r.planned_amount) : 0,
+        actual: r.actual_cost ? parseFloat(r.actual_cost) : 0,
+      });
+    });
+
+    // Merge task sections
+    const existingSectionIds = new Set(sectionStore.map(s => s._id));
+    sectionRows.forEach(r => {
+      if (existingSectionIds.has(r.id)) return;
+      sectionStore.push({ _id: r.id, projId: r.project_id, name: r.name, taskNum: r.task_num||0, collapsed: r.collapsed||false });
+    });
+
+    if (loadingEl) loadingEl.style.opacity = '1';
+  } catch(e) {
+    console.error('loadClosedProject failed:', e);
+    _loadedClosedProjects.delete(projId); // allow retry
   }
 }
 
@@ -10138,18 +10224,34 @@ async function editProjectName(projId) {
 function selectProjectById(id) {
   activeProjectId = id;
   const p = projects.find(x => x.id === id);
-  if (!p) {
-    // Data not loaded yet — bootApp will call this again after load
-    return;
-  }
+  if (!p) return;
+
   document.getElementById('topbarName').textContent = p.emoji + ' ' + p.name;
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('navProjects')?.classList.add('active');
   showProjectView('panel-info');
-  renderAllViews();
-  renderInfoSheet(id);
-  renderProjStickyHeader(id);
-  switchProjTab('sub-info');
+
+  const info   = projectInfo[id];
+  const status = info ? info.status : 'active';
+  const CLOSED = ['closed','complete','cancelled','billed'];
+  const isClosed = CLOSED.includes(status) || !info;
+
+  if (isClosed && !_loadedClosedProjects.has(id)) {
+    // Show skeleton while loading
+    const infoWrap = document.getElementById('panel-info');
+    if (infoWrap) infoWrap.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">&#x23F3; Loading project data…</div>';
+    loadClosedProject(id).then(() => {
+      renderAllViews();
+      renderInfoSheet(id);
+      renderProjStickyHeader(id);
+      switchProjTab('sub-info');
+    });
+  } else {
+    renderAllViews();
+    renderInfoSheet(id);
+    renderProjStickyHeader(id);
+    switchProjTab('sub-info');
+  }
 }
 
 
@@ -13034,7 +13136,6 @@ function setupRealtime() {
         }
       }
     }
-    else if (id === 'panel-clients') renderClientsPanel('');
     else if (id === 'panel-timesheet') renderTimesheet();
   }
 
@@ -13123,9 +13224,7 @@ function setupRealtime() {
         t.section = r.section||t.section; t.fixedPrice = r.fixed_price ? parseFloat(r.fixed_price) : t.fixedPrice;
         t.completedDate = r.completed_date||''; t.billedDate = r.billed_date||'';
       }
-      if (!wasDone && r.done) {
-        toast('✓ Task completed: ' + r.name);
-      }
+      if (!wasDone && r.done) toast('✓ Task completed: ' + r.name);
       refreshCurrentView();
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks' }, payload => {
@@ -13134,109 +13233,10 @@ function setupRealtime() {
     })
     .subscribe();
 
-  // ── EXPENSES ──────────────────────────────────────────────
-  sb.channel('rt-expenses')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'expenses' }, payload => {
-      const r = payload.new;
-      if (!expenseStore.find(e => e._id === r.id)) {
-        expenseStore.push({ _id: r.id, projId: r.proj_id, taskId: r.task_id||null,
-          name: r.name||'', planned: parseFloat(r.planned_amount)||0, actual: parseFloat(r.actual_cost)||0 });
-        refreshCurrentView();
-      }
-    })
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'expenses' }, payload => {
-      const r = payload.new;
-      const e = expenseStore.find(x => x._id === r.id);
-      if (e) { e.name = r.name||''; e.planned = parseFloat(r.planned_amount)||0; e.actual = parseFloat(r.actual_cost)||0; }
-      refreshCurrentView();
-    })
-    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'expenses' }, payload => {
-      expenseStore = expenseStore.filter(e => e._id !== payload.old.id);
-      refreshCurrentView();
-    })
-    .subscribe();
-
-  // ── TIMESHEET_ENTRIES ──────────────────────────────────────
-  sb.channel('rt-timesheet')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'timesheet_entries' }, () => {
-      // Timesheet is complex — just reload data silently, re-render if visible
-      dbFetch('timesheet_entries').then(rows => {
-        tsData = {};
-        rows.forEach(r => {
-          const empId = r.employee_id || '__unknown__';
-          const storeKey = empId + '|' + r.week_start;
-          if (r.is_overhead && r.overhead_cat) {
-            const ohKey = 'oh_' + storeKey;
-            if (!tsData[ohKey]) tsData[ohKey] = {};
-            tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
-          } else {
-            if (!tsData[storeKey]) tsData[storeKey] = [];
-            tsData[storeKey].push({
-              _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
-              isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
-              hours: JSON.parse(r.hours_json||'{}'),
-            });
-          }
-        });
-        const active = document.querySelector('.view-panel.active');
-        if (active?.id === 'panel-timesheet') renderTimesheet();
-      });
-    })
-    .subscribe();
-
-  // ── CLIENTS ───────────────────────────────────────────────
-  sb.channel('rt-clients')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'clients' }, payload => {
-      const r = payload.new;
-      if (!clientStore.find(c => c.id === r.id)) {
-        clientStore.push({ id: r.id, name: r.name||'', address: r.address||'', city: r.city||'',
-          state: r.state||'', zip: r.zip||'', phone: r.phone||'', website: r.website||'', notes: r.notes||'' });
-        const active = document.querySelector('.view-panel.active');
-        if (active?.id === 'panel-clients') renderClientsPanel('');
-      }
-    })
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clients' }, payload => {
-      const r = payload.new;
-      const c = clientStore.find(x => x.id === r.id);
-      if (c) Object.assign(c, { name: r.name||'', address: r.address||'', city: r.city||'',
-        state: r.state||'', zip: r.zip||'', phone: r.phone||'', website: r.website||'', notes: r.notes||'' });
-      const active = document.querySelector('.view-panel.active');
-      if (active?.id === 'panel-clients') renderClientsPanel('');
-    })
-    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'clients' }, payload => {
-      clientStore = clientStore.filter(c => c.id !== payload.old.id);
-      const active = document.querySelector('.view-panel.active');
-      if (active?.id === 'panel-clients') renderClientsPanel('');
-    })
-    .subscribe();
-
-  // ── CONTACTS ──────────────────────────────────────────────
-  sb.channel('rt-contacts')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'contacts' }, payload => {
-      const r = payload.new;
-      if (!contactStore.find(c => c.id === r.id)) {
-        contactStore.push({ id: r.id, clientId: r.client_id||null,
-          firstName: r.first_name||'', lastName: r.last_name||'', email: r.email||'', phone: r.phone||'' });
-        const active = document.querySelector('.view-panel.active');
-        if (active?.id === 'panel-clients') renderClientsPanel('');
-      }
-    })
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'contacts' }, payload => {
-      const r = payload.new;
-      const ct = contactStore.find(x => x.id === r.id);
-      if (ct) Object.assign(ct, { firstName: r.first_name||'', lastName: r.last_name||'',
-        email: r.email||'', phone: r.phone||'' });
-      const active = document.querySelector('.view-panel.active');
-      if (active?.id === 'panel-clients') renderClientsPanel('');
-    })
-    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'contacts' }, payload => {
-      contactStore = contactStore.filter(c => c.id !== payload.old.id);
-      const active = document.querySelector('.view-panel.active');
-      if (active?.id === 'panel-clients') renderClientsPanel('');
-    })
+  // ── SCHEDULE_BLOCKS ────────────────────────────────────────
+  sb.channel('rt-schedule-blocks')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'schedule_blocks' }, payload => {
       const blk = schedRowToBlock(payload.new);
-      // Only add if we don't already have it (avoid echo of our own save)
       if (!schedBlocks.find(b => b.id === blk.id)) {
         schedBlocks.push(blk);
         _schedRerender();
@@ -13254,7 +13254,7 @@ function setupRealtime() {
     })
     .subscribe();
 
-  console.log('✓ Realtime subscriptions active');
+  console.log('✓ Realtime subscriptions active (projects, project_info, tasks, schedule_blocks)');
 }
 
 // Re-render the scheduler if it's currently visible
@@ -14900,7 +14900,7 @@ function renderSchedCalendar() {
   DOW.forEach(d => { html += `<div class="sched-cal-dow">${d}</div>`; });
 
   cells.forEach(cell => {
-    const ds = toDateStr(cell);
+    const ds        = toDateStr(cell);
     const isToday   = ds === todayStr2;
     const isOther   = cell.getMonth() !== displayMonth;
     const isWeekend = cell.getDay() === 0 || cell.getDay() === 6;
@@ -14908,33 +14908,44 @@ function renderSchedCalendar() {
     const cls = ['sched-cal-day', isToday?'today-cell':'', isOther?'other-month':'', isWeekend?'weekend-cell':'', holiday?'holiday-day':''].filter(Boolean).join(' ');
 
     const dayBlocks = blocksForDate(ds);
-    const MAX_SHOW = 3;
-    const shown = dayBlocks.slice(0, MAX_SHOW);
-    const extra = dayBlocks.length - MAX_SHOW;
+    const MAX_SHOW  = 8;
+    const shown     = dayBlocks.slice(0, MAX_SHOW);
+    const extra     = dayBlocks.length - MAX_SHOW;
     const holidayTag = holiday ? `<div class="sched-cal-holiday-tag">&#x1F4C5; ${holiday.name}</div>` : '';
 
-    const chips = shown.map(blk => {
+    const entries = shown.map(blk => {
       const color = resolveBlockColor(blk);
-      const isStart = blk.start === ds;
-      const isEnd   = blk.end   === ds;
-      const chipCls = isStart && isEnd ? 'chip-lone' : isStart ? 'chip-start' : isEnd ? 'chip-end' : 'chip-mid';
-      const lines   = buildBlockDisplayLines(blk);
-      const showDetail = isStart || cell.getDay() === 1;
-      let inner = '';
-      if (showDetail) {
-        inner = lines.map((l, i) => `<div style="font-size:${i===0?'10.5':'9'}px;${i>0?'opacity:.85;':''}white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${l}</div>`).join('');
+      const fmt = t => { if (!t) return ''; const [h,m] = t.split(':'); const hr=+h; return (hr%12||12)+(m&&m!=='00'?':'+m:'')+(hr<12?'am':'pm'); };
+      const timeLbl = blk.startTime ? fmt(blk.startTime) : '';
+      const pi    = blk.projId ? getProjInfo(blk.projId) : null;
+      const proj  = pi ? (pi.proj.name||'') : '';
+      const cust  = pi ? (pi.info.client||'') : '';
+      const room  = rowLabel(blk.rowId || blk.cat);
+      const emp   = blk.empId ? (typeof employees!=='undefined'?employees:[]).find(e=>e.id===blk.empId) : null;
+      let parts = [];
+      if (blk.empId) {
+        const evtLbl = blk.empEventType==='vacation'?'Vacation':blk.empEventType==='sick'?'Sick':'Work';
+        parts = [(emp ? emp.name.split(' ').pop() : '') + ':' + evtLbl];
+        if (blk.label) parts.push(blk.label);
       } else {
-        inner = '&nbsp;';
+        if (proj) parts.push(proj);
+        if (cust) parts.push(cust);
+        if (room && room !== blk.cat) parts.push(room);
       }
-      const titleAttr = lines.join(' | ') + ' | ' + blk.start + ' \u2013 ' + blk.end;
-      return `<div class="sched-cal-chip ${chipCls}" style="background:${color};padding:3px 7px;" onclick="event.stopPropagation();openSchedModal('${blk.id}')" title="${titleAttr}">${inner}</div>`;
+      const bodyText = parts.join('  ');
+      const titleTxt = (timeLbl ? timeLbl + '  ' : '') + bodyText;
+      return `<div class="sched-cal-entry" title="${titleTxt}">
+        <span class="sched-cal-entry-dot" style="background:${color};"></span>
+        ${timeLbl ? `<span class="sched-cal-entry-time" style="color:${color};">${timeLbl}</span>` : ''}
+        <span class="sched-cal-entry-body">${bodyText}</span>
+      </div>`;
     }).join('');
 
     const moreHtml = extra > 0 ? `<div class="sched-cal-more">+${extra} more</div>` : '';
 
-    html += `<div class="${cls}" onclick="openSchedModal(null,null,'${ds}')">
+    html += `<div class="${cls}">
       <div class="sched-cal-daynum">${cell.getDate()}</div>
-      ${holidayTag}${chips}${moreHtml}
+      ${holidayTag}${entries}${moreHtml}
     </div>`;
   });
 
