@@ -13234,9 +13234,38 @@ function setupRealtime() {
       const active = document.querySelector('.view-panel.active');
       if (active?.id === 'panel-clients') renderClientsPanel('');
     })
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'schedule_blocks' }, payload => {
+      const blk = schedRowToBlock(payload.new);
+      // Only add if we don't already have it (avoid echo of our own save)
+      if (!schedBlocks.find(b => b.id === blk.id)) {
+        schedBlocks.push(blk);
+        _schedRerender();
+      }
+    })
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'schedule_blocks' }, payload => {
+      const blk = schedRowToBlock(payload.new);
+      const idx = schedBlocks.findIndex(b => b.id === blk.id);
+      if (idx >= 0) schedBlocks[idx] = blk; else schedBlocks.push(blk);
+      _schedRerender();
+    })
+    .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'schedule_blocks' }, payload => {
+      schedBlocks = schedBlocks.filter(b => b.id !== payload.old.id);
+      _schedRerender();
+    })
     .subscribe();
 
   console.log('✓ Realtime subscriptions active');
+}
+
+// Re-render the scheduler if it's currently visible
+function _schedRerender() {
+  const panel = document.getElementById('panel-scheduler');
+  if (!panel?.classList.contains('active')) return;
+  if (typeof schedView !== 'undefined' && schedView === 'calendar') {
+    if (typeof renderSchedCalendar === 'function') renderSchedCalendar();
+  } else {
+    if (typeof renderSched === 'function') renderSched();
+  }
 }
 
 // ===== TASK DRAG & DROP REORDER =====
