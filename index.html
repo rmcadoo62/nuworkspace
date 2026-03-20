@@ -13875,12 +13875,79 @@ const ROW_H_FIXED  = 64;   // 2-week, month, quarter rows
 const BAR_H_FIXED  = 52;
 // Hour grid constants live inside renderSched for 1-week view
 
-// ---- Persistence ----
-function schedLoad() {
-  try { schedBlocks = JSON.parse(localStorage.getItem(SCHED_KEY)||'[]'); } catch(e){ schedBlocks = []; }
+// ---- Persistence (Supabase) ----
+function schedRowToBlock(r) {
+  return {
+    id:           r.id,
+    rowId:        r.row_id          || null,
+    cat:          r.cat             || null,
+    start:        r.start_date,
+    end:          r.end_date,
+    startTime:    r.start_time      || null,
+    endTime:      r.end_time        || null,
+    label:        r.label           || '',
+    projId:       r.proj_id         || null,
+    taskId:       r.task_id         || null,
+    empId:        r.emp_id          || null,
+    empEventType: r.emp_event_type  || null,
+    flag:         r.flag            || null,
+  };
 }
-function schedSave() {
-  localStorage.setItem(SCHED_KEY, JSON.stringify(schedBlocks));
+function blockToRow(b) {
+  return {
+    id:             b.id,
+    row_id:         b.rowId         || null,
+    cat:            b.cat           || null,
+    start_date:     b.start,
+    end_date:       b.end,
+    start_time:     b.startTime     || null,
+    end_time:       b.endTime       || null,
+    label:          b.label         || null,
+    proj_id:        b.projId        || null,
+    task_id:        b.taskId        || null,
+    emp_id:         b.empId         || null,
+    emp_event_type: b.empEventType  || null,
+    flag:           b.flag          || null,
+  };
+}
+
+async function schedLoad() {
+  if (!sb) return;
+  try {
+    const { data, error } = await sb.from('schedule_blocks').select('*');
+    if (error) { console.error('schedLoad:', error); return; }
+    schedBlocks = (data || []).map(schedRowToBlock);
+    // One-time migration from localStorage
+    const legacy = localStorage.getItem(SCHED_KEY);
+    if (legacy) {
+      try {
+        const old = JSON.parse(legacy);
+        if (Array.isArray(old) && old.length > 0) {
+          const rows = old.map(blockToRow);
+          await sb.from('schedule_blocks').upsert(rows, { onConflict: 'id' });
+          const refreshed = await sb.from('schedule_blocks').select('*');
+          if (refreshed.data) schedBlocks = refreshed.data.map(schedRowToBlock);
+          console.log('Migrated', rows.length, 'blocks from localStorage to Supabase');
+        }
+      } catch(e) { console.warn('Migration failed:', e); }
+      localStorage.removeItem(SCHED_KEY);
+    }
+  } catch(e) { console.error('schedLoad exception:', e); }
+}
+
+async function schedSaveBlock(block) {
+  // Upsert single block — called after save/drag
+  if (!sb) return;
+  try {
+    await sb.from('schedule_blocks').upsert(blockToRow(block), { onConflict: 'id' });
+  } catch(e) { console.error('schedSaveBlock:', e); }
+}
+
+async function schedDeleteFromDB(blockId) {
+  if (!sb) return;
+  try {
+    await sb.from('schedule_blocks').delete().eq('id', blockId);
+  } catch(e) { console.error('schedDeleteFromDB:', e); }
 }
 
 // ---- Date helpers ----
@@ -13973,7 +14040,7 @@ function fmtRangeLabel(range) {
 }
 
 // ---- Open panel ----
-window.openSchedulerPanel = function(el) {
+window.openSchedulerPanel = async function(el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
   activeProjectId = null;
@@ -13981,7 +14048,7 @@ window.openSchedulerPanel = function(el) {
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-scheduler').classList.add('active');
   loadSchedSettings();
-  schedLoad();
+  await schedLoad();
   renderSched();
 };
 
@@ -14304,8 +14371,7 @@ function attachBarDrag(bar, block, rows, range, dayW) {
       if (drag) {
         if (drag.hasMoved) {
           // It was a real drag — save the new position
-          schedSave();
-          renderSched();
+          schedSaveBlock(block).then(() => renderSched());
         } else {
           // It was a plain click — open edit modal
           openSchedModal(block.id);
@@ -14723,7 +14789,11 @@ function _doSaveSchedBlock() {
       flag:   schedFlag           || null
     });
   }
-  schedSave();
+  // Persist to Supabase
+  const _savedBlock = editId
+    ? schedBlocks.find(b => b.id === editId)
+    : schedBlocks[schedBlocks.length - 1];
+  if (_savedBlock) schedSaveBlock(_savedBlock);
   closeSchedModal();
   if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
 }
@@ -14733,7 +14803,7 @@ window.saveSchedBlock   = _doSaveSchedBlock;
 window.deleteSchedBlock = function() {
   const editId = document.getElementById('schedEditId').value;
   schedBlocks = schedBlocks.filter(b => b.id !== editId);
-  schedSave();
+  schedDeleteFromDB(editId);
   closeSchedModal();
   if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
 };
