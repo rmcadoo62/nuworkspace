@@ -899,7 +899,7 @@ tr:hover .ts-del-row{color:var(--muted);}
 .chatter-msg-attachments{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;}
 .chatter-attach-chip{display:flex;align-items:center;gap:6px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--text);cursor:pointer;}
 .chatter-attach-chip:hover{border-color:var(--amber-dim);color:var(--amber);}
-.chatter-composer{border-top:2px solid var(--border);padding:16px 28px 20px;background:var(--surface);flex-shrink:0;}
+.chatter-composer{border-bottom:2px solid var(--border);padding:16px 28px 20px;background:var(--surface);flex-shrink:0;}
 .chatter-composer-top{display:flex;gap:12px;align-items:flex-start;}
 .chatter-avatar-self{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;background:var(--amber);color:#fff;}
 .chatter-input-wrap{flex:1;position:relative;}
@@ -1573,7 +1573,6 @@ tr:hover .ts-del-row{color:var(--muted);}
       </div>
       <div class="proj-sub" id="sub-chatter">
         <div class="chatter-wrap">
-          <div class="chatter-feed" id="chatterFeed"></div>
           <div class="chatter-composer" id="chatterComposer">
             <div class="chatter-reply-bar" id="chatterReplyBar" style="display:none">
               <span id="chatterReplyLabel" style="font-size:12px;color:var(--amber)"></span>
@@ -1597,6 +1596,7 @@ tr:hover .ts-del-row{color:var(--muted);}
               <button class="btn btn-primary" style="margin-left:auto;padding:6px 18px;font-size:13px" onclick="chatterPost()">Post</button>
             </div>
           </div>
+          <div class="chatter-feed" id="chatterFeed"></div>
         </div>
       </div>
 
@@ -7568,7 +7568,7 @@ async function loadChatter(projId) {
   if (!projId) return;
   try {
     const { data, error } = await sb.from('chatter')
-      .select('*').eq('proj_id', projId).order('created_at', { ascending: true });
+      .select('*').eq('proj_id', projId).order('created_at', { ascending: false });
     if (error) throw error;
     chatterStore[projId] = (data || []).map(r => ({
       id: r.id, authorId: r.author_id, authorName: r.author_name,
@@ -7602,12 +7602,12 @@ function renderChatter(projId) {
   }
   let out = '';
   let lastDate = '';
+  // Newest first (fetch is already descending)
   topLevel.forEach(m => {
     const d = new Date(m.ts);
-    const dateStr = d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+    const dateStr = d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
     if (dateStr !== lastDate) { out += '<div class="chatter-date-divider">' + dateStr + '</div>'; lastDate = dateStr; }
     out += chatterMsgHtml(m, false);
-    // Inline replies
     const kids = replies.filter(r => r.replyTo === m.id);
     if (kids.length) {
       out += '<div class="chatter-replies">';
@@ -7616,14 +7616,17 @@ function renderChatter(projId) {
     }
   });
   feed.innerHTML = out;
-  feed.scrollTop = feed.scrollHeight;
+  feed.scrollTop = 0;
   // Update chatter tab badge
   updateChatterTabBadge(projId);
 }
 
 function chatterMsgHtml(m, isReply) {
   const d = new Date(m.ts);
-  const timeStr = d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+  const now = new Date();
+  const sameYear = d.getFullYear() === now.getFullYear();
+  const timeStr = d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' }) +
+    (sameYear ? '' : ', ' + d.getFullYear());
   const textHtml = (m.text || '').replace(/\n/g,'<br>').replace(/@([\w][\w ]*?)(?=\s|$|<br>)/g, '<span class="mention">@$1</span>');
   const attachHtml = m.attachments && m.attachments.length
     ? '<div class="chatter-msg-attachments">' + m.attachments.map(a =>
@@ -7700,8 +7703,19 @@ async function chatterPost() {
     created_at: new Date().toISOString()
   };
   if (!chatterStore[activeProjectId]) chatterStore[activeProjectId] = [];
-  const localMsg = { ...msg, id: 'local_' + Date.now(), ts: msg.created_at, replyTo: msg.reply_to, notifyIds: msg.notify_ids };
-  chatterStore[activeProjectId].push(localMsg);
+  const localMsg = {
+    id: 'local_' + Date.now(),
+    authorId: msg.author_id,
+    authorName,
+    authorInitials,
+    authorColor,
+    text,
+    attachments: msg.attachments,
+    replyTo: msg.reply_to,
+    notifyIds: msg.notify_ids,
+    ts: msg.created_at,
+  };
+  chatterStore[activeProjectId].unshift(localMsg);  // newest first
   renderChatter(activeProjectId);
   input.innerText = '';
   chatterAttachPending = [];
