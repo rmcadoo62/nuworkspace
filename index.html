@@ -9261,9 +9261,8 @@ async function loadAllData() {
       return rows;
     }
 
-    // 8-week timesheet window
-    const tsWeekCutoff = new Date();
-    tsWeekCutoff.setDate(tsWeekCutoff.getDate() - 56);
+    // Load timesheet data from Jan 1 2025 onward (reliable data starts here)
+    const tsWeekCutoff = new Date('2025-01-01');
     const tsCutoffStr = tsWeekCutoff.toISOString().split('T')[0];
 
     // Fire all fetches simultaneously — active projects only for heavy tables
@@ -9275,7 +9274,19 @@ async function loadAllData() {
       dbFetch('clients'),
       dbFetch('contacts'),
       fetchAllPages('expenses',       '*', null,  null),  // expenses are small, load all
-      sb.from('timesheet_entries').select('*').gte('week_start', tsCutoffStr).then(r => r.data || []),
+      (async () => {
+        let rows = [], page = 0;
+        while (true) {
+          const { data } = await sb.from('timesheet_entries').select('*')
+            .gte('week_start', tsCutoffStr)
+            .range(page * 1000, page * 1000 + 999);
+          if (!data || data.length === 0) break;
+          rows = rows.concat(data);
+          if (data.length < 1000) break;
+          page++;
+        }
+        return rows;
+      })(),
       fetchAllPages('task_sections',  '*', null,  null),
       fetchAllPages('permission_roles','*', null, null),
     ]);
