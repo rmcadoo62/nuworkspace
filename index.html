@@ -2268,18 +2268,18 @@ function renderProjectsTable() {
     <div style="overflow-x:auto">
     <table class="projtbl-table" id="projtblTable" style="min-width:1200px;table-layout:fixed">
       <colgroup>
-        <col id="ptc-name"    style="width:220px">
-        <col id="ptc-status"  style="width:130px">
-        <col id="ptc-client"  style="width:160px">
-        <col id="ptc-po"      style="width:90px">
-        <col id="ptc-quote"   style="width:90px">
-        <col id="ptc-desc"    style="width:180px">
-        <col id="ptc-article" style="width:180px">
-        ${PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c => `<col id="ptc-${c.ptc}" style="width:${c.width}">`).join('')}
-        <col id="ptc-exp"     style="width:100px">
-        <col id="ptc-billed"  style="width:100px">
-        <col id="ptc-hours"   style="width:90px">
-        <col id="ptc-remain"  style="width:110px">
+        <col style="width:var(--ptc-name,220px)">
+        <col style="width:var(--ptc-status,130px)">
+        <col style="width:var(--ptc-client,160px)">
+        <col style="width:var(--ptc-po,90px)">
+        <col style="width:var(--ptc-quote,90px)">
+        <col style="width:var(--ptc-desc,180px)">
+        <col style="width:var(--ptc-article,180px)">
+        ${PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c => `<col style="width:var(--ptc-${c.ptc},${c.width})">`).join('')}
+        <col style="width:var(--ptc-exp,100px)">
+        <col style="width:var(--ptc-billed,100px)">
+        <col style="width:var(--ptc-hours,90px)">
+        <col style="width:var(--ptc-remain,110px)">
       </colgroup>
       <thead>
         <tr>
@@ -2302,10 +2302,7 @@ function renderProjectsTable() {
       <tbody>${rows}</tbody>
     </table>
     </div>`;
-  setTimeout(() => {
-    ptblInitResizers();
-    ptblSetW(ptblGetW());
-  }, 0);
+  setTimeout(() => ptblInitResizers(), 0);
 }
 function navToProject(projId) {
   const p = projects.find(x => x.id === projId);
@@ -5888,14 +5885,17 @@ function ittInitResizers(){
   });
 }
 
-const PTBL_MINS = {name:80, status:80, client:80, po:50, quote:50, desc:80, article:80, dcas:50, exp:70, billed:70, hours:60, remain:70};
-function ptblGetW() { try { return Object.assign({name:'220px',status:'130px',client:'160px',po:'90px',quote:'90px',desc:'180px',article:'180px',dcas:'80px',exp:'100px',billed:'100px',hours:'90px',remain:'110px'}, JSON.parse(localStorage.getItem('ptblCols')||'{}')); } catch { return {}; } }
-function ptblSetW(w) { Object.entries(w).forEach(([k,v]) => { const col = document.getElementById('ptc-'+k); if (col) col.style.width = v; }); }
-function ptblSaveW(w) { try { localStorage.setItem('ptblCols', JSON.stringify(w)); } catch {} }
+const PTBL_MINS = {name:80,status:80,client:80,po:50,quote:50,desc:80,article:80,pm:60,tenttest:80,testcomp:80,dcas:50,witness:80,tpappr:60,dpas:50,noforn:50,credit:60,needpo:60,contact:80,exp:70,billed:70,hours:60,remain:70};
+const PTBL_DEFAULTS = {name:'220px',status:'130px',client:'160px',po:'90px',quote:'90px',desc:'180px',article:'180px',exp:'100px',billed:'100px',hours:'90px',remain:'110px'};
+function ptblGetW() { try { return Object.assign({}, PTBL_DEFAULTS, JSON.parse(localStorage.getItem('ptblCols')||'{}')); } catch { return Object.assign({}, PTBL_DEFAULTS); } }
+function ptblSetW(w) { Object.entries(w).forEach(([k,v]) => document.documentElement.style.setProperty('--ptc-'+k, v)); }
+function ptblSaveW(w) { try { const s={}; Object.entries(w).forEach(([k,v])=>{ if(v!==PTBL_DEFAULTS[k]) s[k]=v; }); localStorage.setItem('ptblCols', JSON.stringify(s)); } catch {} }
 
 function ptblInitResizers() {
   const table = document.getElementById('projtblTable');
   if (!table) return;
+  const w = ptblGetW();
+  ptblSetW(w);
   table.querySelectorAll('th .itt-resizer').forEach(r => {
     r.addEventListener('mousedown', e => {
       e.preventDefault(); e.stopPropagation();
@@ -5903,9 +5903,24 @@ function ptblInitResizers() {
       const startX = e.clientX;
       const th = r.closest('th');
       const startW = th ? th.offsetWidth : parseInt(w[col]||100);
+      let dragged = false;
       r.classList.add('active');
-      const mv = m => { const px = Math.max(PTBL_MINS[col]||50, startW + (m.clientX - startX)); w[col] = px+'px'; ptblSetW(w); };
-      const up = () => { r.classList.remove('active'); ptblSaveW(w); document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+      const mv = m => {
+        dragged = true;
+        const px = Math.max(PTBL_MINS[col]||50, startW + (m.clientX - startX));
+        w[col] = px+'px'; ptblSetW(w);
+      };
+      const up = () => {
+        r.classList.remove('active');
+        ptblSaveW(w);
+        document.removeEventListener('mousemove', mv);
+        document.removeEventListener('mouseup', up);
+        // Block the th click (sort) that fires right after mouseup
+        if (dragged && th) {
+          const block = e2 => { e2.stopPropagation(); th.removeEventListener('click', block, true); };
+          th.addEventListener('click', block, true);
+        }
+      };
       document.addEventListener('mousemove', mv);
       document.addEventListener('mouseup', up);
     });
@@ -6047,13 +6062,46 @@ function getVacationAllotment(hireDateStr) {
   return Math.min(120, 80 + Math.floor(yearsWorked - 5) * 8);
 }
 
-function getQuarterlyAccrual(hireDateStr) {
-  // Returns how much vacation has accrued so far this year based on quarters completed
+function getQuarterlyAccrual(hireDateStr, annivStart) {
+  // Returns how much vacation has accrued so far in the current anniversary year
+  // based on quarterly drops from the anniversary date
   const allotment = getVacationAllotment(hireDateStr);
+  const dropAmt = allotment / 4;
   const today = new Date();
-  const month = today.getMonth(); // 0-11
-  const quarter = Math.floor(month / 3) + 1; // 1-4
-  return (allotment / 4) * quarter;
+
+  if (!annivStart) {
+    // Fallback to calendar quarters if no anniv date
+    const quarter = Math.floor(today.getMonth() / 3) + 1;
+    return dropAmt * quarter;
+  }
+
+  // Count how many quarterly drops have occurred since annivStart up to today
+  let accrued = 0;
+  for (let q = 1; q <= 4; q++) {
+    const dropDate = new Date(annivStart);
+    dropDate.setMonth(dropDate.getMonth() + (q * 3));
+    if (dropDate <= today) accrued += dropAmt;
+  }
+  return accrued;
+}
+
+function getPartTimeSickAccrued(empId, annivStart, annivEnd) {
+  // NJ rule: 1 hour sick for every 30 hours worked, calculated from timesheet data
+  const rangeEnd = annivEnd || new Date();
+  let totalHoursWorked = 0;
+  Object.entries(tsData).forEach(([key, rows]) => {
+    if (key.startsWith('oh_') || !Array.isArray(rows)) return;
+    if (!key.startsWith(empId + '|')) return;
+    const weekKey = key.split('|')[1];
+    if (!weekKey) return;
+    const weekDate = new Date(weekKey + 'T00:00:00');
+    if (annivStart && weekDate < annivStart) return;
+    if (weekDate >= rangeEnd) return;
+    rows.forEach(row => {
+      if (row.hours) totalHoursWorked += Object.values(row.hours).reduce((s,h)=>s+(parseFloat(h)||0),0);
+    });
+  });
+  return Math.floor(totalHoursWorked / 30); // 1h per 30h worked, no fractional hours
 }
 
 function getTimeOffUsed(empId, year, annivStart, annivEnd) {
@@ -6218,13 +6266,19 @@ function showEmpProfile(empId, annivOffset) {
   })();
   const used = getTimeOffUsed(empId, year, _annivRange?.start, _annivRange?.end);
   const vacAllotment = getVacationAllotment(emp.hireDate);
-  const vacAccrued = getQuarterlyAccrual(emp.hireDate);
+  const vacAccrued = getQuarterlyAccrual(emp.hireDate, _annivRange?.start);
+  const vacOpeningBalance = emp.vacBank || 0;
   const today = new Date();
 
   // Sick accrual: opening balance (sick_bank) + drops on Jan 1 and May 1 within anniversary year, capped at 48h
+  // Part-time: NJ rule — 1h per 30h worked, no fixed drops
+  const isPartTime = emp.empType === 'parttime';
   let sickAllotment = 0;
   const sickOpeningBalance = emp.sickBank || 0;
-  if (emp.hireDate && _annivRange) {
+  if (isPartTime) {
+    const ptAccrued = getPartTimeSickAccrued(empId, _annivRange?.start, _annivRange?.end);
+    sickAllotment = sickOpeningBalance + ptAccrued;
+  } else if (emp.hireDate && _annivRange) {
     const annivStart = _annivRange.start;
     const annivEnd   = _annivRange.end;
     let running = sickOpeningBalance;
@@ -6246,6 +6300,7 @@ function showEmpProfile(empId, annivOffset) {
   // sickAllotment = what's been accrued/available to take this year (capped at 48)
   // sickBankBalance = true running balance (opening + all drops - used), no cap
   const sickBankBalance = (() => {
+    if (isPartTime) return Math.max(0, sickAllotment - used.sick);
     if (!emp.hireDate || !_annivRange) return sickOpeningBalance - used.sick;
     let running = sickOpeningBalance;
     const annivStart = _annivRange.start;
@@ -6263,6 +6318,8 @@ function showEmpProfile(empId, annivOffset) {
 
   // Calculate sick overage and how much flows to vacation
   const sickOverage = Math.max(0, used.sick - sickAllotment);
+  // Vacation bank: opening balance + accrued so far - used (incl. sick overage charged to vacation)
+  const vacBankBalance = vacOpeningBalance + vacAccrued - (used.vacation + sickOverage);
   const holidays = getHolidays(year);
   const approver = employees.find(e => e.id === emp.approverId);
 
@@ -6581,14 +6638,70 @@ function showEmpProfile(empId, annivOffset) {
           <button onclick="showEmpProfile('${empId}', ${annivOffset + 1})" ${annivOffset >= 0 ? 'disabled' : ''} style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:12px;color:var(--muted);${annivOffset >= 0 ? 'opacity:.3;cursor:not-allowed' : 'cursor:pointer'}">▶</button>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div style="display:grid;grid-template-columns:${isPartTime?'1fr':'1fr 1fr'};gap:20px">
         <!-- Vacation -->
-        <div>
+        ${isPartTime ? '<div style="display:none">' : '<div>'}
           <div style="display:flex;justify-content:space-between;align-items:baseline">
             <div style="font-size:12px;font-weight:600;color:var(--text)">Vacation</div>
-            <div style="font-size:10px;color:var(--muted)">${annivOffset === 0 ? vacAccrued.toFixed(0)+' hrs accrued so far' : vacAllotment+' hrs allotted'}</div>
+            <div style="font-size:13px;font-weight:600;color:var(--blue)">${annivOffset === 0 ? vacBankBalance.toFixed(2)+'h bank balance' : (used.vacation + sickOverage).toFixed(1)+'h used'}</div>
           </div>
-          ${bar(used.vacation + sickOverage, vacAllotment, 'var(--blue)')}
+          ${(() => {
+            // Build quarterly drop visualization
+            const totalAvail = annivOffset === 0 ? vacOpeningBalance + vacAllotment : vacAllotment;
+            const usedHrs = used.vacation + sickOverage;
+            const usedPct = totalAvail > 0 ? Math.min(100, (usedHrs / totalAvail) * 100) : 0;
+            const over = usedHrs > totalAvail;
+            const fmtShort = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+            const today2 = new Date();
+
+            // Calculate quarterly drop dates and amounts from annivStart
+            const drops = [];
+            if (_annivRange) {
+              const dropAmt = vacAllotment / 4;
+              for (let q = 1; q <= 4; q++) {
+                const dropDate = new Date(_annivRange.start);
+                dropDate.setMonth(dropDate.getMonth() + (q * 3));
+                // Position as % of total year span
+                const yearMs = _annivRange.end - _annivRange.start;
+                const pct = ((dropDate - _annivRange.start) / yearMs) * 100;
+                const past = dropDate <= today2;
+                drops.push({ date: dropDate, pct, amt: dropAmt, past, label: fmtShort(dropDate) });
+              }
+            }
+
+            // Today marker position
+            const todayPct = _annivRange ? Math.min(100, Math.max(0,
+              ((today2 - _annivRange.start) / (_annivRange.end - _annivRange.start)) * 100
+            )) : null;
+
+            return `
+              <div style="position:relative;margin-top:10px;margin-bottom:32px">
+                <!-- Bar track -->
+                <div style="background:var(--surface2);border-radius:6px;height:10px;position:relative;overflow:visible">
+                  <!-- Used fill -->
+                  <div style="height:100%;border-radius:6px;width:${usedPct}%;background:${over?'var(--red)':'var(--blue)'};transition:width .4s;position:relative;z-index:1"></div>
+                  <!-- Today marker -->
+                  ${todayPct !== null && annivOffset === 0 ? `<div style="position:absolute;left:${todayPct}%;top:-4px;bottom:-4px;width:2px;background:var(--amber);border-radius:2px;z-index:3" title="Today"></div>` : ''}
+                  <!-- Drop tick marks -->
+                  ${drops.map(d => `
+                    <div style="position:absolute;left:${d.pct}%;top:-3px;bottom:-3px;width:2px;background:${d.past?'rgba(58,127,212,0.6)':'rgba(58,127,212,0.25)'};z-index:2;border-radius:1px"></div>
+                  `).join('')}
+                </div>
+                <!-- Drop labels below -->
+                <div style="position:relative;height:28px;margin-top:2px">
+                  ${drops.map(d => `
+                    <div style="position:absolute;left:${d.pct}%;transform:translateX(-50%);text-align:center;white-space:nowrap">
+                      <div style="font-size:9px;font-weight:600;color:${d.past?'var(--blue)':'var(--muted)'}">${d.label}</div>
+                      <div style="font-size:9px;color:${d.past?'var(--blue)':'var(--muted)'}">+${d.amt}h</div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:-20px">
+                <span>${usedHrs.toFixed(1)}h used${over?' ⚠ Over':''}</span>
+                ${annivOffset === 0 ? `<span>opened ${vacOpeningBalance}h + ${vacAllotment}h = ${totalAvail}h</span>` : `<span>${vacAllotment}h allotted</span>`}
+              </div>`;
+          })()}
           ${(() => {
             // Build vacation drill-down using anniversary range
             const vacEntries = [];
@@ -6632,11 +6745,67 @@ function showEmpProfile(empId, annivOffset) {
             <div style="font-size:12px;font-weight:600;color:var(--text)">Sick</div>
             <div style="font-size:13px;font-weight:600;color:var(--amber)">${sickBankBalance.toFixed(1)}h bank balance</div>
           </div>
-          ${bar(Math.min(used.sick, sickAllotment), sickAllotment, 'var(--amber)')}
-          <div style="display:flex;justify-content:space-between;margin-top:4px;font-size:10px;color:var(--muted)">
-            <span>${used.sick.toFixed(1)}h used this year · 48h annual limit</span>
-            <span>opened at ${sickOpeningBalance}h</span>
-          </div>
+          ${(() => {
+            if (isPartTime) {
+              // Part-time: show hours worked and NJ accrual rate
+              const ptAccrued = getPartTimeSickAccrued(empId, _annivRange?.start, _annivRange?.end);
+              const totalHrsWorked = ptAccrued * 30;
+              const usedPct = sickAllotment > 0 ? Math.min(100, (used.sick / sickAllotment) * 100) : 0;
+              return `
+                <div style="background:var(--surface2);border-radius:6px;height:10px;margin-top:10px;overflow:hidden">
+                  <div style="height:100%;border-radius:6px;width:${usedPct}%;background:var(--amber);transition:width .4s"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px;color:var(--muted)">
+                  <span>${used.sick.toFixed(1)}h used of ${sickAllotment}h accrued</span>
+                  <span>~${totalHrsWorked}h worked · 1h per 30h (NJ)</span>
+                </div>`;
+            }
+            const totalSick = sickOpeningBalance + 48;
+            const usedSick = used.sick;
+            const usedPct = totalSick > 0 ? Math.min(100, (usedSick / totalSick) * 100) : 0;
+            const over = usedSick > sickAllotment;
+            const fmtShort = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+            const today2 = new Date();
+            const sickDrops = [];
+            if (_annivRange) {
+              const yearMs = _annivRange.end - _annivRange.start;
+              for (let y = _annivRange.start.getFullYear(); y <= _annivRange.end.getFullYear(); y++) {
+                for (const mo of [0, 4]) {
+                  const dropDate = new Date(y, mo, 1);
+                  if (dropDate > _annivRange.start && dropDate <= _annivRange.end) {
+                    const pct = ((dropDate - _annivRange.start) / yearMs) * 100;
+                    const past = dropDate <= today2;
+                    sickDrops.push({ date: dropDate, pct, amt: 24, past, label: fmtShort(dropDate) });
+                  }
+                }
+              }
+            }
+            const todayPct = _annivRange ? Math.min(100, Math.max(0,
+              ((today2 - _annivRange.start) / (_annivRange.end - _annivRange.start)) * 100
+            )) : null;
+            return `
+              <div style="position:relative;margin-top:10px;margin-bottom:32px">
+                <div style="background:var(--surface2);border-radius:6px;height:10px;position:relative;overflow:visible">
+                  <div style="height:100%;border-radius:6px;width:${usedPct}%;background:${over?'var(--red)':'var(--amber)'};transition:width .4s;position:relative;z-index:1"></div>
+                  ${todayPct !== null && annivOffset === 0 ? `<div style="position:absolute;left:${todayPct}%;top:-4px;bottom:-4px;width:2px;background:var(--amber);border-radius:2px;z-index:3" title="Today"></div>` : ''}
+                  ${sickDrops.map(d => `
+                    <div style="position:absolute;left:${d.pct}%;top:-3px;bottom:-3px;width:2px;background:${d.past?'rgba(232,162,52,0.7)':'rgba(232,162,52,0.25)'};z-index:2;border-radius:1px"></div>
+                  `).join('')}
+                </div>
+                <div style="position:relative;height:28px;margin-top:2px">
+                  ${sickDrops.map(d => `
+                    <div style="position:absolute;left:${d.pct}%;transform:translateX(-50%);text-align:center;white-space:nowrap">
+                      <div style="font-size:9px;font-weight:600;color:${d.past?'var(--amber)':'var(--muted)'}">${d.label}</div>
+                      <div style="font-size:9px;color:${d.past?'var(--amber)':'var(--muted)'}">+${d.amt}h</div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:-20px">
+                <span>${usedSick.toFixed(1)}h used${over?' ⚠ Over':''}</span>
+                <span>opened ${sickOpeningBalance}h + up to 48h drops</span>
+              </div>`;
+          })()}
           ${sickOverage > 0 ? `<div style="margin-top:6px;padding:5px 9px;border-radius:6px;background:rgba(208,64,64,0.1);border:1px solid rgba(208,64,64,0.3);font-size:11px;color:var(--red)">⚠ ${sickOverage.toFixed(1)}h overage — charged against vacation</div>` : ''}
         </div>
       </div>
@@ -6734,6 +6903,7 @@ function openEmployeeModal(id) {
   if (document.getElementById('empType')) document.getElementById('empType').value = emp ? (emp.empType || 'fulltime') : 'fulltime';
   if (document.getElementById('empActive')) document.getElementById('empActive').value = emp ? (emp.isActive !== false ? 'true' : 'false') : 'true';
   if (document.getElementById('empSickBank')) document.getElementById('empSickBank').value = emp ? (emp.sickBank || 0) : 0;
+  if (document.getElementById('empVacBank'))  document.getElementById('empVacBank').value  = emp ? (emp.vacBank  || 0) : 0;
 
   buildEmpColorSwatches();
   updateEmpPreview();
@@ -6796,6 +6966,7 @@ async function saveEmployee() {
   const _phone     = document.getElementById('empPhone').value.trim();
   const _hireDate  = document.getElementById('empHireDate').value || '';
   const _sickBank  = parseFloat(document.getElementById('empSickBank') ? document.getElementById('empSickBank').value : 0) || 0;
+  const _vacBank   = parseFloat(document.getElementById('empVacBank')  ? document.getElementById('empVacBank').value  : 0) || 0;
   const _roleId = document.getElementById('empPermLevel').value || null;
   const _empType   = document.getElementById('empType') ? document.getElementById('empType').value : 'fulltime';
   const _termDate  = document.getElementById('empTermDate') ? document.getElementById('empTermDate').value : '';
@@ -6813,7 +6984,7 @@ async function saveEmployee() {
   const data = {
     name: _name, initials: getInitials(_name),
     role: _role, dept: _dept, email: _email, phone: _phone, personalEmail: _personalEmail,
-    hireDate: _hireDate, sickBank: _sickBank, color: _color,
+    hireDate: _hireDate, sickBank: _sickBank, vacBank: _vacBank, color: _color,
   };
 
   const dbPayload = {
@@ -6823,6 +6994,7 @@ async function saveEmployee() {
     color: data.color,
     hire_date: data.hireDate || null,
     sick_bank: data.sickBank,
+    vac_bank: data.vacBank,
     role_id: _roleId || null,
     employment_type: _empType,
     is_active: _isActive,
@@ -6835,7 +7007,7 @@ async function saveEmployee() {
   if (_editingId) {
     editingEmpId = _editingId;
     const idx = employees.findIndex(e => e.id === _editingId);
-    if (idx > -1) employees[idx] = {...employees[idx], ...data, roleId: _roleId, terminationDate: _termDate, isActive: _isActive, isPaperTs: document.getElementById('empIsPaperTs')?.checked||false, isApprover: document.getElementById('empIsApprover')?.checked||false, approverId: document.getElementById('empApprover')?.value||null};
+    if (idx > -1) employees[idx] = {...employees[idx], ...data, empType: _empType, roleId: _roleId, terminationDate: _termDate, isActive: _isActive, isPaperTs: document.getElementById('empIsPaperTs')?.checked||false, isApprover: document.getElementById('empIsApprover')?.checked||false, approverId: document.getElementById('empApprover')?.value||null};
     if (sb) {
       const { error } = await sb.from('employees').update(dbPayload).eq('id', _editingId);
       if (error) { console.error('saveEmployee update error:', error); toast('⚠ Save error: ' + error.message); return; }
@@ -6848,6 +7020,7 @@ async function saveEmployee() {
           email: fresh.email||'', phone: fresh.phone||'',
           color: fresh.color, hireDate: fresh.hire_date||'',
           sickBank: parseFloat(fresh.sick_bank)||0,
+                  vacBank: parseFloat(fresh.vac_bank)||0,
           permissionLevel: fresh.permission_level||'employee',
           roleId: fresh.role_id||null,
           empType: fresh.employment_type||'fulltime',
@@ -6872,6 +7045,7 @@ async function saveEmployee() {
           email: d.email||'', phone: d.phone||'',
           color: d.color, hireDate: d.hire_date||'',
           sickBank: parseFloat(d.sick_bank)||0,
+          vacBank: parseFloat(d.vac_bank)||0,
           permissionLevel: d.permission_level||'employee',
           roleId: d.role_id||null,
           empType: d.employment_type||'fulltime',
@@ -9653,6 +9827,7 @@ async function loadAllData() {
       roleId: r.role_id||null,
       empType: r.employment_type||'fulltime',
       sickBank: parseFloat(r.sick_bank)||0,
+      vacBank: parseFloat(r.vac_bank)||0,
       isOwner: !!r.is_owner,
       isActive: r.is_active !== false,
       terminationDate: r.termination_date||'',
