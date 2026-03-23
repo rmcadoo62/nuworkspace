@@ -1249,6 +1249,10 @@ tr:hover .ts-del-row{color:var(--muted);}
             <button class="nav-filter-save" onclick="saveNamedFilter()" style="padding:6px 14px">&#x2713; Save Filter</button>
             <button class="nav-filter-clear" onclick="clearNavFilter()" style="padding:6px 12px">Clear</button>
           </div>
+          <div style="padding-top:12px;border-top:1px solid var(--border);margin-top:4px">
+            <div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Optional Columns</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px" id="colToggleChips"></div>
+          </div>
         </div>
 
         <div id="projStatBubbles" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
@@ -2077,6 +2081,40 @@ function openDashboardPanel(el) {
   renderDashboard();
 }
 
+// ===== COLUMN VISIBILITY =====
+const PROJ_COL_DEFS = [
+  { key: 'pm',            label: 'PM',                    ptc: 'pm',       default: false, width: '110px' },
+  { key: 'tentativeTest', label: 'Tentative Test Date',   ptc: 'tenttest', default: false, width: '120px' },
+  { key: 'testcomplete',  label: 'Test Complete Date',    ptc: 'testcomp', default: false, width: '120px' },
+  { key: 'dcas',          label: 'DCAS',                  ptc: 'dcas',     default: true,  width: '80px'  },
+  { key: 'witness',       label: 'Customer Witness',      ptc: 'witness',  default: false, width: '130px' },
+  { key: 'tpApproval',    label: 'TP Approval',           ptc: 'tpappr',   default: false, width: '100px' },
+  { key: 'dpas',          label: 'DPAS',                  ptc: 'dpas',     default: false, width: '70px'  },
+  { key: 'noforn',        label: 'NOFORN',                ptc: 'noforn',   default: false, width: '80px'  },
+  { key: 'creditHold',    label: 'Credit Hold',           ptc: 'credit',   default: false, width: '90px'  },
+  { key: 'needPo',        label: 'Need Updated PO',       ptc: 'needpo',   default: false, width: '110px' },
+  { key: 'contact',       label: 'Client Contact',        ptc: 'contact',  default: false, width: '130px' },
+];
+function getProjCols() { try { return JSON.parse(localStorage.getItem('projColVis') || '{}'); } catch { return {}; } }
+function setProjCols(vis) { try { localStorage.setItem('projColVis', JSON.stringify(vis)); } catch {} }
+function isProjColVisible(key) {
+  const vis = getProjCols();
+  const def = PROJ_COL_DEFS.find(c => c.key === key);
+  return vis[key] !== undefined ? vis[key] : (def?.default || false);
+}
+function toggleProjCol(key) {
+  const vis = getProjCols(); vis[key] = !isProjColVisible(key); setProjCols(vis);
+  buildColToggleChips(); renderProjectsTable();
+}
+function buildColToggleChips() {
+  const wrap = document.getElementById('colToggleChips');
+  if (!wrap) return;
+  wrap.innerHTML = PROJ_COL_DEFS.map(c => {
+    const on = isProjColVisible(c.key);
+    return `<span onclick="toggleProjCol('${c.key}')" style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;user-select:none;background:${on?'var(--amber-glow)':'var(--surface2)'};color:${on?'var(--amber)':'var(--muted)'};border:1px solid ${on?'var(--amber-dim)':'var(--border)'};transition:all .15s">${on?'✓':'+'} ${c.label}</span>`;
+  }).join('');
+}
+
 function renderProjectsTable() {
   const container = document.getElementById('projtblContainer');
   const subEl = document.getElementById('projtblSub');
@@ -2183,6 +2221,23 @@ function renderProjectsTable() {
 
     const fmtMoney = n => n > 0 ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
     const truncate = (s, n=40) => s && s.length > n ? s.slice(0,n)+'…' : (s||'—');
+    const fmtDate  = d => d ? new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}) : '—';
+
+    const optCells = PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c => {
+      let val = '—';
+      if (c.key === 'pm')            val = info.pm || '—';
+      if (c.key === 'tentativeTest') val = `<span style="font-size:11px;font-family:'JetBrains Mono',monospace">${fmtDate(info.tentativeTestDate)}</span>`;
+      if (c.key === 'testcomplete')  val = `<span style="font-size:11px;font-family:'JetBrains Mono',monospace">${fmtDate(info.testcompleteDate)}</span>`;
+      if (c.key === 'dcas')          val = `<span style="font-size:11px;color:var(--muted)">${info.dcas||'—'}</span>`;
+      if (c.key === 'witness')       val = `<span style="font-size:11px;color:var(--muted)">${truncate(info.customerWitness,30)}</span>`;
+      if (c.key === 'tpApproval')    val = `<span style="font-size:11px;color:var(--muted)">${info.tpApproval||'—'}</span>`;
+      if (c.key === 'dpas')          val = `<span style="font-size:11px;color:var(--muted)">${info.dpas||'—'}</span>`;
+      if (c.key === 'noforn')        val = `<span style="font-size:11px;color:var(--muted)">${info.noforn||'—'}</span>`;
+      if (c.key === 'creditHold')    val = info.creditHold ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:rgba(208,64,64,0.15);color:var(--red)">YES</span>` : `<span style="color:var(--muted);font-size:11px">—</span>`;
+      if (c.key === 'needPo')        val = info.needUpdatedPo ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:rgba(232,162,52,0.15);color:var(--amber)">YES</span>` : `<span style="color:var(--muted);font-size:11px">—</span>`;
+      if (c.key === 'contact')       val = `<span style="font-size:11px;color:var(--muted)">${truncate(info.clientContact,25)}</span>`;
+      return `<td>${val}</td>`;
+    }).join('');
 
     return `<tr onclick="navToProject('${p.id}')">
       <td>
@@ -2201,7 +2256,7 @@ function renderProjectsTable() {
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${info.quoteNumber||'—'}</td>
       <td style="font-size:12px;color:var(--muted);max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${(p.desc||info.desc||'').replace(/"/g,'&quot;')}">${truncate(p.desc||info.desc)}</td>
       <td style="font-size:12px;color:var(--muted);max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${(info.testArticleDesc||'').replace(/"/g,'&quot;')}">${truncate(info.testArticleDesc)}</td>
-      <td style="font-size:11px;color:var(--muted)">${info.dcas||'—'}</td>
+      ${optCells}
       <td class="projtbl-amount" style="color:var(--green)">${fmtMoney(expected)}</td>
       <td class="projtbl-amount" style="color:var(--blue)">${fmtMoney(billed)}</td>
       <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--blue)">${actualHours>0?actualHours.toFixed(1)+'h':'—'}</td>
@@ -2211,26 +2266,46 @@ function renderProjectsTable() {
 
   container.innerHTML = `
     <div style="overflow-x:auto">
-    <table class="projtbl-table" style="min-width:1200px">
+    <table class="projtbl-table" id="projtblTable" style="min-width:1200px;table-layout:fixed">
+      <colgroup>
+        <col id="ptc-name"    style="width:220px">
+        <col id="ptc-status"  style="width:130px">
+        <col id="ptc-client"  style="width:160px">
+        <col id="ptc-po"      style="width:90px">
+        <col id="ptc-quote"   style="width:90px">
+        <col id="ptc-desc"    style="width:180px">
+        <col id="ptc-article" style="width:180px">
+        ${PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c => `<col id="ptc-${c.ptc}" style="width:${c.width}">`).join('')}
+        <col id="ptc-exp"     style="width:100px">
+        <col id="ptc-billed"  style="width:100px">
+        <col id="ptc-hours"   style="width:90px">
+        <col id="ptc-remain"  style="width:110px">
+      </colgroup>
       <thead>
         <tr>
-          <th class="sortable" onclick="setProjSort('name')">Project Name <span class="sort-icon ${projSortCol==='name'?'active':''}">${projSortCol==='name'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span></th>
-          <th class="sortable" onclick="setProjSort('status')">Status <span class="sort-icon ${projSortCol==='status'?'active':''}">${projSortCol==='status'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span></th>
-          <th class="sortable" onclick="setProjSort('client')">Company <span class="sort-icon ${projSortCol==='client'?'active':''}">${projSortCol==='client'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span></th>
-          <th>PO</th>
-          <th>Quote</th>
-          <th>Description</th>
-          <th>Test Article Description</th>
-          <th class="sortable" onclick="setProjSort('dcas')">DCAS <span class="sort-icon ${projSortCol==='dcas'?'active':''}">${projSortCol==='dcas'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span></th>
-          <th>Expected Revenue</th>
-          <th>Billed Revenue</th>
-          <th>Actual Hours</th>
-          <th>Remaining Revenue</th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('name')">Project Name <span class="sort-icon ${projSortCol==='name'?'active':''}">${projSortCol==='name'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="name"></span></th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('status')">Status <span class="sort-icon ${projSortCol==='status'?'active':''}">${projSortCol==='status'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="status"></span></th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('client')">Company <span class="sort-icon ${projSortCol==='client'?'active':''}">${projSortCol==='client'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="client"></span></th>
+          <th style="position:relative">PO<span class="itt-resizer" data-ptc="po"></span></th>
+          <th style="position:relative">Quote<span class="itt-resizer" data-ptc="quote"></span></th>
+          <th style="position:relative">Description<span class="itt-resizer" data-ptc="desc"></span></th>
+          <th style="position:relative">Test Article Description<span class="itt-resizer" data-ptc="article"></span></th>
+          ${PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c =>
+            `<th style="position:relative">${c.label}<span class="itt-resizer" data-ptc="${c.ptc}"></span></th>`
+          ).join('')}
+          <th style="position:relative">Expected Revenue<span class="itt-resizer" data-ptc="exp"></span></th>
+          <th style="position:relative">Billed Revenue<span class="itt-resizer" data-ptc="billed"></span></th>
+          <th style="position:relative">Actual Hours<span class="itt-resizer" data-ptc="hours"></span></th>
+          <th style="position:relative">Remaining Revenue<span class="itt-resizer" data-ptc="remain"></span></th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
     </div>`;
+  setTimeout(() => {
+    ptblInitResizers();
+    ptblSetW(ptblGetW());
+  }, 0);
 }
 function navToProject(projId) {
   const p = projects.find(x => x.id === projId);
@@ -2351,7 +2426,7 @@ function saveNamedFilter() {
   const namePattern = document.getElementById('filterNamePattern')?.value.trim() || '';
   navFilter.namePattern = namePattern;
   const filters = getSavedFilters().filter(f => f.name !== name); // overwrite if exists
-  filters.push({ name, status: [...navFilter.status], phase: [...navFilter.phase], namePattern });
+  filters.push({ name, status: [...navFilter.status], phase: [...navFilter.phase], namePattern, colVis: getProjCols() });
   setSavedFilters(filters);
   activeFilterName = name;
   if (nameInp) nameInp.value = '';
@@ -2371,8 +2446,10 @@ function applyNamedFilter(name) {
   navFilter.status = new Set(f.status || []);
   navFilter.phase  = new Set(f.phase  || []);
   navFilter.namePattern = f.namePattern || '';
+  if (f.colVis) setProjCols(f.colVis);
   activeFilterName = name;
   buildNavFilterChips();
+  buildColToggleChips();
   const inp = document.getElementById('filterNamePattern');
   if (inp) inp.value = navFilter.namePattern;
   persistFilterState();
@@ -2436,7 +2513,7 @@ function toggleNavFilter() {
   const btn   = document.getElementById('navFilterBtn');
   const open  = panel.classList.toggle('open');
   btn.classList.toggle('active', open);
-  if (open) buildNavFilterChips();
+  if (open) { buildNavFilterChips(); buildColToggleChips(); }
 }
 
 function buildNavFilterChips() {
@@ -3348,6 +3425,7 @@ function renderInfoSheet(projId) {
             </div>
           </div>
           ${dateField('Created Date', fmtDate(info.startDate), 'startDate')}
+          ${dateField('Test Complete Date', fmtDate(info.testcompleteDate), 'testcompleteDate')}
           ${dateField('Closed Date', fmtDate(info.endDate), 'endDate')}
           ${dateField('Tentative Test Date', fmtDate(info.tentativeTestDate), 'tentativeTestDate')}
         </div>
@@ -3421,7 +3499,7 @@ async function inlineEditInfoDate(projId, key, el) {
   el.appendChild(input);
   input.focus();
 
-  const colMap = { startDate: 'start_date', endDate: 'end_date', tentativeTestDate: 'tentative_test_date' };
+  const colMap = { startDate: 'start_date', endDate: 'end_date', tentativeTestDate: 'tentative_test_date', testcompleteDate: 'testcomplete_date' };
 
   const save = async () => {
     const val = input.value;
@@ -3514,7 +3592,7 @@ function makeFieldsEditable(projId) {
   const info = projectInfo[projId];
   const editableKeys = ['pm','po','billingType','client','clientContact','clientEmail','clientPhone','quoteNumber'];
   const textareaKeys = [];
-  const dateKeys = ['startDate','endDate','tentativeTestDate'];
+  const dateKeys = ['startDate','endDate','tentativeTestDate','testcompleteDate'];
 
   editableKeys.forEach(key => {
     const el = document.getElementById('ifv-' + key);
@@ -5737,7 +5815,7 @@ function renderInfoTasks(projId, filter) {
       const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
         `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
       return `
-        <div class="itt-row" data-task-id="${t._id}" draggable="true" style="animation:fadeUp 0.2s ease ${i*0.03}s both"
+        <div class="itt-row" data-task-id="${t._id}" draggable="true" style="animation:fadeUp 0.2s ease ${i*0.03}s both;${t.status==='billed'?'background:rgba(192,132,252,0.18);border-color:rgba(192,132,252,0.45);':t.status==='complete'||t.done?'background:rgba(120,120,130,0.16);border-color:rgba(120,120,130,0.35);':t.status==='inprogress'?'background:rgba(46,158,98,0.10);border-color:rgba(46,158,98,0.30);':''}"
           ondragstart="taskDragStart(event,'${t._id}')"
           ondragover="taskDragOver(event)"
           ondragleave="taskDragLeave(event)"
@@ -5806,6 +5884,30 @@ function ittInitResizers(){
       const up=()=>{r.classList.remove('active');ittSaveW(w);document.removeEventListener('mousemove',mv);document.removeEventListener('mouseup',up);};
       document.addEventListener('mousemove',mv);
       document.addEventListener('mouseup',up);
+    });
+  });
+}
+
+const PTBL_MINS = {name:80, status:80, client:80, po:50, quote:50, desc:80, article:80, dcas:50, exp:70, billed:70, hours:60, remain:70};
+function ptblGetW() { try { return Object.assign({name:'220px',status:'130px',client:'160px',po:'90px',quote:'90px',desc:'180px',article:'180px',dcas:'80px',exp:'100px',billed:'100px',hours:'90px',remain:'110px'}, JSON.parse(localStorage.getItem('ptblCols')||'{}')); } catch { return {}; } }
+function ptblSetW(w) { Object.entries(w).forEach(([k,v]) => { const col = document.getElementById('ptc-'+k); if (col) col.style.width = v; }); }
+function ptblSaveW(w) { try { localStorage.setItem('ptblCols', JSON.stringify(w)); } catch {} }
+
+function ptblInitResizers() {
+  const table = document.getElementById('projtblTable');
+  if (!table) return;
+  table.querySelectorAll('th .itt-resizer').forEach(r => {
+    r.addEventListener('mousedown', e => {
+      e.preventDefault(); e.stopPropagation();
+      const col = r.dataset.ptc;
+      const startX = e.clientX;
+      const th = r.closest('th');
+      const startW = th ? th.offsetWidth : parseInt(w[col]||100);
+      r.classList.add('active');
+      const mv = m => { const px = Math.max(PTBL_MINS[col]||50, startW + (m.clientX - startX)); w[col] = px+'px'; ptblSetW(w); };
+      const up = () => { r.classList.remove('active'); ptblSaveW(w); document.removeEventListener('mousemove', mv); document.removeEventListener('mouseup', up); };
+      document.addEventListener('mousemove', mv);
+      document.addEventListener('mouseup', up);
     });
   });
 }
@@ -6087,7 +6189,8 @@ function renderEmployeesPanel(search) {
   if (empDetailOpen) showEmpProfile(empDetailOpen);
 }
 
-function showEmpProfile(empId) {
+function showEmpProfile(empId, annivOffset) {
+  annivOffset = annivOffset || 0;
   empDetailOpen = empId;
   // Highlight in list
   document.querySelectorAll('[id^="emplistrow-"]').forEach(el => {
@@ -6100,14 +6203,16 @@ function showEmpProfile(empId) {
   const emp = employees.find(e => e.id === empId);
   if (!emp) return;
 
-  const year = new Date().getFullYear();
-  // Calculate anniversary year window from hire date
+  const year = new Date().getFullYear() + annivOffset;
+  // Calculate anniversary year window from hire date, shifted by annivOffset
   const _annivRange = (() => {
     if (!emp.hireDate) return null;
     const hire = new Date(emp.hireDate + 'T00:00:00');
     const now = new Date();
     let annivStart = new Date(hire); annivStart.setFullYear(now.getFullYear());
     if (annivStart > now) annivStart.setFullYear(now.getFullYear() - 1);
+    // Shift by offset
+    annivStart.setFullYear(annivStart.getFullYear() + annivOffset);
     const annivEnd = new Date(annivStart); annivEnd.setFullYear(annivStart.getFullYear() + 1);
     return { start: annivStart, end: annivEnd };
   })();
@@ -6251,21 +6356,30 @@ function showEmpProfile(empId) {
     if (!weekKey || weekKey.length < 10) return;
     const weekDate = new Date(weekKey + 'T00:00:00');
     if (weekDate < chartStart) return;
-    let projHrs = 0, sickHrs = 0, vacHrs = 0, holHrs = 0;
+    let projHrs = 0, sickHrs = 0, vacHrs = 0, holHrs = 0, ohWorkHrs = 0;
     rows.forEach(r => { if (r && r.hours) projHrs += Object.values(r.hours).reduce((s,h)=>s+(parseFloat(h)||0),0); });
     const ohKey = 'oh_' + key;
     const oh = tsData[ohKey] || {};
+    // Deduplicate overhead categories — normalize names like "290-Sales Support" → "Sales Support"
+    const ohNormalized = {};
     Object.entries(oh).forEach(([cat, dayMap]) => {
       if (!dayMap) return;
+      const normCat = cat.replace(/^\d+-/, '').replace(/^⬡\s*/, '').trim();
+      if (!ohNormalized[normCat]) ohNormalized[normCat] = {};
+      Object.entries(dayMap).forEach(([di, h]) => {
+        ohNormalized[normCat][di] = Math.max(ohNormalized[normCat][di]||0, parseFloat(h)||0);
+      });
+    });
+    Object.entries(ohNormalized).forEach(([cat, dayMap]) => {
       const catHrs = Object.values(dayMap).reduce((s,h)=>s+(parseFloat(h)||0),0);
-      if (SICK_CATS.includes(cat)) sickHrs += catHrs;
+      if (SICK_CATS.some(sc => sc.replace(/^⬡\s*/,'').trim() === cat)) sickHrs += catHrs;
       else if (cat === 'Vacation Time' || cat === 'Personal Time') vacHrs += catHrs;
       else if (cat === 'Holiday' || cat === 'Snow Day') holHrs += catHrs;
-      else projHrs += catHrs; // General Overhead etc counts as work
+      else ohWorkHrs += catHrs;
     });
-    const total = projHrs + sickHrs + vacHrs + holHrs;
+    const total = projHrs + ohWorkHrs + sickHrs + vacHrs + holHrs;
     if (total > 0) {
-      weeklyHours[weekKey] = projHrs;
+      weeklyHours[weekKey] = projHrs + ohWorkHrs;
       weeklySick[weekKey] = sickHrs;
       weeklyVacation[weekKey] = vacHrs;
       weeklyHoliday[weekKey] = holHrs;
@@ -6295,8 +6409,7 @@ function showEmpProfile(empId) {
     const chartUtil = chartWeeks.map((wk, i) => {
       const wkDate = new Date(wk + 'T00:00:00');
       if (wkDate < utilCutoff) return null;
-      // Hours in building = everything minus sick, vacation, holiday
-      // chartWork already includes project hours + General Overhead (both count as in-building)
+      // Hours in building = project hours + overhead work (Sales Support, General Overhead)
       const inBuilding = (chartWork[i]||0);
       if (inBuilding <= 0) return null;
       // Pure project hours only (exclude General Overhead from denominator's numerator)
@@ -6457,13 +6570,23 @@ function showEmpProfile(empId) {
 
     <!-- Time off section -->
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
-      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">🏖 Time Off — ${year}</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">🏖 Time Off</div>
+        <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+          <button onclick="showEmpProfile('${empId}', ${annivOffset - 1})" style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;cursor:pointer;font-size:12px;color:var(--muted)">◀</button>
+          <div style="font-size:12px;font-weight:600;color:var(--text);min-width:160px;text-align:center">
+            ${_annivRange ? _annivRange.start.toLocaleDateString('en-US',{month:'short',year:'numeric'}) + ' – ' + new Date(_annivRange.end-1).toLocaleDateString('en-US',{month:'short',year:'numeric'}) : String(year)}
+            ${annivOffset === 0 ? '<span style="font-size:10px;color:var(--green);margin-left:4px">Current</span>' : ''}
+          </div>
+          <button onclick="showEmpProfile('${empId}', ${annivOffset + 1})" ${annivOffset >= 0 ? 'disabled' : ''} style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:12px;color:var(--muted);${annivOffset >= 0 ? 'opacity:.3;cursor:not-allowed' : 'cursor:pointer'}">▶</button>
+        </div>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
         <!-- Vacation -->
         <div>
           <div style="display:flex;justify-content:space-between;align-items:baseline">
             <div style="font-size:12px;font-weight:600;color:var(--text)">Vacation</div>
-            <div style="font-size:10px;color:var(--muted)">${vacAccrued.toFixed(0)} hrs accrued so far</div>
+            <div style="font-size:10px;color:var(--muted)">${annivOffset === 0 ? vacAccrued.toFixed(0)+' hrs accrued so far' : vacAllotment+' hrs allotted'}</div>
           </div>
           ${bar(used.vacation + sickOverage, vacAllotment, 'var(--blue)')}
           ${(() => {
@@ -10584,7 +10707,7 @@ function renderTasksPanel(projId) {
     const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : loggedH > 0 ? 'var(--blue)' : 'var(--muted)';
 
     return `
-      <div class="itt-row" data-task-id="${t._id}" draggable="true" style="${t.status==='billed'?'background:rgba(192,132,252,0.08);border-color:rgba(192,132,252,0.2);':t.status==='complete'||t.done?'background:rgba(120,120,130,0.10);border-color:rgba(120,120,130,0.18);':''}"
+      <div class="itt-row" data-task-id="${t._id}" draggable="true" style="${t.status==='billed'?'background:rgba(192,132,252,0.18);border-color:rgba(192,132,252,0.45);':t.status==='complete'||t.done?'background:rgba(120,120,130,0.16);border-color:rgba(120,120,130,0.35);':t.status==='inprogress'?'background:rgba(46,158,98,0.10);border-color:rgba(46,158,98,0.30);':''}"
         ondragstart="taskDragStart(event,'${t._id}')"
         ondragover="taskDragOver(event)"
         ondragleave="taskDragLeave(event)"
@@ -13331,8 +13454,23 @@ function renderClosingReport() {
     const info = projectInfo[p.id];
     if (!info) return;
     if (info.status === 'testcomplete') {
-      const days = getDays(info.testcompleteDate);
-      if (days === null || days >= 60) testComplete60.push({p, info, days});
+      const projTasks = taskStore.filter(t => t.proj === p.id);
+      const openTasks = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
+      if (openTasks.length > 0) return; // skip — still has open tasks
+
+      let refDate = info.testcompleteDate || '';
+      let days = getDays(refDate);
+
+      // If tasks are loaded, use the most recent date across ALL tasks (billed, complete, cancelled)
+      if (projTasks.length > 0) {
+        const lastAnyDate = projTasks.reduce((latest, t) => {
+          const d = t.billedDate || t.completedDate || '';
+          return d > latest ? d : latest;
+        }, '');
+        if (lastAnyDate) { refDate = lastAnyDate; days = getDays(refDate); }
+      }
+
+      if (days === null || days >= 60) testComplete60.push({p, info, days, refDate});
     } else if (info.status === 'complete') {
       readyToClose.push({p, info});
     } else if (info.status === 'closing') {
@@ -13340,7 +13478,7 @@ function renderClosingReport() {
     }
   });
 
-  const projectCard = ({p, info, days, section}) => {
+  const projectCard = ({p, info, days, refDate, section}) => {
     const projTasks = taskStore.filter(t => t.proj === p.id);
     const openTasks = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
     const canClose = openTasks.length === 0;
@@ -13379,7 +13517,8 @@ function renderClosingReport() {
           ${info.client ? `<span style="font-size:12px;color:var(--muted)">🏢 ${info.client}</span>` : ''}
           ${info.pm ? `<span style="font-size:12px;color:var(--muted)">👤 ${info.pm}</span>` : ''}
           ${info.testcompleteDate ? `<span style="font-size:12px;color:var(--muted)">📅 TC: ${fmtDate(info.testcompleteDate)}</span>` : ''}
-          ${days !== null && days !== undefined ? `<span style="font-size:12px;font-weight:700;color:${days>=90?'var(--red)':'var(--amber)'}">${days} days</span>` : ''}
+          ${refDate && refDate !== info.testcompleteDate ? `<span style="font-size:12px;color:var(--muted)">🏷 Last billed: ${fmtDate(refDate)}</span>` : ''}
+          ${days !== null && days !== undefined ? `<span style="font-size:12px;font-weight:700;color:${days>=90?'var(--red)':'var(--amber)'}">${days} days since last billed</span>` : ''}
         </div>
         ${!canClose && section !== 'pending' ? `<div style="margin-top:6px;font-size:11px;color:var(--red)">⚠ ${openTasks.length} open task${openTasks.length>1?'s':''} remaining</div>` : ''}
         ${canClose && section === 'testcomplete' ? `<div style="margin-top:6px;font-size:11px;color:#4caf7d">✓ All tasks complete</div>` : ''}
