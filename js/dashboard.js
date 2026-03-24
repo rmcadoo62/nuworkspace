@@ -83,23 +83,22 @@ function renderDashboard() {
       }).join('');
 
   // ── Billed by Month chart data ────────────────────────────────────────
-  // Use billedMonthlyData for accurate totals across ALL projects including closed
+  // Calculate directly from taskStore — same source as detail modal — for consistency
   const totalBilledAllProjects = Object.values(projectInfo).reduce((s, p) => s + (p.billedRevenue||0), 0);
   const monthMap = {};
   for (let i = 11; i >= 0; i--) {
     const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
     const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-    monthMap[key] = { label: d.toLocaleDateString('en-US',{month:'short', year:'2-digit'}), val: window.billedMonthlyData?.[key] || 0 };
+    monthMap[key] = { label: d.toLocaleDateString('en-US',{month:'short', year:'2-digit'}), val: 0 };
   }
-  // Add any open project billed tasks not yet in the monthly summary (newly billed this session)
+  // Sum billed tasks directly from taskStore — same as detail modal
   const billedTasks = taskStore.filter(t => t.status === 'billed');
   const todayStr = new Date().toISOString().split('T')[0];
   billedTasks.forEach(t => {
     const dateStr = t.billedDate || t.completedDate || todayStr;
     const d = new Date(dateStr + 'T00:00:00');
     const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-    // Only add if not already counted in billedMonthlyData to avoid double counting
-    if (monthMap[key] && !(window.billedMonthlyData?.[key])) monthMap[key].val += (t.fixedPrice || 0);
+    if (monthMap[key]) monthMap[key].val += (t.fixedPrice || 0);
   });
   const chartLabels  = Object.values(monthMap).map(m => m.label);
   const chartData    = Object.values(monthMap).map(m => m.val);
