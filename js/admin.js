@@ -156,6 +156,7 @@ function openSetupPanel(el) {
   if (can('view_setup') || isManager()) tiles.push(tile('&#x2705;','Approvals','Review and approve pending timesheet submissions.',"openApprovalsPanel(document.getElementById('navSetup'))"));
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F4E5;','Import Salesforce','Import accounts and contacts from a Salesforce CSV export.',"openSfImportPanel(document.getElementById('navSetup'))"));
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F9F9;','Merge Duplicate Clients','Find and merge client records with similar names.',"openMergeClientsPanel(document.getElementById('navSetup'))"));
+  if (can('view_setup') || isManager()) tiles.push(tile('&#x1F4C5;','Scheduler Settings','Configure block colors and employee scheduler access.',"openSchedSettingsPanel()"));
 
   const grid = document.getElementById('setupTilesGrid');
   if (grid) grid.innerHTML = tiles.join('') || '<div style="color:var(--muted);font-size:13px">No setup options available for your role.</div>';
@@ -356,6 +357,7 @@ async function renderAuditLogPanel() {
       '<thead><tr style="border-bottom:2px solid var(--border)">'+
       '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">When</th>'+
       '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Who</th>'+
+      '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>'+
       '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Record</th>'+
       '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Field</th>'+
       '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">From</th>'+
@@ -364,6 +366,7 @@ async function renderAuditLogPanel() {
       logs.map(l => '<tr style="border-bottom:1px solid var(--border);transition:background .12s" onmouseover="this.style.background=\x27var(--surface2)\x27" onmouseout="this.style.background=\x27\x27">'+
         '<td style="padding:9px 14px;font-size:11px;color:var(--muted);white-space:nowrap">'+fmtDate(l.created_at)+'</td>'+
         '<td style="padding:9px 14px;font-size:13px;font-weight:500;color:var(--text)">'+( l.employee_name||'—')+'</td>'+
+        (()=>{ let proj = null; if(l.record_type==='projects') { proj=projects.find(p=>p.id===l.record_id); } else if(l.record_type==='tasks') { const t=taskStore.find(t=>t._id===l.record_id); if(t) proj=projects.find(p=>p.id===t.proj); } return '<td style="padding:9px 14px;font-size:12px;color:var(--muted);white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis">'+(proj ? proj.emoji+' '+proj.name : '—')+'</td>'; })()+
         '<td style="padding:9px 14px;font-size:12px;color:var(--text)">'+
           '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface2);color:var(--muted);margin-right:6px">'+l.record_type+'</span>'+
           (l.record_label||l.record_id||'—')+'</td>'+
@@ -406,6 +409,7 @@ const CAPABILITY_DEFS = [
   { key: 'delete_clients',     label: 'Delete Clients',        group: 'Clients' },
   { key: 'add_contacts',       label: 'Add Contacts',          group: 'Clients' },
   { key: 'delete_contacts',    label: 'Delete Contacts',       group: 'Clients' },
+  { key: 'view_dashboard',     label: 'View Dashboard',        group: 'Reports' },
   { key: 'view_reports',       label: 'View Reports',          group: 'Reports' },
   { key: 'view_billing',       label: 'View Billing Queue',    group: 'Reports' },
   { key: 'view_audit_log',     label: 'View Audit Log',        group: 'Admin' },
@@ -424,7 +428,6 @@ function openPermissionsPanel() {
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-permissions').classList.add('active');
   renderPermissionsPanel();
-  renderSchedSettingsSection();
 }
 
 function renderPermissionsPanel() {
@@ -487,7 +490,7 @@ function renderPermissionsPanel() {
             <select onchange="assignRole(this.value,'${role.id}');this.value=''"
               style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:6px 10px;outline:none;width:100%;cursor:pointer;">
               <option value="">+ Assign employee…</option>
-              ${employees.filter(e => e.roleId !== role.id && e.isActive !== false).map(e =>
+              ${employees.filter(e => !e.roleId && e.isActive !== false).map(e =>
                 `<option value="${e.id}">${e.name}</option>`).join('')}
             </select>
           </div>
@@ -497,8 +500,80 @@ function renderPermissionsPanel() {
   }).join('');
 }
 
+function openSchedSettingsPanel() {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('navSetup')?.classList.add('active');
+  activeProjectId = null;
+  document.getElementById('topbarName').textContent = 'Scheduler Settings';
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-sched-settings').classList.add('active');
+  renderSchedSettingsPanel();
+}
+
+function renderSchedSettingsPanel() {
+  const body = document.getElementById('schedSettingsPanelBody');
+  if (!body) return;
+  window.loadSchedSettings();
+  const ss = window.getSchedSettings();
+
+  const COLOR_DEFS = [
+    { key: 'reschedule',       label: 'Reschedule',             hint: 'Status override — Yellow' },
+    { key: 'tentative',        label: 'Tentative',              hint: 'Status override — Gray' },
+    { key: 'setup',            label: 'Setup task',             hint: 'Task name contains "setup"' },
+    { key: 'teardown',         label: 'Teardown task',          hint: 'Task name contains "teardown"' },
+    { key: 'dcas_no_wit_yes',  label: 'DCAS No / Witness Yes',  hint: 'DCAS=No, Witness=Yes' },
+    { key: 'dcas_yes_wit_no',  label: 'DCAS Yes / Witness No',  hint: 'DCAS=Yes/CNF, Witness=No' },
+    { key: 'dcas_yes_wit_yes', label: 'DCAS Yes / Witness Yes', hint: 'DCAS=Yes/CNF, Witness=Yes/CNF' },
+  ];
+
+  const colorRows = COLOR_DEFS.map(def => {
+    const cur = window.sc(def.key);
+    const isDefault = !ss.colors?.[def.key];
+    const resetBtn = isDefault ? '' : `<button onclick="resetSchedColor(${JSON.stringify(def.key)})"
+      style="background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--muted);font-size:10px;padding:3px 7px;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x21BA; Reset</button>`;
+    return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);">
+      <div style="width:26px;height:26px;border-radius:6px;border:1.5px solid rgba(0,0,0,.15);flex-shrink:0;background:${cur}"></div>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:12.5px;font-weight:600;">${def.label}</div>
+        <div style="font-size:11px;color:var(--muted);">${def.hint}</div>
+      </div>
+      <input type="color" value="${cur}"
+        style="width:34px;height:26px;border:1.5px solid var(--border);border-radius:6px;cursor:pointer;padding:1px;flex-shrink:0;"
+        oninput="updateSchedColor(${JSON.stringify(def.key)},this.value);renderSchedSettingsPanel()"
+        onchange="updateSchedColor(${JSON.stringify(def.key)},this.value);renderSchedSettingsPanel()" />
+      ${resetBtn}
+    </div>`;
+  }).join('');
+
+  const accessRows = employees.filter(e => e.isActive !== false).map(emp => {
+    const hasAccess = window.empHasSchedAccess(emp.id);
+    return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
+      <div style="width:30px;height:30px;border-radius:50%;background:${emp.color};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;">${emp.initials}</div>
+      <div style="flex:1;font-size:13px;">${emp.name}</div>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:${hasAccess ? 'var(--green)' : 'var(--muted)'};user-select:none;">
+        <input type="checkbox" ${hasAccess ? 'checked' : ''} style="width:15px;height:15px;accent-color:var(--green);cursor:pointer;"
+          onchange="toggleSchedAccess(${JSON.stringify(emp.id)},this.checked);renderSchedSettingsPanel()" />
+        ${hasAccess ? 'Has access' : 'No access'}
+      </label>
+    </div>`;
+  }).join('');
+
+  body.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+        <div style="padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border);font-weight:700;font-size:13px;">&#x1F3A8; Block Colors</div>
+        <div style="padding:10px 18px;">${colorRows}</div>
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+        <div style="padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border);font-weight:700;font-size:13px;">&#x1F465; Employee Access</div>
+        <div style="padding:10px 18px;">${accessRows}</div>
+      </div>
+    </div>`;
+}
+
 function renderSchedSettingsSection() {
-  const body = document.getElementById('permissionsBody');
+  // Append to setup panel's scroll container
+  const body = document.querySelector('#panel-setup > div') || document.getElementById('permissionsBody');
   if (!body) return;
   const prev = document.getElementById('schedSettingsSection');
   if (prev) prev.remove();

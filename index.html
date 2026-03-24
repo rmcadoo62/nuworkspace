@@ -534,6 +534,19 @@
       </div>
     </div>
 
+    <!-- SCHEDULER SETTINGS PANEL -->
+    <div class="view-panel" id="panel-sched-settings" style="flex-direction:column;overflow-y:auto;">
+      <div style="padding:32px 40px;max-width:860px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
+          <button onclick="openSetupPanel(document.getElementById('navSetup'))" style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0;font-family:'DM Sans',sans-serif;">&#x2190; Setup</button>
+          <span style="color:var(--border)">|</span>
+          <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);">&#x1F4C5; Scheduler Settings</div>
+        </div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:32px;">Configure block colors and employee scheduler access.</div>
+        <div id="schedSettingsPanelBody"></div>
+      </div>
+    </div>
+
     <!-- SETUP PANEL -->
     <div class="view-panel" id="panel-setup" style="flex-direction:column;overflow-y:auto;">
       <div style="padding:32px 40px;max-width:760px;">

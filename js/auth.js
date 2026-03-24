@@ -20,7 +20,7 @@ function can(capability) {
   const fallbacks = {
     add_projects: mgr, delete_projects: false, add_tasks: mgr || true,
     delete_tasks: mgr, mark_complete: mgr, mark_closing: mgr, mark_closed: false,
-    view_reports: mgr, view_audit_log: mgr, view_setup: mgr,
+    view_dashboard: mgr || true, view_reports: mgr, view_audit_log: mgr, view_setup: mgr,
     manage_employees: mgr, manage_permissions: false, view_billing: mgr,
     edit_project_info: mgr, view_chatter: true, post_chatter: true,
     add_clients: mgr, delete_clients: mgr, add_contacts: mgr, delete_contacts: mgr,
@@ -579,6 +579,10 @@ async function doLogin() {
 function applyPermissions() {
   if (!currentEmployee) return;
   const manager = isManager() || can('view_setup');
+
+  // Dashboard nav
+  const navDash = document.getElementById('navDashboard');
+  if (navDash) navDash.style.display = can('view_dashboard') ? 'flex' : 'none';
 
   // Reports nav
   const navRep = document.getElementById('navReports');
