@@ -83,38 +83,17 @@ function renderDashboard() {
       }).join('');
 
   // ── Billed by Month chart data ────────────────────────────────────────
-  // Start with billedMonthlyData (covers ALL projects including closed) as the base,
-  // then overlay open-project tasks from taskStore to catch anything not yet in the summary.
+  // billedMonthlyData is the source of truth — it covers ALL projects including closed.
+  // It is kept current by the billed_revenue_monthly table in Supabase.
   const totalBilledAllProjects = Object.values(projectInfo).reduce((s, p) => s + (p.billedRevenue||0), 0);
   const monthMap = {};
   for (let i = 11; i >= 0; i--) {
     const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
     const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-    // Seed with pre-aggregated summary (includes closed projects)
     monthMap[key] = { label: d.toLocaleDateString('en-US',{month:'short', year:'2-digit'}), val: window.billedMonthlyData?.[key] || 0 };
   }
-  // For open projects, recalculate from taskStore directly to stay accurate in real time.
-  // We replace the summary value for any month that has open-project billed tasks,
-  // since the summary may lag or double-count newly billed items.
-  const _openProjIdSet = new Set(projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').map(p => p.id));
-  const billedTasks = taskStore.filter(t => t.status === 'billed' && _openProjIdSet.has(t.proj));
+  const billedTasks = taskStore.filter(t => t.status === 'billed');
   const todayStr = new Date().toISOString().split('T')[0];
-  // Build open-project totals per month
-  const openMonthTotals = {};
-  billedTasks.forEach(t => {
-    const dateStr = t.billedDate || t.completedDate || todayStr;
-    const d = new Date(dateStr + 'T00:00:00');
-    const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
-    if (monthMap[key]) openMonthTotals[key] = (openMonthTotals[key] || 0) + (t.fixedPrice || 0);
-  });
-  // Merge: for months with open-project data, add to the closed-project base
-  // The summary already includes closed projects; we add open project actuals on top
-  Object.entries(openMonthTotals).forEach(([key, openTotal]) => {
-    // Get closed-project portion from summary
-    const closedPortion = (window.billedMonthlyData?.[key] || 0);
-    // Replace with: closed summary + open taskStore actuals
-    if (monthMap[key]) monthMap[key].val = closedPortion + openTotal;
-  });
   const chartLabels  = Object.values(monthMap).map(m => m.label);
   const chartData    = Object.values(monthMap).map(m => m.val);
   const chartKeys    = Object.keys(monthMap); // e.g. ['2025-03', ...]
