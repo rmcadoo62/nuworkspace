@@ -1,0 +1,1288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NUWorkspace &mdash; Project Management</title>
+<!-- External libraries -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- App stylesheets -->
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/auth.css">
+  <link rel="stylesheet" href="css/setup.css">
+  <link rel="stylesheet" href="css/modals.css">
+  <link rel="stylesheet" href="css/tasks.css">
+  <link rel="stylesheet" href="css/projects-table.css">
+  <link rel="stylesheet" href="css/project-info.css">
+  <link rel="stylesheet" href="css/employees.css">
+  <link rel="stylesheet" href="css/timesheet.css">
+  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="stylesheet" href="css/clients.css">
+  <link rel="stylesheet" href="css/chatter.css">
+  <link rel="stylesheet" href="css/scheduler.css">
+</head>
+<body>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+</head>
+<body>
+
+<!-- APP LOADER -->
+<div id="loginScreen" style="display:none">
+  <div class="login-box">
+    <div class="login-logo">
+      <img src="vibrato.png" alt="Vibrato" style="max-height:80px;object-fit:contain;display:block;margin:0 auto 12px;" />
+      <img src="https://images.squarespace-cdn.com/content/v1/4ffd78c424accf259206d1dc/1473195765839-Z06GZYUXTVC8DBAGVE1V/logo-shadowed.png" alt="NU Labs" />
+    </div>
+    <div class="login-title">Welcome to NUWorkspace</div>
+    <div class="login-sub">Sign in to access your workspace</div>
+    <div class="login-field">
+      <label>Email</label>
+      <input type="email" id="loginEmail" placeholder="you@nulabs.com" onkeydown="if(event.key==='Enter')doLogin()" />
+    </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="loginPassword" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" />
+    </div>
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+<div id="appLoader">
+  <div class="loader-logo" style="display:flex;flex-direction:column;align-items:center;gap:10px"><img src="vibrato.png" alt="Vibrato" style="max-height:64px;object-fit:contain;" /><img src="https://images.squarespace-cdn.com/content/v1/4ffd78c424accf259206d1dc/1473195765839-Z06GZYUXTVC8DBAGVE1V/logo-shadowed.png" style="max-height:48px;object-fit:contain;" alt="NU Labs" /></div>
+  <div class="loader-sub">Loading your workspace…</div>
+  <div class="loader-spinner"></div>
+</div>
+
+<!-- SETUP SCREEN -->
+<div id="setupScreen">
+  <div class="setup-card">
+    <div class="setup-logo"><img src="https://images.squarespace-cdn.com/content/v1/4ffd78c424accf259206d1dc/1473195765839-Z06GZYUXTVC8DBAGVE1V/logo-shadowed.png" style="max-height:48px;object-fit:contain;" alt="NU Labs" /></div>
+    <div class="setup-tagline">Connect your database to get started</div>
+    <div class="setup-step">
+      <div class="setup-step-num">1</div>
+      <div>Go to <a href="https://supabase.com" target="_blank">supabase.com</a> → New Project → wait for it to provision (~2 min).</div>
+    </div>
+    <div class="setup-step">
+      <div class="setup-step-num">2</div>
+      <div>Open the <strong>SQL Editor</strong> and run the setup script from <code>forge-setup.sql</code> (included in your download).</div>
+    </div>
+    <div class="setup-step">
+      <div class="setup-step-num">3</div>
+      <div>Go to <strong>Project Settings → API</strong>. Copy your <em>Project URL</em> and <em>anon public</em> key below.</div>
+    </div>
+    <div class="setup-div"></div>
+    <div class="field" style="margin-bottom:12px">
+      <label class="field-label">Supabase Project URL</label>
+      <input class="f-input" id="setupUrl" type="url" placeholder="https://xxxxxxxxxxxx.supabase.co" autocomplete="off" />
+    </div>
+    <div class="field" style="margin-bottom:8px">
+      <label class="field-label">Anon Public Key</label>
+      <input class="f-input" id="setupKey" type="text" placeholder="eyJhbGci…" autocomplete="off" />
+    </div>
+    <div class="setup-error" id="setupError"></div>
+    <button class="setup-connect-btn" id="setupConnectBtn" onclick="connectSupabase()">Connect to Supabase</button>
+  </div>
+</div>
+
+<div id="appShell" style="display:none;width:100%;height:100%;flex-direction:row;">
+<aside class="sidebar">
+  <div class="logo" style="display:flex;flex-direction:column;align-items:center;gap:8px">
+    <img src="vibrato.png" alt="Vibrato" style="max-height:52px;object-fit:contain;" />
+    <img src="https://images.squarespace-cdn.com/content/v1/4ffd78c424accf259206d1dc/1473195765839-Z06GZYUXTVC8DBAGVE1V/logo-shadowed.png" style="max-height:28px;max-width:160px;object-fit:contain;" alt="NU Labs" />
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">Workspace</div>
+    <div class="nav-item active" id="navDashboard" onclick="openDashboardPanel(this)"><span class="icon">&#x1F3E0;</span> Dashboard</div>
+    <div class="nav-item" id="navProjects" onclick="openProjectsTable(this)"><span class="icon">&#x1F4C1;</span> Projects <span class="nav-badge" id="allBadge">0</span></div>
+    <div class="nav-item" onclick="openTimesheetPanel(this)"><span class="icon">&#x23F1;</span> Timesheet</div>
+    <div class="nav-item" id="navScheduler" onclick="openSchedulerPanel(this)"><span class="icon">&#x1F4C6;</span> Scheduler</div>
+    <div class="nav-item" id="navClients" onclick="openClientsPanel(this)"><span class="icon">&#x1F3E2;</span> Clients</div>
+    <div class="nav-item" id="navShipping" onclick="openShippingPanel(this)"><span class="icon">&#x1F4E6;</span> Shipping</div>
+    <div class="nav-item" id="navMyInfo" onclick="openMyInfoPanel(this)"><span class="icon">&#x1F464;</span> My Info</div>
+    <div class="nav-item" id="navApprovals" style="display:none" onclick="openApprovalsPanel(this)"><span class="icon">&#x2705;</span> Approvals <span class="nav-badge" id="approvalsBadge" style="display:none">0</span></div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">Reports</div>
+    <div class="nav-item" id="navReports" onclick="openReportsPanel(this)"><span class="icon">&#x1F4CA;</span> Reports</div>
+    <div class="nav-item" id="navClosingReport" onclick="openClosingReport(this)"><span class="icon">&#x1F4CB;</span> Closing Report</div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">Setup</div>
+    <div class="nav-item" id="navSetup" onclick="openSetupPanel(this)"><span class="icon">&#x2699;</span> Setup</div>
+  </div>
+
+  <div class="sidebar-footer">
+    <div id="sidebarUserBadge" style="display:none;margin-top:8px;border-top:1px solid var(--border);padding-top:10px;">
+      <div class="user-badge">
+        <div class="user-av" id="userBadgeAv" style="background:#888;font-size:12px"></div>
+        <div style="flex:1;min-width:0;overflow:hidden">
+          <div class="user-name" id="userBadgeName" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
+          <div class="user-role" id="userBadgeRole" style="white-space:nowrap">—</div>
+        </div>
+        <button class="user-logout" onclick="doLogout()" title="Sign out" style="flex-shrink:0">⏻</button>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<div class="main">
+  <div class="topbar">
+    <div class="project-name" id="topbarName">Platform v3</div>
+    <div class="global-search-wrap">
+      <span class="global-search-icon">&#x1F50D;</span>
+      <input class="global-search-input" id="globalSearchInput" placeholder="Search projects, tasks, clients…" autocomplete="off"
+        oninput="runGlobalSearch(this.value)" onfocus="runGlobalSearch(this.value)" />
+      <div class="global-search-results" id="globalSearchResults"></div>
+    </div>
+
+    <div class="notif-bell-wrap" style="margin-left:auto;position:relative">
+      <button class="notif-bell-btn" id="notifBellBtn" onclick="toggleNotifPanel()" title="Notifications">
+        🔔
+        <span class="notif-bell-badge" id="notifBellBadge" style="display:none">0</span>
+      </button>
+      <div class="notif-panel" id="notifPanel" style="display:none">
+        <div class="notif-panel-header">Notifications <button onclick="markAllNotifsRead()" style="margin-left:auto;background:none;border:none;color:var(--amber);font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif">Mark all read</button></div>
+        <div class="notif-list" id="notifList"></div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <button class="btn btn-primary" id="addProjBtn1" onclick="openProjectModal()" style="display:none">+ New Project</button>
+      <button class="settings-btn" onclick="resetConfig()" title="Reset Supabase connection">⚙</button>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- AUDIT LOG PANEL -->
+    <div class="view-panel" id="panel-auditlog" style="flex-direction:column;overflow:hidden">
+      <div style="flex:1;overflow-y:auto;padding:28px 32px">
+        <div id="auditLogContent"></div>
+      </div>
+    </div>
+
+    <!-- ALL PROJECTS DASHBOARD -->
+    <div class="view-panel" id="panel-dashboard">
+      <div class="dash-wrap" id="dashWrap"></div>
+    </div>
+
+    <!-- PROJECTS TABLE PANEL -->
+    <div class="view-panel" id="panel-projects">
+      <div class="projtbl-wrap">
+        <div class="projtbl-toolbar">
+          <div>
+            <div class="projtbl-title">Projects</div>
+            <div class="projtbl-sub" id="projtblSub"></div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button class="nav-filter-btn" id="navFilterBtn" onclick="toggleNavFilter()" title="Filter" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+              &#x25BC; Filter <span id="navFilterDot" style="display:none" class="nav-filter-active-dot"></span>
+            </button>
+            <button id="showClosedBtn" onclick="toggleShowClosed()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s" title="Toggle closed jobs">
+              &#x1F512; Show Closed
+            </button>
+            <button class="btn btn-primary" id="addProjBtn2" style="font-size:12.5px;display:none" onclick="openProjectModal()">+ New Project</button>
+          </div>
+        </div>
+
+        <!-- Saved filters bar -->
+        <div class="saved-filters-bar" id="savedFiltersBar" style="display:none"></div>
+
+        <!-- Filter drawer -->
+        <div class="proj-filter-drawer" id="navFilterPanel">
+          <div class="proj-filter-row">
+            <div class="proj-filter-col">
+              <label>Name Pattern</label>
+              <input type="text" id="filterNamePattern" placeholder='e.g. ^N (exclude) or 136' oninput="renderProjectsTable()" />
+              <div style="font-size:10px;color:var(--muted);margin-top:2px">Start with <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">^</code> to exclude, leave blank to include all</div>
+            </div>
+            <div class="proj-filter-col">
+              <label>Status</label>
+              <div class="nav-filter-chips" id="filterStatusChips" style="max-width:360px"></div>
+            </div>
+            <div class="proj-filter-col">
+              <label>Condition</label>
+              <div class="nav-filter-chips" id="filterPhaseChips" style="max-width:360px"></div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid var(--border)">
+            <input type="text" id="filterSaveName" placeholder="Filter name…" style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 10px;outline:none;width:160px;transition:border-color var(--transition);" onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
+            <button class="nav-filter-save" onclick="saveNamedFilter()" style="padding:6px 14px">&#x2713; Save Filter</button>
+            <button class="nav-filter-clear" onclick="clearNavFilter()" style="padding:6px 12px">Clear</button>
+          </div>
+          <div style="padding-top:12px;border-top:1px solid var(--border);margin-top:4px">
+            <div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Optional Columns</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px" id="colToggleChips"></div>
+          </div>
+        </div>
+
+        <div id="projStatBubbles" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div id="projtblContainer"></div>
+      </div>
+    </div>
+
+    <!-- KANBAN -->
+    <div class="view-panel" id="panel-kanban">
+      <div class="kanban-wrap">
+        <div class="kanban-col" id="col-backlog">
+          <div class="kanban-header"><div class="kanban-dot" style="background:#7a7a85"></div><div class="kanban-title">Backlog</div><div class="kanban-count" id="cnt-backlog">3</div></div>
+          <div class="card" style="animation-delay:.05s"><div class="card-tag" style="background:rgba(167,139,250,0.15);color:#a78bfa">Design</div><div class="card-title">Redesign onboarding flow for new signup funnel</div><div class="card-footer"><div class="card-assignee" style="background:#b94d8a;color:#fff">SA</div><div class="priority p-med">Medium</div><div class="card-meta">Mar 18</div></div></div>
+          <div class="card" style="animation-delay:.1s"><div class="card-tag" style="background:rgba(91,156,246,0.15);color:#5b9cf6">Backend</div><div class="card-title">Implement rate limiting on all public endpoints</div><div class="card-footer"><div class="card-assignee" style="background:#2d8a6e;color:#fff">JO</div><div class="priority p-high">High</div><div class="card-meta">Mar 20</div></div></div>
+          <div class="card" style="animation-delay:.15s"><div class="card-tag" style="background:rgba(76,175,125,0.15);color:#4caf7d">QA</div><div class="card-title">Set up end-to-end test coverage for checkout</div><div class="card-footer"><div class="card-assignee" style="background:#5b4fcf;color:#fff">AL</div><div class="priority p-low">Low</div><div class="card-meta">Mar 25</div></div></div>
+          <div class="add-card">+ Add card</div>
+        </div>
+        <div class="kanban-col" id="col-inprogress">
+          <div class="kanban-header"><div class="kanban-dot" style="background:#e8a234"></div><div class="kanban-title">In Progress</div><div class="kanban-count" id="cnt-inprogress">3</div></div>
+          <div class="card" style="animation-delay:.08s"><div class="card-tag" style="background:rgba(91,156,246,0.15);color:#5b9cf6">Frontend</div><div class="card-title">Build notifications center with real-time updates</div><div class="card-footer"><div class="card-assignee" style="background:#c47a25;color:#fff">RI</div><div class="priority p-high">High</div><div class="card-meta">Mar 10</div></div></div>
+          <div class="card" style="animation-delay:.13s"><div class="card-tag" style="background:rgba(167,139,250,0.15);color:#a78bfa">Research</div><div class="card-title">Competitive analysis: pricing page UX patterns</div><div class="card-footer"><div class="card-assignee" style="background:#4a6fa5;color:#fff">CA</div><div class="priority p-med">Medium</div><div class="card-meta">Mar 12</div></div></div>
+          <div class="card" style="animation-delay:.18s"><div class="card-tag" style="background:rgba(91,156,246,0.15);color:#5b9cf6">Backend</div><div class="card-title">Migrate legacy auth service to OAuth 2.0</div><div class="card-footer"><div class="card-assignee" style="background:#7a4a9a;color:#fff">MO</div><div class="priority p-high">High</div><div class="card-meta" style="color:var(--red)">Mar 6</div></div></div>
+          <div class="add-card">+ Add card</div>
+        </div>
+        <div class="kanban-col" id="col-review">
+          <div class="kanban-header"><div class="kanban-dot" style="background:#5b9cf6"></div><div class="kanban-title">Review</div><div class="kanban-count" id="cnt-review">2</div></div>
+          <div class="card" style="animation-delay:.06s"><div class="card-tag" style="background:rgba(76,175,125,0.15);color:#4caf7d">Content</div><div class="card-title">Draft release notes for v3.2 public changelog</div><div class="card-footer"><div class="card-assignee" style="background:#3d8a3d;color:#fff">DR</div><div class="priority p-low">Low</div><div class="card-meta">Mar 8</div></div></div>
+          <div class="card" style="animation-delay:.12s"><div class="card-tag" style="background:rgba(91,156,246,0.15);color:#5b9cf6">Frontend</div><div class="card-title">Accessibility audit on dashboard components</div><div class="card-footer"><div class="card-assignee" style="background:#8a4a3d;color:#fff">TA</div><div class="priority p-med">Medium</div><div class="card-meta">Mar 9</div></div></div>
+          <div class="add-card">+ Add card</div>
+        </div>
+        <div class="kanban-col" id="col-done">
+          <div class="kanban-header"><div class="kanban-dot" style="background:#4caf7d"></div><div class="kanban-title">Done</div><div class="kanban-count">4</div></div>
+          <div class="card" style="animation-delay:.07s;opacity:.6"><div class="card-tag" style="background:rgba(76,175,125,0.15);color:#4caf7d">Backend</div><div class="card-title">Database schema migration for multi-tenancy</div><div class="card-footer"><div class="card-assignee" style="background:#5a7a4a;color:#fff">QU</div><div class="priority p-high">High</div><div class="card-meta">Mar 4 &#x2713;</div></div></div>
+          <div class="card" style="animation-delay:.12s;opacity:.6"><div class="card-tag" style="background:rgba(167,139,250,0.15);color:#a78bfa">Design</div><div class="card-title">Create component library in Figma</div><div class="card-footer"><div class="card-assignee" style="background:#b94d8a;color:#fff">SA</div><div class="priority p-med">Medium</div><div class="card-meta">Mar 1 &#x2713;</div></div></div>
+          <div class="add-card">+ Add card</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TASK LIST -->
+    <div class="view-panel" id="panel-tasklist">
+      <div class="tasklist-wrap">
+        <div class="task-section">
+          <div class="task-section-header"><div class="section-title">This Sprint</div><div class="section-count" id="sprintCount">8 tasks</div></div>
+          <div id="tasks-sprint"></div>
+        </div>
+        <div class="task-section">
+          <div class="task-section-header"><div class="section-title">Upcoming</div><div class="section-count">5 tasks</div></div>
+          <div id="tasks-upcoming"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- INDENTED -->
+    <div class="view-panel" id="panel-indented">
+      <div class="indented-wrap" id="indented-body"></div>
+    </div>
+
+
+    <!-- TIMESHEET PANEL -->
+    <div class="view-panel" id="panel-timesheet">
+      <div class="ts-wrap" id="tsWrap"></div>
+    </div>
+
+    <!-- SCHEDULER PANEL -->
+    <div class="view-panel" id="panel-scheduler" style="flex-direction:column;overflow:hidden">
+      <div class="sched-wrap" id="schedWrap">
+        <!-- toolbar -->
+        <div class="sched-toolbar">
+          <div class="sched-title">&#x1F4C6; Scheduler</div>
+          <div class="sched-nav">
+            <button class="sched-nav-btn" onclick="schedNav(-1)" title="Previous">&#x2039;</button>
+            <span class="sched-range-label" id="schedRangeLabel">—</span>
+            <button class="sched-nav-btn" onclick="schedNav(1)" title="Next">&#x203A;</button>
+          </div>
+          <button class="sched-today-btn" onclick="schedGoToday()">Today</button>
+          <div class="sched-zoom-group" id="schedGanttZoomGroup">
+            <button class="sched-zoom-btn" id="schedZoom1Week" onclick="setSchedZoom('1week',this)">1 Week</button>
+            <button class="sched-zoom-btn active" id="schedZoomWeek" onclick="setSchedZoom('week',this)">2 Weeks</button>
+            <button class="sched-zoom-btn" id="schedZoomMonth" onclick="setSchedZoom('month',this)">Month</button>
+            <button class="sched-zoom-btn" id="schedZoomQuarter" onclick="setSchedZoom('quarter',this)">Quarter</button>
+          </div>
+          <div style="width:1px;height:22px;background:var(--border);flex-shrink:0"></div>
+          <div class="sched-zoom-group">
+            <button class="sched-zoom-btn" id="schedViewGantt" onclick="setSchedView('gantt',this)">&#x1F4CA; Gantt</button>
+            <button class="sched-zoom-btn" id="schedViewCal" onclick="setSchedView('calendar',this)">&#x1F4C5; Calendar</button>
+          </div>
+          <div style="width:1px;height:22px;background:var(--border);flex-shrink:0"></div>
+          <button class="sched-toggle on" id="schedToggleRooms" onclick="toggleSchedSection('rooms',this)" title="Show/hide lab rooms">
+            <span class="sched-toggle-dot"></span> Rooms
+          </button>
+          <button class="sched-toggle on" id="schedToggleEmps" onclick="toggleSchedSection('employees',this)" title="Show/hide employees">
+            <span class="sched-toggle-dot"></span> Employees
+          </button>
+          <button class="sched-add-btn" onclick="openSchedModal()">+ Schedule Block</button>
+        </div>
+        <!-- body -->
+        <div class="sched-body">
+          <div class="sched-sidebar">
+            <div class="sched-sidebar-head">Sales Categories</div>
+            <div class="sched-rows-labels" id="schedRowLabels"></div>
+          </div>
+          <div class="sched-grid-area">
+            <div class="sched-header-scroll" id="schedHeaderScroll">
+              <div class="sched-day-header" id="schedDayHeader"></div>
+            </div>
+            <div class="sched-canvas-scroll" id="schedCanvasScroll">
+              <div class="sched-canvas" id="schedCanvas"></div>
+            </div>
+          </div>
+        </div>
+        <!-- legend (gantt) -->
+        <div class="sched-legend" id="schedLegend" style="background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;min-height:32px;align-items:center;"></div>
+
+        <!-- calendar view -->
+        <div id="schedCalView" style="display:none;flex:1;overflow:auto;padding:20px 24px;">
+          <div id="schedCalGrid"></div>
+        </div>
+      </div>
+      <!-- tooltip -->
+      <div class="sched-bar-tooltip" id="schedTooltip"></div>
+    </div>
+
+    <!-- EMPLOYEES PANEL -->
+    <div class="view-panel" id="panel-employees">
+      <div class="emp-panel" id="empPanelBody"></div>
+    </div>
+
+    <!-- APPROVAL QUEUE PANEL -->
+    <div class="view-panel" id="panel-approvals">
+      <div class="approval-queue" id="approvalQueueBody"></div>
+    </div>
+
+    <!-- CLIENTS PANEL -->
+    <div class="view-panel" id="panel-clients">
+      <div class="emp-panel" id="clientsPanelBody"></div>
+    </div>
+
+    <!-- SHIPPING & RECEIVING PANEL -->
+    <div class="view-panel" id="panel-shipping" style="flex-direction:column;overflow:hidden">
+      <div id="shippingGlobalBody" style="flex:1;overflow-y:auto;padding:32px 40px;max-width:1100px"></div>
+    </div>
+
+    <!-- REPORTS PANEL -->
+    <div class="view-panel" id="panel-reports" style="flex-direction:column;overflow:hidden">
+      <div style="padding:20px 28px 0;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0">
+        <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);margin-bottom:14px">Reports</div>
+        <div class="reports-tabs" id="reportsTabs">
+          <div class="reports-tab active" data-tab="tab-billing" onclick="switchReportsTab(this)">&#x1F4B3; Billing Queue</div>
+          <div class="reports-tab" data-tab="tab-overview" onclick="switchReportsTab(this)">&#x1F4CA; Overview</div>
+          <div class="reports-tab" data-tab="tab-employees" onclick="switchReportsTab(this)">&#x1F465; Employees</div>
+          <div class="reports-tab" data-tab="tab-timesheets" onclick="switchReportsTab(this)">&#x1F4C5; Timesheets</div>
+        </div>
+      </div>
+      <div style="flex:1;overflow-y:auto;padding:24px 28px" id="reportsBody">
+        <!-- Overview Tab -->
+        <div class="reports-tab-panel active" id="tab-overview"></div>
+        <!-- Tasks Tab -->
+        <div class="reports-tab-panel" id="tab-tasks"></div>
+        <!-- Employees Tab -->
+        <div class="reports-tab-panel" id="tab-employees"></div>
+        <!-- Billing Queue Tab -->
+        <div class="reports-tab-panel" id="tab-billing"></div>
+        <!-- Timesheets Tab -->
+        <div class="reports-tab-panel" id="tab-timesheets"></div>
+        <!-- AI Analysis Tab -->
+        <div class="reports-tab-panel" id="tab-ai">
+          <div style="max-width:860px">
+            <!-- Header -->
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px">
+              <div>
+                <div style="font-size:18px;font-weight:700;color:var(--text)">&#x2728; AI Business Intelligence</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">Ask anything about your projects, tasks, employees, or finances</div>
+              </div>
+              <button class="btn btn-ghost" style="font-size:11px;padding:5px 12px" onclick="clearAiHistory()">&#x1F5D1; Clear History</button>
+            </div>
+
+            <!-- Conversation history -->
+            <div id="aiConversation" style="margin-bottom:16px"></div>
+
+            <!-- Quick prompts -->
+            <div style="margin-bottom:10px">
+              <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Quick Reports</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="ai-prompt-chip" onclick="setAiPrompt('Summarize all active projects with status and task completion %')">&#x1F4CB; Active Projects</button>
+                <button class="ai-prompt-chip" onclick="setAiPrompt('Show billed vs ready-to-bill vs unbilled revenue across all projects')">&#x1F4B0; Revenue Status</button>
+                <button class="ai-prompt-chip" onclick="setAiPrompt('Which employees have the most overdue tasks? Show workload breakdown')">&#x1F465; Workload</button>
+                <button class="ai-prompt-chip" onclick="setAiPrompt('Show all overdue tasks grouped by project with assignee and days overdue')">&#x26A0; Overdue Tasks</button>
+                <button class="ai-prompt-chip" onclick="setAiPrompt('Which projects are on hold and what is their combined value at risk?')">&#x23F8; On Hold</button>
+                <button class="ai-prompt-chip" onclick="setAiPrompt('Show expense breakdown by project')">&#x1F9FE; Expenses</button>
+              </div>
+            </div>
+
+            <!-- Input -->
+            <div style="display:flex;gap:8px;align-items:flex-end">
+              <textarea id="aiReportPrompt" placeholder="Ask anything… e.g. Which projects are behind schedule? What's our total revenue this month?" style="flex:1;background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:11px 14px;outline:none;resize:none;height:48px;line-height:1.5;transition:border-color .2s" onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();runAiReport()}"></textarea>
+              <button class="btn btn-primary" style="padding:11px 20px;font-size:13px;height:48px;white-space:nowrap" onclick="runAiReport()" id="aiRunBtn">&#x2728; Ask</button>
+            </div>
+            <div style="font-size:11px;color:var(--muted);margin-top:5px">Press Enter to send · Shift+Enter for new line</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Closing Report Panel -->
+    <div class="view-panel" id="panel-closing-report" style="flex-direction:column;overflow-y:auto;">
+      <div style="padding:24px 32px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+          <div style="font-family:'DM Serif Display',serif;font-size:24px;color:var(--text)">📋 Closing Report</div>
+          <div style="font-size:12px;color:var(--muted)">Projects in Testing Complete for 60+ days</div>
+        </div>
+        <div id="closingReportBody"></div>
+      </div>
+    </div>
+
+    <!-- IMPORT EXPENSES PANEL -->
+    <div class="view-panel" id="panel-import-expenses" style="flex-direction:column;overflow-y:auto;">
+      <div style="padding:32px 40px;max-width:760px;">
+        <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);margin-bottom:6px;">&#x1F4E5; Import Historical Expenses</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:28px;">Bulk-import 1,612 expense records from your TSV export. Each row is matched to a project by its number and inserted into the expenses table.</div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:28px;">
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;">Total Rows</div>
+            <div style="font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--text);">1,612</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;">Total Planned</div>
+            <div style="font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--amber);">$828,574</div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px;">
+            <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;">Total Actual</div>
+            <div style="font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--green);">$655,961</div>
+          </div>
+        </div>
+
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 24px;margin-bottom:20px;">
+          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px;">What gets imported</div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.7;">
+            Each row's <strong style="color:var(--text)">Description</strong> → expense name &nbsp;·&nbsp;
+            <strong style="color:var(--text)">Planned Amount</strong> → planned_amount &nbsp;·&nbsp;
+            <strong style="color:var(--text)">Actual Amount</strong> → actual_cost.<br>
+            Rows are matched to projects by their <strong style="color:var(--text)">Proj Name</strong> number (e.g. <code style="font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--surface2);padding:1px 5px;border-radius:3px;">13057</code>).
+            Rows whose project number doesn't match any existing project are skipped.
+          </div>
+        </div>
+
+        <div id="importExpensesStatus" style="margin-bottom:16px;display:none;"></div>
+
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button id="importExpensesBtn" class="btn btn-primary" style="font-size:14px;padding:10px 24px;" onclick="runImportExpenses()">&#x25B6; Run Import</button>
+          <div id="importExpensesProgress" style="font-size:13px;color:var(--muted);display:none;font-family:'JetBrains Mono',monospace;"></div>
+        </div>
+
+        <div id="importExpensesLog" style="margin-top:20px;display:none;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);max-height:280px;overflow-y:auto;line-height:1.7;"></div>
+      </div>
+    </div>
+
+    <!-- SALESFORCE IMPORT PANEL -->
+    <div class="view-panel" id="panel-sf-import" style="flex-direction:column;overflow-y:auto;">
+      <div style="padding:32px 40px;max-width:960px">
+        <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);margin-bottom:6px">📥 Import from Salesforce</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:28px">Upload a Salesforce Accounts/Contacts CSV export. Accounts become clients, contacts are linked automatically. Existing clients are detected and skipped.</div>
+        <input type="file" id="sfCsvInput" accept=".csv" style="display:none" onchange="handleSfCsvFile(this.files[0])" />
+        <div style="background:var(--surface);border:2px dashed var(--border);border-radius:12px;padding:32px;text-align:center;margin-bottom:24px;transition:border-color .2s;cursor:pointer"
+          id="sfDropZone"
+          onclick="document.getElementById('sfCsvInput').click()"
+          ondragover="event.preventDefault();event.stopPropagation();this.style.borderColor='var(--amber-dim)'"
+          ondragleave="event.stopPropagation();this.style.borderColor='var(--border)'"
+          ondrop="event.preventDefault();event.stopPropagation();this.style.borderColor='var(--border)';handleSfCsvDrop(event)">
+          <div style="font-size:32px;margin-bottom:10px">📂</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">Drop your Salesforce CSV here or click to browse</div>
+          <div style="font-size:12px;color:var(--muted)">Contacts export with Account Name column</div>
+        </div>
+        <div id="sfImportPreview" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+            <div>
+              <div style="font-size:15px;font-weight:700;color:var(--text)" id="sfPreviewTitle"></div>
+              <div style="font-size:12px;color:var(--muted);margin-top:2px" id="sfPreviewSub"></div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost" onclick="resetSfImport()">↩ Start Over</button>
+              <button class="btn btn-primary" id="sfImportBtn" onclick="runSfImport()">Import Selected</button>
+            </div>
+          </div>
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+            <table style="width:100%;border-collapse:collapse" id="sfPreviewTable">
+              <thead>
+                <tr style="border-bottom:2px solid var(--border);background:var(--surface2)">
+                  <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Status</th>
+                  <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Account Name</th>
+                  <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Contacts</th>
+                  <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">City / State</th>
+                  <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Match to Existing</th>
+                </tr>
+              </thead>
+              <tbody id="sfPreviewBody"></tbody>
+            </table>
+          </div>
+          <div id="sfImportLog" style="display:none;margin-top:20px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text);max-height:240px;overflow-y:auto;line-height:1.8"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MERGE CLIENTS PANEL -->
+    <div class="view-panel" id="panel-merge-clients" style="flex-direction:column;overflow-y:auto;">
+      <div style="padding:32px 40px;max-width:1000px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;flex-wrap:wrap;gap:12px">
+          <div>
+            <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text)">🧹 Merge Duplicate Clients</div>
+            <div style="font-size:13px;color:var(--muted);margin-top:3px">Find client records with similar names and merge them into one.</div>
+          </div>
+          <button class="btn btn-primary" onclick="runMergeScan()">🔍 Scan for Duplicates</button>
+        </div>
+        <div id="mergeResultsWrap" style="margin-top:24px"></div>
+      </div>
+    </div>
+
+    <!-- SETUP PANEL -->
+    <div class="view-panel" id="panel-setup" style="flex-direction:column;overflow-y:auto;">
+      <div style="padding:32px 40px;max-width:760px;">
+        <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);margin-bottom:6px;">&#x2699; Setup</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:32px;">Manage employees, permissions, and audit log settings.</div>
+        <div id="setupTilesGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;"></div>
+      </div>
+    </div>
+
+    <!-- PERMISSIONS PANEL -->
+    <div class="view-panel" id="panel-permissions" style="flex-direction:column;overflow:hidden;">
+      <div style="flex:1;overflow-y:auto;padding:28px 36px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);">&#x1F510; Permissions</div>
+          <button class="btn btn-primary" style="font-size:12.5px" onclick="openNewRoleModal()">+ New Role</button>
+        </div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:28px;">Define roles and assign them to employees. Each role is a named set of capabilities.</div>
+        <div id="permissionsBody"></div>
+      </div>
+    </div>
+
+    <!-- MY INFO PANEL -->
+    <div class="view-panel" id="panel-myinfo" style="flex-direction:column;overflow:hidden;">
+      <div class="emp-panel" id="myInfoBody" style="flex:1;overflow-y:auto;"></div>
+    </div>
+
+    <!-- PROJECT CONTAINER — Info, Tasks, Expenses, Invoicing share this -->
+    <div class="view-panel active" id="panel-project" style="flex-direction:column;overflow:hidden">
+
+      <!-- Sticky project header -->
+      <div class="proj-sticky-header" id="projStickyHeader" style="display:none">
+        <div class="proj-sticky-bar" id="projStickyBar">
+          <!-- filled by renderProjStickyHeader() -->
+        </div>
+        <div class="credit-hold-banner" id="creditHoldBanner" style="display:none">⚠ CREDIT HOLD — All work must stop until resolved</div>
+        <div class="need-po-banner" id="needPoBanner" style="display:none">⚠ UPDATED PO REQUIRED — Please provide an updated Purchase Order to continue</div>
+        <div class="proj-sticky-tabs" id="projStickyTabs">
+          <div class="proj-tab active" data-sub="sub-info">&#x1F4CB; Info</div>
+          <div class="proj-tab" data-sub="sub-tasks">&#x2713; Tasks</div>
+          <div class="proj-tab" data-sub="sub-hours">&#x23F1; Hours</div>
+          <div class="proj-tab" data-sub="sub-expenses">&#x1F4B0; Expenses</div>
+          <div class="proj-tab" data-sub="sub-invoicing">&#x1F4C4; Invoicing</div>
+          <div class="proj-tab" data-sub="sub-shipping" id="projShippingTab">&#x1F4E6; Shipping</div>
+          <div class="proj-tab" data-sub="sub-chatter">&#x1F4AC; Chatter</div>
+          <div class="proj-tab" data-sub="sub-activity" id="projActivityTab" style="display:none">&#x1F4DD; Activity</div>
+        </div>
+      </div>
+
+      <!-- Sub-panels -->
+      <div class="proj-sub active" id="sub-info">
+        <div class="info-wrap" id="infoWrap"></div>
+      </div>
+      <div class="proj-sub" id="sub-tasks">
+        <div style="padding:24px 32px;overflow-x:auto;">
+          <div id="tasksPanelWrap"></div>
+        </div>
+      </div>
+      <div class="proj-sub" 
+    <div class="proj-sub" id="sub-hours">
+      <div style="padding:24px 32px;max-width:1100px">
+        <div id="hoursPanelBody"></div>
+      </div>
+    </div><!-- /sub-hours -->
+    <div class="proj-sub" id="sub-expenses">
+        <div style="padding:28px 32px;max-width:900px">
+          <div id="expensesPanelSummary" style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:28px;"></div>
+          <div id="expensesPanelList"></div>
+        </div>
+      </div>
+      <div class="proj-sub" id="sub-chatter">
+        <div class="chatter-wrap">
+          <div class="chatter-composer" id="chatterComposer">
+            <div class="chatter-reply-bar" id="chatterReplyBar" style="display:none">
+              <span id="chatterReplyLabel" style="font-size:12px;color:var(--amber)"></span>
+              <button onclick="chatterCancelReply()" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted);font-size:14px">✕</button>
+            </div>
+            <div class="chatter-composer-top">
+              <div class="chatter-avatar-self" id="chatterSelfAvatar"></div>
+              <div class="chatter-input-wrap">
+                <div class="chatter-input" id="chatterInput" contenteditable="true" 
+                  data-placeholder="Write a message… use @ to mention someone"
+                  onkeydown="chatterKeydown(event)"
+                  oninput="chatterInputHandler(event)"></div>
+                <div class="chatter-mention-dropdown" id="chatterMentionDrop" style="display:none"></div>
+              </div>
+            </div>
+            <div class="chatter-composer-actions">
+              <label class="chatter-attach-btn" title="Attach file">
+                📎 <input type="file" style="display:none" onchange="chatterAttachFile(event)" multiple />
+              </label>
+              <div class="chatter-attachments-preview" id="chatterAttachPreview"></div>
+              <button class="btn btn-primary" style="margin-left:auto;padding:6px 18px;font-size:13px" onclick="chatterPost()">Post</button>
+            </div>
+          </div>
+          <div class="chatter-feed" id="chatterFeed"></div>
+        </div>
+      </div>
+
+      <div class="proj-sub" id="sub-activity">
+        <div style="padding:24px 32px;max-width:900px" id="activityPanelBody"></div>
+      </div>
+      <div class="proj-sub" id="sub-invoicing">
+        <div id="invoicingWrap" style="padding:24px 28px"></div>
+      </div>
+      <div class="proj-sub" id="sub-shipping">
+        <div id="shippingProjWrap" style="padding:24px 32px;max-width:900px"></div>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+
+<!-- ===== NEW PROJECT MODAL ===== -->
+<div class="modal-backdrop" id="projectModal" onclick="if(event.target===this)closeProjectModal()">
+  <div class="modal" style="width:540px">
+    <div class="modal-header">
+      <div class="modal-title">New Project</div>
+      <button class="modal-close" onclick="closeProjectModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-row" style="align-items:flex-end">
+        <div class="field" style="max-width:64px">
+          <label class="field-label">Icon</label>
+          <div class="emoji-btn" id="projEmojiBtn" onclick="toggleEmojiPicker()">&#x1F4E6;</div>
+        </div>
+        <div class="field" style="flex:1">
+          <label class="field-label">Project Name <span style="color:var(--red)">*</span></label>
+          <input class="f-input f-title" id="projName" type="text" placeholder="e.g. Marketing Campaign Q3" maxlength="60" autocomplete="off" />
+        </div>
+      </div>
+      <div id="emojiPickerWrap" style="display:none;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px;">
+        <div class="emoji-grid" id="emojiGrid"></div>
+      </div>
+      <div class="field">
+        <label class="field-label">Description</label>
+        <textarea class="f-textarea" id="projDesc" placeholder="What is this project about?" rows="4" style="min-height:100px"></textarea>
+      </div>
+      <div class="modal-div"></div>
+      <div class="field">
+        <label class="field-label">Project Color</label>
+        <div class="color-swatches" id="colorSwatches"></div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Start Date</label>
+          <input class="f-input" id="projStart" type="date" style="color-scheme:dark" />
+        </div>
+        <div class="field">
+          <label class="field-label">Target End</label>
+          <input class="f-input" id="projEnd" type="date" style="color-scheme:dark" />
+        </div>
+      </div>
+      <div class="modal-div"></div>
+      <div class="field">
+        <label class="field-label">Team Members</label>
+        <div class="chip-grid" id="projTeamGrid"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeProjectModal()">Cancel</button>
+      <div style="margin-left:auto"><button class="btn btn-primary" onclick="saveProject()">Create Project</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== NEW TASK MODAL ===== -->
+<div class="modal-backdrop" id="taskModal" onclick="if(event.target===this)closeTaskModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">New Task</div>
+      <div class="proj-chip"><div class="proj-dot" id="tProjDot" style="background:#5b9cf6"></div><span id="tProjLabel">Platform v3</span></div>
+      <button class="modal-close" onclick="closeTaskModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">Task Title <span style="color:var(--red)">*</span></label>
+        <input class="f-input f-title" id="taskTitle" type="text" placeholder="What needs to be done?" maxlength="120" oninput="cc(this,'tTitleCnt',120)" autocomplete="off" />
+        <div class="char-cnt"><span id="tTitleCnt">0</span> / 120</div>
+      </div>
+      <div class="field">
+        <label class="field-label">Description</label>
+        <textarea class="f-textarea" id="taskDesc" placeholder="Add context, acceptance criteria, or notes..." rows="3" maxlength="600" oninput="cc(this,'tDescCnt',600)"></textarea>
+        <div class="char-cnt"><span id="tDescCnt">0</span> / 600</div>
+      </div>
+      <div class="modal-div"></div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Project</label>
+          <select class="f-select" id="taskProject" onchange="syncProjChip(this)"></select>
+        </div>
+        <div class="field">
+          <label class="field-label">Type</label>
+          <select class="f-select" id="taskType">
+            <option>Task</option><option>Bug</option><option>Feature</option>
+            <option>Design</option><option>Content</option><option>Research</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Status</label>
+          <select class="f-select" id="taskStatus">
+            <option value="new" selected>New</option>
+            <option value="inprogress">In Progress</option>
+            <option value="prohold">Production Hold</option>
+            <option value="accthold">Accounting Hold</option>
+            <option value="complete">Complete</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="billed">Billed</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Completed Date</label>
+          <input class="f-input" id="taskDue" type="date" style="color-scheme:dark" />
+        </div>
+      </div>
+      <div class="field-row">
+      <div class="field">
+        <label class="field-label">Sales Category</label>
+        <select class="f-select" id="taskSalesCat">
+          <option value="">— select —</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="33">33</option><option value="41">41</option><option value="42">42</option><option value="43">43</option><option value="44">44</option><option value="51">51</option><option value="52">52</option><option value="53">53</option><option value="54">54</option><option value="55">55</option><option value="56">56</option><option value="57">57</option><option value="58">58</option><option value="59">59</option><option value="67">67</option><option value="91">91</option><option value="92">92</option><option value="93">93</option><option value="94">94</option><option value="95">95</option><option value="96">96</option><option value="98">98</option><option value="99">99</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Revenue Type</label>
+        <select class="f-input" id="taskRevenueType" style="cursor:pointer" onchange="toggleTaskFixedPriceField(this.value)">
+          <option value="fixed">Fixed Price</option>
+          <option value="nocharge">No Charge</option>
+        </select>
+      </div>
+      <div class="field" id="taskFixedPriceField">
+        <label class="field-label">Fixed Price ($)</label>
+        <input class="f-input" id="taskFixedPrice" type="number" step="0.01" placeholder="0.00" style="font-family:'JetBrains Mono',monospace" />
+      </div>
+      </div>
+      <div class="field">
+        <label class="field-label">Priority</label>
+        <div class="priority-group">
+          <button class="pp" data-p="urgent" onclick="selPri(this)">&#x1F534; Urgent</button>
+          <button class="pp" data-p="high" onclick="selPri(this)">&#x1F7E0; High</button>
+          <button class="pp" data-p="medium" onclick="selPri(this)">&#x1F535; Medium</button>
+          <button class="pp sel-low" data-p="low" onclick="selPri(this)">&#x1F7E2; Low</button>
+        </div>
+      </div>
+      <div class="modal-div"></div>
+      <div class="field">
+        <label class="field-label">Assign To</label>
+        <div class="chip-grid" id="taskChipGrid"></div>
+      </div>
+      <div class="modal-div"></div>
+      <div class="field">
+        <label class="field-label">Tags</label>
+        <div class="tag-wrap" id="tagWrap" onclick="document.getElementById('tagIn').focus()">
+          <input class="tag-in" id="tagIn" placeholder="Type and press Enter..." maxlength="24" onkeydown="tagKey(event)" />
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Suggestions: frontend &middot; backend &middot; design &middot; qa &middot; sprint-3</div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeTaskModal()">Cancel</button>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-ghost" style="font-size:12px" onclick="saveTask(true)">Save &amp; add another</button>
+        <button class="btn btn-primary" onclick="saveTask()">Create Task</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ===== ADD EMPLOYEE MODAL ===== -->
+<div class="modal-backdrop" id="employeeModal" onclick="if(event.target===this)closeEmployeeModal()">
+  <div class="modal" style="width:460px">
+    <div class="modal-header">
+      <div class="modal-title" id="empModalTitle">Add Employee</div>
+      <button class="modal-close" onclick="closeEmployeeModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div id="empAvPreview" class="emp-modal-av-preview" style="background:#5b4fcf">AL</div>
+      <div class="field">
+        <label class="field-label">Full Name <span style="color:var(--red)">*</span></label>
+        <input class="f-input" id="empName" type="text" placeholder="e.g. Jordan Smith" maxlength="60" autocomplete="off" oninput="updateEmpPreview()" />
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Role / Title</label>
+          <input class="f-input" id="empRole" type="text" placeholder="e.g. Project Manager" maxlength="60" />
+        </div>
+        <div class="field">
+          <label class="field-label">Department</label>
+          <input class="f-input" id="empDept" type="text" placeholder="e.g. Engineering" maxlength="60" />
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Work Email</label>
+          <input class="f-input" id="empEmail" type="email" placeholder="name@company.com" maxlength="100" />
+        </div>
+        <div class="field">
+          <label class="field-label">Personal Email</label>
+          <input class="f-input" id="empPersonalEmail" type="email" placeholder="personal@email.com" maxlength="100" />
+        </div>
+      </div>
+      <div class="field">
+        <label class="field-label">Phone</label>
+        <input class="f-input" id="empPhone" type="text" placeholder="+1 (555) 000-0000" maxlength="30" />
+      </div>
+      <div class="field">
+        <label class="field-label">Hire Date</label>
+        <input class="f-input" id="empHireDate" type="date" />
+      </div>
+      <div class="field">
+        <label class="field-label">Termination Date <span style="font-size:10px;color:var(--muted);font-weight:400">(sets employee as inactive)</span></label>
+        <input class="f-input" id="empTermDate" type="date" />
+      </div>
+      <div class="field">
+        <label class="field-label">Role</label>
+        <select class="f-input" id="empPermLevel" style="cursor:pointer">
+          <option value="">— No role assigned —</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Employment Type</label>
+        <select class="f-input" id="empType" style="cursor:pointer">
+          <option value="fulltime">Full Time</option>
+          <option value="parttime">Part Time</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Avatar Color</label>
+        <div class="color-swatches" id="empColorSwatches"></div>
+      </div>
+      <div class="field-row" style="align-items:center;gap:16px;margin-top:4px">
+        <div class="field" style="flex:1">
+          <label class="field-label">Timesheet Approver</label>
+          <select class="f-input" id="empApprover" style="cursor:pointer">
+            <option value="">— None —</option>
+          </select>
+        </div>
+        <div class="field" style="flex:0;white-space:nowrap;padding-top:18px;display:flex;flex-direction:column;gap:10px">
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:var(--text)">
+            <input type="checkbox" id="empIsApprover" style="width:15px;height:15px;cursor:pointer;accent-color:var(--amber)" />
+            Is Approver
+          </label>
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:var(--text)">
+            <input type="checkbox" id="empIsPaperTs" style="width:15px;height:15px;cursor:pointer;accent-color:var(--amber)" />
+            Paper Timesheet
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeEmployeeModal()">Cancel</button>
+      <div style="margin-left:auto"><button class="btn btn-primary" id="empSaveBtn" onclick="saveEmployee()">Add Employee</button></div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ===== EDIT TASK MODAL ===== -->
+<div class="modal-backdrop" id="editTaskModal" onclick="if(event.target===this)closeEditTaskModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Edit Task</div>
+      <div class="proj-chip"><div class="proj-dot" id="etProjDot" style="background:#5b9cf6"></div><span id="etProjLabel"></span></div>
+      <button class="modal-close" onclick="closeEditTaskModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">Task Title <span style="color:var(--red)">*</span></label>
+        <input class="f-input f-title" id="etTitle" type="text" maxlength="120" oninput="cc(this,'etTitleCnt',120)" autocomplete="off" />
+        <div class="char-cnt"><span id="etTitleCnt">0</span> / 120</div>
+      </div>
+      <div class="field">
+        <label class="field-label">Description</label>
+        <textarea class="f-textarea" id="etDesc" rows="3" maxlength="600" oninput="cc(this,'etDescCnt',600)"></textarea>
+        <div class="char-cnt"><span id="etDescCnt">0</span> / 600</div>
+      </div>
+      <div class="modal-div"></div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Status</label>
+          <select class="f-select" id="etStatus" onchange="updateCompletedDateFromStatus()">
+            <option value="new">New</option>
+            <option value="inprogress">In Progress</option>
+            <option value="prohold">Production Hold</option>
+            <option value="accthold">Accounting Hold</option>
+            <option value="complete">Complete</option>
+            <option value="cancelled">Cancelled</option>
+            <option value="billed">Billed</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Completed Date</label>
+          <input class="f-input" id="etDue" type="date" style="color-scheme:dark" onchange="updateCompletedDateFromStatus()" />
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Sales Category</label>
+          <select class="f-select" id="etSalesCat"><option value="">— select —</option><option value="11">11</option><option value="12">12</option><option value="13">13</option><option value="33">33</option><option value="41">41</option><option value="42">42</option><option value="43">43</option><option value="44">44</option><option value="51">51</option><option value="52">52</option><option value="53">53</option><option value="54">54</option><option value="55">55</option><option value="56">56</option><option value="57">57</option><option value="58">58</option><option value="59">59</option><option value="67">67</option><option value="91">91</option><option value="92">92</option><option value="93">93</option><option value="94">94</option><option value="95">95</option><option value="96">96</option><option value="98">98</option><option value="99">99</option></select>
+        </div>
+        <div class="field">
+          <label class="field-label">Revenue Type</label>
+          <select class="f-input" id="etRevenueType" style="cursor:pointer" onchange="toggleFixedPriceField(this.value)">
+            <option value="fixed">Fixed Price</option>
+            <option value="nocharge">No Charge</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-row" id="etFixedPriceField">
+        <div class="field">
+          <label class="field-label">Fixed Price ($)</label>
+          <input class="f-input" id="etFixedPrice" type="number" step="0.01" placeholder="0.00" style="font-family:'JetBrains Mono',monospace" />
+        </div>
+      </div>
+      <div class="field">
+        <label class="field-label">Priority</label>
+        <div class="priority-group">
+          <button class="pp" data-p="urgent" onclick="etSelPri(this)">&#x1F534; Urgent</button>
+          <button class="pp" data-p="high"   onclick="etSelPri(this)">&#x1F7E0; High</button>
+          <button class="pp" data-p="medium" onclick="etSelPri(this)">&#x1F535; Medium</button>
+          <button class="pp" data-p="low"    onclick="etSelPri(this)">&#x1F7E2; Low</button>
+        </div>
+      </div>
+      <div class="modal-div"></div>
+      <div class="field">
+        <label class="field-label">Assign To</label>
+        <div class="chip-grid" id="etChipGrid"></div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" style="color:var(--red);border-color:rgba(224,92,92,0.3)" onclick="confirmDeleteTask()">&#x1F5D1; Delete</button>
+      <div style="margin-left:auto;display:flex;gap:8px">
+        <button class="btn btn-ghost" onclick="closeEditTaskModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveEditTask()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TOAST -->
+<div class="toast" id="toast"><span>&#x2713;</span><span id="toastMsg">Done</span></div>
+
+
+<!-- External chart/PDF libraries -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<!-- App modules (order matters) -->
+  <script src="js/supabase-client.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/projects.js"></script>
+  <script src="js/tasks.js"></script>
+  <script src="js/project-detail.js"></script>
+  <script src="js/employees.js"></script>
+  <script src="js/timesheet.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/clients.js"></script>
+  <script src="js/reports.js"></script>
+  <script src="js/search.js"></script>
+  <script src="js/chatter.js"></script>
+  <script src="js/admin.js"></script>
+  <script src="js/scheduler.js"></script>
+
+</div><!-- /appShell -->
+
+<!-- SCHEDULER MODAL -->
+<div class="sched-modal-backdrop" id="schedModal" onclick="if(event.target===this)closeSchedModal()">
+  <div class="sched-modal">
+    <div class="sched-modal-hdr">
+      <div class="sched-modal-title" id="schedModalTitle">New Schedule Block</div>
+      <button class="modal-close" onclick="closeSchedModal()">&#x2715;</button>
+    </div>
+    <div class="sched-modal-body">
+      <input type="hidden" id="schedEditId" value="">
+      <div class="sched-date-row" style="align-items:flex-end">
+        <div class="sched-field" style="flex:1.2">
+          <div class="sched-field-label">Schedule Type</div>
+          <select class="sched-f-input" id="schedBlockType" onchange="schedBlockTypeChanged()">
+            <option value="room">Lab Room / Asset</option>
+            <option value="employee">Employee</option>
+          </select>
+        </div>
+        <div class="sched-field" style="flex:1" id="schedEmpTypeField">
+          <div class="sched-field-label">Employee Event</div>
+          <select class="sched-f-input" id="schedEmpEventType" onchange="schedBlockTypeChanged()">
+            <option value="">— select —</option>
+            <option value="vacation">Vacation</option>
+            <option value="sick">Sick</option>
+            <option value="work">Working</option>
+          </select>
+        </div>
+      </div>
+      <div id="schedRoomSection">
+        <div class="sched-field-label">Asset / Lab Room</div>
+        <div class="sched-proj-list" id="schedProjList"></div>
+      </div>
+      <div id="schedEmpSection" style="display:none">
+        <div class="sched-field-label">Employee</div>
+        <select class="sched-f-input" id="schedEmpPicker" onchange="schedEmpPickerChanged()">
+          <option value="">— select employee —</option>
+        </select>
+      </div>
+      <div>
+        <div class="sched-field-label">Block Label <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></div>
+        <input class="sched-f-input" id="schedLabel" type="text" placeholder="e.g. Q2 Push, Spring Campaign…" autocomplete="off" />
+      </div>
+      <div style="position:relative" id="schedProjWrap">
+        <div class="sched-field-label">Linked Project <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></div>
+        <input class="sched-f-input" id="schedProjSearch" placeholder="Search projects…" autocomplete="off"
+          oninput="filterSchedProjDD(this.value)"
+          onmousedown="schedProjMousedown(event)"
+          onblur="schedProjBlur()"
+          style="margin-bottom:0" />
+        <div class="sched-proj-list" id="schedProjDD"
+          style="display:none;position:absolute;left:0;right:0;z-index:200;max-height:180px;background:var(--surface);border:1.5px solid var(--amber-dim);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);margin-top:4px;"
+          onmousedown="event.preventDefault()"></div>
+        <div id="schedProjPreview" style="display:none;margin-top:8px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;font-size:12px;line-height:1.6;"></div>
+      </div>
+      <div id="schedTaskSection" style="display:none">
+        <div class="sched-field-label">Task <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — excludes billed &amp; complete)</span></div>
+        <div class="sched-proj-list" id="schedTaskList" style="max-height:160px"></div>
+      </div>
+      <div class="sched-date-row">
+        <div class="sched-field">
+          <div class="sched-field-label">Start Date</div>
+          <input class="sched-f-input" id="schedStartDate" type="date" oninput="schedDateChanged()" />
+        </div>
+        <div class="sched-field">
+          <div class="sched-field-label">Start Time <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(opt)</span></div>
+          <input class="sched-f-input" id="schedStartTime" type="time" />
+        </div>
+      </div>
+      <div class="sched-date-row">
+        <div class="sched-field">
+          <div class="sched-field-label">End Date</div>
+          <input class="sched-f-input" id="schedEndDate" type="date" oninput="schedDateChanged()" />
+        </div>
+        <div class="sched-field">
+          <div class="sched-field-label">End Time <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(opt)</span></div>
+          <input class="sched-f-input" id="schedEndTime" type="time" />
+        </div>
+      </div>
+      <div>
+        <div class="sched-field-label">Quick Duration</div>
+        <div class="sched-dur-chips" id="schedDurChips">
+          <div class="sched-dur-chip" onclick="applySchedDur(1)">1d</div>
+          <div class="sched-dur-chip" onclick="applySchedDur(3)">3d</div>
+          <div class="sched-dur-chip" onclick="applySchedDur(5)">1 wk</div>
+          <div class="sched-dur-chip" onclick="applySchedDur(10)">2 wks</div>
+          <div class="sched-dur-chip" onclick="applySchedDur(14)">2 wks+</div>
+          <div class="sched-dur-chip" onclick="applySchedDur(21)">3 wks</div>
+          <div class="sched-dur-chip" onclick="applySchedDur(30)">1 mo</div>
+          <div class="sched-dur-chip" onclick="applySchedDur(60)">2 mo</div>
+          <div class="sched-dur-chip" onclick="applySchedDur(90)">3 mo</div>
+        </div>
+      </div>
+      <div id="schedDurationPreview" style="font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace;min-height:18px;"></div>
+      <div class="sched-flag-section">
+        <div class="sched-field-label" style="margin-bottom:8px">Status Override <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(overrides all color rules)</span></div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;padding:6px 12px;border-radius:7px;border:1.5px solid var(--border);transition:all .15s;user-select:none;" id="flagLabelReschedule"
+            onclick="toggleSchedFlag('reschedule')">
+            <div style="width:14px;height:14px;border-radius:3px;border:1.5px solid #c9a800;background:#fff8cc;flex-shrink:0;display:flex;align-items:center;justify-content:center;" id="flagBoxReschedule">
+              <span style="display:none;color:#b8940a;font-size:11px;font-weight:900;">&#x2713;</span>
+            </div>
+            <span style="font-size:12.5px;font-weight:500;color:#b8940a;">&#x1F504; Reschedule</span>
+            <div style="width:14px;height:14px;border-radius:3px;background:#f6e040;border:1px solid #c9a800;flex-shrink:0"></div>
+          </label>
+          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;padding:6px 12px;border-radius:7px;border:1.5px solid var(--border);transition:all .15s;user-select:none;" id="flagLabelTentative"
+            onclick="toggleSchedFlag('tentative')">
+            <div style="width:14px;height:14px;border-radius:3px;border:1.5px solid #888;background:#f0f0f0;flex-shrink:0;display:flex;align-items:center;justify-content:center;" id="flagBoxTentative">
+              <span style="display:none;color:#555;font-size:11px;font-weight:900;">&#x2713;</span>
+            </div>
+            <span style="font-size:12.5px;font-weight:500;color:#666;">&#x2753; Tentative</span>
+            <div style="width:14px;height:14px;border-radius:3px;background:#a0a0a0;border:1px solid #888;flex-shrink:0"></div>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="sched-modal-footer">
+      <button class="btn btn-ghost" id="schedDeleteBtn" onclick="deleteSchedBlock()" style="margin-right:auto;display:none">&#x1F5D1; Delete</button>
+      <button class="btn btn-ghost" onclick="closeSchedModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSchedBlock()">Save Block</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="confirmDeleteModal" onclick="if(event.target===this)closeConfirmModal()" style="z-index:1100">
+  <div class="modal" style="width:420px;max-width:94vw">
+    <div class="modal-header" style="border-bottom-color:rgba(208,64,64,0.3)">
+      <div class="modal-title" id="confirmModalTitle" style="color:var(--red)">&#x26A0; Confirm Delete</div>
+      <button class="modal-close" onclick="closeConfirmModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <p id="confirmDeleteMsg" style="font-size:14px;color:var(--text);line-height:1.6;margin:0"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeConfirmModal()">Cancel</button>
+      <button class="btn" id="confirmDeleteBtn" style="margin-left:auto">Yes, Delete</button>
+    </div>
+  </div>
+</div>
+
+  <!-- CLIENT DETAIL DRAWER -->
+  <div class="client-drawer-backdrop" id="clientDrawerBackdrop" onclick="closeClientDrawer()"></div>
+  <div class="client-drawer" id="clientDrawer">
+    <div class="client-drawer-header">
+      <div class="client-drawer-title" id="clientDrawerTitle">Client</div>
+      <button class="client-drawer-close" onclick="closeClientDrawer()">&#x2715;</button>
+    </div>
+    <div class="client-drawer-tabs">
+      <div class="client-dtab active" data-dtab="dtab-info" onclick="switchClientDrawerTab(this)">&#x1F4CB; Info</div>
+      <div class="client-dtab" data-dtab="dtab-contacts" onclick="switchClientDrawerTab(this)">&#x1F465; Contacts</div>
+      <div class="client-dtab" data-dtab="dtab-jobs" onclick="switchClientDrawerTab(this)">&#x1F4C1; Job History</div>
+    </div>
+    <div class="client-drawer-body" id="clientDrawerBody"></div>
+    <div class="client-save-bar" id="clientSaveBar" style="display:none">
+      <button class="btn btn-ghost" id="clientDeleteBtn" onclick="deleteClientFromDrawer()" style="margin-right:auto;color:var(--red);display:none">&#x1F5D1; Delete Client</button>
+      <button class="btn btn-primary" onclick="saveClientDrawer()">Save Changes</button>
+      <button class="btn btn-ghost" onclick="closeClientDrawer()">Cancel</button>
+    </div>
+  </div>
+
+  <!-- ROLE MODAL -->
+  <div class="modal-backdrop" id="roleModal" onclick="if(event.target===this)closeRoleModal()">
+    <div class="modal" style="width:440px">
+      <div class="modal-header">
+        <div class="modal-title" id="roleModalTitle">New Role</div>
+        <button class="modal-close" onclick="closeRoleModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field" style="margin-bottom:12px">
+          <label class="field-label">Role Name <span style="color:var(--red)">*</span></label>
+          <input class="f-input" id="roleModalName" type="text" placeholder="e.g. Manager, Engineer…" autocomplete="off" onkeydown="if(event.key==='Enter')saveRoleModal()" />
+        </div>
+        <div class="field">
+          <label class="field-label">Description</label>
+          <input class="f-input" id="roleModalDesc" type="text" placeholder="Brief description of this role…" autocomplete="off" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeRoleModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveRoleModal()">Save Role</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contact Modal -->
+  <!-- Contact Modal -->
+  <div id="contactModalOverlay" onclick="if(event.target===this)closeContactModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);backdrop-filter:blur(6px);z-index:1000;align-items:center;justify-content:center">
+    <div class="modal" style="width:420px;transform:none;opacity:1">
+      <div class="modal-header">
+        <div class="modal-title" id="contactModalTitle">Add Contact</div>
+        <button class="modal-close" onclick="closeContactModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">First Name <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="ctFirstName" type="text" placeholder="First name" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label class="field-label">Last Name</label>
+            <input class="f-input" id="ctLastName" type="text" placeholder="Last name" autocomplete="off" />
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Email</label>
+          <input class="f-input" id="ctEmail" type="email" placeholder="email@company.com" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label class="field-label">Phone</label>
+          <input class="f-input" id="ctPhone" type="text" placeholder="+1 (555) 000-0000" autocomplete="off" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" onclick="closeContactModal()">Cancel</button>
+        <button class="btn-primary" onclick="saveContactModal()">Save Contact</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TEST ARTICLE MODAL -->
+  <div class="modal-backdrop" id="articleModal" onclick="if(event.target===this)closeArticleModal()">
+    <div class="modal" style="width:480px">
+      <div class="modal-header">
+        <div class="modal-title" id="articleModalTitle">Receive Test Article</div>
+        <button class="modal-close" onclick="closeArticleModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field" id="articleProjField">
+          <label class="field-label">Project <span style="color:var(--red)">*</span></label>
+          <select class="f-input" id="articleProjSelect" style="cursor:pointer">
+            <option value="">— Select Project —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Article Description <span style="color:var(--red)">*</span></label>
+          <input class="f-input" id="articleDesc" type="text" placeholder="e.g. Valve Assembly, Unit 1" autocomplete="off" />
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Date Received</label>
+            <input class="f-input" id="articleReceivedDate" type="date" style="color-scheme:dark" />
+          </div>
+          <div class="field">
+            <label class="field-label">Received By</label>
+            <select class="f-input" id="articleReceivedBy" style="cursor:pointer">
+              <option value="">— Select —</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-div" style="margin:16px 0"></div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Outbound (leave blank if still in house)</div>
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Date Shipped</label>
+            <input class="f-input" id="articleShippedDate" type="date" style="color-scheme:dark" />
+          </div>
+          <div class="field">
+            <label class="field-label">Carrier</label>
+            <select class="f-input" id="articleCarrier" style="cursor:pointer">
+              <option value="">— Select —</option>
+              <option value="UPS">UPS</option>
+              <option value="FedEx">FedEx</option>
+              <option value="USPS">USPS</option>
+              <option value="Customer Pickup">Customer Pickup</option>
+              <option value="Hand Delivered">Hand Delivered</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Notes</label>
+          <input class="f-input" id="articleNotes" type="text" placeholder="Optional notes…" autocomplete="off" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" id="articleDeleteBtn" style="margin-right:auto;display:none;color:var(--red)" onclick="deleteArticle()">&#x1F5D1; Delete</button>
+        <button class="btn btn-ghost" onclick="closeArticleModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveArticle()">Save</button>
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
+</body>
+</html>

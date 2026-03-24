@@ -1,0 +1,26 @@
+
+/* ===== APP LOADER & SETUP ===== */
+/* ===== APP LOADER & SETUP ===== */
+#appLoader{position:fixed;inset:0;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:9999;gap:16px;}
+.loader-logo{font-family:'DM Serif Display',serif;font-size:36px;color:var(--amber);}
+.loader-sub{font-size:12px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;}
+.loader-spinner{width:28px;height:28px;border:3px solid var(--border);border-top-color:var(--amber);border-radius:50%;animation:spin 0.7s linear infinite;margin-top:8px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+#setupScreen{position:fixed;inset:0;background:var(--bg);display:none;align-items:center;justify-content:center;z-index:9998;flex-direction:column;}
+.setup-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:40px;width:100%;max-width:480px;display:flex;flex-direction:column;gap:0;}
+.setup-logo{font-family:'DM Serif Display',serif;font-size:28px;color:var(--amber);margin-bottom:4px;}
+.setup-tagline{font-size:12px;color:var(--muted);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:28px;}
+.setup-step{display:flex;align-items:flex-start;gap:12px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px;font-size:12.5px;line-height:1.6;color:var(--muted);}
+.setup-step-num{width:22px;height:22px;border-radius:50%;background:var(--amber-glow);border:1px solid var(--amber-dim);color:var(--amber);font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px;}
+.setup-step a{color:var(--blue);text-decoration:none;}
+.setup-step a:hover{text-decoration:underline;}
+.setup-div{height:1px;background:var(--border);margin:20px 0;}
+.setup-error{font-size:12.5px;color:var(--red);min-height:18px;margin-bottom:8px;}
+.setup-connect-btn{width:100%;padding:11px;border-radius:8px;background:var(--amber);color:#0e0e0f;border:none;font-size:14px;font-weight:700;cursor:pointer;transition:background var(--transition);font-family:'DM Sans',sans-serif;margin-top:4px;}
+.setup-connect-btn:hover{background:#f0b04a;}
+.setup-connect-btn:disabled{opacity:0.6;cursor:not-allowed;}
+/* Settings cog in topbar */
+.settings-btn{background:transparent;border:1.5px solid var(--border);border-radius:7px;color:var(--muted);padding:5px 9px;font-size:15px;cursor:pointer;transition:all var(--transition);}
+.settings-btn:hover{border-color:var(--amber-dim);color:var(--amber);}
+
+
