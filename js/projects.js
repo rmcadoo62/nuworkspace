@@ -31,16 +31,16 @@ function openDashboardPanel(el) {
 // ===== COLUMN VISIBILITY =====
 const PROJ_COL_DEFS = [
   { key: 'pm',            label: 'PM',                    ptc: 'pm',       default: false, width: '110px' },
-  { key: 'tentativeTest', label: 'Tentative Test Date',   ptc: 'tenttest', default: false, width: '120px' },
-  { key: 'testcomplete',  label: 'Test Complete Date',    ptc: 'testcomp', default: false, width: '120px' },
+  { key: 'tentativeTest', label: 'Tent. Test Date',   ptc: 'tenttest', default: false, width: '120px' },
+  { key: 'testcomplete',  label: 'Test Comp. Date',    ptc: 'testcomp', default: false, width: '120px' },
   { key: 'dcas',          label: 'DCAS',                  ptc: 'dcas',     default: true,  width: '80px'  },
-  { key: 'witness',       label: 'Customer Witness',      ptc: 'witness',  default: false, width: '130px' },
+  { key: 'witness',       label: 'Cust. Witness',      ptc: 'witness',  default: false, width: '130px' },
   { key: 'tpApproval',    label: 'TP Approval',           ptc: 'tpappr',   default: false, width: '100px' },
   { key: 'dpas',          label: 'DPAS',                  ptc: 'dpas',     default: false, width: '70px'  },
   { key: 'noforn',        label: 'NOFORN',                ptc: 'noforn',   default: false, width: '80px'  },
   { key: 'creditHold',    label: 'Credit Hold',           ptc: 'credit',   default: false, width: '90px'  },
-  { key: 'needPo',        label: 'Need Updated PO',       ptc: 'needpo',   default: false, width: '110px' },
-  { key: 'contact',       label: 'Client Contact',        ptc: 'contact',  default: false, width: '130px' },
+  { key: 'needPo',        label: 'Need PO',       ptc: 'needpo',   default: false, width: '110px' },
+  { key: 'contact',       label: 'Contact',        ptc: 'contact',  default: false, width: '130px' },
 ];
 function getProjCols() { try { return JSON.parse(localStorage.getItem('projColVis') || '{}'); } catch { return {}; } }
 function setProjCols(vis) { try { localStorage.setItem('projColVis', JSON.stringify(vis)); } catch {} }
@@ -88,10 +88,39 @@ function renderProjectsTable() {
   const sortFn = (a, b) => {
     const ia = projectInfo[a.id] || {}, ib = projectInfo[b.id] || {};
     let va, vb;
-    if (projSortCol === 'name')   { va = a.name||''; vb = b.name||''; }
-    else if (projSortCol === 'status') { va = ia.status||''; vb = ib.status||''; }
-    else if (projSortCol === 'client') { va = ia.client||''; vb = ib.client||''; }
-    else if (projSortCol === 'dcas')   { va = ia.dcas||''; vb = ib.dcas||''; }
+    const numCols = ['expected','billed','remaining','hours'];
+    if (projSortCol === 'name')      { va = a.name||''; vb = b.name||''; }
+    else if (projSortCol === 'status')   { va = ia.status||''; vb = ib.status||''; }
+    else if (projSortCol === 'client')   { va = ia.client||''; vb = ib.client||''; }
+    else if (projSortCol === 'dcas')     { va = ia.dcas||''; vb = ib.dcas||''; }
+    else if (projSortCol === 'po')       { va = ia.po||''; vb = ib.po||''; }
+    else if (projSortCol === 'pm')            { va = ia.pm||''; vb = ib.pm||''; }
+    else if (projSortCol === 'tentativeTest') { va = ia.tentativeTestDate||''; vb = ib.tentativeTestDate||''; }
+    else if (projSortCol === 'testcomplete')  { va = ia.testcompleteDate||''; vb = ib.testcompleteDate||''; }
+    else if (projSortCol === 'witness')       { va = ia.customerWitness||''; vb = ib.customerWitness||''; }
+    else if (projSortCol === 'tpApproval')    { va = ia.tpApproval||''; vb = ib.tpApproval||''; }
+    else if (projSortCol === 'dpas')          { va = ia.dpas||''; vb = ib.dpas||''; }
+    else if (projSortCol === 'noforn')        { va = ia.noforn||''; vb = ib.noforn||''; }
+    else if (projSortCol === 'creditHold')    { va = String(ia.creditHold||false); vb = String(ib.creditHold||false); }
+    else if (projSortCol === 'needPo')        { va = String(ia.needUpdatedPo||false); vb = String(ib.needUpdatedPo||false); }
+    else if (projSortCol === 'contact')       { va = ia.clientContact||''; vb = ib.clientContact||''; }
+    else if (projSortCol === 'quote')    { va = ia.quoteNumber||''; vb = ib.quoteNumber||''; }
+    else if (projSortCol === 'expected') {
+      const tasksA = taskStore.filter(t=>t.proj===a.id), tasksB = taskStore.filter(t=>t.proj===b.id);
+      return (projSortDir==='asc'?1:-1) * (tasksA.reduce((s,t)=>s+(t.fixedPrice||0),0) - tasksB.reduce((s,t)=>s+(t.fixedPrice||0),0));
+    }
+    else if (projSortCol === 'billed') {
+      const tasksA = taskStore.filter(t=>t.proj===a.id&&t.status==='billed'), tasksB = taskStore.filter(t=>t.proj===b.id&&t.status==='billed');
+      return (projSortDir==='asc'?1:-1) * (tasksA.reduce((s,t)=>s+(t.fixedPrice||0),0) - tasksB.reduce((s,t)=>s+(t.fixedPrice||0),0));
+    }
+    else if (projSortCol === 'remaining') {
+      const getRem = (p) => { const ts=taskStore.filter(t=>t.proj===p.id); return ts.reduce((s,t)=>s+(t.fixedPrice||0),0) - ts.filter(t=>t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0); };
+      return (projSortDir==='asc'?1:-1) * (getRem(a) - getRem(b));
+    }
+    else if (projSortCol === 'hours') {
+      const getHrs = (p) => { let h=0; Object.entries(tsData).forEach(([k,rows])=>{ if(k.startsWith('oh_')||!Array.isArray(rows))return; rows.forEach(r=>{ if(r.projId===p.id) h+=Object.values(r.hours).reduce((a,b)=>a+b,0); }); }); return h; };
+      return (projSortDir==='asc'?1:-1) * (getHrs(a) - getHrs(b));
+    }
     else { va = a.name||''; vb = b.name||''; }
     const cmp = va.localeCompare(vb, undefined, {numeric: true});
     return projSortDir === 'asc' ? cmp : -cmp;
@@ -230,20 +259,20 @@ function renderProjectsTable() {
       </colgroup>
       <thead>
         <tr>
-          <th class="sortable" style="position:relative" onclick="setProjSort('name')">Project Name <span class="sort-icon ${projSortCol==='name'?'active':''}">${projSortCol==='name'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="name"></span></th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('name')">Project <span class="sort-icon ${projSortCol==='name'?'active':''}">${projSortCol==='name'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="name"></span></th>
           <th class="sortable" style="position:relative" onclick="setProjSort('status')">Status <span class="sort-icon ${projSortCol==='status'?'active':''}">${projSortCol==='status'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="status"></span></th>
           <th class="sortable" style="position:relative" onclick="setProjSort('client')">Company <span class="sort-icon ${projSortCol==='client'?'active':''}">${projSortCol==='client'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="client"></span></th>
-          <th style="position:relative">PO<span class="itt-resizer" data-ptc="po"></span></th>
-          <th style="position:relative">Quote<span class="itt-resizer" data-ptc="quote"></span></th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('po')">PO <span class="sort-icon ${projSortCol==='po'?'active':''}">${projSortCol==='po'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="po"></span></th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('quote')">Quote <span class="sort-icon ${projSortCol==='quote'?'active':''}">${projSortCol==='quote'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="quote"></span></th>
           <th style="position:relative">Description<span class="itt-resizer" data-ptc="desc"></span></th>
-          <th style="position:relative">Test Article Description<span class="itt-resizer" data-ptc="article"></span></th>
+          <th style="position:relative">Test Article Desc.<span class="itt-resizer" data-ptc="article"></span></th>
           ${PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c =>
-            `<th style="position:relative">${c.label}<span class="itt-resizer" data-ptc="${c.ptc}"></span></th>`
+            `<th class="sortable" style="position:relative" onclick="setProjSort('${c.key}')">${c.label} <span class="sort-icon ${projSortCol===c.key?'active':''}">${projSortCol===c.key?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="${c.ptc}"></span></th>`
           ).join('')}
-          <th style="position:relative">Expected Revenue<span class="itt-resizer" data-ptc="exp"></span></th>
-          <th style="position:relative">Billed Revenue<span class="itt-resizer" data-ptc="billed"></span></th>
-          <th style="position:relative">Actual Hours<span class="itt-resizer" data-ptc="hours"></span></th>
-          <th style="position:relative">Remaining Revenue<span class="itt-resizer" data-ptc="remain"></span></th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('expected')">Expected Rev. <span class="sort-icon ${projSortCol==='expected'?'active':''}">${projSortCol==='expected'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="exp"></span></th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('billed')">Billed Rev. <span class="sort-icon ${projSortCol==='billed'?'active':''}">${projSortCol==='billed'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="billed"></span></th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('hours')">Act. Hours <span class="sort-icon ${projSortCol==='hours'?'active':''}">${projSortCol==='hours'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="hours"></span></th>
+          <th class="sortable" style="position:relative" onclick="setProjSort('remaining')">Remaining Rev. <span class="sort-icon ${projSortCol==='remaining'?'active':''}">${projSortCol==='remaining'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="remain"></span></th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
