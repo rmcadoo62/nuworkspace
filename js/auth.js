@@ -5,7 +5,7 @@ let currentUser = null;       // Supabase auth user
 let currentEmployee = null;   // matching employees[] record
 let proxyEmployee = null;  
 
-function isManager() { return !!(currentEmployee && currentEmployee.permissionLevel === 'manager'); }
+function isManager() { return !!(currentEmployee && ['manager','Manager','owner','Owner','admin','Admin'].includes(currentEmployee.permissionLevel)); }
 
 // Capability checker — uses role if assigned, falls back to permissionLevel
 function can(capability) {
