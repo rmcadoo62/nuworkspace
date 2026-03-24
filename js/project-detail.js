@@ -3019,15 +3019,61 @@ function renderInvoicingPanel(projId) {
   `;
 }
 
-function showBilledAuditModal(monthKey, monthLabel) {
-  // Collect all billed tasks for this month
-  const _todayStr = new Date().toISOString().split('T')[0];
-  const tasks = taskStore.filter(t => {
-    if (t.status !== 'billed') return false;
-    const d = t.billedDate || t.completedDate || t.due_raw || _todayStr;
-    return d.slice(0,7) === monthKey;
-  });
+async function showBilledAuditModal(monthKey, monthLabel) {
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+  // Show modal immediately with loading state
+  let auditOv = document.getElementById('billedAuditOverlay');
+  if (!auditOv) {
+    auditOv = document.createElement('div');
+    auditOv.id = 'billedAuditOverlay';
+    auditOv.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);backdrop-filter:blur(6px);z-index:1000;align-items:flex-start;justify-content:center;padding-top:60px';
+    auditOv.onclick = e => { if (e.target === auditOv) auditOv.style.display='none'; };
+    document.body.appendChild(auditOv);
+  }
+  auditOv.innerHTML = `<div class="modal" style="width:700px;max-height:80vh;transform:none;opacity:1">
+    <div class="modal-header">
+      <div class="modal-title">📋 Billed Items — ${monthLabel}</div>
+      <button class="modal-close" onclick="document.getElementById('billedAuditOverlay').style.display='none'">&#x2715;</button>
+    </div>
+    <div class="modal-body" style="padding:20px;text-align:center;color:var(--muted)">Loading...</div>
+  </div>`;
+  auditOv.style.display = 'flex';
+
+  // Fetch ALL billed tasks for this month directly from Supabase (includes closed projects)
+  const monthStart = monthKey + '-01';
+  const nextMonth = new Date(monthStart + 'T00:00:00');
+  nextMonth.setMonth(nextMonth.getMonth() + 1);
+  const monthEnd = nextMonth.toISOString().slice(0,10);
+
+  let tasks = [];
+  if (sb) {
+    const { data } = await sb.from('tasks')
+      .select('id, name, task_num, project_id, status, fixed_price, billed_date, completed_date, peachtree_inv')
+      .eq('status', 'billed')
+      .or(`billed_date.gte.${monthStart},completed_date.gte.${monthStart}`)
+      .or(`billed_date.lt.${monthEnd},completed_date.lt.${monthEnd}`)
+      .order('billed_date', { ascending: true });
+    // Filter precisely by month since OR logic above is broad
+    tasks = (data || []).filter(r => {
+      const d = r.billed_date || r.completed_date;
+      return d && d.slice(0,7) === monthKey;
+    }).map(r => ({
+      _id: r.id, taskNum: r.task_num, proj: r.project_id,
+      name: r.name, fixedPrice: parseFloat(r.fixed_price)||0,
+      billedDate: r.billed_date, completedDate: r.completed_date,
+      peachtreeInv: r.peachtree_inv||''
+    }));
+  } else {
+    // Fallback to taskStore if no Supabase
+    const _todayStr = new Date().toISOString().split('T')[0];
+    tasks = taskStore.filter(t => {
+      if (t.status !== 'billed') return false;
+      const d = t.billedDate || t.completedDate || _todayStr;
+      return d.slice(0,7) === monthKey;
+    });
+  }
+
   const total = tasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
 
   // Group by Peachtree Inv #
@@ -3068,17 +3114,6 @@ function showBilledAuditModal(monthKey, monthLabel) {
           }).join('')}`;
       }).join('');
 
-  // Use the shared confirm modal overlay as a display container
-  const ov = document.getElementById('confirmModalOverlay') || document.getElementById('contactModalOverlay');
-  // Build our own overlay
-  let auditOv = document.getElementById('billedAuditOverlay');
-  if (!auditOv) {
-    auditOv = document.createElement('div');
-    auditOv.id = 'billedAuditOverlay';
-    auditOv.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(0,0,0,0.72);backdrop-filter:blur(6px);z-index:1000;align-items:flex-start;justify-content:center;padding-top:60px';
-    auditOv.onclick = e => { if (e.target === auditOv) auditOv.style.display='none'; };
-    document.body.appendChild(auditOv);
-  }
   auditOv.innerHTML = `
     <div class="modal" style="width:700px;max-height:80vh;transform:none;opacity:1">
       <div class="modal-header">
