@@ -41,9 +41,9 @@
 .sched-canvas{position:relative;overflow:visible;}
 .sched-grid-row{position:absolute;left:0;right:0;border-bottom:1px solid var(--border);pointer-events:none;overflow:visible;}
 .sched-grid-row.alt{background:rgba(0,0,0,0.012);}
-.sched-col-line{position:absolute;top:0;bottom:0;width:1px;background:var(--border);pointer-events:none;}
-.sched-col-line.weekend{background:rgba(0,0,0,0.03);width:var(--day-w);}
-.sched-col-line.today-line{background:var(--amber);opacity:0.5;width:2px;z-index:5;pointer-events:none;}
+.sched-col-line{position:absolute;top:0;bottom:0;width:1px;background:rgba(100,100,120,0.2);pointer-events:none;z-index:1;}
+.sched-col-line.weekend{background:rgba(0,0,0,0.045);width:var(--day-w);}
+.sched-col-line.today-line{background:var(--amber);opacity:0.6;width:2px;z-index:5;pointer-events:none;}
 .sched-bar{position:absolute;border-radius:6px;cursor:grab;user-select:none;display:flex;align-items:stretch;overflow:hidden;transition:box-shadow .15s,filter .15s;z-index:2;}
 .sched-bar:active{cursor:grabbing;box-shadow:0 4px 18px rgba(0,0,0,0.35);filter:brightness(1.08);z-index:10;}
 .sched-bar-inner{flex:1;min-width:0;overflow:hidden;padding:0 8px;font-size:11px;font-weight:600;color:#fff;white-space:nowrap;text-overflow:ellipsis;letter-spacing:.2px;text-shadow:0 1px 2px rgba(0,0,0,0.3);}

@@ -407,10 +407,15 @@ function renderSched() {
       const isWknd  = d.getDay() === 0 || d.getDay() === 6;
       const dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
       const cls = ['sched-day-cell', isToday?'today':'', isWknd?'weekend':''].filter(Boolean).join(' ');
+      // Half-day marker at noon position
+      const noonX = Math.round(dayW / 2);
+      const halfDayMarker = `<div style="position:absolute;left:${noonX}px;top:0;bottom:0;width:1px;background:rgba(192,122,26,0.35);pointer-events:none;"></div>
+        <div style="position:absolute;left:${noonX+3}px;bottom:5px;font-size:8px;font-family:'JetBrains Mono',monospace;color:var(--amber);opacity:.7;pointer-events:none;">½</div>`;
       return `<div class="${cls}" style="width:${dayW}px;position:relative;flex-shrink:0;">
         <div class="sched-day-name">${dayNames[d.getDay()]}</div>
         <div class="sched-day-num">${d.getDate()}</div>
         ${hrLabels}
+        ${halfDayMarker}
       </div>`;
     }).join('');
   } else {
@@ -421,11 +426,18 @@ function renderSched() {
       const cls = ['sched-day-cell', isToday?'today':'', isWknd?'weekend':'', isMonthStart?'month-start':''].filter(Boolean).join(' ');
       const dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
       const showMonth = (schedZoom !== 'week') && d.getDate() === 1;
-      return `<div class="${cls}" style="width:${dayW}px">
+      // In 2-week view show AM/PM half-day markers
+      const halfMarker = is2Week
+        ? `<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(192,122,26,0.3);pointer-events:none;"></div>
+           <div style="position:absolute;left:2px;bottom:3px;font-size:7.5px;font-family:'JetBrains Mono',monospace;color:var(--muted);opacity:.8">AM</div>
+           <div style="position:absolute;left:50%;margin-left:2px;bottom:3px;font-size:7.5px;font-family:'JetBrains Mono',monospace;color:var(--muted);opacity:.8">PM</div>`
+        : '';
+      return `<div class="${cls}" style="width:${dayW}px;position:relative;">
         ${showMonth
           ? `<div style="font-size:9px;color:var(--amber);font-weight:700;letter-spacing:.5px;text-transform:uppercase">${d.toLocaleString('default',{month:'short'})}</div>`
           : `<div class="sched-day-name">${dayNames[d.getDay()]}</div>`}
         <div class="sched-day-num">${d.getDate()}</div>
+        ${halfMarker}
       </div>`;
     }).join('');
   }
@@ -488,6 +500,12 @@ function renderSched() {
       el.className = 'sched-col-line today-line';
       el.style.cssText = `left:${di*dayW + Math.floor(dayW/2)}px`;
       canvas.appendChild(el);
+    }
+    // Alternating day background for readability
+    if (di % 2 === 0) {
+      const bg = document.createElement('div');
+      bg.style.cssText = `position:absolute;left:${di*dayW}px;top:0;bottom:0;width:${dayW}px;background:rgba(100,100,120,0.03);pointer-events:none;z-index:0;`;
+      canvas.appendChild(bg);
     }
     // Day start line
     const el = document.createElement('div');
@@ -576,8 +594,11 @@ function renderSched() {
       x = xStart + 2;
       w = Math.max(xEnd - xStart - 4, hourW - 4); // at least 1 hour wide
     } else {
-      x = startOff * dayW + 2;
-      w = Math.max((endOff - startOff + 1) * dayW - 4, 8);
+      // Account for half-day start/end offsets
+      const startHalfPx = block._startHalf ? Math.round(dayW / 2) : 0;
+      const endHalfAdj  = block._endHalf   ? Math.round(dayW / 2) : dayW;
+      x = startOff * dayW + startHalfPx + 2;
+      w = Math.max((endOff - startOff) * dayW + endHalfAdj - startHalfPx - 4, Math.round(dayW / 2) - 4);
     }
 
     // Text layout
@@ -631,42 +652,130 @@ function attachBarDrag(bar, block, rows, range, dayW) {
 
   bar.addEventListener('mousedown', e => {
     const dir = e.target.dataset.dir;
-    // Only intercept left-button; let right-click / middle pass through
     if (e.button !== 0) return;
-    // Don't preventDefault yet — let click events fire if no movement occurs
-    drag = { dir, startX: e.clientX, origStart: block.start, origEnd: block.end, hasMoved: false };
+
+    // Store original dates and half flags — we always calculate delta from these originals
+    drag = {
+      dir,
+      startX:    e.clientX,
+      lastSnap:  null,        // last snapped delta (half-days float) so we skip redundant renders
+      origStart: block.start,
+      origEnd:   block.end,
+      origStartHalf: block._startHalf || false,
+      origEndHalf:   block._endHalf   || false,
+      hasMoved:  false,
+    };
 
     const onMove = e => {
       if (!drag) return;
       const px = Math.abs(e.clientX - drag.startX);
-      if (!drag.hasMoved && px < 5) return; // dead-zone: ignore tiny jitter
+      if (!drag.hasMoved && px < 5) return;
       drag.hasMoved = true;
-      // Once we know it's a drag, prevent text selection
       e.preventDefault();
-      const dDays = Math.round((e.clientX - drag.startX) / dayW);
-      if (dDays === 0) return;
-      if (drag.dir === 'left') {
-        const ns = toDateStr(addDays(parseDate(drag.origStart), dDays));
-        if (ns >= drag.origEnd) return;
-        block.start = ns;
-      } else if (drag.dir === 'right') {
-        const ne = toDateStr(addDays(parseDate(drag.origEnd), dDays));
-        if (ne <= drag.origStart) return;
-        block.end = ne;
-      } else {
-        block.start = toDateStr(addDays(parseDate(drag.origStart), dDays));
-        block.end   = toDateStr(addDays(parseDate(drag.origEnd),   dDays));
+
+      // 1-week: snap to full days; 2-week: snap to half-days
+      const useHalfDay = schedZoom === 'week';
+      const snapPx     = dayW / (useHalfDay ? 2 : 1);
+      const rawDelta   = (e.clientX - drag.startX) / snapPx;
+      const snapped    = Math.round(rawDelta);
+      if (snapped === drag.lastSnap) return;
+      drag.lastSnap = snapped;
+
+      if (!useHalfDay) {
+        // Full-day snap — simple date arithmetic
+        if (drag.dir === 'left') {
+          const ns = toDateStr(addDays(parseDate(drag.origStart), snapped));
+          if (ns >= drag.origEnd) return;
+          block.start = ns;
+        } else if (drag.dir === 'right') {
+          const ne = toDateStr(addDays(parseDate(drag.origEnd), snapped));
+          if (ne <= drag.origStart) return;
+          block.end = ne;
+        } else {
+          block.start = toDateStr(addDays(parseDate(drag.origStart), snapped));
+          block.end   = toDateStr(addDays(parseDate(drag.origEnd),   snapped));
+        }
+        requestAnimationFrame(renderSched);
+        return;
       }
+
+      // Half-day snap for 2-week view.
+      // Key insight: start and end have different base semantics —
+      //   start (isHalf=false) = start-of-day  → base half-unit = days*2 + 0
+      //   start (isHalf=true)  = noon          → base half-unit = days*2 + 1
+      //   end   (isHalf=false) = end-of-day    → base half-unit = days*2 + 2
+      //   end   (isHalf=true)  = noon          → base half-unit = days*2 + 1
+      // This ensures +1 snap from end-of-Monday lands on noon-Tuesday (not noon-Monday).
+
+      const EPOCH = new Date(2000, 0, 1);
+      function daysFromEpoch(dateStr) {
+        return Math.round((parseDate(dateStr) - EPOCH) / 86400000);
+      }
+      function fromHalfUnit(u) {
+        const d = Math.floor(u / 2);
+        const isHalf = (((u % 2) + 2) % 2) === 1;
+        const date = new Date(EPOCH);
+        date.setDate(date.getDate() + d);
+        return { dateStr: toDateStr(date), isHalf };
+      }
+
+      const startBase = daysFromEpoch(drag.origStart) * 2 + (drag.origStartHalf ? 1 : 0);
+      const endBase   = daysFromEpoch(drag.origEnd)   * 2 + (drag.origEndHalf   ? 1 : 2);
+
+      if (drag.dir === 'left') {
+        const nu = startBase + snapped;
+        if (nu >= endBase) return; // can't pass end
+        const ns = fromHalfUnit(nu);
+        block.start      = ns.dateStr;
+        block._startHalf = ns.isHalf;
+      } else if (drag.dir === 'right') {
+        const nu = endBase + snapped;
+        if (nu <= startBase) return; // can't pass start
+        // Convert back: end half-unit even = end-of-day (isHalf=false), odd = noon (isHalf=true)
+        const wholeDays = Math.floor(nu / 2);
+        const isEndHalf = (((nu % 2) + 2) % 2) === 1;
+        const date = new Date(EPOCH);
+        date.setDate(date.getDate() + wholeDays + (isEndHalf ? 0 : -1));
+        block.end      = toDateStr(isEndHalf ? date : date);
+        // If nu is even, it means end-of-day for the PREVIOUS day boundary
+        if (!isEndHalf) {
+          // nu is even: e.g. nu=4 means end of day 1 (Tue) = block.end=Tue, isHalf=false
+          const d2 = new Date(EPOCH);
+          d2.setDate(d2.getDate() + nu/2 - 1);
+          block.end      = toDateStr(d2);
+          block._endHalf = false;
+        } else {
+          block._endHalf = true;
+        }
+      } else {
+        // Move whole bar
+        const ns = fromHalfUnit(startBase + snapped);
+        const endHalfUnit = endBase + snapped;
+        const wholeDays = Math.floor(endHalfUnit / 2);
+        const isEndHalf = (((endHalfUnit % 2) + 2) % 2) === 1;
+        block.start      = ns.dateStr;
+        block._startHalf = ns.isHalf;
+        if (!isEndHalf) {
+          const d2 = new Date(EPOCH);
+          d2.setDate(d2.getDate() + endHalfUnit/2 - 1);
+          block.end      = toDateStr(d2);
+          block._endHalf = false;
+        } else {
+          const d2 = new Date(EPOCH);
+          d2.setDate(d2.getDate() + wholeDays);
+          block.end      = toDateStr(d2);
+          block._endHalf = true;
+        }
+      }
+
       requestAnimationFrame(renderSched);
     };
 
     const onUp = e => {
       if (drag) {
         if (drag.hasMoved) {
-          // It was a real drag — save the new position
           schedSaveBlock(block).then(() => renderSched());
         } else {
-          // It was a plain click — open edit modal
           openSchedModal(block.id);
         }
         drag = null;
@@ -710,6 +819,21 @@ function showSchedTooltip(block, e) {
 }
 function moveSchedTooltip(e) {
   const tt = document.getElementById('schedTooltip');
+  // Hide tooltip if hovering near a resize handle so it doesn't block dragging
+  const target = e.target;
+  if (target && (target.dataset.dir === 'left' || target.dataset.dir === 'right' ||
+      target.classList.contains('sched-bar-handle'))) {
+    tt.style.display = 'none';
+    return;
+  }
+  // Also hide if near left or right edge of bar
+  const bar = target && target.closest ? target.closest('.sched-bar') : null;
+  if (bar) {
+    const rect = bar.getBoundingClientRect();
+    const fromLeft  = e.clientX - rect.left;
+    const fromRight = rect.right - e.clientX;
+    if (fromLeft < 18 || fromRight < 18) { tt.style.display = 'none'; return; }
+  }
   tt.style.left = (e.clientX + 14) + 'px';
   tt.style.top  = (e.clientY - 50) + 'px';
 }
