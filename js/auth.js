@@ -109,7 +109,7 @@ function setOhHours(key, cat, di, val) {
   updateTsTotals(key);
 }
 
-function setTsHours(key, rowIdx, dayIdx, val) {
+window.setTsHours = function setTsHours(key, rowIdx, dayIdx, val) {
   const n = parseFloat(val) || 0;
   tsData[key][rowIdx].hours[dayIdx] = n >= 0 ? n : 0;
   updateTsTotals(key);

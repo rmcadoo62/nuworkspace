@@ -621,7 +621,7 @@ function togProjMember(id,el){
   else{pTeam.add(id);el.classList.add('sel');el.querySelector('.chip-chk').innerHTML='&#x2713;';}
 }
 
-function saveProject(){
+window.saveProject = function saveProject(){
   const name=document.getElementById('projName').value.trim();
   if(!name){
     const inp=document.getElementById('projName');

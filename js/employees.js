@@ -882,7 +882,7 @@ function showEmpProfile(empId, annivOffset) {
   `;
 }
 
-function deleteEmployee(id) {
+window.deleteEmployee = function deleteEmployee(id) {
   if (!confirm('Remove this employee?')) return;
   employees = employees.filter(e => e.id !== id);
   renderEmployeesPanel('');
@@ -1136,7 +1136,7 @@ function renderPmOptions(query) {
         </div>`).join('');
 }
 
-function selectPm(empId) {
+window.selectPm = function selectPm(empId) {
   const emp = employees.find(e => e.id === empId);
   if (!emp || !pmDropdownProjId) return;
   if (!projectInfo[pmDropdownProjId]) projectInfo[pmDropdownProjId] = defaultInfo(projects.find(p=>p.id===pmDropdownProjId)||{});

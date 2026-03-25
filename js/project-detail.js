@@ -430,7 +430,7 @@ function makeFieldsEditable(projId) {
   document.querySelectorAll('.info-field').forEach(f => f.classList.add('editable'));
 }
 
-function collectAndSave(projId) {
+window.collectAndSave = function collectAndSave(projId) {
   const info = projectInfo[projId];
   document.querySelectorAll('.info-input[data-key], .info-textarea[data-key]').forEach(inp => {
     info[inp.dataset.key] = inp.value.trim();
@@ -2728,7 +2728,7 @@ function ptblInitResizers() {
   });
 }
 
-async function toggleInfoTask(idx, projId) {
+window.toggleInfoTask = async function toggleInfoTask(idx, projId) {
   if (idx < 0 || idx >= taskStore.length) return;
   const t = taskStore[idx];
   const today = new Date().toISOString().split('T')[0];
