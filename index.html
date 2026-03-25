@@ -736,7 +736,7 @@
       <div class="field-row">
         <div class="field">
           <label class="field-label">Project</label>
-          <select class="f-select" id="taskProject" onchange="syncProjChip(this)"></select>
+          <select class="f-select" id="taskProject" onchange="syncProjChip(this);populateTaskSectionDropdown(this.value)"></select>
         </div>
         <div class="field">
           <label class="field-label">Type</label>
@@ -745,6 +745,12 @@
             <option>Design</option><option>Content</option><option>Research</option>
           </select>
         </div>
+      </div>
+      <div class="field" id="taskSectionField" style="display:none">
+        <label class="field-label">Section <span style="font-size:10px;color:var(--muted);font-weight:400">(optional)</span></label>
+        <select class="f-select" id="taskSectionSelect">
+          <option value="">— No section —</option>
+        </select>
       </div>
       <div class="field-row">
         <div class="field">
@@ -1012,6 +1018,7 @@
   <script src="js/chatter.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/scheduler.js"></script>
+  <script src="js/supabase-patches.js"></script>
 
 </div><!-- /appShell -->
 

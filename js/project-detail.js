@@ -346,7 +346,9 @@ async function inlineEditInfoField(projId, key, el, placeholder) {
 async function inlineEditDesc(projId, key, el) {
   if (el.querySelector('textarea')) return; // already editing
   const info = projectInfo[projId] || {};
-  const current = info[key] || '';
+  const proj = projects.find(p => p.id === projId) || {};
+  // Fall back to proj.desc for description field
+  const current = info[key] || (key === 'desc' ? (proj.desc || '') : '');
   const orig = el.innerHTML;
   el.innerHTML = '';
   const ta = document.createElement('textarea');
@@ -2783,6 +2785,10 @@ function openTaskModalForProject(projId) {
       if (projField) projField.style.display = 'none';
       // Store locked project so saveTask uses it
       lockedProjectId = projId;
+    }
+    // Populate section dropdown for this project
+    if (typeof populateTaskSectionDropdown === 'function') {
+      populateTaskSectionDropdown(projId);
     }
   }, 10);
 }

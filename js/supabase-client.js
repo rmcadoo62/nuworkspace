@@ -505,6 +505,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'tasks' }, payload => {
       const r = payload.new;
       if (taskStore.find(t => t._id === r.id)) return;
+      if (window._localInsertIds?.has(r.id)) return; // skip locally inserted tasks
       taskStore.unshift({
         _id: r.id, taskNum: r.task_num||0, name: r.name, assign: r.assignee||'',
         due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',

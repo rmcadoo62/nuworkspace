@@ -1392,6 +1392,23 @@ function openTaskModalForSection(sectionId, projId) {
   openTaskModalForProject(projId);
   // Store the sectionId so saveTask can attach it
   window._pendingSectionId = sectionId;
+  // Pre-select the section in the dropdown
+  setTimeout(() => {
+    const sel = document.getElementById('taskSectionSelect');
+    if (sel) sel.value = sectionId;
+  }, 50);
+}
+
+function populateTaskSectionDropdown(projId) {
+  const field = document.getElementById('taskSectionField');
+  const sel = document.getElementById('taskSectionSelect');
+  if (!field || !sel) return;
+  const sections = sectionStore.filter(s => s.projId === projId);
+  if (sections.length === 0) { field.style.display = 'none'; return; }
+  field.style.display = '';
+  sel.innerHTML = '<option value="">— No section —</option>' +
+    sections.sort((a,b) => (a.taskNum||0)-(b.taskNum||0))
+      .map(s => `<option value="${s._id}">${s.name}</option>`).join('');
 }
 
 // ===== SUPABASE SAVE TASK PATCH =====
@@ -1410,12 +1427,53 @@ window.saveTask = async function(another=false) {
   const salesCat = document.getElementById('taskSalesCat').value;
   const fixedPrice = parseFloat(document.getElementById('taskFixedPrice').value) || 0;
 
-  // Assign next taskNum for this project BEFORE saving
-  if (!window._projTaskNums) window._projTaskNums = {};
-  window._projTaskNums[projId] = (window._projTaskNums[projId] || 0) + 1;
-  const _nextNum = window._projTaskNums[projId];
-
   const today = new Date().toISOString().split('T')[0];
+  // Resolve section BEFORE insert so it goes in the initial row
+  const _sectionId = window._pendingSectionId || document.getElementById('taskSectionSelect')?.value || null;
+
+  // ── Calculate insertion position ────────────────────────────────────────
+  // Build a flat sorted list of all items (tasks + sections) for this project
+  const _allItems = [
+    ...taskStore.filter(t => t.proj === projId).map(t => ({ type:'task', id: t._id, num: t.taskNum||0, obj: t })),
+    ...sectionStore.filter(s => s.projId === projId).map(s => ({ type:'section', id: s._id, num: s.taskNum||0, obj: s })),
+  ].sort((a,b) => a.num - b.num);
+
+  let _insertAfterNum; // new task goes right after this num
+  if (_sectionId) {
+    // Find the last item that belongs to this section (either the section header itself
+    // or tasks whose sectionId matches), but stop before the next section header
+    const secItem = _allItems.find(x => x.type === 'section' && x.id === _sectionId);
+    const secNum = secItem ? secItem.num : 0;
+    // Find next section header after this one
+    const nextSec = _allItems.find(x => x.type === 'section' && x.num > secNum);
+    const boundary = nextSec ? nextSec.num : Infinity;
+    // Last item before the boundary
+    const itemsInSection = _allItems.filter(x => x.num > secNum && x.num < boundary);
+    _insertAfterNum = itemsInSection.length > 0
+      ? itemsInSection[itemsInSection.length - 1].num
+      : secNum;
+  } else {
+    // No section — append at the end
+    _insertAfterNum = _allItems.length > 0 ? _allItems[_allItems.length - 1].num : 0;
+  }
+
+  // Shift all items after the insertion point up by 1
+  const _itemsToShift = _allItems.filter(x => x.num > _insertAfterNum);
+  if (_itemsToShift.length > 0) {
+    _itemsToShift.forEach(x => { x.obj.taskNum = x.num + 1; });
+    // Persist to Supabase in bulk
+    if (sb) {
+      await Promise.all(_itemsToShift.map(x =>
+        x.type === 'task'
+          ? sb.from('tasks').update({ task_num: x.obj.taskNum }).eq('id', x.id)
+          : sb.from('task_sections').update({ task_num: x.obj.taskNum }).eq('id', x.id)
+      ));
+    }
+  }
+  const _nextNum = _insertAfterNum + 1;
+  // Invalidate cached max so next task recalculates
+  if (window._projTaskNums) delete window._projTaskNums[projId];
+
   const row = {
     name: title,
     description: document.getElementById('taskDesc').value.trim(),
@@ -1427,15 +1485,15 @@ window.saveTask = async function(another=false) {
     fixed_price: fixedPrice||null,
     revenue_type: document.getElementById('taskRevenueType') ? document.getElementById('taskRevenueType').value : 'fixed',
     task_num: _nextNum,
+    section_id: _sectionId || null,
     created_at: new Date().toISOString(),
   };
   const saved = await dbInsert('tasks', row);
   if (!saved) { window._projTaskNums[projId]--; toast('⚠ Could not save task'); return; }
-
-  // Link to section if opened via "+ Task" on a section header
-  if (window._pendingSectionId) {
-    await sb?.from('tasks').update({ section_id: window._pendingSectionId }).eq('id', saved.id);
-  }
+  // Mark as locally inserted so realtime subscription skips it
+  if (!window._localInsertIds) window._localInsertIds = new Set();
+  window._localInsertIds.add(saved.id);
+  setTimeout(() => window._localInsertIds?.delete(saved.id), 8000);
 
   const dueLabel = due ? new Date(due+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
   // 'due' field is now Completed Date
@@ -1444,7 +1502,7 @@ window.saveTask = async function(another=false) {
     _id: saved.id, taskNum: _nextNum, name: title, assign, assignId, due: dueLabel, due_raw: '',
     completedDate: (status === 'complete' || status === 'done' || status === 'billed') ? due : '',
     salesCat, fixedPrice,
-    sectionId: window._pendingSectionId || null,
+    sectionId: _sectionId || null,
     overdue: due ? new Date(due+'T00:00:00') < new Date() && status!=='done' : false,
     done: status==='done', proj: projId, status, priority: tPri, section:'sprint',
     createdAt: today, revenueType: _revType,
@@ -1453,11 +1511,10 @@ window.saveTask = async function(another=false) {
   closeTaskModal();
   window._pendingSectionId = null;
   toast('"' + (title.length>40?title.slice(0,40)+'…':title) + '" created');
-  renderAllViews();
   const _proj = projects.find(p => p.id === projId);
   logActivity('tasks', saved.id, title, 'Task Created' + (_proj ? ' on ' + _proj.name : ''));
 
-  // Always refresh tasks panel — works whether on sub-tasks or sub-info
+  // Targeted render — avoid renderAllViews() which can cause double-render with realtime
   if (activeProjectId) {
     renderTasksPanel(activeProjectId);
     const subInfo = document.getElementById('sub-info');
