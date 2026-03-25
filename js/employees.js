@@ -1211,5 +1211,30 @@ function setYnField(projId, key, val) {
   sel.style.color = colorMap[val] || 'var(--muted)';
 }
 
+// ===== SUPABASE PATCHES =====
+// Patch deleteEmployee
+const _origDeleteEmployee = typeof deleteEmployee !== "undefined" ? deleteEmployee : ()=>{};
+window.deleteEmployee = async function(id) {
+  if (!confirm('Remove this employee?')) return;
+  await dbDelete('employees', id);
+  employees = employees.filter(e => e.id !== id);
+  renderEmployeesPanel('');
+  renderSidebarTeam();
+  toast('Employee removed');
+};
 
-
+// Patch selectPm
+const _origSelectPm = typeof selectPm !== "undefined" ? selectPm : ()=>{};
+window.selectPm = async function(empId) {
+  const emp = employees.find(e => e.id === empId);
+  if (!emp || !pmDropdownProjId) return;
+  if (!projectInfo[pmDropdownProjId]) projectInfo[pmDropdownProjId] = defaultInfo(projects.find(p=>p.id===pmDropdownProjId)||{});
+  projectInfo[pmDropdownProjId].pm = emp.name;
+  if (sb) await sb.from('project_info').upsert({project_id: pmDropdownProjId, pm: emp.name},{onConflict:'project_id'});
+  closePmDropdown();
+  const nameEl = document.getElementById('pmSelectedName');
+  const avEl   = document.getElementById('pmSelectedAv');
+  if (nameEl) nameEl.textContent = emp.name;
+  if (avEl)   { avEl.textContent = emp.initials; avEl.style.background = emp.color; }
+  toast('Project Manager set to ' + emp.name);
+};

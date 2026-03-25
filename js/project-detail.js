@@ -118,7 +118,7 @@ function renderInfoSheet(projId) {
         <div class="desc-cards">
           <div class="desc-card">
             <div class="desc-card-header">Project Description</div>
-            <div class="desc-card-body" id="info-proj-desc" onclick="inlineEditDesc('${projId}','desc',this)" title="Click to edit" style="cursor:text;min-height:40px">${info.desc || '<span style="color:var(--border)">Click to add project description…</span>'}</div>
+            <div class="desc-card-body" id="info-proj-desc" onclick="inlineEditDesc('${projId}','desc',this)" title="Click to edit" style="cursor:text;min-height:40px">${(info.desc || proj.desc) || '<span style="color:var(--border)">Click to add project description…</span>'}</div>
           </div>
           <div class="desc-card">
             <div class="desc-card-header">Test Article Description</div>
@@ -411,7 +411,7 @@ function makeFieldsEditable(projId) {
   const descEl = document.getElementById('info-proj-desc');
   if (descEl) {
     descEl.style.padding = '0';
-    descEl.innerHTML = '<textarea style="width:100%;background:transparent;border:none;color:var(--text);font-family:\'DM Sans\',sans-serif;font-size:13px;line-height:1.65;padding:12px 14px;outline:none;resize:vertical;min-height:80px;" id="edit-desc" placeholder="Project description...">' + (info.desc||'') + '</textarea>';
+    descEl.innerHTML = '<textarea style="width:100%;background:transparent;border:none;color:var(--text);font-family:\'DM Sans\',sans-serif;font-size:13px;line-height:1.65;padding:12px 14px;outline:none;resize:vertical;min-height:80px;" id="edit-desc" placeholder="Project description...">' + (info.desc||proj.desc||'') + '</textarea>';
   }
   const testArticleEl = document.getElementById('info-test-article');
   if (testArticleEl) {
@@ -3394,3 +3394,29 @@ async function syncProjBilledRevenue(projId) {
   } catch(e) { console.warn('syncProjBilledRevenue error:', e); }
 }
 
+// ===== SUPABASE PATCHES =====
+// Patch saveProject info (collectAndSave)
+const _origCollectAndSave = typeof collectAndSave !== "undefined" ? collectAndSave : ()=>{};
+window.collectAndSave = async function(projId) {
+  _origCollectAndSave(projId);
+  const info = projectInfo[projId];
+  if (!info) return;
+  const row = {
+    pm: info.pm, po_number: info.po, contract_amount: info.contract,
+    billing_type: info.billingType, remaining: info.remaining,
+    client: info.client, client_contact: info.clientContact,
+    client_email: info.clientEmail, client_phone: info.clientPhone,
+    start_date: info.startDate||null, end_date: info.endDate||null, tentative_test_date: info.tentativeTestDate||null,
+    phase: info.phase, status: info.status, notes: info.notes, description: info.desc,
+    dcas: info.dcas||null, customer_witness: info.customerWitness||null, tp_approval: info.tpApproval||null, dpas: info.dpas||null, noforn: info.noforn||null,
+    test_description: info.testDesc||null, test_article_description: info.testArticleDesc||null, quote_number: info.quoteNumber||null,
+  };
+  // Upsert by project_id
+  if (!sb) return;
+  const { error } = await sb.from('project_info').upsert({project_id: projId, ...row}, {onConflict:'project_id'});
+  if (error) console.error('upsert project_info', error);
+  // Also update projects table description
+  if (info.desc !== undefined) {
+    await sb.from('projects').update({ description: info.desc }).eq('id', projId);
+  }
+};

@@ -698,3 +698,79 @@ function selectAllProjects(el) { openDashboardPanel(el); } function _oldSelectAl
   renderDashboard();
 }
 
+// ===== SUPABASE PATCHES =====
+// Patch saveProject
+const _origSaveProject = typeof saveProject !== "undefined" ? saveProject : ()=>{};
+window.saveProject = async function() {
+  const name = document.getElementById('projName').value.trim();
+  if (!name) { _origSaveProject(); return; }
+
+  // Prevent double-submit
+  const btn = document.querySelector('#projectModal .btn-primary');
+  if (btn && btn.disabled) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  const desc = document.getElementById('projDesc').value.trim();
+  const start = document.getElementById('projStart').value;
+  const end   = document.getElementById('projEnd').value;
+
+  if (!sb) {
+    try {
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    } catch(e) {
+      toast('⚠ Not connected to Supabase');
+      if (btn) { btn.disabled = false; btn.textContent = 'Create Project'; }
+      return;
+    }
+  }
+
+  const row = { name, description: desc, color: pColor, emoji: pEmoji };
+  const saved = await dbInsert('projects', row);
+  if (!saved) {
+    toast('⚠ Could not save project — check connection');
+    if (btn) { btn.disabled = false; btn.textContent = 'Create Project'; }
+    return;
+  }
+
+  const today = new Date().toISOString().split('T')[0];
+  await dbInsert('project_info', {
+    project_id: saved.id, phase: 'Planning', status: 'jobprep',
+    start_date: today, end_date: null,
+  });
+
+  projects.push({ id: saved.id, name, color: pColor, emoji: pEmoji, desc });
+  projectInfo[saved.id] = { pm:'', po:'', contract:'', phase:'Waiting on TP Approval', status:'jobprep',
+    startDate: today, endDate: '', tentativeTestDate: '', client:'', clientContact:'', clientEmail:'',
+    clientPhone:'', billingType:'Fixed Fee', invoiced:'', remaining:'', notes:'', desc,
+    dcas:'', customerWitness:'', tpApproval:'', dpas:'', noforn:'', testDesc:'', testArticleDesc:'', quoteNumber:'' };
+  renderProjectNav(); rebuildProjDropdown();
+  closeProjectModal();
+  toast(pEmoji + ' "' + name + '" created');
+  renderProjectsTable();
+  logActivity('projects', saved.id, name, 'Project Created');
+  // Auto-open the new project in edit mode
+  setTimeout(() => {
+    selectProjectById(saved.id);
+  }, 100);
+};
+
+
+const _origToggleInfoTask = typeof toggleInfoTask !== "undefined" ? toggleInfoTask : ()=>{};
+window.toggleInfoTask = async function(idx, projId) {
+  if (idx < 0 || idx >= taskStore.length) return;
+  const t = taskStore[idx];
+  t.done = !t.done;
+  t.status = t.done ? 'complete' : 'inprogress';
+  if (t._id) await dbUpdate('tasks', t._id, { done: t.done, status: t.status });
+  renderInfoTasks(projId, currentTaskFilter);
+  updateStatsBar();
+  const ring = document.querySelector('.ring-fill');
+  const pctEl = document.querySelector('.info-progress-pct');
+  if (ring || pctEl) {
+    const pt = taskStore.filter(x => x.proj === projId);
+    const pct = pt.length ? Math.round(pt.filter(x=>x.done).length/pt.length*100) : 0;
+    const circ = 2*Math.PI*20;
+    if (ring) ring.setAttribute('stroke-dashoffset', circ-(pct/100)*circ);
+    if (pctEl) pctEl.textContent = pct+'%';
+  }
+};

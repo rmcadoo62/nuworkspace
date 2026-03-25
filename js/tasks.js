@@ -403,8 +403,7 @@ function updateStatsBar() { /* stats bar removed */ }
 
 // ===== SAVE TASK — push to store =====
 // ===== SAVE TASK — push to store =====
-// saveTask is patched by supabase-client.js — original kept for reference
-window._origSaveTask = function saveTask(another=false){
+window.saveTask = function saveTask(another=false){
   const title=document.getElementById('taskTitle').value.trim();
   if(!title){
     const inp=document.getElementById('taskTitle');
