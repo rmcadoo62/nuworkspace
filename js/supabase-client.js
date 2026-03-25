@@ -426,6 +426,7 @@ async function loadClosedProject(projId) {
 
 // ===== PATCH SAVE FUNCTIONS TO WRITE TO SUPABASE =====
 // ===== PATCH SAVE FUNCTIONS TO WRITE TO SUPABASE =====
+document.addEventListener('DOMContentLoaded', function() {
 
 // Patch saveProject
 const _origSaveProject = saveProject;
@@ -805,4 +806,4 @@ function _schedRerender() {
     if (typeof renderSched === 'function') renderSched();
   }
 }
-
+}); // end DOMContentLoaded patches

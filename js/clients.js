@@ -51,18 +51,19 @@ function renderShippingGlobal() {
     : sorted.map(a => {
         const proj = projects.find(p => p.id === a.projId);
         const inHouse = !a.shippedDate;
-        return `<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="openArticleModal('${a._id}','${a.projId}')"
+        return `<tr style="border-bottom:1px solid var(--border)"
           onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
           <td style="padding:10px 14px">
             ${inHouse ? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">📦 In House</span>'
             : '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">Shipped</span>'}
           </td>
           <td style="padding:10px 14px;font-size:13.5px;font-weight:500;color:var(--text)">${a.desc}</td>
-          <td style="padding:10px 14px;font-size:12px;color:var(--text)">${proj ? proj.emoji+' '+proj.name : '—'}</td>
+          <td style="padding:10px 14px;font-size:12px;">${proj ? `<span onclick="navToProject('${a.projId}')" style="color:var(--amber);cursor:pointer;font-weight:600" title="Go to project">${proj.emoji} ${proj.name}</span>` : '—'}</td>
           <td style="padding:10px 14px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${fmt(a.receivedDate)}</td>
           <td style="padding:10px 14px;font-size:12px;color:var(--muted)">${a.receivedBy||'—'}</td>
           <td style="padding:10px 14px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${a.shippedDate ? fmt(a.shippedDate) : '—'}</td>
           <td style="padding:10px 14px;font-size:12px;color:var(--muted)">${a.carrier||'—'}</td>
+          <td style="padding:6px 10px;text-align:right"><button onclick="openArticleModal('${a._id}','${a.projId}')" style="background:transparent;border:1.5px solid var(--border);border-radius:6px;color:var(--muted);font-size:11px;padding:4px 10px;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s" onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">&#x270E; Edit</button></td>
         </tr>`;
       }).join('');
 
@@ -85,6 +86,7 @@ function renderShippingGlobal() {
             <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Received By</th>
             <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Shipped</th>
             <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Carrier</th>
+            <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:right"></th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
