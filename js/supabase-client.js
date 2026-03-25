@@ -426,10 +426,9 @@ async function loadClosedProject(projId) {
 
 // ===== PATCH SAVE FUNCTIONS TO WRITE TO SUPABASE =====
 // ===== PATCH SAVE FUNCTIONS TO WRITE TO SUPABASE =====
-document.addEventListener('DOMContentLoaded', function() {
 
 // Patch saveProject
-const _origSaveProject = saveProject;
+const _origSaveProject = typeof saveProject !== "undefined" ? saveProject : ()=>{};
 window.saveProject = async function() {
   const name = document.getElementById('projName').value.trim();
   if (!name) { _origSaveProject(); return; }
@@ -484,7 +483,7 @@ window.saveProject = async function() {
 };
 
 // Patch saveTask
-const _origSaveTask = saveTask;
+const _origSaveTask = typeof saveTask !== "undefined" ? saveTask : ()=>{};
 window.saveTask = async function(another=false) {
   const title = document.getElementById('taskTitle').value.trim();
   if (!title) { document.getElementById('taskTitle').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('taskTitle').style.borderColor='',1800); return; }
@@ -561,7 +560,7 @@ window.saveTask = async function(another=false) {
 };
 
 // Patch toggleInfoTask to persist
-const _origToggleInfoTask = toggleInfoTask;
+const _origToggleInfoTask = typeof toggleInfoTask !== "undefined" ? toggleInfoTask : ()=>{};
 window.toggleInfoTask = async function(idx, projId) {
   if (idx < 0 || idx >= taskStore.length) return;
   const t = taskStore[idx];
@@ -582,7 +581,7 @@ window.toggleInfoTask = async function(idx, projId) {
 };
 
 // Patch deleteEmployee
-const _origDeleteEmployee = deleteEmployee;
+const _origDeleteEmployee = typeof deleteEmployee !== "undefined" ? deleteEmployee : ()=>{};
 window.deleteEmployee = async function(id) {
   if (!confirm('Remove this employee?')) return;
   await dbDelete('employees', id);
@@ -593,7 +592,7 @@ window.deleteEmployee = async function(id) {
 };
 
 // Patch saveProject info (collectAndSave)
-const _origCollectAndSave = collectAndSave;
+const _origCollectAndSave = typeof collectAndSave !== "undefined" ? collectAndSave : ()=>{};
 window.collectAndSave = async function(projId) {
   _origCollectAndSave(projId);
   const info = projectInfo[projId];
@@ -619,7 +618,7 @@ window.collectAndSave = async function(projId) {
 };
 
 // Patch selectPm
-const _origSelectPm = selectPm;
+const _origSelectPm = typeof selectPm !== "undefined" ? selectPm : ()=>{};
 window.selectPm = async function(empId) {
   const emp = employees.find(e => e.id === empId);
   if (!emp || !pmDropdownProjId) return;
@@ -635,7 +634,7 @@ window.selectPm = async function(empId) {
 };
 
 // Patch timesheet hour changes to persist
-const _origSetTsHours = setTsHours;
+const _origSetTsHours = typeof setTsHours !== "undefined" ? setTsHours : ()=>{};
 window.setTsHours = async function(key, rowIdx, dayIdx, val) {
   _origSetTsHours(key, rowIdx, dayIdx, val);
   const row = tsData[key]?.[rowIdx];
@@ -806,4 +805,4 @@ function _schedRerender() {
     if (typeof renderSched === 'function') renderSched();
   }
 }
-}); // end DOMContentLoaded patches
+
