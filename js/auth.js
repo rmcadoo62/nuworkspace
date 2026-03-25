@@ -18,7 +18,7 @@ function can(capability) {
   // Fallback: map old permissionLevel to capabilities
   const mgr = currentEmployee.permissionLevel === 'manager';
   const fallbacks = {
-    add_projects: mgr, delete_projects: false, add_tasks: mgr || true,
+    add_projects: mgr, delete_projects: false, add_tasks: mgr || true, edit_tasks: mgr || true,
     delete_tasks: mgr, mark_complete: mgr, mark_closing: mgr, mark_closed: false,
     view_dashboard: mgr || true, view_reports: mgr, view_audit_log: mgr, view_setup: mgr,
     manage_employees: mgr, manage_permissions: false, view_billing: mgr,

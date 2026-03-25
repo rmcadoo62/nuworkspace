@@ -404,6 +404,7 @@ const CAPABILITY_DEFS = [
   { key: 'mark_closing',       label: 'Mark Closing',          group: 'Projects' },
   { key: 'mark_closed',        label: 'Mark Closed',           group: 'Projects' },
   { key: 'add_tasks',          label: 'Add Tasks',             group: 'Tasks' },
+  { key: 'edit_tasks',         label: 'Edit Tasks',            group: 'Tasks' },
   { key: 'delete_tasks',       label: 'Delete Tasks',          group: 'Tasks' },
   { key: 'add_clients',        label: 'Add Clients',           group: 'Clients' },
   { key: 'delete_clients',     label: 'Delete Clients',        group: 'Clients' },
