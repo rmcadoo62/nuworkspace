@@ -1052,6 +1052,21 @@ async function openEditTaskModal(taskId) {
   // Assignee chips
   buildEditTaskChips();
 
+  // Section dropdown
+  const _etSectionField = document.getElementById('etSectionField');
+  const _etSectionSel = document.getElementById('etSectionSelect');
+  if (_etSectionField && _etSectionSel) {
+    const _projSections = sectionStore.filter(s => s.projId === t.proj);
+    if (_projSections.length > 0) {
+      _etSectionField.style.display = '';
+      _etSectionSel.innerHTML = '<option value="">— No section —</option>' +
+        _projSections.sort((a,b) => (a.taskNum||0)-(b.taskNum||0))
+          .map(s => `<option value="${s._id}"${t.sectionId === s._id ? ' selected' : ''}>${s.name}</option>`).join('');
+    } else {
+      _etSectionField.style.display = 'none';
+    }
+  }
+
   document.getElementById('editTaskModal').classList.add('open');
   setTimeout(() => document.getElementById('etTitle').focus(), 80);
 }
@@ -1139,6 +1154,8 @@ async function saveEditTask() {
   // Auto-set completed date if marking complete/billed with no date
   const completedDate = due || ((status === 'complete' || status === 'billed') ? new Date().toISOString().slice(0,10) : null);
 
+  const _newSectionId = document.getElementById('etSectionSelect')?.value || null;
+
   const updates = {
     name: title, description: desc, assignee: assign,
     completed_date: completedDate||null, due_date: null, status, priority: etPri,
@@ -1146,6 +1163,7 @@ async function saveEditTask() {
     fixed_price: fixedPrice||null,
     revenue_type: revenueType,
     done: status === 'complete',
+    section_id: _newSectionId || null,
   };
 
   if (sb && editingTaskId) {
@@ -1169,6 +1187,10 @@ async function saveEditTask() {
   }
 
   // Update taskStore
+  // Update sectionId in taskStore
+  const _editedTask = taskStore.find(t => t._id === editingTaskId);
+  if (_editedTask) _editedTask.sectionId = _newSectionId || null;
+
   const idx = taskStore.findIndex(t => t._id === editingTaskId);
   if (idx > -1) {
     taskStore[idx] = {
