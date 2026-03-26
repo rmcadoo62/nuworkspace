@@ -287,6 +287,22 @@ async function submitTimesheet() {
   if (saved) {
     tsWeekStatuses[saved.id] = { ...row, id: saved.id, weekKey: weekDate, employeeId: emp.id, status: 'submitted' };
   }
+  // Send email to approver
+  if (approver?.email !== undefined || approver) {
+    try {
+      await sb.functions.invoke('send-notification', {
+        body: {
+          type: 'timesheet_submitted',
+          data: {
+            employeeName: emp.name,
+            employeeId: emp.id,
+            weekDate,
+            approverId: approver ? approver.id : null,
+          }
+        }
+      });
+    } catch(e) { console.warn('Timesheet email notification failed:', e); }
+  }
   toast('✅ Timesheet submitted for approval');
   await loadTsStatuses();
   updateTsStatusBadge(getTsKey(tsWeekOffset));

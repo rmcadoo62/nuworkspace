@@ -183,6 +183,21 @@ async function chatterPost() {
           preview: text.slice(0, 80), is_read: false, created_at: new Date().toISOString()
         }));
         await sb.from('chatter_notifs').insert(notifRows);
+        // Send email notifications via edge function
+        const _notifProj = projects.find(p => p.id === activeProjectId);
+        try {
+          await sb.functions.invoke('send-notification', {
+            body: {
+              type: 'chatter_mention',
+              data: {
+                mentionedIds: allNotifyIds,
+                authorName,
+                projectName: _notifProj ? (_notifProj.emoji + ' ' + _notifProj.name) : 'a project',
+                messageText: text.length > 200 ? text.slice(0, 200) + '…' : text,
+              }
+            }
+          });
+        } catch(e) { console.warn('Email notification failed:', e); }
       }
     }
   } catch(e) { console.warn('Chatter save error:', e); }
