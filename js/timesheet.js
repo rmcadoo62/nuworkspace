@@ -379,6 +379,24 @@ function openApprovalsPanel(el) {
   renderApprovalsPanel();
 }
 
+async function resetTimesheetToDraft(weekStatusId) {
+  if (!confirm('Reopen this timesheet so the employee can make corrections?')) return;
+  const ws = Object.values(tsWeekStatuses).find(s => s.id === weekStatusId);
+  if (!ws) return;
+  if (sb) {
+    const { error } = await sb.from('timesheet_weeks')
+      .update({ status: 'draft', approved_by: null, submitted_by: null })
+      .eq('id', weekStatusId);
+    if (error) { toast('⚠ Could not reopen timesheet'); console.error(error); return; }
+  }
+  ws.status = 'draft';
+  ws.approvedBy = null;
+  ws.submittedBy = null;
+  toast('✓ Timesheet reopened — employee can now edit and resubmit');
+  renderApprovalsPanel();
+  updateApprovalsBadge();
+}
+
 function renderApprovalsPanel() {
   const body = document.getElementById('approvalQueueBody');
   if (!body) return;
@@ -387,10 +405,31 @@ function renderApprovalsPanel() {
   const myEmployeeIds = employees.filter(e => e.approverId === currentEmployee?.id).map(e => e.id);
   const pending   = Object.values(tsWeekStatuses).filter(s => s.status === 'submitted' && myEmployeeIds.includes(s.employeeId));
   const rejected  = Object.values(tsWeekStatuses).filter(s => s.status === 'rejected'  && myEmployeeIds.includes(s.employeeId));
+  const approved  = Object.values(tsWeekStatuses).filter(s => s.status === 'approved'  && myEmployeeIds.includes(s.employeeId))
+    .sort((a,b) => b.weekKey.localeCompare(a.weekKey)).slice(0, 10); // show last 10 approved
   const all = [...pending, ...rejected];
 
   if (all.length === 0) {
-    body.innerHTML = '<div class="approval-queue-title">Approvals <span style="font-size:14px;color:var(--muted);font-family:monospace;font-weight:400">(0 pending)</span></div><div style="color:var(--muted);font-size:13px;padding:20px 0">✓ All timesheets reviewed — nothing pending.</div>';
+    body.innerHTML = '<div class="approval-queue-title">Approvals <span style="font-size:14px;color:var(--muted);font-family:monospace;font-weight:400">(0 pending)</span></div>'+
+      '<div style="color:var(--muted);font-size:13px;padding:20px 0">✓ All timesheets reviewed — nothing pending.</div>'+
+      (approved.length > 0 ? '<div style="margin-top:20px"><div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px">Recently Approved</div>' +
+        approved.map(ws => {
+          const emp = employees.find(e => e.id === ws.employeeId);
+          if (!emp) return '';
+          const fmtWeek = (() => { const d = new Date(ws.weekKey+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); })();
+          return '<div class="approval-card" style="opacity:.8">'+
+            '<div class="approval-emp-av" style="background:'+emp.color+'">'+emp.initials+'</div>'+
+            '<div class="approval-info">'+
+              '<div class="approval-emp-name">'+emp.name+'</div>'+
+              '<div class="approval-week">Week of '+fmtWeek+' · <span class="ts-status-badge ts-status-approved">✓ Approved</span></div>'+
+            '</div>'+
+            '<div class="approval-actions">'+
+              '<button class="btn-view-ts" onclick="viewEmployeeTimesheet(\''+ws.employeeId+'\',\''+ws.weekKey+'\')">View</button>'+
+              '<button class="btn-reject" style="background:rgba(232,162,52,0.15);color:var(--amber);border-color:rgba(232,162,52,0.4)" onclick="resetTimesheetToDraft(\''+ws.id+'\')">↩ Reopen</button>'+
+            '</div>'+
+          '</div>';
+        }).join('') + '</div>'
+      : '');
     return;
   }
 
@@ -430,6 +469,9 @@ function renderApprovalsPanel() {
         (isPending ? 
           '<button class="btn-approve" onclick="approveTimesheet(\''+ws.id+'\')">&#x2713; Approve</button>'+
           '<button class="btn-reject" onclick="showRejectInput(\''+ws.id+'\')">&#x2717; Reject</button>' 
+        : '')+
+        (ws.status === 'approved' ?
+          '<button class="btn-reject" style="background:rgba(232,162,52,0.15);color:var(--amber);border-color:rgba(232,162,52,0.4)" onclick="resetTimesheetToDraft(\''+ws.id+'\')">↩ Reopen</button>'
         : '')+
         '<button class="btn-view-ts" onclick="viewEmployeeTimesheet(\''+ws.employeeId+'\',\''+ws.weekKey+'\')">View</button>'+
       '</div>'+

@@ -104,6 +104,20 @@ function renderDashboard() {
   const readyToBill  = taskStore.filter(t => t.status === 'complete' && _openProjIds.has(t.proj)).reduce((s,t) => s + (t.fixedPrice||0), 0);
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 
+  // ── Booking Report — tasks entered this month grouped by sales category ─
+  const _now = new Date();
+  const _thisMonthKey = _now.getFullYear() + '-' + String(_now.getMonth()+1).padStart(2,'0');
+  const _thisMonthLabel = _now.toLocaleDateString('en-US', {month:'long', year:'numeric'});
+  const bookingByCat = {};
+  taskStore.forEach(t => {
+    const created = (t.createdAt || '').slice(0,7); // 'YYYY-MM'
+    if (created !== _thisMonthKey) return;
+    const cat = t.salesCat || 'Uncategorized';
+    bookingByCat[cat] = (bookingByCat[cat] || 0) + (t.fixedPrice || 0);
+  });
+  const bookingCats   = Object.keys(bookingByCat).sort((a,b) => bookingByCat[b] - bookingByCat[a]);
+  const bookingTotal  = Object.values(bookingByCat).reduce((s,v) => s+v, 0);
+
   // Backlog: sum of all task prices excluding billed
   const backlogTotal = taskStore.reduce((sum, t) => {
     if (t.status === 'billed') return sum;
@@ -135,6 +149,15 @@ function renderDashboard() {
           <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#e05c5c;display:inline-block"></span>$0 – $1M</span>
           <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#4caf7d;display:inline-block"></span>$1M – $2M</span>
         </div>
+      </div>
+    </div>
+
+    <div class="dash-charts-row" style="margin-top:20px">
+      <div class="dash-chart-card">
+        <div class="dash-chart-title"><span>📋</span> Booking Report — ${_thisMonthLabel} <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--amber);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(bookingTotal)} total</span></div>
+        ${bookingCats.length === 0
+          ? `<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No tasks entered this month yet.</div>`
+          : `<canvas id="bookingByCatChart" height="120"></canvas>`}
       </div>
     </div>
 
@@ -434,6 +457,54 @@ function renderDashboard() {
       });
     }
   }, 120);
+
+  // ── Booking Report chart ─────────────────────────────────────────────
+  setTimeout(() => {
+    const bookCanv = document.getElementById('bookingByCatChart');
+    if (!bookCanv || typeof Chart === 'undefined' || bookingCats.length === 0) return;
+    const existingB = Chart.getChart(bookCanv);
+    if (existingB) existingB.destroy();
+    const COLORS = ['#5b9cf6','#a78bfa','#e8a234','#4caf7d','#e05c5c','#f472b6',
+                    '#34d399','#fb923c','#60a5fa','#c084fc','#facc15','#2dd4bf',
+                    '#7c3aed','#db2777','#059669','#d97706'];
+    new Chart(bookCanv, {
+      type: 'bar',
+      data: {
+        labels: bookingCats,
+        datasets: [{
+          data: bookingCats.map(c => bookingByCat[c]),
+          backgroundColor: bookingCats.map((_, i) => COLORS[i % COLORS.length] + 'cc'),
+          borderColor:     bookingCats.map((_, i) => COLORS[i % COLORS.length]),
+          borderWidth: 1,
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: ctx => ' $' + ctx.parsed.y.toLocaleString('en-US', {minimumFractionDigits:0,maximumFractionDigits:0})
+            }
+          }
+        },
+        scales: {
+          x: {
+            ticks: { color: 'var(--muted)', font: { size: 11 } },
+            grid:  { color: 'rgba(128,128,128,0.1)' }
+          },
+          y: {
+            ticks: {
+              color: 'var(--muted)', font: { size: 11 },
+              callback: v => '$' + (v>=1000 ? (v/1000).toFixed(0)+'k' : v)
+            },
+            grid: { color: 'rgba(128,128,128,0.1)' }
+          }
+        }
+      }
+    });
+  }, 150);
 
 }, 80);
 }

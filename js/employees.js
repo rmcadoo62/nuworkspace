@@ -402,16 +402,15 @@ function showEmpProfile(empId, annivOffset) {
   const weeklyVacation = {};   // weekKey -> vacation hours only
   const weeklyHoliday = {};    // weekKey -> holiday hours only
   // Chart starts at hire date in the current year (or Jan 1 if no hire date)
+  // Chart shows last 52 weeks of data regardless of anniversary
   const chartStart = (() => {
-    if (emp.hireDate) {
-      const hire = new Date(emp.hireDate + 'T00:00:00');
-      const start = new Date(hire);
-      start.setFullYear(new Date().getFullYear());
-      // If this year's anniversary hasn't happened yet, use last year's
-      if (start > new Date()) start.setFullYear(new Date().getFullYear() - 1);
-      return start;
-    }
-    return new Date(new Date().getFullYear(), 0, 1);
+    const d = new Date();
+    d.setDate(d.getDate() - 364); // 52 weeks back
+    // Snap to nearest Monday
+    const dow = d.getDay();
+    const diff = (dow + 6) % 7;
+    d.setDate(d.getDate() - diff);
+    return d;
   })();
 
   const SICK_CATS = ['Sick', 'Sick Time', '⬡ Sick Time'];
