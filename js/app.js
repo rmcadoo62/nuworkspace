@@ -144,7 +144,22 @@ taskStore = [];
 // ===== STARTUP =====
 (async function startup() {
   try {
-    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+      auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: false }
+    });
+
+    // Keep the session alive — handles silent token refresh and expiry across tabs
+    sb.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'TOKEN_REFRESHED') {
+        console.log('Auth: token refreshed silently');
+      } else if (event === 'SIGNED_OUT') {
+        // Session expired or signed out in another tab — force back to login
+        currentUser = null; currentEmployee = null;
+        document.getElementById('appShell').style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'flex';
+      }
+    });
+
     await loadAllData(); // load projects/employees/etc first
     showAppLoader(false);
     setTimeout(()=>{ if(typeof ittSetW==='function') ittSetW(ittGetW()); },200);
