@@ -48,3 +48,32 @@
 @media(max-width:900px){.dash-bottom{grid-template-columns:1fr;}.dash-top{grid-template-columns:repeat(2,1fr);}}
 
 
+
+/* Visible scrollbar for dashboard detail panels */
+#backlogSummaryWrap::-webkit-scrollbar,
+#backlogDetailWrap::-webkit-scrollbar,
+#salesSummaryWrap::-webkit-scrollbar,
+#salesDetailWrap::-webkit-scrollbar,
+#bookingSummaryWrap::-webkit-scrollbar,
+#bookingDetailWrap::-webkit-scrollbar { width: 8px; }
+
+#backlogSummaryWrap::-webkit-scrollbar-track,
+#backlogDetailWrap::-webkit-scrollbar-track,
+#salesSummaryWrap::-webkit-scrollbar-track,
+#salesDetailWrap::-webkit-scrollbar-track,
+#bookingSummaryWrap::-webkit-scrollbar-track,
+#bookingDetailWrap::-webkit-scrollbar-track { background: var(--surface2); border-radius: 4px; }
+
+#backlogSummaryWrap::-webkit-scrollbar-thumb,
+#backlogDetailWrap::-webkit-scrollbar-thumb,
+#salesSummaryWrap::-webkit-scrollbar-thumb,
+#salesDetailWrap::-webkit-scrollbar-thumb,
+#bookingSummaryWrap::-webkit-scrollbar-thumb,
+#bookingDetailWrap::-webkit-scrollbar-thumb { background: var(--amber-dim); border-radius: 4px; }
+
+#backlogSummaryWrap::-webkit-scrollbar-thumb:hover,
+#backlogDetailWrap::-webkit-scrollbar-thumb:hover,
+#salesSummaryWrap::-webkit-scrollbar-thumb:hover,
+#salesDetailWrap::-webkit-scrollbar-thumb:hover,
+#bookingSummaryWrap::-webkit-scrollbar-thumb:hover,
+#bookingDetailWrap::-webkit-scrollbar-thumb:hover { background: var(--amber); }

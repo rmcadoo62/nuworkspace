@@ -117,6 +117,41 @@ function renderDashboard() {
   });
   const bookingCats   = Object.keys(bookingByCat).sort((a,b) => bookingByCat[b] - bookingByCat[a]);
   const bookingTotal  = Object.values(bookingByCat).reduce((s,v) => s+v, 0);
+  // Detail list for audit view — all tasks this month sorted by category then project
+  const bookingDetailTasks = taskStore
+    .filter(t => (t.createdAt||'').slice(0,7) === _thisMonthKey)
+    .sort((a,b) => {
+      const catA = a.salesCat||'Uncategorized', catB = b.salesCat||'Uncategorized';
+      if (catA !== catB) return catA.localeCompare(catB);
+      const pA = (projects.find(p=>p.id===a.proj)||{}).name||'', pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
+      return pA.localeCompare(pB);
+    });
+
+  // Sales by Category detail — billed tasks this year by category and project
+  const curYearStr = new Date().getFullYear().toString();
+  const salesDetailTasks = taskStore
+    .filter(t => t.status === 'billed' && (t.billedDate||'').slice(0,4) === curYearStr)
+    .sort((a,b) => {
+      const catA = a.salesCat||'?', catB = b.salesCat||'?';
+      if (catA !== catB) return catA.localeCompare(catB);
+      const pA = (projects.find(p=>p.id===a.proj)||{}).name||'', pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
+      return pA.localeCompare(pB);
+    });
+
+  // Backlog detail — all non-billed tasks on open projects
+  const backlogDetailTasks = taskStore
+    .filter(t => {
+      if (t.status === 'billed') return false;
+      const proj = projectInfo[t.proj];
+      if (proj && proj.status === 'closed') return false;
+      const projObj = projects.find(p => p.id === t.proj);
+      if (projObj && /^N/i.test((projObj.name||'').trim())) return false; // exclude N jobs
+      return true;
+    })
+    .sort((a,b) => {
+      const pA = (projects.find(p=>p.id===a.proj)||{}).name||'', pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
+      return pB.localeCompare(pA, undefined, {numeric:true}); // descending by project number
+    });
 
   // Backlog: sum of all task prices excluding billed
   const backlogTotal = taskStore.reduce((sum, t) => {
@@ -129,35 +164,270 @@ function renderDashboard() {
   wrap.innerHTML = `
     <div class="dash-charts-row">
       <div class="dash-chart-card">
-        <div class="dash-chart-title"><span>💰</span> Billed Revenue <span style="margin-left:auto;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--green);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(totalBilled)} this month</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#c084fc;letter-spacing:0;text-transform:none;font-weight:600;margin-left:12px">${fmt$(readyToBill)} ready to bill</span></div>
+        <div class="dash-chart-title"><span>💰</span> Billed Revenue <span style="margin-left:auto;font-size:13px;font-family:monospace;color:var(--green);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(totalBilled)} this month</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#c084fc;letter-spacing:0;text-transform:none;font-weight:600;margin-left:12px">${fmt$(readyToBill)} ready to bill</span></div>
         <canvas id="billedByMonthChart" height="110"></canvas>
       </div>
     </div>
 
     <div class="dash-charts-row" style="margin-top:20px">
       <div class="dash-chart-card">
-        <div class="dash-chart-title"><span>📊</span> Sales by Category</div>
-        <canvas id="salesByCatChart" height="140"></canvas>
-      </div>
-    </div>
-
-    <div class="dash-charts-row" style="margin-top:20px">
-      <div class="dash-chart-card" style="display:flex;flex-direction:column;align-items:center;padding-bottom:12px">
-        <div class="dash-chart-title" style="width:100%"><span>📦</span> Backlog <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:15px;color:var(--text);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(backlogTotal)}</span><span style="font-size:11px;color:var(--muted);letter-spacing:0;text-transform:none;font-weight:400;margin-left:8px">excl. billed</span></div>
-        <canvas id="backlogGaugeChart" height="160" style="max-width:500px"></canvas>
-        <div style="display:flex;gap:24px;margin-top:-8px;font-size:11px;color:var(--muted)">
-          <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#e05c5c;display:inline-block"></span>$0 – $1M</span>
-          <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#4caf7d;display:inline-block"></span>$1M – $2M</span>
+        <div class="dash-chart-title">
+          <span>📊</span> Sales by Category
+          <div style="display:flex;gap:4px;margin-left:auto">
+            <button id="salesBtnChart" onclick="setSalesView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
+            <button id="salesBtnSummary" onclick="setSalesView('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
+            <button id="salesBtnDetail" onclick="setSalesView('detail')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
+          </div>
+        </div>
+        <div id="salesChartWrap"><canvas id="salesByCatChart" height="140"></canvas></div>
+        <div id="salesSummaryWrap" style="display:none;max-height:400px;overflow-y:scroll">
+          ${(() => {
+            const curYearStr2 = new Date().getFullYear().toString();
+            const mnths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const catRows = {};
+            Object.entries(window.billedCatData||{}).forEach(([ym,cats]) => {
+              if (ym.slice(0,4) !== curYearStr2) return;
+              const mo = parseInt(ym.slice(5,7))-1;
+              Object.entries(cats).forEach(([cat,amt]) => {
+                if (!catRows[cat]) catRows[cat] = {months:{}, total:0};
+                catRows[cat].months[mo] = (catRows[cat].months[mo]||0)+amt;
+                catRows[cat].total += amt;
+              });
+            });
+            const sortedCats2 = Object.entries(catRows).sort((a,b)=>b[1].total-a[1].total);
+            const activeMos = [...new Set(Object.values(catRows).flatMap(r=>Object.keys(r.months).map(Number)))].sort((a,b)=>a-b);
+            if (!sortedCats2.length) return '<div style="padding:24px;text-align:center;color:var(--muted)">No billed data this year.</div>';
+            return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+              '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>'+
+              activeMos.map(m=>'<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">'+mnths[m]+'</th>').join('')+
+              '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--amber)">Total</th>'+
+              '</tr></thead><tbody>'+
+              sortedCats2.map(([cat,row],i)=>
+                '<tr style="border-bottom:1px solid var(--border);background:'+(i%2===1?'var(--surface2)':'')+'">'+
+                '<td style="padding:7px 12px;font-weight:600;color:var(--amber)">'+cat+'</td>'+
+                activeMos.map(m=>'<td style="padding:7px 12px;text-align:right;font-family:monospace;color:var(--muted)">'+(row.months[m]?fmt$(row.months[m]):'—')+'</td>').join('')+
+                '<td style="padding:7px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--text)">'+fmt$(row.total)+'</td>'+
+                '</tr>'
+              ).join('')+
+              '</tbody></table>';
+          })()}
+        </div>
+        <div id="salesDetailWrap" style="display:none;max-height:400px;overflow-y:scroll">
+          ${(() => {
+            const mnthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const byCatMonth = {};
+            salesDetailTasks.forEach(t => {
+              const cat = t.salesCat||'—';
+              const mo = t.billedDate ? mnthNames[parseInt(t.billedDate.slice(5,7))-1]+' '+t.billedDate.slice(0,4) : 'Unknown';
+              if (!byCatMonth[cat]) byCatMonth[cat] = {};
+              if (!byCatMonth[cat][mo]) byCatMonth[cat][mo] = [];
+              byCatMonth[cat][mo].push(t);
+            });
+            const sortedCats3 = Object.keys(byCatMonth).sort();
+            if (!sortedCats3.length) return '<div style="padding:24px;text-align:center;color:var(--muted)">No billed data this year.</div>';
+            return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+              '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat / Month / Task</th>'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Billed Date</th>'+
+              '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>'+
+              '</tr></thead><tbody>'+
+              sortedCats3.map(cat => {
+                const months = Object.keys(byCatMonth[cat]).sort();
+                const catTotal = months.flatMap(m=>byCatMonth[cat][m]).reduce((s,t)=>s+(t.fixedPrice||0),0);
+                return '<tr style="background:var(--surface2);border-bottom:1px solid var(--border)">'+
+                  '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--amber);font-size:12px">Cat '+cat+'</td>'+
+                  '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--amber)">'+fmt$(catTotal)+'</td>'+
+                  '</tr>'+
+                  months.map(mo => {
+                    const tasks = byCatMonth[cat][mo];
+                    const moTotal = tasks.reduce((s,t)=>s+(t.fixedPrice||0),0);
+                    return '<tr style="background:rgba(128,128,128,0.05);border-bottom:1px solid var(--border)">'+
+                      '<td style="padding:6px 12px 6px 24px;font-weight:600;color:var(--muted);font-size:11px">'+mo+'</td>'+
+                      '<td colspan="2"></td>'+
+                      '<td style="padding:6px 12px;text-align:right;font-family:monospace;color:var(--muted);font-size:11px">'+fmt$(moTotal)+'</td>'+
+                      '</tr>'+
+                      tasks.map(t => {
+                        const p = projects.find(x=>x.id===t.proj);
+                        return '<tr style="border-bottom:1px solid var(--border)">'+
+                          '<td style="padding:5px 12px 5px 36px;color:var(--text);font-size:11px">'+t.name+'</td>'+
+                          '<td style="padding:5px 12px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
+                          '<td style="padding:5px 12px;color:var(--muted);font-size:11px">'+(t.billedDate||'—')+'</td>'+
+                          '<td style="padding:5px 12px;text-align:right;font-family:monospace;color:var(--blue);font-size:11px">'+(t.fixedPrice>0?fmt$(t.fixedPrice):'—')+'</td>'+
+                        '</tr>';
+                      }).join('');
+                  }).join('');
+              }).join('')+
+              '</tbody></table>';
+          })()}
         </div>
       </div>
     </div>
 
     <div class="dash-charts-row" style="margin-top:20px">
+      <div class="dash-chart-card" style="display:flex;flex-direction:column;align-items:center;padding-bottom:12px">
+        <div class="dash-chart-title" style="width:100%">
+          <span>📦</span> Backlog
+          <span style="margin-left:8px;font-family:monospace;font-size:15px;color:var(--text);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(backlogTotal)}</span>
+          <span style="font-size:11px;color:var(--muted);letter-spacing:0;text-transform:none;font-weight:400;margin-left:6px">excl. billed</span>
+          <div style="display:flex;gap:4px;margin-left:auto">
+            <button id="backlogBtnChart" onclick="setBacklogView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
+            <button id="backlogBtnSummary" onclick="setBacklogView('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
+            <button id="backlogBtnDetail" onclick="setBacklogView('detail')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
+          </div>
+        </div>
+        <div id="backlogChartWrap" style="display:flex;flex-direction:column;align-items:center;width:100%">
+          <canvas id="backlogGaugeChart" width="400" height="210" style="display:block;margin:0 auto"></canvas>
+          <div style="display:flex;gap:24px;margin-top:-8px;font-size:11px;color:var(--muted)">
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#e05c5c;display:inline-block"></span>$0 – $1M</span>
+            <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#4caf7d;display:inline-block"></span>$1M – $2M</span>
+          </div>
+        </div>
+        <div id="backlogSummaryWrap" style="display:none;max-height:400px;overflow-y:scroll;width:100%">
+          ${(() => {
+            const projMap = {};
+            backlogDetailTasks.forEach(t => {
+              const p = projects.find(x=>x.id===t.proj);
+              const key = t.proj;
+              if (!projMap[key]) projMap[key] = {proj:p, tasks:[], total:0};
+              projMap[key].tasks.push(t);
+              projMap[key].total += (t.fixedPrice||0);
+            });
+            const rows = Object.values(projMap).sort((a,b)=>((b.proj?.name||'').localeCompare(a.proj?.name||'', undefined, {numeric:true})));
+            if (!rows.length) return '<div style="padding:24px;text-align:center;color:var(--muted)">No backlog.</div>';
+            return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+              '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>'+
+              '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)"># Tasks</th>'+
+              '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Total</th>'+
+              '</tr></thead><tbody>'+
+              rows.map((r,i)=>
+                '<tr style="border-bottom:1px solid var(--border);background:'+(i%2===1?'var(--surface2)':'')+'">'+
+                '<td style="padding:7px 12px;color:var(--text)">'+(r.proj?r.proj.emoji+' '+r.proj.name:'—')+'</td>'+
+                '<td style="padding:7px 12px;text-align:right;color:var(--muted)">'+r.tasks.length+'</td>'+
+                '<td style="padding:7px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--green)">'+fmt$(r.total)+'</td>'+
+                '</tr>'
+              ).join('')+
+              '</tbody></table>';
+          })()}
+        </div>
+        <div id="backlogDetailWrap" style="display:none;max-height:400px;overflow-y:scroll;width:100%">
+          ${(() => {
+            const projMap2 = {};
+            backlogDetailTasks.forEach(t => {
+              const key = t.proj;
+              if (!projMap2[key]) projMap2[key] = {proj:projects.find(x=>x.id===t.proj), tasks:[], total:0};
+              projMap2[key].tasks.push(t);
+              projMap2[key].total += (t.fixedPrice||0);
+            });
+            const rows2 = Object.values(projMap2).sort((a,b)=>((b.proj?.name||'').localeCompare(a.proj?.name||'', undefined, {numeric:true})));
+            if (!rows2.length) return '<div style="padding:24px;text-align:center;color:var(--muted)">No backlog.</div>';
+            const statusColors = {new:'var(--muted)',inprogress:'var(--green)',complete:'var(--blue)',cancelled:'var(--amber)',prohold:'var(--amber)',accthold:'var(--red)'};
+            return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+              '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project / Task</th>'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>'+
+              '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>'+
+              '</tr></thead><tbody>'+
+              rows2.map(r => {
+                return '<tr style="background:var(--surface2);border-bottom:1px solid var(--border)">'+
+                  '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--text)">'+(r.proj?r.proj.emoji+' '+r.proj.name:'—')+'</td>'+
+                  '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--green)">'+fmt$(r.total)+'</td>'+
+                  '</tr>'+
+                  r.tasks.map(t =>
+                    '<tr style="border-bottom:1px solid var(--border)">'+
+                    '<td style="padding:5px 12px 5px 24px;color:var(--text);font-size:11px">'+t.name+'</td>'+
+                    '<td style="padding:5px 12px;color:var(--amber);font-weight:600;font-size:11px">'+(t.salesCat||'—')+'</td>'+
+                    '<td style="padding:5px 12px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+t.status+'</span></td>'+
+                    '<td style="padding:5px 12px;text-align:right;font-family:monospace;color:var(--green);font-size:11px">'+(t.fixedPrice>0?fmt$(t.fixedPrice):'—')+'</td>'+
+                    '</tr>'
+                  ).join('');
+              }).join('')+
+              '</tbody></table>';
+          })()}
+        </div>
+      </div>
+    </div>
+    <div class="dash-charts-row" style="margin-top:20px">
       <div class="dash-chart-card">
-        <div class="dash-chart-title"><span>📋</span> Booking Report — ${_thisMonthLabel} <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--amber);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(bookingTotal)} total</span></div>
+        <div class="dash-chart-title">
+          <span>📋</span> Booking Report — ${_thisMonthLabel}
+          <span style="margin-left:8px;font-family:monospace;font-size:13px;color:var(--amber);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(bookingTotal)}</span>
+          ${bookingCats.length > 0 ? `
+          <div style="display:flex;gap:4px;margin-left:auto">
+            <button id="bookingBtnChart" onclick="setBookingView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
+            <button id="bookingBtnSummary" onclick="setBookingView('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
+            <button id="bookingBtnDetail" onclick="setBookingView('detail')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
+          </div>` : ''}
+        </div>
         ${bookingCats.length === 0
           ? `<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No tasks entered this month yet.</div>`
-          : `<canvas id="bookingByCatChart" height="120"></canvas>`}
+          : `<div id="bookingChartWrap"><canvas id="bookingByCatChart" height="120"></canvas></div>
+             <div id="bookingSummaryWrap" style="display:none;max-height:400px;overflow-y:scroll">
+               <table style="width:100%;border-collapse:collapse;font-size:12px">
+                 <thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">
+                   <th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Sales Category</th>
+                   <th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)"># Tasks</th>
+                   <th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Total</th>
+                 </tr></thead>
+                 <tbody>
+                   ${bookingCats.map((cat,i) => {
+                     const count = bookingDetailTasks.filter(t=>(t.salesCat||'Uncategorized')===cat).length;
+                     return '<tr style="border-bottom:1px solid var(--border);background:'+(i%2===1?'var(--surface2)':'')+'">'+
+                       '<td style="padding:7px 12px;font-weight:600;color:var(--amber)">Cat '+cat+'</td>'+
+                       '<td style="padding:7px 12px;text-align:right;color:var(--muted)">'+count+'</td>'+
+                       '<td style="padding:7px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--green)">'+fmt$(bookingByCat[cat])+'</td>'+
+                     '</tr>';
+                   }).join('')}
+                   <tr style="border-top:2px solid var(--border);background:var(--surface2)">
+                     <td style="padding:8px 12px;font-weight:700;color:var(--text)">Total</td>
+                     <td style="padding:8px 12px;text-align:right;font-weight:700;color:var(--text)">${bookingDetailTasks.length}</td>
+                     <td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--amber)">${fmt$(bookingTotal)}</td>
+                   </tr>
+                 </tbody>
+               </table>
+             </div>
+             <div id="bookingDetailWrap" style="display:none;max-height:400px;overflow-y:scroll">
+               ${(() => {
+                 const byCat = {};
+                 bookingDetailTasks.forEach(t => {
+                   const cat = t.salesCat||'Uncategorized';
+                   if (!byCat[cat]) byCat[cat] = [];
+                   byCat[cat].push(t);
+                 });
+                 const sortedCatsD = Object.keys(byCat).sort((a,b)=>
+                   (byCat[b].reduce((s,t)=>s+(t.fixedPrice||0),0)) - (byCat[a].reduce((s,t)=>s+(t.fixedPrice||0),0))
+                 );
+                 const statusColors = {new:'var(--muted)',inprogress:'var(--green)',complete:'var(--blue)',billed:'#c084fc',cancelled:'var(--amber)',prohold:'var(--amber)',accthold:'var(--red)'};
+                 return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+                   '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
+                   '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat / Task</th>'+
+                   '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>'+
+                   '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>'+
+                   '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>'+
+                   '</tr></thead><tbody>'+
+                   sortedCatsD.map(cat => {
+                     const tasks = byCat[cat];
+                     const catTotal = tasks.reduce((s,t)=>s+(t.fixedPrice||0),0);
+                     return '<tr style="background:var(--surface2);border-bottom:1px solid var(--border)">'+
+                       '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--amber)">Cat '+cat+'</td>'+
+                       '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--amber)">'+fmt$(catTotal)+'</td>'+
+                       '</tr>'+
+                       tasks.map(t => {
+                         const p = projects.find(x=>x.id===t.proj);
+                         return '<tr style="border-bottom:1px solid var(--border)">'+
+                           '<td style="padding:5px 12px 5px 24px;color:var(--text);font-size:11px">'+t.name+'</td>'+
+                           '<td style="padding:5px 12px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
+                           '<td style="padding:5px 12px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
+                           '<td style="padding:5px 12px;text-align:right;font-family:monospace;color:var(--green);font-size:11px">'+(t.fixedPrice>0?fmt$(t.fixedPrice):'—')+'</td>'+
+                         '</tr>';
+                       }).join('');
+                   }).join('')+
+                   '</tbody></table>';
+               })()}
+             </div>`}
       </div>
     </div>
 
@@ -342,120 +612,99 @@ function renderDashboard() {
 
 
     // ── Backlog Gauge ──
-    const gaugeCanv = document.getElementById('backlogGaugeChart');
-    if (gaugeCanv) {
-      const existingG = Chart.getChart(gaugeCanv);
-      if (existingG) existingG.destroy();
+    window._drawBacklogGauge = function() {
+      const c = document.getElementById('backlogGaugeChart');
+      if (!c) return;
+      // Destroy any existing Chart.js instance
+      const existing = Chart.getChart(c);
+      if (existing) existing.destroy();
 
-      const MAX1 = 1000000;   // $1M threshold (red zone end)
-      const MAX2 = 2000000;   // $2M threshold (green zone end)
-      const val  = backlogTotal;
-      const clampedVal = Math.min(val, MAX2);
-      const seg1 = Math.min(clampedVal, MAX1);         // red portion
-      const seg2 = Math.max(0, clampedVal - MAX1);     // green portion
-      const empty = MAX2 - clampedVal;                  // unfilled
+      const W = c.width, H = c.height;
+      const ctx = c.getContext('2d');
+      ctx.clearRect(0, 0, W, H);
 
-      new Chart(gaugeCanv, {
-        type: 'doughnut',
-        data: {
-          datasets: [{
-            data: [seg1, seg2, empty],
-            backgroundColor: ['#e05c5c', '#4caf7d', 'rgba(255,255,255,0.07)'],
-            borderWidth: 0,
-            circumference: 180,
-            rotation: 270,
-          }]
-        },
-        options: {
-          responsive: true,
-          cutout: '68%',
-          plugins: { legend: { display: false }, tooltip: { enabled: false } },
-          animation: { duration: 900, easing: 'easeOutQuart' }
-        },
-        plugins: [{
-          id: 'gaugeTicks',
-          afterDraw(chart) {
-            const { ctx, chartArea: { left, right, bottom } } = chart;
-            const cx = (left + right) / 2;
-            const cy = bottom;
-            const outerR = (right - left) / 2;
-            const labelR = outerR * 1.08;
+      const MAX1 = 1000000, MAX2 = 2000000;
+      const val = backlogTotal;
+      const pct = Math.min(val / MAX2, 1);
 
-            const ticks = [
-              { pct: 0,   label: '$0'  },
-              { pct: 0.5, label: '$1M' },
-              { pct: 1,   label: '$2M' },
-            ];
-            ticks.forEach(({ pct, label }) => {
-              const angle = Math.PI * (1 - pct);  // 180°→0° left to right
-              const tx = cx + Math.cos(angle) * labelR;
-              const ty = cy - Math.sin(angle) * labelR;
-              ctx.save();
-              ctx.fillStyle = '#9a9aaa';
-              ctx.font = '600 10px DM Sans,sans-serif';
-              ctx.textAlign = pct === 0 ? 'right' : pct === 1 ? 'left' : 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillText(label, tx, ty);
-              ctx.restore();
-            });
-          }
-        }]
+      const cx = W / 2, cy = H - 20;
+      const r = Math.min(W, H * 2) / 2 - 30;
+      const startA = Math.PI, endA = 0; // left to right
+
+      // Background arc
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, Math.PI, 0, false);
+      ctx.lineWidth = 28;
+      ctx.strokeStyle = 'rgba(128,128,140,0.15)';
+      ctx.stroke();
+
+      // Red segment (0 to $1M)
+      const midA = Math.PI * (1 - 0.5); // 50% = $1M
+      const valA  = Math.PI * (1 - pct);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, Math.PI, pct <= 0.5 ? valA : midA, false);
+      ctx.lineWidth = 28;
+      ctx.strokeStyle = '#e05c5c';
+      ctx.stroke();
+
+      // Green segment ($1M to value)
+      if (pct > 0.5) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, midA, valA, false);
+        ctx.lineWidth = 28;
+        ctx.strokeStyle = '#4caf7d';
+        ctx.stroke();
+      }
+
+      // Tick labels
+      const ticks = [{p:0,lbl:'$0'},{p:0.5,lbl:'$1M'},{p:1,lbl:'$2M'}];
+      ticks.forEach(({p, lbl}) => {
+        const a = Math.PI * (1 - p);
+        const tx = cx + Math.cos(a) * (r + 22);
+        const ty = cy - Math.sin(a) * (r + 22);
+        ctx.save();
+        ctx.fillStyle = '#9a9aaa';
+        ctx.font = '600 11px DM Sans,sans-serif';
+        ctx.textAlign = p === 0 ? 'right' : p === 1 ? 'left' : 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(lbl, tx, ty);
+        ctx.restore();
       });
-    }
-    if (gaugeCanv) {
-      const existingG = Chart.getChart(gaugeCanv);
-      if (existingG) existingG.destroy();
 
-      const MAX1 = 1000000;  // 0-1M red
-      const MAX2 = 2000000;  // 1M-2M green
-      const val  = Math.min(backlogTotal, MAX2);
-      const seg1 = Math.min(val, MAX1);
-      const seg2 = Math.max(0, val - MAX1);
-      const empty = MAX2 - val;
+      // Needle
+      const needleA = Math.PI * (1 - pct);
+      const needleLen = r - 16;
+      const nx = cx + Math.cos(needleA) * needleLen;
+      const ny = cy - Math.sin(needleA) * needleLen;
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(needleA + Math.PI/2) * 5, cy - Math.sin(needleA + Math.PI/2) * 5);
+      ctx.lineTo(nx, ny);
+      ctx.lineTo(cx + Math.cos(needleA - Math.PI/2) * 5, cy - Math.sin(needleA - Math.PI/2) * 5);
+      ctx.closePath();
+      ctx.fillStyle = '#e8e8f0';
+      ctx.shadowColor = 'rgba(0,0,0,0.4)';
+      ctx.shadowBlur = 5;
+      ctx.fill();
+      ctx.restore();
 
-      new Chart(gaugeCanv, {
-        type: 'doughnut',
-        data: {
-          datasets: [{
-            data: [seg1, seg2, empty],
-            backgroundColor: ['#e05c5c', '#4caf7d', 'rgba(255,255,255,0.06)'],
-            borderWidth: 0,
-            circumference: 180,
-            rotation: -90,
-          }]
-        },
-        options: {
-          responsive: false,
-          cutout: '72%',
-          plugins: { legend: { display: false }, tooltip: { enabled: false } },
-          animation: { duration: 800, easing: 'easeOutQuart' }
-        },
-        plugins: [{
-          id: 'gaugeNeedle',
-          afterDraw(chart) {
-            const { ctx, chartArea: { left, right, top, bottom } } = chart;
-            const cx = (left + right) / 2;
-            const cy = bottom;
-            const r  = (right - left) / 2 * 0.78;
-            const pct = Math.min(val / MAX2, 1);
-            const angle = Math.PI * (1 - pct);  // 180deg = left (0), 0deg = right (MAX)
-            // Tick marks at 0, 1M, 2M
-            [[0,'$0'],[0.5,'$1M'],[1,'$2M']].forEach(([p, lbl]) => {
-              const a = Math.PI * (1 - p);
-              const tx = cx + Math.cos(a) * (r * 1.18);
-              const ty = cy - Math.sin(a) * (r * 1.18);
-              ctx.save();
-              ctx.fillStyle = '#9a9aaa';
-              ctx.font = '600 9px DM Sans,sans-serif';
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.fillText(lbl, tx, ty);
-              ctx.restore();
-            });
-          }
-        }]
-      });
-    }
+      // Hub
+      ctx.beginPath();
+      ctx.arc(cx, cy, 10, 0, Math.PI * 2);
+      ctx.fillStyle = '#e8e8f0';
+      ctx.fill();
+
+      // Value label
+      const lbl = val >= 1000000 ? '$' + (val/1000000).toFixed(2) + 'M' : '$' + Math.round(val).toLocaleString();
+      ctx.save();
+      ctx.fillStyle = val < MAX1 ? '#e05c5c' : '#4caf7d';
+      ctx.font = 'bold 15px DM Sans,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(lbl, cx, cy - r * 0.3);
+      ctx.restore();
+    };
+    window._drawBacklogGauge();
   }, 120);
 
   // ── Booking Report chart ─────────────────────────────────────────────
@@ -508,6 +757,31 @@ function renderDashboard() {
 
 }, 80);
 }
+
+function _setView3(prefix, view) {
+  const views = ['chart','summary','detail'];
+  views.forEach(v => {
+    const wrap = document.getElementById(prefix + v.charAt(0).toUpperCase()+v.slice(1) + 'Wrap');
+    const btn  = document.getElementById(prefix + 'Btn' + v.charAt(0).toUpperCase()+v.slice(1));
+    if (wrap) wrap.style.display = v === view ? '' : 'none';
+    if (btn) {
+      const active = v === view;
+      btn.style.background   = active ? 'var(--amber-glow)' : 'transparent';
+      btn.style.color        = active ? 'var(--amber)' : 'var(--muted)';
+      btn.style.borderColor  = active ? 'var(--amber-dim)' : 'var(--border)';
+    }
+  });
+  // For backlog chart, destroy and redraw fresh so canvas sizes correctly
+  if (prefix === 'backlog' && view === 'chart') {
+    setTimeout(() => {
+      if (typeof _drawBacklogGauge === 'function') _drawBacklogGauge();
+    }, 50);
+  }
+}
+function setSalesView(view)   { _setView3('sales', view); }
+function setBacklogView(view) { _setView3('backlog', view); }
+function setBookingView(view) { _setView3('booking', view); }
+
 
 async function editProjectName(projId) {
   const proj = projects.find(p => p.id === projId);
