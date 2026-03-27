@@ -70,16 +70,28 @@ function renderProjectsTable() {
   // ── Stat bubbles ──
   const bubblesEl = document.getElementById('projStatBubbles');
   if (bubblesEl) {
-    const openProjs   = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed');
-    const waitingTP   = openProjs.filter(p => (projectInfo[p.id]||{}).phase === 'Waiting on TP Approval');
+    const openProjs = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed');
+    const statusGroups = {
+      jobprep:     { label: 'Job Prep',     color: '#a78bfa', bg: 'rgba(167,139,250,0.08)' },
+      pending:     { label: 'Pending',       color: '#e8a234', bg: 'rgba(232,162,52,0.08)'  },
+      pendretest:  { label: 'Pend. Retest', color: '#fb923c', bg: 'rgba(251,146,60,0.08)'  },
+      active:      { label: 'Active',        color: '#4caf7d', bg: 'rgba(76,175,125,0.08)'  },
+      onhold:      { label: 'On Hold',       color: '#7a7a85', bg: 'rgba(122,122,133,0.08)' },
+      complete:    { label: 'Complete',      color: '#5b9cf6', bg: 'rgba(91,156,246,0.08)'  },
+      testcomplete:{ label: 'Test Complete', color: '#4caf7d', bg: 'rgba(76,175,125,0.08)'  },
+      closing:     { label: 'Closing',       color: '#e8a234', bg: 'rgba(232,162,52,0.08)'  },
+    };
     const bubble = (label, count, color, bg) =>
-      `<div style="background:${bg};border:1px solid ${color}44;border-radius:10px;padding:10px 16px;min-width:120px;cursor:default">
-        <div style="font-size:11px;color:${color};font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${label}</div>
-        <div style="font-size:26px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1">${count}</div>
+      `<div style="background:${bg};border:1px solid ${color}44;border-radius:10px;padding:10px 16px;min-width:100px;cursor:default">
+        <div style="font-size:10px;color:${color};font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${label}</div>
+        <div style="font-size:24px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1">${count}</div>
       </div>`;
-    bubblesEl.innerHTML =
-      bubble('Open Projects', openProjs.length, '#5b9cf6', 'rgba(91,156,246,0.08)') +
-      bubble('Waiting on TP', waitingTP.length, '#a78bfa', 'rgba(167,139,250,0.08)');
+    let html = bubble('All Open', openProjs.length, '#5b9cf6', 'rgba(91,156,246,0.08)');
+    Object.entries(statusGroups).forEach(([status, meta]) => {
+      const count = openProjs.filter(p => (projectInfo[p.id]||{}).status === status).length;
+      if (count > 0) html += bubble(meta.label, count, meta.color, meta.bg);
+    });
+    bubblesEl.innerHTML = html;
   }
 
   renderSavedFiltersBar();
@@ -585,6 +597,8 @@ async function toggleShowClosed() {
     if (btn) { btn.disabled = false; }
   }
   showClosed = !showClosed;
+  // Clear col filters when toggling closed — DOM filter rows change so stale filters cause blank screen
+  projColFilters = {};
   const btn = document.getElementById('showClosedBtn');
   if (btn) {
     btn.style.color = showClosed ? 'var(--amber)' : 'var(--muted)';
