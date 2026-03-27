@@ -253,17 +253,29 @@ function openClientsPanel(el) {
   renderClientsPanel('');
 }
 
+let _clientSearchQuery = '';
+
 function renderClientsPanel(search) {
-  const q = (search||'').toLowerCase();
+  if (search !== undefined) _clientSearchQuery = search;
+  const q = _clientSearchQuery.toLowerCase();
   const filtered = clientStore.filter(c => c.name.toLowerCase().includes(q))
     .sort((a, b) => a.name.localeCompare(b.name));
   const body = document.getElementById('clientsPanelBody');
   if (!body) return;
 
+  // Save focus state so we can restore it after re-render (prevents single-char typing bug)
+  const searchEl = body.querySelector('.emp-search');
+  const wasFocused = searchEl && document.activeElement === searchEl;
+  const selStart = wasFocused ? searchEl.selectionStart : null;
+  const selEnd   = wasFocused ? searchEl.selectionEnd   : null;
+
+  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  const colors = ['#c07a1a','#3a7fd4','#2e9e62','#7c5cbf','#d04040','#2d8a6e'];
+
   body.innerHTML = `
     <div class="emp-panel-header">
       <div class="emp-panel-title">Clients <span style="font-size:14px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-weight:400">(${clientStore.length})</span></div>
-      <input class="emp-search" placeholder="Search clients…" value="${search||''}" oninput="renderClientsPanel(this.value)" />
+      <input class="emp-search" placeholder="Search clients…" value="${_clientSearchQuery}" oninput="_clientSearchQuery=this.value;renderClientsPanel()" />
       ${can('add_clients') ? `<button class="emp-add-btn" onclick="openNewClientDrawer()">+ Add Client</button>` : ''}
     </div>
     <div class="client-grid">
@@ -271,9 +283,7 @@ function renderClientsPanel(search) {
         const contacts = contactStore.filter(ct => ct.clientId === c.id);
         const jobs = projects.filter(p => (projectInfo[p.id]||{}).clientId === c.id);
         const initials = c.name.split(' ').map(w=>w[0]||'').join('').substring(0,2).toUpperCase();
-        const colors = ['#c07a1a','#3a7fd4','#2e9e62','#7c5cbf','#d04040','#2d8a6e'];
         const color = colors[Math.abs(c.name.split('').reduce((a,ch)=>a+ch.charCodeAt(0),0)) % colors.length];
-        const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
         return `<div class="client-card" onclick="openClientDrawer('${c.id}')">
           <div class="client-actions">
             <button class="client-action-btn" onclick="event.stopPropagation();openClientDrawer('${c.id}')" title="Edit">&#x270E;</button>
@@ -296,6 +306,15 @@ function renderClientsPanel(search) {
       }).join('')}
       ${filtered.length === 0 ? `<div style="color:var(--muted);font-size:13px;padding:20px 0">No clients yet — add one above.</div>` : ''}
     </div>`;
+
+  // Restore focus and cursor position if the search input was active before re-render
+  if (wasFocused) {
+    const newSearchEl = body.querySelector('.emp-search');
+    if (newSearchEl) {
+      newSearchEl.focus();
+      newSearchEl.setSelectionRange(selStart, selEnd);
+    }
+  }
 }
 
 

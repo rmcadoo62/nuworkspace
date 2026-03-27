@@ -175,7 +175,7 @@ function getTimeOffUsed(empId, year, annivStart, annivEnd) {
     Object.entries(holByDay).forEach(([di, hrs]) => {
       const h = parseFloat(hrs) || 0;
       if (h <= 0) return;
-      // di is 0=Mon...6=Sun, week starts Monday
+      // di is 0=Sun...6=Sat, week starts Sunday
       const d = new Date(weekDate);
       d.setDate(weekDate.getDate() + parseInt(di));
       if (d < rangeStart || d >= rangeEnd) return;
@@ -376,7 +376,7 @@ function showEmpProfile(empId, annivOffset) {
     rejected:  '<span style="background:rgba(224,92,92,0.15);color:#e05c5c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✗ Rejected</span>',
   }[s] || '<span style="color:var(--muted);font-size:10px">Draft</span>');
 
-  const fmtWeek = wk => new Date(wk+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  const fmtWeek = wk => { const sat = new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+6); return sat.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
 
   const tsRows = weeks.map(ws => {
     const storeKey = empId + '|' + ws.weekKey;
@@ -406,10 +406,9 @@ function showEmpProfile(empId, annivOffset) {
   const chartStart = (() => {
     const d = new Date();
     d.setDate(d.getDate() - 364); // 52 weeks back
-    // Snap to nearest Monday
+    // Snap to nearest Sunday
     const dow = d.getDay();
-    const diff = (dow + 6) % 7;
-    d.setDate(d.getDate() - diff);
+    d.setDate(d.getDate() - dow);
     return d;
   })();
 
@@ -470,7 +469,7 @@ function showEmpProfile(empId, annivOffset) {
   const weeklyChartId = 'empHoursChart_' + empId;
   let weeklyHoursChartHtml = '';
   if (chartWeeks.length > 0) {
-    const chartLabels = chartWeeks.map(wk => { const sat=new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+5); return sat.toLocaleDateString('en-US',{month:'short',day:'numeric'}); });
+    const chartLabels = chartWeeks.map(wk => { const sat=new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+6); return sat.toLocaleDateString('en-US',{month:'short',day:'numeric'}); });
     const chartWork   = chartWeeks.map(wk => weeklyHours[wk]   || 0);
     const chartVac    = chartWeeks.map(wk => weeklyVacation[wk] || 0);
     const chartHol    = chartWeeks.map(wk => weeklyHoliday[wk]  || 0);

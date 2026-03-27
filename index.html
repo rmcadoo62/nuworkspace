@@ -130,6 +130,7 @@
 
 <div class="main">
   <div class="topbar">
+    <button id="backBtn" onclick="goBack()" title="Go back" style="display:none;align-items:center;gap:5px;background:transparent;border:1.5px solid var(--border);border-radius:7px;color:var(--muted);padding:5px 10px;font-size:12px;font-weight:500;cursor:pointer;transition:all 0.18s ease;font-family:'DM Sans',sans-serif;flex-shrink:0;" onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">&#x2190; <span id="backBtnLabel"></span></button>
     <div class="project-name" id="topbarName">Platform v3</div>
     <div class="global-search-wrap">
       <span class="global-search-icon">&#x1F50D;</span>
@@ -1025,6 +1026,7 @@
   <script src="js/admin.js"></script>
   <script src="js/scheduler.js"></script>
   <script src="js/supabase-patches.js"></script>
+  <script src="js/nav.js"></script>
 
 </div><!-- /appShell -->
 

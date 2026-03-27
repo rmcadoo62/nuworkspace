@@ -48,21 +48,22 @@ function getTsKey(offset) {
 }
 
 function getWeekMonday(offset) {
+  // Returns the Sunday that starts the week (Sun–Sat)
   const now = new Date();
   const day = now.getDay(); // 0=Sun
-  const diff = (day === 0 ? -6 : 1 - day); // Monday
-  const mon = new Date(now);
-  mon.setDate(now.getDate() + diff + offset * 7);
-  mon.setHours(0,0,0,0);
-  return mon;
+  const diff = -day; // back to Sunday
+  const sun = new Date(now);
+  sun.setDate(now.getDate() + diff + offset * 7);
+  sun.setHours(0,0,0,0);
+  return sun;
 }
 
 function getWeekDays(offset) {
-  const mon = getWeekMonday(offset);
+  const sun = getWeekMonday(offset); // sun = week start (Sunday)
   const days = [];
   for (let i = 0; i < 7; i++) {
-    const d = new Date(mon);
-    d.setDate(mon.getDate() + i);
+    const d = new Date(sun);
+    d.setDate(sun.getDate() + i);
     days.push(d);
   }
   return days;
@@ -291,9 +292,9 @@ function renderTimesheet() {
   const rows = tsData[key];
   const days = getWeekDays(tsWeekOffset);
 
-  const mon = days[0];
-  const sun = days[6];
-  const weekLabel = `${fmtDate(mon)} – ${fmtDate(sun)}, ${mon.getFullYear()}`;
+  const sun = days[0];
+  const sat = days[6];
+  const weekLabel = `${fmtDate(sun)} – ${fmtDate(sat)}, ${sat.getFullYear()}`;
 
   // Build table rows
   const tableRows = rows.map((row, ri) => {

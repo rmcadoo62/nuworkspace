@@ -110,7 +110,7 @@ async function loadAllData() {
       .map(p => p.id);
 
     // Phase 2: load remaining tables in parallel, filtering tasks to open projects only
-    const [taskRows, empRows, clientRows, contactRows, expRows, tsRows, sectionRows, roleRows, billedMonthlyRows, billedCatRows, articleRows] = await Promise.all([
+    const [taskRows, empRows, clientRows, contactRows, expRows, , sectionRows, roleRows, billedMonthlyRows, billedCatRows, articleRows] = await Promise.all([
       (async () => {
         // Only load tasks for open projects (145 open vs 2252 closed)
         let rows = [], page = 0;
@@ -129,19 +129,7 @@ async function loadAllData() {
       dbFetch('clients'),
       dbFetch('contacts'),
       fetchAllPages('expenses',       '*', null,  null),  // expenses are small, load all
-      (async () => {
-        let rows = [], page = 0;
-        while (true) {
-          const { data } = await sb.from('timesheet_entries').select('*')
-            .gte('week_start', tsCutoffStr)
-            .range(page * 1000, page * 1000 + 999);
-          if (!data || data.length === 0) break;
-          rows = rows.concat(data);
-          if (data.length < 1000) break;
-          page++;
-        }
-        return rows;
-      })(),
+      Promise.resolve([]), // placeholder — timesheets loaded separately below
       fetchAllPages('task_sections',  '*', null,  null),
       fetchAllPages('permission_roles','*', null, null),
       (async () => {
@@ -300,6 +288,31 @@ async function loadAllData() {
 
     // Test Articles
     articleStore = (articleRows || []).map(mapArticle);
+
+    // Timesheet — loaded sequentially AFTER other queries, with count-based pagination
+    // to guarantee all rows are fetched regardless of Supabase rate limiting
+    const tsRows = await (async () => {
+      // First get the exact count so we know how many pages to fetch
+      const { count } = await sb.from('timesheet_entries')
+        .select('*', { count: 'exact', head: true })
+        .gte('week_start', tsCutoffStr);
+      const totalPages = Math.ceil((count || 0) / 1000);
+      let rows = [];
+      for (let page = 0; page < totalPages; page++) {
+        let data = null;
+        // Retry up to 3 times per page
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const res = await sb.from('timesheet_entries').select('*')
+            .gte('week_start', tsCutoffStr)
+            .order('id', { ascending: true })
+            .range(page * 1000, page * 1000 + 999);
+          if (res.data && res.data.length > 0) { data = res.data; break; }
+          await new Promise(r => setTimeout(r, 300));
+        }
+        if (data) rows = rows.concat(data);
+      }
+      return rows;
+    })();
 
     // Timesheet
     tsRows.forEach(r => {

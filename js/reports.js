@@ -308,7 +308,7 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
     rejected:  '<span style="background:rgba(224,92,92,0.15);color:#e05c5c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✗ Rejected</span>',
   }[s] || '<span style="color:var(--muted);font-size:10px">Draft</span>');
 
-  const fmtWeek = wk => { const d = new Date(wk+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
+  const fmtWeek = wk => { const sat = new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+6); return sat.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
 
   el.innerHTML = `
     <div style="max-width:1100px">
@@ -363,7 +363,7 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
           const rows = weekMap[wk].sort((a,b) => a.empName.localeCompare(b.empName));
           const weekTotal = rows.reduce((s,r) => s + r.totalHrs, 0);
           // Week subtotal header row
-          const sat = new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+5);
+          const sat = new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+6);
           const weekLabel = sat.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
           html += '<tr style="background:var(--surface2);border-top:2px solid var(--border)">' +
             '<td colspan="3" style="padding:7px 12px;font-size:11px;font-weight:700;color:var(--text);letter-spacing:.3px">Week ending ' + weekLabel + '</td>' +
