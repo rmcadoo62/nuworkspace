@@ -60,3 +60,20 @@
 .saved-filter-chip .sf-del{font-size:11px;opacity:.5;margin-left:2px;}
 .saved-filter-chip .sf-del:hover{opacity:1;color:var(--red);}
 
+
+/* Per-column filter row */
+.proj-col-filter-row th { background: var(--surface2); border-bottom: 1px solid var(--border); }
+.proj-col-filter-input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11px;
+  padding: 3px 6px;
+  font-family: 'DM Sans', sans-serif;
+  outline: none;
+  transition: border-color .15s, background .15s;
+}
+.proj-col-filter-input:focus { border-color: var(--amber-dim); }
+.proj-col-filter-input::placeholder { color: var(--muted); opacity: 0.5; }

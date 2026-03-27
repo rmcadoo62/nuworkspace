@@ -144,6 +144,32 @@ function renderProjectsTable() {
     }
   }
 
+  // Per-column filters
+  if (Object.keys(projColFilters).length > 0) {
+    filtered = filtered.filter(p => {
+      const info = projectInfo[p.id] || {};
+      return Object.entries(projColFilters).every(([field, val]) => {
+        if (!val) return true;
+        const v = val.toLowerCase();
+        let cell = '';
+        if (field === 'name')    cell = (p.name||'').toLowerCase();
+        else if (field === 'status')  cell = (info.status||'').toLowerCase();
+        else if (field === 'client')  cell = (info.client||'').toLowerCase();
+        else if (field === 'po')      cell = (info.po||'').toLowerCase();
+        else if (field === 'quote')   cell = (info.quoteNumber||'').toLowerCase();
+        else if (field === 'desc')    cell = (p.desc||info.desc||'').toLowerCase();
+        else if (field === 'article') cell = (info.testArticleDesc||'').toLowerCase();
+        else if (field === 'pm')      cell = (info.pm||'').toLowerCase();
+        else if (field === 'tentativeTest') cell = (info.tentativeTestDate||'').toLowerCase();
+        else if (field === 'testcomplete')  cell = (info.testcompleteDate||'').toLowerCase();
+        else if (field === 'witness')       cell = (info.customerWitness||'').toLowerCase();
+        else if (field === 'contact')       cell = (info.clientContact||'').toLowerCase();
+        else if (field === 'dcas')          cell = (info.dcas||'').toLowerCase();
+        return cell.includes(v);
+      });
+    });
+  }
+
   if (navFilter.status.size > 0 || navFilter.phase.size > 0) {
     filtered = filtered.filter(p => {
       const info = projectInfo[p.id] || {};
@@ -215,7 +241,7 @@ function renderProjectsTable() {
       return `<td>${val}</td>`;
     }).join('');
 
-    return `<tr onclick="navToProject('${p.id}')">
+    return `<tr data-proj-id="${p.id}" onclick="navToProject('${p.id}')">
       <td>
         <span class="projtbl-proj-name">
           <span class="projtbl-proj-emoji">${p.emoji}</span>${p.name}
@@ -274,11 +300,35 @@ function renderProjectsTable() {
           <th class="sortable" style="position:relative" onclick="setProjSort('hours')">Act. Hours <span class="sort-icon ${projSortCol==='hours'?'active':''}">${projSortCol==='hours'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="hours"></span></th>
           <th class="sortable" style="position:relative" onclick="setProjSort('remaining')">Remaining Rev. <span class="sort-icon ${projSortCol==='remaining'?'active':''}">${projSortCol==='remaining'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="remain"></span></th>
         </tr>
+      <tr id="projColFilterRow" class="proj-col-filter-row">
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="name" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="status" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="client" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="po" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="quote" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="desc" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="article" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          ${PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c =>
+            '<th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="'+c.key+'" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>'
+          ).join('')}
+          <th></th><th></th><th></th><th></th>
+        </tr>
       </thead>
       <tbody>${rows}</tbody>
     </table>
     </div>`;
-  setTimeout(() => ptblInitResizers(), 0);
+  setTimeout(() => {
+    ptblInitResizers();
+    // Restore col filter values and styles after re-render
+    Object.entries(projColFilters).forEach(([field, val]) => {
+      const inp = document.querySelector('.proj-col-filter-input[data-field="' + field + '"]' );
+      if (inp) {
+        inp.value = val;
+        inp.style.borderColor = 'var(--amber-dim)';
+        inp.style.background = 'rgba(192,122,26,0.08)';
+      }
+    });
+  }, 0);
 }
 function navToProject(projId) {
   const p = projects.find(x => x.id === projId);
@@ -307,6 +357,7 @@ const NAV_FILTER_PHASE  = ['Waiting on TP Approval','Within 3 Months','3 to 6 Mo
 let showClosed = false;
 let navFilter = { status: new Set(), phase: new Set(), namePattern: '' };
 let projSortCol = 'name';
+let projColFilters = {}; // { fieldKey: 'filterText' }
 let projSortDir = 'asc';
 let activeFilterName = null; // name of currently active saved filter
 
@@ -337,6 +388,66 @@ function persistFilterState() {
     namePattern: navFilter.namePattern, activeFilterName,
     sortCol: projSortCol, sortDir: projSortDir,
   }));
+}
+
+function setProjColFilter(input) {
+  const field = input.dataset.field;
+  const val = input.value; // don't trim while typing
+  if (val.trim()) projColFilters[field] = val.trim();
+  else delete projColFilters[field];
+  // Highlight active filter inputs
+  input.style.borderColor = val.trim() ? 'var(--amber-dim)' : '';
+  input.style.background  = val.trim() ? 'rgba(192,122,26,0.08)' : '';
+  // Apply filter to existing rows without full re-render
+  _applyProjColFiltersToDOM();
+}
+
+function _applyProjColFiltersToDOM() {
+  const tbody = document.querySelector('#projtblContainer table tbody');
+  if (!tbody) { renderProjectsTable(); return; }
+  const rows = tbody.querySelectorAll('tr[data-proj-id]');
+  let visibleCount = 0;
+  rows.forEach(row => {
+    const projId = row.dataset.projId;
+    const p = projects.find(x => x.id === projId);
+    const info = projectInfo[projId] || {};
+    const match = Object.entries(projColFilters).every(([field, val]) => {
+      const v = val.toLowerCase();
+      let cell = '';
+      if (field === 'name')    cell = (p?.name||'').toLowerCase();
+      else if (field === 'status')  cell = (info.status||'').toLowerCase();
+      else if (field === 'client')  cell = (info.client||'').toLowerCase();
+      else if (field === 'po')      cell = (info.po||'').toLowerCase();
+      else if (field === 'quote')   cell = (info.quoteNumber||'').toLowerCase();
+      else if (field === 'desc')    cell = ((p?.desc||'')||(info.desc||'')).toLowerCase();
+      else if (field === 'article') cell = (info.testArticleDesc||'').toLowerCase();
+      else if (field === 'pm')      cell = (info.pm||'').toLowerCase();
+      else if (field === 'tentativeTest') cell = (info.tentativeTestDate||'').toLowerCase();
+      else if (field === 'testcomplete')  cell = (info.testcompleteDate||'').toLowerCase();
+      else if (field === 'witness')       cell = (info.customerWitness||'').toLowerCase();
+      else if (field === 'contact')       cell = (info.clientContact||'').toLowerCase();
+      else if (field === 'dcas')          cell = (info.dcas||'').toLowerCase();
+      return cell.includes(v);
+    });
+    row.style.display = match ? '' : 'none';
+    if (match) visibleCount++;
+  });
+  // Update subtitle count
+  const subEl = document.getElementById('projtblSub');
+  if (subEl && Object.keys(projColFilters).length > 0) {
+    const total = rows.length;
+    subEl.textContent = visibleCount + ' of ' + total + ' projects (column filtered)';
+  }
+}
+
+function clearProjColFilters() {
+  projColFilters = {};
+  document.querySelectorAll('.proj-col-filter-input').forEach(i => {
+    i.value = '';
+    i.style.borderColor = '';
+    i.style.background = '';
+  });
+  renderProjectsTable();
 }
 
 function setProjSort(col) {
