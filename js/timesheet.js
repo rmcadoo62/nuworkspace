@@ -203,7 +203,7 @@ async function autoApproveProxyTimesheet() {
       hours_json: JSON.stringify(row.hours),
       employee_id: emp.id,
       is_overhead: row.isOverhead||false, overhead_cat: row.overheadCat||null,
-    }, {onConflict:'week_start,employee_id,task_name'});
+    }, {onConflict:'week_start,employee_id,task_name,project_id'});
   }
   // Save pinned overhead rows
   const ohData = tsData['oh_' + key] || {};
@@ -216,7 +216,7 @@ async function autoApproveProxyTimesheet() {
       hours_json: JSON.stringify(hours),
       employee_id: emp.id,
       is_overhead: true, overhead_cat: cat,
-    }, {onConflict:'week_start,employee_id,task_name'});
+    }, {onConflict:'week_start,employee_id,task_name,project_id'});
   }
 
   // Upsert as approved directly
@@ -353,7 +353,7 @@ async function saveTsWeekToSupabase(key) {
     };
     // Use upsert to avoid duplicates
     await sb.from('timesheet_entries').upsert(payload,
-      {onConflict: 'week_start,employee_id,task_name'});
+      {onConflict: 'week_start,employee_id,task_name,project_id'});
   }
 }
 
