@@ -191,9 +191,10 @@ function openMyInfoPanel(el) {
   const body = document.getElementById('myInfoBody');
   if (!body) return;
 
-  // Remove any old pane first
-  const old = document.getElementById('empProfilePane');
-  if (old && old.closest('#myInfoBody')) old.remove();
+  // Remove ALL existing empProfilePane elements anywhere in the DOM to avoid
+  // duplicate-ID conflicts (the Employees panel renders one too, and getElementById
+  // returns the first match — which would be that hidden one, leaving My Info blank).
+  document.querySelectorAll('#empProfilePane').forEach(el => el.remove());
 
   const pane = document.createElement('div');
   pane.id = 'empProfilePane';
