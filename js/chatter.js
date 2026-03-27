@@ -317,6 +317,15 @@ function chatterShowMention() {
     '<div style="width:24px;height:24px;border-radius:50%;background:' + e.color + ';color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700">' + e.initials + '</div>' +
     e.name + '</div>'
   ).join('');
+  // Position above the input using fixed coords
+  const input = document.getElementById('chatterInput');
+  if (input) {
+    const rect = input.getBoundingClientRect();
+    drop.style.left = rect.left + 'px';
+    drop.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+    drop.style.top = 'auto';
+    drop.style.width = Math.max(220, rect.width) + 'px';
+  }
   drop.style.display = '';
   chatterMentionActive = true;
   chatterMentionSel = 0;

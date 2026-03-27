@@ -597,7 +597,8 @@ function renderTasksPanel(projId) {
 
   wrap.setAttribute('data-filter', activeFilter);
   wrap.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+    <div style="position:sticky;top:0;z-index:20;background:var(--bg);padding:20px 0 4px;margin-bottom:0;border-bottom:2px solid var(--border);">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">
       <div style="display:flex;align-items:center;gap:8px">
         <div class="info-task-filters" style="margin:0">
           <button class="itf ${activeFilter==='all'?'active':''}"    onclick="setTasksPanelFilter('all','${projId}')">All <span style="font-family:'JetBrains Mono',monospace;font-size:10px;opacity:.7">${total}</span></button>
@@ -626,6 +627,7 @@ function renderTasksPanel(projId) {
       <div class="itt-head-cell">Start Date<span class="itt-resizer" data-col="start"></span></div>
       <div class="itt-head-cell">Done/Billed<span class="itt-resizer" data-col="comp"></span></div>
       <div class="itt-head-cell"></div>
+    </div>
     </div>
     ${tasks.length === 0
       ? `<div class="info-tasks-empty"><div class="eico">${activeFilter==='done'?'✅':activeFilter==='overdue'?'🎉':'📋'}</div>${activeFilter==='done'?'No completed tasks yet':activeFilter==='overdue'?'No overdue tasks — great work!':'No tasks yet — add one above'}</div>`
