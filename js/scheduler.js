@@ -642,8 +642,131 @@ function renderSched() {
     attachBarDrag(bar, block, rows, range, dayW);
   });
 
+  // ---- Click-drag to create new block ----
+  attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week, is2Week, rangeStartStr);
+
   syncSchedScroll();
   renderSchedLegend();
+}
+
+// ---- Canvas drag-to-create ----
+function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week, is2Week, rangeStartStr) {
+  let drag = null;
+  let ghost = null;
+
+  canvas.addEventListener('mousedown', e => {
+    // Only fire on canvas background — not on bars, handles, or other elements
+    if (e.button !== 0) return;
+    if (e.target !== canvas && (
+      e.target.classList.contains('sched-bar') ||
+      e.target.classList.contains('sched-bar-inner') ||
+      e.target.classList.contains('sched-bar-handle') ||
+      e.target.closest('.sched-bar')
+    )) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scrollEl = document.getElementById('schedCanvasScroll');
+    const scrollLeft = scrollEl ? scrollEl.scrollLeft : 0;
+    const scrollTop  = scrollEl ? scrollEl.scrollTop  : 0;
+
+    const localX = e.clientX - rect.left + scrollLeft;
+    const localY = e.clientY - rect.top  + scrollTop;
+
+    // Which row?
+    const ri = Math.floor(localY / rowH);
+    if (ri < 0 || ri >= rows.length) return;
+    const row = rows[ri];
+    if (!row || row.section === 'divider') return;
+
+    // Which day/time?
+    function xToDateHalf(px) {
+      const di = Math.floor(px / dayW);
+      const fracInDay = (px % dayW) / dayW;
+      const d = addDays(range.start, Math.max(0, Math.min(di, range.days - 1)));
+      const dateStr = toDateStr(d);
+      if (is1Week && hourW > 0) {
+        // Snap to nearest hour
+        const hr = Math.floor(fracInDay * (17 - 8)) + 8;
+        return { dateStr, isHalf: false, hr };
+      }
+      // 2-week/month: snap to half-day
+      const isHalf = fracInDay >= 0.5;
+      return { dateStr, isHalf };
+    }
+
+    const startSnap = xToDateHalf(localX);
+
+    drag = {
+      startX: localX,
+      startY: localY,
+      rowId: row.rowId,
+      rowColor: getCatColor(row.cat || row.rowId),
+      startSnap,
+      hasMoved: false,
+    };
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (!drag) return;
+    const rect = canvas.getBoundingClientRect();
+    const scrollEl = document.getElementById('schedCanvasScroll');
+    const scrollLeft = scrollEl ? scrollEl.scrollLeft : 0;
+    const scrollTop  = scrollEl ? scrollEl.scrollTop  : 0;
+    const localX = e.clientX - rect.left + scrollLeft;
+
+    if (!drag.hasMoved && Math.abs(localX - drag.startX) < 8) return;
+    drag.hasMoved = true;
+    e.preventDefault();
+
+    // Calculate ghost bar position
+    const x1 = Math.min(drag.startX, localX);
+    const x2 = Math.max(drag.startX, localX);
+    const ri  = Math.floor(drag.startY / rowH);
+
+    if (!ghost) {
+      ghost = document.createElement('div');
+      ghost.style.cssText = `position:absolute;border-radius:5px;pointer-events:none;z-index:50;opacity:0.55;border:2px dashed rgba(255,255,255,0.6);`;
+      ghost.style.background = drag.rowColor;
+      canvas.appendChild(ghost);
+    }
+    ghost.style.left   = x1 + 'px';
+    ghost.style.width  = Math.max(x2 - x1, 4) + 'px';
+    ghost.style.top    = (ri * rowH + 4) + 'px';
+    ghost.style.height = (rowH - 8) + 'px';
+  });
+
+  const finishDrag = e => {
+    if (!drag) return;
+    if (ghost) { ghost.remove(); ghost = null; }
+
+    if (drag.hasMoved) {
+      const rect = canvas.getBoundingClientRect();
+      const scrollEl = document.getElementById('schedCanvasScroll');
+      const scrollLeft = scrollEl ? scrollEl.scrollLeft : 0;
+      const localX = e.clientX - rect.left + scrollLeft;
+
+      // Calculate start and end from drag
+      const x1 = Math.min(drag.startX, localX);
+      const x2 = Math.max(drag.startX, localX);
+
+      function xToDate(px) {
+        const di = Math.max(0, Math.min(Math.floor(px / dayW), range.days - 1));
+        const frac = (px % dayW) / dayW;
+        const d = addDays(range.start, di);
+        const isHalf = frac >= 0.5;
+        return { dateStr: toDateStr(d), isHalf };
+      }
+
+      const s = xToDate(x1);
+      const en = xToDate(x2);
+
+      // Open modal pre-filled
+      openSchedModal(null, drag.rowId, s.dateStr, en.dateStr);
+    }
+    drag = null;
+  };
+
+  canvas.addEventListener('mouseup', finishDrag);
 }
 
 // ---- Drag ----
@@ -881,7 +1004,7 @@ window.setSchedZoom = function(z, btn) {
 };
 
 // ---- Modal ----
-window.openSchedModal = function(blockId, preselCat, clickedDate) {
+window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) {
   schedSelectedCat    = preselCat || null;
   schedSelectedProjId = null;
 
@@ -940,7 +1063,7 @@ window.openSchedModal = function(blockId, preselCat, clickedDate) {
     }
   } else {
     const s = clickedDate || todayStr();
-    const e = clickedDate || toDateStr(addDays(new Date(), 6));
+    const e = prefilledEnd || clickedDate || toDateStr(addDays(new Date(), 6));
     document.getElementById('schedStartDate').value = s;
     document.getElementById('schedEndDate').value   = e;
     document.getElementById('schedStartTime').value = '';
