@@ -664,13 +664,14 @@ function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week,
       e.target.closest('.sched-bar')
     )) return;
 
-    const rect = canvas.getBoundingClientRect();
     const scrollEl = document.getElementById('schedCanvasScroll');
     const scrollLeft = scrollEl ? scrollEl.scrollLeft : 0;
     const scrollTop  = scrollEl ? scrollEl.scrollTop  : 0;
+    // Use the scroll container's rect — canvas rect shifts as it's larger than the viewport
+    const containerRect = scrollEl ? scrollEl.getBoundingClientRect() : canvas.getBoundingClientRect();
 
-    const localX = e.clientX - rect.left + scrollLeft;
-    const localY = e.clientY - rect.top  + scrollTop;
+    const localX = e.clientX - containerRect.left + scrollLeft;
+    const localY = e.clientY - containerRect.top  + scrollTop;
 
     // Which row?
     const ri = Math.floor(localY / rowH);
@@ -708,11 +709,11 @@ function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week,
 
   canvas.addEventListener('mousemove', e => {
     if (!drag) return;
-    const rect = canvas.getBoundingClientRect();
     const scrollEl = document.getElementById('schedCanvasScroll');
     const scrollLeft = scrollEl ? scrollEl.scrollLeft : 0;
     const scrollTop  = scrollEl ? scrollEl.scrollTop  : 0;
-    const localX = e.clientX - rect.left + scrollLeft;
+    const containerRect = scrollEl ? scrollEl.getBoundingClientRect() : canvas.getBoundingClientRect();
+    const localX = e.clientX - containerRect.left + scrollLeft;
 
     if (!drag.hasMoved && Math.abs(localX - drag.startX) < 8) return;
     drag.hasMoved = true;
@@ -740,10 +741,10 @@ function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week,
     if (ghost) { ghost.remove(); ghost = null; }
 
     if (drag.hasMoved) {
-      const rect = canvas.getBoundingClientRect();
-      const scrollEl = document.getElementById('schedCanvasScroll');
-      const scrollLeft = scrollEl ? scrollEl.scrollLeft : 0;
-      const localX = e.clientX - rect.left + scrollLeft;
+      const scrollEl2 = document.getElementById('schedCanvasScroll');
+      const scrollLeft = scrollEl2 ? scrollEl2.scrollLeft : 0;
+      const containerRect2 = scrollEl2 ? scrollEl2.getBoundingClientRect() : canvas.getBoundingClientRect();
+      const localX = e.clientX - containerRect2.left + scrollLeft;
 
       // Calculate start and end from drag
       const x1 = Math.min(drag.startX, localX);
@@ -778,15 +779,29 @@ function attachBarDrag(bar, block, rows, range, dayW) {
     if (e.button !== 0) return;
 
     // Store original dates and half flags — we always calculate delta from these originals
+    // Capture the canvas Y position at drag start to track row changes
+    const _cScroll = document.getElementById('schedCanvasScroll');
+    const _scrollRect = _cScroll ? _cScroll.getBoundingClientRect() : null;
+    const _startCanvasY = _scrollRect ? (e.clientY - _scrollRect.top + (_cScroll ? _cScroll.scrollTop : 0)) : e.clientY;
+
     drag = {
       dir,
       startX:    e.clientX,
-      lastSnap:  null,        // last snapped delta (half-days float) so we skip redundant renders
+      startClientY: e.clientY,
+      startCanvasY: _startCanvasY,
+      lastSnap:  null,
+      lastRowIdx: -1,
       origStart: block.start,
       origEnd:   block.end,
       origStartHalf: block._startHalf || false,
       origEndHalf:   block._endHalf   || false,
+      origRowId: block.rowId || block.cat,
+      origCat:   block.cat,
+      origRowIdx: rows.findIndex(r => r.rowId === (block.rowId || block.cat)),
+      startClientY: e.clientY,
       hasMoved:  false,
+      currentRowId: block.rowId || block.cat,
+      bar,
     };
 
     const onMove = e => {
@@ -801,6 +816,31 @@ function attachBarDrag(bar, block, rows, range, dayW) {
       const snapPx     = dayW / (useHalfDay ? 2 : 1);
       const rawDelta   = (e.clientX - drag.startX) / snapPx;
       const snapped    = Math.round(rawDelta);
+      // Row tracking for whole-bar moves — delta from start row using canvas-relative coords
+      if (!drag.dir && drag.origRowIdx >= 0) {
+        const _csRowD = document.getElementById('schedCanvasScroll');
+        const _crRowD = _csRowD ? _csRowD.getBoundingClientRect() : null;
+        const currentCanvasY = _crRowD ? (e.clientY - _crRowD.top + (_csRowD ? _csRowD.scrollTop : 0)) : e.clientY;
+        const rowDelta = Math.floor((currentCanvasY - drag.startCanvasY + ROW_H_FIXED * 0.5) / ROW_H_FIXED);
+        let targetRi = drag.origRowIdx + rowDelta;
+        targetRi = Math.max(0, Math.min(targetRi, rows.length - 1));
+        // Skip divider rows
+        while (targetRi < rows.length && rows[targetRi].section === 'divider') targetRi++;
+        if (targetRi !== drag.lastRowIdx && targetRi < rows.length) {
+          drag.lastRowIdx = targetRi;
+          const hoverRow = rows[targetRi];
+          if (hoverRow && hoverRow.section !== 'divider') {
+            drag.currentRowId = hoverRow.rowId;
+            block.rowId = hoverRow.rowId;
+            block.cat   = hoverRow.cat || hoverRow.rowId;
+            const barTop = schedZoom === '1week' ? 4 : Math.floor((ROW_H_FIXED - BAR_H_FIXED) / 2);
+            drag.bar.style.top = (targetRi * ROW_H_FIXED + barTop) + 'px';
+            drag.bar.style.background = getCatColor(hoverRow.cat || hoverRow.rowId);
+            drag.bar.style.boxShadow = '0 2px 8px ' + getCatColor(hoverRow.cat || hoverRow.rowId) + '66';
+          }
+        }
+      }
+
       if (snapped === drag.lastSnap) return;
       drag.lastSnap = snapped;
 
@@ -817,6 +857,19 @@ function attachBarDrag(bar, block, rows, range, dayW) {
         } else {
           block.start = toDateStr(addDays(parseDate(drag.origStart), snapped));
           block.end   = toDateStr(addDays(parseDate(drag.origEnd),   snapped));
+          // Track row for non-half-day views too
+          const _cv2 = document.getElementById('schedCanvas');
+          const _cs2 = document.getElementById('schedCanvasScroll');
+          if (_cv2) {
+            const _cr2 = _cv2.getBoundingClientRect();
+            const localY2 = e.clientY - _cr2.top + (_cs2 ? _cs2.scrollTop : 0);
+            const ri2 = Math.max(0, Math.min(Math.floor(localY2 / ROW_H_FIXED), rows.length - 1));
+            const hoverRow2 = rows[ri2];
+            if (hoverRow2 && hoverRow2.section !== 'divider') {
+              block.rowId = hoverRow2.rowId;
+              block.cat   = hoverRow2.cat || hoverRow2.rowId;
+            }
+          }
         }
         requestAnimationFrame(renderSched);
         return;
@@ -871,6 +924,22 @@ function attachBarDrag(bar, block, rows, range, dayW) {
           block._endHalf = true;
         }
       } else {
+        // Move whole bar — also track vertical row changes
+        if (!drag.dir) {
+          const _cv = document.getElementById('schedCanvas');
+          const _cs = document.getElementById('schedCanvasScroll');
+          if (_cv) {
+            const _cr = _cv.getBoundingClientRect();
+            const localY = e.clientY - _cr.top + (_cs ? _cs.scrollTop : 0);
+            const ri = Math.max(0, Math.min(Math.floor(localY / ROW_H_FIXED), rows.length - 1));
+            const hoverRow = rows[ri];
+            if (hoverRow && hoverRow.section !== 'divider' && hoverRow.rowId !== drag.currentRowId) {
+              drag.currentRowId = hoverRow.rowId;
+              block.rowId = hoverRow.rowId;
+              block.cat   = hoverRow.cat || hoverRow.rowId;
+            }
+          }
+        }
         // Move whole bar
         const ns = fromHalfUnit(startBase + snapped);
         const endHalfUnit = endBase + snapped;
