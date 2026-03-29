@@ -806,17 +806,12 @@ function selectProjectById(id) {
   document.getElementById('navProjects')?.classList.add('active');
   showProjectView('panel-info');
 
-  const info   = projectInfo[id];
-  const status = info ? info.status : 'active';
-  const CLOSED = ['closed','complete','cancelled','billed'];
-  const isClosed = CLOSED.includes(status) || !info;
-
+  const info = projectInfo[id];
+  const isClosed = !info || info.status === 'closed';
   if (isClosed && !_loadedClosedProjects.has(id)) {
-    // Show skeleton while loading
-    const infoWrap = document.getElementById('panel-info');
+    const infoWrap = document.getElementById('infoWrap');
     if (infoWrap) infoWrap.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">&#x23F3; Loading project data…</div>';
     loadClosedProject(id).then(() => {
-      renderAllViews();
       renderInfoSheet(id);
       renderProjStickyHeader(id);
       switchProjTab('sub-info');

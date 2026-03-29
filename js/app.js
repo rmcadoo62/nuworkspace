@@ -1,16 +1,6 @@
 
 // ===== CONSTANTS =====
 // ===== CONSTANTS =====
-const TEAM=[
-  {id:'AL',name:'Alex',  c:'#5b4fcf'},{id:'SA',name:'Sam',   c:'#b94d8a'},
-  {id:'JO',name:'Jordan',c:'#2d8a6e'},{id:'RI',name:'Riley', c:'#c47a25'},
-  {id:'CA',name:'Casey', c:'#4a6fa5'},{id:'MO',name:'Morgan',c:'#7a4a9a'},
-  {id:'DR',name:'Drew',  c:'#3d8a3d'},{id:'TA',name:'Taylor',c:'#8a4a3d'},
-  {id:'QU',name:'Quinn', c:'#5a7a4a'},{id:'BL',name:'Blake', c:'#4a5a8a'},
-  {id:'AV',name:'Avery', c:'#8a6a2a'},{id:'RE',name:'Reese', c:'#6a3d5a'},
-  {id:'FI',name:'Finley',c:'#2d6a7a'},{id:'SG',name:'Sage',  c:'#7a2d4a'},
-];
-
 
 // ===== STATUS COLOR HELPER =====
 // ===== STATUS COLOR HELPER =====
@@ -88,8 +78,6 @@ document.addEventListener('keydown',e=>{
 // ===== RE-RENDER ALL VIEWS =====
 function renderAllViews() {
   renderTaskListView();
-  renderKanbanView();
-  renderIndentedView();
   updateStatsBar();
 }
 

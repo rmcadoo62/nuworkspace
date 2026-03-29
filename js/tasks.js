@@ -1,8 +1,6 @@
 
 // ===== TASK LIST DATA =====
 // ===== TASK LIST DATA =====
-const sprintTasks = [];   // loaded from Supabase
-const upcomingTasks = []; // loaded from Supabase
 
 function renderTaskList(tasks,cid){
   document.getElementById(cid).innerHTML=tasks.map((t,i)=>{
@@ -29,86 +27,6 @@ function toggleTask(el){
 
 // ===== INDENTED =====
 // ===== INDENTED =====
-const indData=[
-  {title:'Platform v3',color:'#5b9cf6',epics:[
-    {label:'Authentication & Security',tc:'rgba(91,156,246,0.15)',tt:'#5b9cf6',prog:60,stories:[
-      {label:'OAuth 2.0 Migration',tasks:[
-        {name:'Audit existing auth flow',a:'MO',due:'Mar 6',done:true},
-        {name:'Set up OAuth provider config',a:'MO',due:'Mar 7',done:true},
-        {name:'Migrate legacy endpoints',a:'MO',due:'Mar 8',done:false},
-        {name:'Write regression tests',a:'AL',due:'Mar 10',done:false},
-      ]},
-      {label:'Rate Limiting',tasks:[
-        {name:'Research rate limit strategies',a:'JO',due:'Mar 12',done:false},
-        {name:'Implement on public endpoints',a:'JO',due:'Mar 15',done:false},
-      ]}
-    ]},
-    {label:'Frontend — Notifications',tc:'rgba(232,162,52,0.15)',tt:'#e8a234',prog:25,stories:[
-      {label:'Real-time Notification Center',tasks:[
-        {name:'Design notification UI',a:'RI',due:'Mar 8',done:true},
-        {name:'Integrate WebSocket feed',a:'RI',due:'Mar 10',done:false},
-        {name:'Notification preferences screen',a:'SA',due:'Mar 14',done:false},
-      ]}
-    ]}
-  ]},
-  {title:'Mobile App',color:'#a78bfa',epics:[
-    {label:'User Onboarding',tc:'rgba(167,139,250,0.15)',tt:'#a78bfa',prog:40,stories:[
-      {label:'Welcome & Signup Flow',tasks:[
-        {name:'Wireframe 5-step onboarding',a:'SA',due:'Mar 12',done:true},
-        {name:'Build step 1-3 screens',a:'TA',due:'Mar 16',done:false},
-        {name:'A/B test CTA copy',a:'CA',due:'Mar 20',done:false},
-      ]}
-    ]}
-  ]}
-];
-
-function renderIndented(){
-  document.getElementById('indented-body').innerHTML=indData.map((proj,pi)=>{
-    const epHTML=proj.epics.map((ep,ei)=>{
-      const stHTML=ep.stories.map((st,si)=>{
-        const sid=`s${pi}${ei}${si}`;
-        const tHTML=st.tasks.map(t=>{
-          const m=employees.find(x=>x.initials===t.a)||{color:'#555',c:'#555'};
-          return`<div class="tier3-row">
-            <div class="tier3-check ${t.done?'done':''}" onclick="this.classList.toggle('done');this.innerHTML=this.classList.contains('done')?'&#x2713;':'';this.nextElementSibling.classList.toggle('done');event.stopPropagation()">${t.done?'&#x2713;':''}</div>
-            <div class="tier3-label ${t.done?'done':''}">${t.name}</div>
-            <div class="tier3-av" style="background:${m.c};color:#fff">${t.a}</div>
-            <div class="tier3-due">${t.due}</div>
-          </div>`;
-        }).join('');
-        return`<div class="tier2-row" onclick="toggle('${sid}',this.querySelector('.tier2-chevron'))">
-            <span class="tier2-chevron open">&#x25B6;</span>
-            <div class="tier2-label">${st.label}</div>
-            <div class="tier3-due" style="margin-left:auto">${st.tasks.filter(x=>x.done).length}/${st.tasks.length} done</div>
-          </div><div id="${sid}">${tHTML}</div>`;
-      }).join('');
-      const eid=`e${pi}${ei}`;
-      return`<div class="tier1-row" onclick="toggle('${eid}',this.querySelector('.tier1-chevron'))">
-          <span class="tier1-chevron open">&#x25B6;</span>
-          <div class="tier1-label">${ep.label}</div>
-          <div class="tier1-tag" style="background:${ep.tc};color:${ep.tt}">Epic</div>
-          <div class="prog-wrap" style="margin-left:auto"><div class="prog-fill" style="width:${ep.prog}%"></div></div>
-          <div class="tier3-due" style="min-width:32px;text-align:right">${ep.prog}%</div>
-        </div><div id="${eid}">${stHTML}</div>`;
-    }).join('');
-    const pid=`p${pi}`;
-    return`<div class="indent-project">
-      <div class="indent-project-header" onclick="toggle('${pid}',this.querySelector('.indent-chevron'))">
-        <div style="width:10px;height:10px;border-radius:50%;background:${proj.color};flex-shrink:0"></div>
-        <div class="indent-project-title">${proj.title}</div>
-        <span class="indent-chevron open">&#x25B6;</span>
-      </div>
-      <div class="indent-body" id="${pid}">${epHTML}</div>
-    </div>`;
-  }).join('');
-}
-
-function toggle(id,ch){
-  document.getElementById(id).classList.toggle('hidden');
-  if(ch)ch.classList.toggle('open');
-}
-
-
 // ===== TASK MODAL =====
 // ===== TASK MODAL =====
 let tPri='low',tAssign=new Set(),tTags=[];
@@ -207,10 +125,7 @@ function renderTags(){
 // ===== UNIFIED TASK STORE =====
 // ===== UNIFIED TASK STORE =====
 // Merge sprint + upcoming into one flat store with section metadata
-let taskStore = [
-  ...sprintTasks.map(t => ({...t, section:'sprint'})),
-  ...upcomingTasks.map(t => ({...t, section:'upcoming'})),
-];
+let taskStore = [];
 
 
 // ===== FILTERED TASK HELPERS =====
@@ -252,147 +167,6 @@ function showEmptyIfNeeded(containerId, count, msg) {
       <button class="btn btn-ghost" id="addTaskBtn1" style="margin-top:10px;font-size:12px;display:none" onclick="openTaskModal()">+ Add Task</button>
     </div>`;
   }
-}
-
-
-// ===== KANBAN VIEW =====
-// ===== KANBAN VIEW =====
-function renderKanbanView() {
-  const tasks = getFilteredTasks();
-  const statuses = [
-    {id:'col-backlog',   status:'backlog',    label:'Backlog',     color:'#7a7a85'},
-    {id:'col-inprogress',status:'inprogress', label:'In Progress', color:'#e8a234'},
-    {id:'col-review',    status:'review',     label:'Review',      color:'#5b9cf6'},
-    {id:'col-done',      status:'done',       label:'Done',        color:'#4caf7d'},
-  ];
-
-  statuses.forEach(({id, status, label, color}) => {
-    const col = document.getElementById(id);
-    if (!col) return;
-    const colTasks = tasks.filter(t => (t.status || guessStatus(t)) === status);
-    const addBtn = col.querySelector('.add-card');
-
-    // Remove all existing cards
-    col.querySelectorAll('.card').forEach(c => c.remove());
-
-    // Update count
-    const cnt = col.querySelector('.kanban-count');
-    if (cnt) cnt.textContent = colTasks.length;
-
-    // Render filtered cards
-    colTasks.forEach((t, i) => {
-      const p = projects.find(x => x.id === t.proj);
-      const m = employees.find(x => x.initials === t.assign) || {color:'#555',c:'#555'};
-      const card = document.createElement('div');
-      card.className = 'card';
-      card.style.animationDelay = (i * 0.05) + 's';
-      card.setAttribute('data-proj', t.proj);
-      card.setAttribute('data-task-id', t._id || '');
-      card.innerHTML = `
-        <div class="card-tag" style="background:${p ? p.color+'22' : 'rgba(76,175,125,0.15)'};color:${p ? p.color : '#4caf7d'}">${p ? p.emoji + ' ' + p.name : 'Task'}</div>
-        <div class="card-title">${t.name}</div>
-        <div class="card-footer">
-          <div class="card-assignee" style="background:${m.c};color:#fff">${t.assign}</div>
-          <div class="priority ${priClass(t.priority || 'medium')}">${priLabel(t.priority || 'medium')}</div>
-          <div class="card-meta">${t.due || ''}</div>
-        </div>`;
-      if (t.done) card.style.opacity = '0.6';
-      col.insertBefore(card, addBtn);
-    });
-
-    // Show empty state if no tasks
-    let emptyCard = col.querySelector('.col-empty');
-    if (emptyCard) emptyCard.remove();
-    if (colTasks.length === 0) {
-      const emptyCard = document.createElement('div');
-      emptyCard.className = 'col-empty';
-      emptyCard.style.cssText = 'text-align:center;padding:20px 10px;color:var(--muted);font-size:12px;';
-      emptyCard.textContent = 'No tasks';
-      col.insertBefore(emptyCard, addBtn);
-    }
-  });
-}
-
-function guessStatus(t) {
-  if (t.done) return 'done';
-  if (t.section === 'upcoming') return 'backlog';
-  return 'inprogress';
-}
-
-function priClass(p) {
-  return {urgent:'p-high', high:'p-med', medium:'p-low', low:'p-low'}[p] || 'p-low';
-}
-
-function priLabel(p) {
-  return {urgent:'Urgent', high:'High', medium:'Medium', low:'Low'}[p] || 'Medium';
-}
-
-
-// ===== INDENTED VIEW (filtered) =====
-// ===== INDENTED VIEW (filtered) =====
-function renderIndentedView() {
-  const body = document.getElementById('indented-body');
-
-  // Filter indData to only show projects matching activeProjectId
-  const filtered = activeProjectId
-    ? indData.filter(p => {
-        const proj = projects.find(x => x.name === p.title || x.id === activeProjectId);
-        // Match by project id stored in indData, or by title for default data
-        return p.projId === activeProjectId ||
-               (activeProjectId === 'platform' && p.title === 'Platform v3') ||
-               (activeProjectId === 'mobile'   && p.title === 'Mobile App') ||
-               (activeProjectId === 'brand'    && p.title === 'Brand Refresh') ||
-               (activeProjectId === 'docs'     && p.title === 'API Docs');
-      })
-    : indData;
-
-  if (filtered.length === 0) {
-    body.innerHTML = `<div class="empty-state" style="margin:40px auto;max-width:340px">
-      <div class="empty-icon">&#x1F5C2;&#xFE0F;</div>
-      <div class="empty-msg">No epics or stories yet for this project</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:6px">Epics and stories will appear here once added.</div>
-    </div>`;
-    return;
-  }
-
-  body.innerHTML = filtered.map((proj, pi) => {
-    const epHTML = proj.epics.map((ep, ei) => {
-      const stHTML = ep.stories.map((st, si) => {
-        const sid = `s${pi}${ei}${si}`;
-        const tHTML = st.tasks.map(t => {
-          const m = employees.find(x => x.initials === t.a) || {color:'#555',c:'#555'};
-          return `<div class="tier3-row">
-            <div class="tier3-check ${t.done?'done':''}" onclick="this.classList.toggle('done');this.innerHTML=this.classList.contains('done')?'&#x2713;':'';this.nextElementSibling.classList.toggle('done');event.stopPropagation()">${t.done?'&#x2713;':''}</div>
-            <div class="tier3-label ${t.done?'done':''}">${t.name}</div>
-            <div class="tier3-av" style="background:${m.c};color:#fff">${t.a}</div>
-            <div class="tier3-due">${t.due}</div>
-          </div>`;
-        }).join('');
-        return `<div class="tier2-row" onclick="toggle('${sid}',this.querySelector('.tier2-chevron'))">
-            <span class="tier2-chevron open">&#x25B6;</span>
-            <div class="tier2-label">${st.label}</div>
-            <div class="tier3-due" style="margin-left:auto">${st.tasks.filter(x=>x.done).length}/${st.tasks.length} done</div>
-          </div><div id="${sid}">${tHTML}</div>`;
-      }).join('');
-      const eid = `e${pi}${ei}`;
-      return `<div class="tier1-row" onclick="toggle('${eid}',this.querySelector('.tier1-chevron'))">
-          <span class="tier1-chevron open">&#x25B6;</span>
-          <div class="tier1-label">${ep.label}</div>
-          <div class="tier1-tag" style="background:${ep.tc};color:${ep.tt}">Epic</div>
-          <div class="prog-wrap" style="margin-left:auto"><div class="prog-fill" style="width:${ep.prog}%"></div></div>
-          <div class="tier3-due" style="min-width:32px;text-align:right">${ep.prog}%</div>
-        </div><div id="${eid}">${stHTML}</div>`;
-    }).join('');
-    const pid = `p${pi}`;
-    return `<div class="indent-project">
-      <div class="indent-project-header" onclick="toggle('${pid}',this.querySelector('.indent-chevron'))">
-        <div style="width:10px;height:10px;border-radius:50%;background:${proj.color};flex-shrink:0"></div>
-        <div class="indent-project-title">${proj.title}</div>
-        <span class="indent-chevron open">&#x25B6;</span>
-      </div>
-      <div class="indent-body" id="${pid}">${epHTML}</div>
-    </div>`;
-  }).join('');
 }
 
 

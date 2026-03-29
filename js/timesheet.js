@@ -237,6 +237,11 @@ async function autoApproveProxyTimesheet() {
     const { data } = await sb.from('timesheet_weeks').insert(weekRow).select().single();
     if (data) tsWeekStatuses[data.id] = { ...weekRow, id: data.id, weekKey: weekDate2, employeeId: emp.id };
   }
+  // Sync actual_hours for all projects touched
+  const affectedIds = [...new Set((tsData[key]||[]).map(r => r.projId).filter(Boolean))];
+  for (const pid of affectedIds) {
+    if (typeof syncProjActualHours === 'function') await syncProjActualHours(pid);
+  }
   toast('✓ Timesheet saved & approved for ' + emp.name);
   await loadTsStatuses();
   updateTsStatusBadge(key);
@@ -354,6 +359,12 @@ async function saveTsWeekToSupabase(key) {
     // Use upsert to avoid duplicates
     await sb.from('timesheet_entries').upsert(payload,
       {onConflict: 'week_start,employee_id,task_name,project_id'});
+  }
+
+  // Sync actual_hours on project_info for each project touched this week
+  const affectedProjIds = [...new Set((tsData[key]||[]).map(r => r.projId).filter(Boolean))];
+  for (const projId of affectedProjIds) {
+    if (typeof syncProjActualHours === 'function') await syncProjActualHours(projId);
   }
 }
 

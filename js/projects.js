@@ -118,19 +118,19 @@ function renderProjectsTable() {
     else if (projSortCol === 'contact')       { va = ia.clientContact||''; vb = ib.clientContact||''; }
     else if (projSortCol === 'quote')    { va = ia.quoteNumber||''; vb = ib.quoteNumber||''; }
     else if (projSortCol === 'expected') {
-      const tasksA = taskStore.filter(t=>t.proj===a.id), tasksB = taskStore.filter(t=>t.proj===b.id);
-      return (projSortDir==='asc'?1:-1) * (tasksA.reduce((s,t)=>s+(t.fixedPrice||0),0) - tasksB.reduce((s,t)=>s+(t.fixedPrice||0),0));
+      const iaExp = (projectInfo[a.id]||{}).expectedRevenue||0, ibExp = (projectInfo[b.id]||{}).expectedRevenue||0;
+      return (projSortDir==='asc'?1:-1) * (iaExp - ibExp);
     }
     else if (projSortCol === 'billed') {
-      const tasksA = taskStore.filter(t=>t.proj===a.id&&t.status==='billed'), tasksB = taskStore.filter(t=>t.proj===b.id&&t.status==='billed');
-      return (projSortDir==='asc'?1:-1) * (tasksA.reduce((s,t)=>s+(t.fixedPrice||0),0) - tasksB.reduce((s,t)=>s+(t.fixedPrice||0),0));
+      const iaBil = (projectInfo[a.id]||{}).billedRevenue||0, ibBil = (projectInfo[b.id]||{}).billedRevenue||0;
+      return (projSortDir==='asc'?1:-1) * (iaBil - ibBil);
     }
     else if (projSortCol === 'remaining') {
-      const getRem = (p) => { const ts=taskStore.filter(t=>t.proj===p.id); return ts.reduce((s,t)=>s+(t.fixedPrice||0),0) - ts.filter(t=>t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0); };
+      const getRem = (p) => { const i=projectInfo[p.id]||{}; return (i.expectedRevenue||0)-(i.billedRevenue||0); };
       return (projSortDir==='asc'?1:-1) * (getRem(a) - getRem(b));
     }
     else if (projSortCol === 'hours') {
-      const getHrs = (p) => { let h=0; Object.entries(tsData).forEach(([k,rows])=>{ if(k.startsWith('oh_')||!Array.isArray(rows))return; rows.forEach(r=>{ if(r.projId===p.id) h+=Object.values(r.hours).reduce((a,b)=>a+b,0); }); }); return h; };
+      const getHrs = (p) => (projectInfo[p.id]||{}).actualHours || 0;
       return (projSortDir==='asc'?1:-1) * (getHrs(a) - getHrs(b));
     }
     else { va = a.name||''; vb = b.name||''; }
@@ -216,22 +216,13 @@ function renderProjectsTable() {
   const rows = filtered.map(p => {
     const info  = projectInfo[p.id] || {};
     const st    = STATUS_META[info.status] || STATUS_META['active'];
-    const tasks = taskStore.filter(t => t.proj === p.id);
-
-    // Revenue calcs
-    const expected  = tasks.reduce((s,t) => s+(t.fixedPrice||0), 0);
-    const billed    = tasks.filter(t => t.status==='billed')
-                           .reduce((s,t) => s+(t.fixedPrice||0), 0);
+    // Revenue calcs — use stored values from project_info (no need to scan taskStore)
+    const expected  = info.expectedRevenue || 0;
+    const billed    = info.billedRevenue   || 0;
     const remaining = expected - billed;
 
-    // Actual hours from timesheets
-    let actualHours = 0;
-    Object.entries(tsData).forEach(([k, rows]) => {
-      if (k.startsWith('oh_') || !Array.isArray(rows)) return; // skip overhead keys
-      rows.forEach(row => {
-        if (row.projId === p.id) actualHours += Object.values(row.hours).reduce((a,b)=>a+b,0);
-      });
-    });
+    // Actual hours — use stored value from project_info (covers full history)
+    const actualHours = info.actualHours || 0;
 
     const fmtMoney = n => n > 0 ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
     const truncate = (s, n=40) => s && s.length > n ? s.slice(0,n)+'…' : (s||'—');
@@ -349,14 +340,27 @@ function navToProject(projId) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('navProjects')?.classList.add('active');
   document.getElementById('topbarName').textContent = p.emoji + ' ' + p.name;
-  
+
   // Reset to info tab
   document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
   document.querySelector('.view-tab')?.classList.add('active');
   showProjectView('panel-info');
-  renderInfoSheet(projId);
-  renderProjStickyHeader(projId);
-  switchProjTab('sub-info');
+
+  const info = projectInfo[projId];
+  const isClosed = !info || info.status === 'closed';
+  if (isClosed && !_loadedClosedProjects.has(projId)) {
+    const infoWrap = document.getElementById('infoWrap');
+    if (infoWrap) infoWrap.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">&#x23F3; Loading project data…</div>';
+    loadClosedProject(projId).then(() => {
+      renderInfoSheet(projId);
+      renderProjStickyHeader(projId);
+      switchProjTab('sub-info');
+    });
+  } else {
+    renderInfoSheet(projId);
+    renderProjStickyHeader(projId);
+    switchProjTab('sub-info');
+  }
 }
 
 
@@ -746,29 +750,7 @@ function togProjMember(id,el){
   else{pTeam.add(id);el.classList.add('sel');el.querySelector('.chip-chk').innerHTML='&#x2713;';}
 }
 
-window.saveProject = function saveProject(){
-  const name=document.getElementById('projName').value.trim();
-  if(!name){
-    const inp=document.getElementById('projName');
-    inp.style.borderColor='var(--red)';inp.style.boxShadow='0 0 0 3px rgba(224,92,92,0.18)';
-    inp.focus();setTimeout(()=>{inp.style.borderColor='';inp.style.boxShadow='';},1800);return;
-  }
-  const proj={id:'p'+Date.now(),name,color:pColor,emoji:pEmoji,desc:document.getElementById('projDesc').value.trim()};
-  const newProjId = proj.id;
-  projects.push(proj);
-  projectInfo[newProjId] = { pm:'', po:'', contract:'', phase:'Waiting on TP Approval', status:'jobprep',
-    startDate:'', endDate:'', tentativeTestDate:'', client:'', clientContact:'', clientEmail:'',
-    clientPhone:'', billingType:'Fixed Fee', invoiced:'', remaining:'', notes:'', desc:proj.desc||'',
-    dcas:'', customerWitness:'', tpApproval:'', dpas:'', noforn:'', testDesc:'', testArticleDesc:'', quoteNumber:'' };
-  renderProjectNav();
-  rebuildProjDropdown();
-  closeProjectModal();
-  toast(pEmoji+' "'+name+'" project created');
-  // Auto-open the new project
-  setTimeout(() => {
-    selectProjectById(newProjId);
-  }, 100);
-}
+
 
 
 // ===== ACTIVE PROJECT STATE =====
@@ -823,12 +805,15 @@ function selectAllProjects(el) { openDashboardPanel(el); } function _oldSelectAl
   renderDashboard();
 }
 
-// ===== SUPABASE PATCHES =====
-// Patch saveProject
-const _origSaveProject = typeof saveProject !== "undefined" ? saveProject : ()=>{};
-window.saveProject = async function() {
+// ===== SAVE PROJECT =====
+async function saveProject() {
   const name = document.getElementById('projName').value.trim();
-  if (!name) { _origSaveProject(); return; }
+  if (!name) {
+    const inp = document.getElementById('projName');
+    inp.style.borderColor = 'var(--red)'; inp.style.boxShadow = '0 0 0 3px rgba(224,92,92,0.18)';
+    inp.focus(); setTimeout(() => { inp.style.borderColor = ''; inp.style.boxShadow = ''; }, 1800);
+    return;
+  }
 
   // Prevent double-submit
   const btn = document.querySelector('#projectModal .btn-primary');
@@ -859,7 +844,7 @@ window.saveProject = async function() {
 
   const today = new Date().toISOString().split('T')[0];
   await dbInsert('project_info', {
-    project_id: saved.id, phase: 'Planning', status: 'jobprep',
+    project_id: saved.id, phase: 'Waiting on TP Approval', status: 'jobprep',
     start_date: today, end_date: null,
   });
 
@@ -877,7 +862,7 @@ window.saveProject = async function() {
   setTimeout(() => {
     selectProjectById(saved.id);
   }, 100);
-};
+}
 
 
 const _origToggleInfoTask = typeof toggleInfoTask !== "undefined" ? toggleInfoTask : ()=>{};

@@ -6,12 +6,13 @@ const projectInfo = {}; // loaded from Supabase
 // Default empty info for newly created projects
 function defaultInfo(proj) {
   return {
-    pm: '', po: '', contract: '', phase: 'Waiting on TP Approval', status: 'active',
+    pm: '', po: '', contract: '', phase: 'Waiting on TP Approval', status: 'jobprep',
     startDate: '', endDate: '', tentativeTestDate: '', client: '', clientContact: '', clientEmail: '',
-    clientPhone: '', billingType: 'Fixed Fee', invoiced: '—', remaining: '',
+    clientPhone: '', billingType: 'Fixed Fee', invoiced: '', remaining: '',
     notes: '', desc: proj.desc || '',
     dcas: '', customerWitness: '', tpApproval: '', dpas: '', noforn: '',
     testDesc: '', testArticleDesc: '', quoteNumber: '',
+    billedRevenue: 0, expectedRevenue: 0,
   };
 }
 
@@ -432,8 +433,11 @@ function makeFieldsEditable(projId) {
   document.querySelectorAll('.info-field').forEach(f => f.classList.add('editable'));
 }
 
-window.collectAndSave = function collectAndSave(projId) {
+async function collectAndSave(projId) {
   const info = projectInfo[projId];
+  if (!info) return;
+
+  // Collect form fields into local state
   document.querySelectorAll('.info-input[data-key], .info-textarea[data-key]').forEach(inp => {
     info[inp.dataset.key] = inp.value.trim();
   });
@@ -447,6 +451,26 @@ window.collectAndSave = function collectAndSave(projId) {
   // Sync desc to project store
   const proj = projects.find(p => p.id === projId);
   if (proj) proj.desc = info.desc;
+
+  // Persist to Supabase
+  if (!sb) return;
+  const row = {
+    pm: info.pm, po_number: info.po, contract_amount: info.contract,
+    billing_type: info.billingType, remaining: info.remaining,
+    client: info.client, client_contact: info.clientContact,
+    client_email: info.clientEmail, client_phone: info.clientPhone,
+    start_date: info.startDate||null, end_date: info.endDate||null, tentative_test_date: info.tentativeTestDate||null,
+    phase: info.phase, status: info.status, notes: info.notes, description: info.desc,
+    dcas: info.dcas||null, customer_witness: info.customerWitness||null, tp_approval: info.tpApproval||null,
+    dpas: info.dpas||null, noforn: info.noforn||null,
+    test_description: info.testDesc||null, test_article_description: info.testArticleDesc||null,
+    quote_number: info.quoteNumber||null,
+  };
+  const { error } = await sb.from('project_info').upsert({ project_id: projId, ...row }, { onConflict: 'project_id' });
+  if (error) console.error('upsert project_info', error);
+  if (info.desc !== undefined) {
+    await sb.from('projects').update({ description: info.desc }).eq('id', projId);
+  }
 }
 
 function editNotes(projId) {
@@ -642,16 +666,8 @@ function renderProjSummary(projId) {
                           .reduce((s,t) => s + (t.fixedPrice||0), 0);
   const remaining  = expected - billed;
 
-  // Hours
-  let totalHours = 0;
-  Object.entries(tsData).forEach(([k, rows]) => {
-    if (k.startsWith('oh_') || !Array.isArray(rows)) return;
-    rows.forEach(row => {
-      if (row.projId === projId) {
-        totalHours += Object.values(row.hours).reduce((a,b)=>a+b, 0);
-      }
-    });
-  });
+  // Hours — use stored value from project_info (covers all history including pre-2025)
+  const totalHours = (projectInfo[projId] || {}).actualHours || 0;
 
   // Expenses
   const expenses     = expenseStore.filter(e => e.projId === projId);
@@ -2810,7 +2826,13 @@ function switchProjTab(subId) {
   // Trigger renders
   if (subId === 'sub-info' && activeProjectId) renderInfoSheet(activeProjectId);
   if (subId === 'sub-tasks' && activeProjectId) renderTasksPanel(activeProjectId);
-  if (subId === 'sub-hours' && activeProjectId) renderHoursPanel(activeProjectId);
+  if (subId === 'sub-hours' && activeProjectId) {
+    if (typeof loadFullProjectTimesheets === 'function') {
+      loadFullProjectTimesheets(activeProjectId).then(() => renderHoursPanel(activeProjectId));
+    } else {
+      renderHoursPanel(activeProjectId);
+    }
+  }
   if (subId === 'sub-expenses' && activeProjectId) renderExpensesPanel(activeProjectId);
   if (subId === 'sub-chatter' && activeProjectId) loadChatter(activeProjectId);
   if (subId === 'sub-activity' && activeProjectId) renderActivityPanel(activeProjectId);
@@ -3399,30 +3421,22 @@ async function syncProjBilledRevenue(projId) {
     }
   } catch(e) { console.warn('syncProjBilledRevenue error:', e); }
 }
+async function syncProjActualHours(projId) {
+  if (!sb || !projId) return;
+  let total = 0;
+  Object.entries(tsData).forEach(([k, rows]) => {
+    if (k.startsWith('oh_') || !Array.isArray(rows)) return;
+    rows.forEach(row => {
+      if (row.projId === projId) {
+        total += Object.values(row.hours).reduce((a, b) => a + b, 0);
+      }
+    });
+  });
+  if (projectInfo[projId]) projectInfo[projId].actualHours = total;
+  try {
+    await sb.from('project_info').update({ actual_hours: total }).eq('project_id', projId);
+  } catch(e) { console.warn('syncProjActualHours error:', e); }
+}
 
-// ===== SUPABASE PATCHES =====
-// Patch saveProject info (collectAndSave)
-const _origCollectAndSave = typeof collectAndSave !== "undefined" ? collectAndSave : ()=>{};
-window.collectAndSave = async function(projId) {
-  _origCollectAndSave(projId);
-  const info = projectInfo[projId];
-  if (!info) return;
-  const row = {
-    pm: info.pm, po_number: info.po, contract_amount: info.contract,
-    billing_type: info.billingType, remaining: info.remaining,
-    client: info.client, client_contact: info.clientContact,
-    client_email: info.clientEmail, client_phone: info.clientPhone,
-    start_date: info.startDate||null, end_date: info.endDate||null, tentative_test_date: info.tentativeTestDate||null,
-    phase: info.phase, status: info.status, notes: info.notes, description: info.desc,
-    dcas: info.dcas||null, customer_witness: info.customerWitness||null, tp_approval: info.tpApproval||null, dpas: info.dpas||null, noforn: info.noforn||null,
-    test_description: info.testDesc||null, test_article_description: info.testArticleDesc||null, quote_number: info.quoteNumber||null,
-  };
-  // Upsert by project_id
-  if (!sb) return;
-  const { error } = await sb.from('project_info').upsert({project_id: projId, ...row}, {onConflict:'project_id'});
-  if (error) console.error('upsert project_info', error);
-  // Also update projects table description
-  if (info.desc !== undefined) {
-    await sb.from('projects').update({ description: info.desc }).eq('id', projId);
-  }
-};
+
+

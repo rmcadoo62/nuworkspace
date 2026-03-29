@@ -431,21 +431,78 @@ function renderClientDrawerBody() {
       ? projects.filter(p => (projectInfo[p.id]||{}).clientId === _clientDrawerId)
           .sort((a,b) => a.name.localeCompare(b.name))
       : [];
+
+    const fmt$ = n => n > 0 ? '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
+    const fmtH = h => h > 0 ? h.toFixed(1) + 'h' : '—';
+    const fmtRate = (billed, hours) => (billed > 0 && hours > 0) ? '$' + (billed / hours).toFixed(2) + '/h' : '—';
+
     const statusColors = { active:'rgba(46,158,98,0.15)', closed:'rgba(107,107,120,0.15)', jobprep:'rgba(91,156,246,0.15)' };
-    const statusText = { active:'Active', closed:'Closed', jobprep:'Job Prep' };
+    const statusText   = { active:'Active', closed:'Closed', jobprep:'Job Prep' };
+
+    // Totals across all jobs
+    const totalBilled  = jobs.reduce((s,p) => s + ((projectInfo[p.id]||{}).billedRevenue||0), 0);
+    const totalHours   = jobs.reduce((s,p) => s + ((projectInfo[p.id]||{}).actualHours||0), 0);
+    const avgRate      = (totalBilled > 0 && totalHours > 0) ? totalBilled / totalHours : 0;
+
+    // Build as a proper table so columns align regardless of content
+    const th = (label, align='left') =>
+      `<th style="padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);text-align:${align};white-space:nowrap;border-bottom:2px solid var(--border)">${label}</th>`;
+
+    const jobRows = jobs.map(p => {
+      const info = projectInfo[p.id]||{};
+      const st   = info.status||'active';
+      const bil  = info.billedRevenue||0;
+      const hrs  = info.actualHours||0;
+      const td   = (val, color='var(--text)', align='left') =>
+        `<td style="padding:9px 12px;font-size:12px;color:${color};text-align:${align};white-space:nowrap;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace">${val}</td>`;
+      return `<tr style="cursor:pointer;transition:background .12s" onclick="closeClientDrawer();navToProject('${p.id}')"
+          onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+        <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace;white-space:nowrap">${p.name.match(/^\d+/)?.[0]||''}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;color:var(--text);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.emoji||''} ${p.name}</td>
+        <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
+          <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:${statusColors[st]||'var(--surface2)'};color:var(--muted);white-space:nowrap">${statusText[st]||st}</span>
+        </td>
+        ${td(fmt$(bil), bil > 0 ? 'var(--green)' : 'var(--muted)', 'right')}
+        ${td(fmtH(hrs), hrs > 0 ? 'var(--blue)' : 'var(--muted)', 'right')}
+        ${td(fmtRate(bil, hrs), (bil > 0 && hrs > 0) ? 'var(--amber)' : 'var(--muted)', 'right')}
+        <td style="padding:9px 12px;border-bottom:1px solid var(--border);color:var(--muted);font-size:12px">›</td>
+      </tr>`;
+    }).join('');
+
+    const table = `
+      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead style="background:var(--surface2)">
+            <tr>
+              ${th('#')}${th('Job')}${th('Status')}${th('Billed','right')}${th('Hours','right')}${th('Job Rate','right')}${th('')}
+            </tr>
+          </thead>
+          <tbody>${jobRows}</tbody>
+        </table>
+      </div>`;
+
+    // Summary footer
+    const summary = `
+      <div style="margin-top:14px;border:1px solid var(--border);border-radius:10px;padding:14px 18px;background:var(--surface2);display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Total Billed</div>
+          <div style="font-size:18px;font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--green)">${fmt$(totalBilled)}</div>
+        </div>
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Total Hours</div>
+          <div style="font-size:18px;font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--blue)">${fmtH(totalHours)}</div>
+        </div>
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Avg Job Rate</div>
+          <div style="font-size:18px;font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--amber)">${fmtRate(totalBilled, totalHours)}</div>
+        </div>
+      </div>`;
+
     body.innerHTML = `
-      <div style="font-size:12px;color:var(--muted);margin-bottom:14px">${jobs.length} project${jobs.length!==1?'s':''} linked to this client</div>
-      ${jobs.length === 0 ? `<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No projects linked yet</div>` :
-        jobs.map(p => {
-          const info = projectInfo[p.id]||{};
-          const st = info.status||'active';
-          return `<div class="client-job-row" onclick="closeClientDrawer();navToProject('${p.id}')">
-            <div class="client-job-num">${p.name.match(/^\d+/)?.[0]||''}</div>
-            <div class="client-job-name">${p.emoji||''} ${p.name}</div>
-            <div class="client-job-status" style="background:${statusColors[st]||'var(--surface2)'};color:var(--muted)">${statusText[st]||st}</div>
-            <div class="client-job-arrow">›</div>
-          </div>`;
-        }).join('')}`;
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${jobs.length} project${jobs.length!==1?'s':''} linked to this client</div>
+      ${jobs.length === 0
+        ? `<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No projects linked yet</div>`
+        : table + summary}`;
   }
 }
 

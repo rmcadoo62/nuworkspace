@@ -81,8 +81,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const proj = item.dataset.proj;
     gsCloseSearch();
     if (action === 'project') {
-      selectProject(id, null);
-      
+      navToProject(id);
       document.getElementById('navProjects')?.classList.add('active');
     } else if (action === 'task') {
       selectProject(proj, null);
@@ -112,8 +111,7 @@ function gsCloseSearch() {
 function gsOpenProject(projId) {
   gsCloseSearch();
   if (!projId) return;
-  selectProject(projId, null);
-  
+  navToProject(projId);
   document.getElementById('navProjects')?.classList.add('active');
 }
 

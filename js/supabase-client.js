@@ -92,8 +92,8 @@ async function loadAllData() {
       return rows;
     }
 
-    // Load timesheet data from Jan 1 2025 onward (reliable data starts here)
-    const tsWeekCutoff = new Date('2025-01-01');
+    // Load timesheet data from Jan 1 2020 onward at startup; pre-2020 loaded on demand per project
+    const tsWeekCutoff = new Date('2020-01-01');
     const tsCutoffStr = tsWeekCutoff.toISOString().split('T')[0];
 
     // Phase 1: load projects and project_info first so we can filter tasks by open projects
@@ -183,6 +183,7 @@ async function loadAllData() {
         testcompleteDate: r.testcomplete_date||'',
         billedRevenue: r.billed_revenue ? parseFloat(r.billed_revenue) : 0,
         expectedRevenue: r.expected_revenue ? parseFloat(r.expected_revenue) : 0,
+        actualHours: r.actual_hours ? parseFloat(r.actual_hours) : 0,
       };
     });
 
@@ -364,11 +365,12 @@ async function loadClosedProject(projId) {
     const loadingEl = document.getElementById('panel-project');
     if (loadingEl) loadingEl.style.opacity = '0.6';
 
-    const [infoRows, taskRows, expRows, sectionRows] = await Promise.all([
+    const [infoRows, taskRows, expRows, sectionRows, tsRows] = await Promise.all([
       sb.from('project_info').select('*').eq('project_id', projId).then(r => r.data || []),
       sb.from('tasks').select('*').eq('project_id', projId).then(r => r.data || []),
       sb.from('expenses').select('*').eq('proj_id', projId).then(r => r.data || []),
       sb.from('task_sections').select('*').eq('project_id', projId).then(r => r.data || []),
+      sb.from('timesheet_entries').select('*').eq('project_id', projId).then(r => r.data || []),
     ]);
 
     // Merge project_info
@@ -387,6 +389,9 @@ async function loadClosedProject(projId) {
         testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'',
         quoteNumber: r.quote_number||'', creditHold: r.credit_hold||false,
         needUpdatedPo: r.need_updated_po||false, testcompleteDate: r.testcomplete_date||'',
+        billedRevenue: r.billed_revenue ? parseFloat(r.billed_revenue) : 0,
+        expectedRevenue: r.expected_revenue ? parseFloat(r.expected_revenue) : 0,
+        actualHours: r.actual_hours ? parseFloat(r.actual_hours) : 0,
       };
     });
 
@@ -422,6 +427,26 @@ async function loadClosedProject(projId) {
       });
     });
 
+    // Merge timesheet rows into tsData so Hours tab works
+    tsRows.forEach(r => {
+      const empId = r.employee_id || '__unknown__';
+      const storeKey = empId + '|' + r.week_start;
+      if (r.is_overhead && r.overhead_cat) {
+        const ohKey = 'oh_' + storeKey;
+        if (!tsData[ohKey]) tsData[ohKey] = {};
+        tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+      } else {
+        if (!tsData[storeKey]) tsData[storeKey] = [];
+        if (!tsData[storeKey].find(x => x._id === r.id)) {
+          tsData[storeKey].push({
+            _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            isOverhead: false, overheadCat: '',
+            hours: JSON.parse(r.hours_json||'{}'),
+          });
+        }
+      }
+    });
+
     // Merge task sections
     const existingSectionIds = new Set(sectionStore.map(s => s._id));
     sectionRows.forEach(r => {
@@ -436,6 +461,42 @@ async function loadClosedProject(projId) {
   }
 }
 
+
+// Track which projects have had full timesheet history loaded (pre-2020)
+const _loadedFullTsProjects = new Set();
+
+async function loadFullProjectTimesheets(projId) {
+  if (_loadedFullTsProjects.has(projId)) return;
+  _loadedFullTsProjects.add(projId);
+  try {
+    const { data } = await sb.from('timesheet_entries')
+      .select('*')
+      .eq('project_id', projId)
+      .lt('week_start', '2020-01-01');
+    if (!data || data.length === 0) return;
+    data.forEach(r => {
+      const empId = r.employee_id || '__unknown__';
+      const storeKey = empId + '|' + r.week_start;
+      if (r.is_overhead && r.overhead_cat) {
+        const ohKey = 'oh_' + storeKey;
+        if (!tsData[ohKey]) tsData[ohKey] = {};
+        tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+      } else {
+        if (!tsData[storeKey]) tsData[storeKey] = [];
+        if (!tsData[storeKey].find(x => x._id === r.id)) {
+          tsData[storeKey].push({
+            _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            isOverhead: false, overheadCat: '',
+            hours: JSON.parse(r.hours_json||'{}'),
+          });
+        }
+      }
+    });
+  } catch(e) {
+    console.error('loadFullProjectTimesheets failed:', e);
+    _loadedFullTsProjects.delete(projId); // allow retry
+  }
+}
 
 // ===== REALTIME SUBSCRIPTIONS =====
 // ===== REALTIME SUBSCRIPTIONS =====
@@ -505,6 +566,9 @@ function setupRealtime() {
           testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'',
           quoteNumber: r.quote_number||'', creditHold: r.credit_hold||false,
           needUpdatedPo: r.need_updated_po||false, testcompleteDate: r.testcomplete_date||'',
+          billedRevenue: r.billed_revenue ? parseFloat(r.billed_revenue) : 0,
+          expectedRevenue: r.expected_revenue ? parseFloat(r.expected_revenue) : 0,
+          actualHours: r.actual_hours ? parseFloat(r.actual_hours) : 0,
         };
       } else {
         delete projectInfo[r.project_id];

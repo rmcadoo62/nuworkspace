@@ -1349,8 +1349,11 @@ async function loadClosedProjects(el) {
           remaining: r.remaining||'', notes: r.notes||'', desc: r.description||'',
           dcas: r.dcas||'', customerWitness: r.customer_witness||'', tpApproval: r.tp_approval||'',
           dpas: r.dpas||'', noforn: r.noforn||'', quoteNumber: r.quote_number||'',
-          creditHold: r.credit_hold||false, testcompleteDate: r.testcomplete_date||'',
+          creditHold: r.credit_hold||false, needUpdatedPo: r.need_updated_po||false,
+          testcompleteDate: r.testcomplete_date||'',
           testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'',
+          billedRevenue: r.billed_revenue ? parseFloat(r.billed_revenue) : 0,
+          expectedRevenue: r.expected_revenue ? parseFloat(r.expected_revenue) : 0,
           po_number: r.po_number||'',
         };
       }
@@ -1366,18 +1369,24 @@ async function loadClosedProjects(el) {
           .range(taskPage * 1000, taskPage * 1000 + 999);
         if (!data || data.length === 0) break;
         data.forEach(r => {
+          if (taskStore.find(t => t._id === r.id)) return; // skip duplicates
           taskStore.push({
             _id: r.id, taskNum: r.task_num||0, proj: r.project_id,
             name: r.name||'', status: r.status||'new',
-            assignee: r.assignee||'', assign: r.assignee||'',
-            dueDate: r.due_date||'', taskStartDate: r.task_start_date||'',
+            assign: r.assignee||'',
+            due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
+            due_raw: r.due_date||'',
+            overdue: false, done: r.done||false,
+            priority: r.priority||'medium',
+            section: r.section||'sprint', sectionId: r.section_id||null,
+            taskStartDate: r.task_start_date||'',
             completedDate: r.completed_date||'', billedDate: r.billed_date||'',
             fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
             budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
-            salesCategory: r.sales_category||'', quoteNum: r.quote_number||'',
+            salesCat: r.sales_category||'', quoteNum: r.quote_number||'',
             poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
-            done: r.done||false, priority: r.priority||'medium',
-      revenueType: r.revenue_type||'fixed',
+            createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+            revenueType: r.revenue_type||'fixed',
           });
         });
         if (data.length < 1000) break;
