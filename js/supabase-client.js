@@ -194,7 +194,8 @@ async function loadAllData() {
       window.billedMonthlyData[r.year_month] += parseFloat(r.amount) || 0;
     });
 
-    // Billed by category summary
+    // Billed by category summary — DB table is the source of truth (covers all projects
+    // including closed). Kept accurate going forward by _applyBilledCatDelta().
     window.billedCatData = {}; // { 'YYYY-MM': { cat: amount } }
     billedCatRows.forEach(r => {
       if (!window.billedCatData[r.year_month]) window.billedCatData[r.year_month] = {};
@@ -644,6 +645,39 @@ function setupRealtime() {
     .subscribe();
 
   console.log('✓ Realtime subscriptions active (projects, project_info, tasks, schedule_blocks)');
+}
+
+// ===== BILLED CATEGORY SYNC HELPER =====
+// ===== BILLED CATEGORY SYNC HELPER =====
+// Applies deltas to window.billedCatData (in-memory) AND billed_revenue_by_category (DB).
+// deltaMap: { 'YYYY-MM|salesCat': amountDelta }  — positive when billing, negative when unbilling.
+// Call this after every bill / unbill operation to keep chart, summary, and DB in sync.
+async function _applyBilledCatDelta(deltaMap) {
+  if (!deltaMap || !Object.keys(deltaMap).length) return;
+  // 1. Update in-memory billedCatData immediately (chart re-renders use this)
+  for (const [key, delta] of Object.entries(deltaMap)) {
+    const [ym, cat] = key.split('|');
+    if (!window.billedCatData[ym]) window.billedCatData[ym] = {};
+    window.billedCatData[ym][cat] = Math.max(0, (window.billedCatData[ym][cat] || 0) + delta);
+  }
+  // 2. Sync to DB summary table so future page loads are also accurate
+  if (!sb) return;
+  for (const [key, delta] of Object.entries(deltaMap)) {
+    if (!delta) continue;
+    const [ym, cat] = key.split('|');
+    try {
+      const { data: rows } = await sb.from('billed_revenue_by_category')
+        .select('id, amount').eq('year_month', ym).eq('sales_category', cat);
+      if (rows && rows.length > 0) {
+        const newAmt = Math.max(0, (parseFloat(rows[0].amount) || 0) + delta);
+        await sb.from('billed_revenue_by_category').update({ amount: newAmt }).eq('id', rows[0].id);
+      } else if (delta > 0) {
+        await sb.from('billed_revenue_by_category').insert({ year_month: ym, sales_category: cat, amount: delta });
+      }
+    } catch(e) {
+      console.error('_applyBilledCatDelta', ym, cat, e);
+    }
+  }
 }
 
 // Re-render the scheduler if it's currently visible

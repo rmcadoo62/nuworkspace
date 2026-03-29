@@ -2838,6 +2838,7 @@ function switchProjTab(subId) {
   if (subId === 'sub-activity' && activeProjectId) renderActivityPanel(activeProjectId);
   if (subId === 'sub-invoicing' && activeProjectId) renderInvoicingPanel(activeProjectId);
   if (subId === 'sub-shipping' && activeProjectId) renderShippingProjTab(activeProjectId);
+  if (subId === 'sub-jobpack'  && activeProjectId) renderJobPackPanel(activeProjectId);
 }
 
 function renderProjStickyHeader(projId) {

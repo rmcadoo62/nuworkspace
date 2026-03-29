@@ -273,6 +273,7 @@ function renderDashboard() {
           <span style="font-size:11px;color:var(--muted);letter-spacing:0;text-transform:none;font-weight:400;margin-left:6px">excl. billed</span>
           <div style="display:flex;gap:4px;margin-left:auto">
             <button id="backlogBtnChart" onclick="setBacklogView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
+            <button id="backlogBtnCat" onclick="setBacklogView('cat')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Category</button>
             <button id="backlogBtnSummary" onclick="setBacklogView('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
             <button id="backlogBtnDetail" onclick="setBacklogView('detail')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
           </div>
@@ -283,6 +284,9 @@ function renderDashboard() {
             <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#e05c5c;display:inline-block"></span>$0 – $1M</span>
             <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#4caf7d;display:inline-block"></span>$1M – $2M</span>
           </div>
+        </div>
+        <div id="backlogCatWrap" style="display:none;width:100%">
+          <canvas id="backlogByCatChart" height="150"></canvas>
         </div>
         <div id="backlogSummaryWrap" style="display:none;max-height:400px;overflow-y:scroll;width:100%">
           ${(() => {
@@ -705,6 +709,82 @@ function renderDashboard() {
       ctx.restore();
     };
     window._drawBacklogGauge();
+
+    // ── Backlog by Category bar chart ──
+    window._drawBacklogByCat = function() {
+      const catCanv = document.getElementById('backlogByCatChart');
+      if (!catCanv || typeof Chart === 'undefined') return;
+      const existing = Chart.getChart(catCanv);
+      if (existing) existing.destroy();
+
+      // Build cat totals from backlogDetailTasks
+      const catTotals = {};
+      backlogDetailTasks.forEach(t => {
+        const cat = t.salesCat || 'Uncategorized';
+        catTotals[cat] = (catTotals[cat] || 0) + (t.fixedPrice || 0);
+      });
+      const sorted = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+      const labels = sorted.map(([k]) => k);
+      const data   = sorted.map(([, v]) => v);
+      const BCOLORS = ['#5b9cf6','#a78bfa','#e8a234','#4caf7d','#e05c5c','#f472b6',
+                       '#34d399','#fb923c','#60a5fa','#c084fc','#facc15','#2dd4bf',
+                       '#7c3aed','#db2777','#059669','#d97706'];
+
+      new Chart(catCanv, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            data,
+            backgroundColor: labels.map((_, i) => BCOLORS[i % BCOLORS.length] + 'cc'),
+            borderColor:     labels.map((_, i) => BCOLORS[i % BCOLORS.length]),
+            borderWidth: 1,
+            borderRadius: 4,
+          }]
+        },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: ctx => ' $' + ctx.parsed.y.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
+              }
+            }
+          },
+          scales: {
+            x: { ticks: { color: '#9a9aaa', font: { size: 11 } }, grid: { display: false } },
+            y: {
+              beginAtZero: true,
+              ticks: {
+                color: '#9a9aaa', font: { size: 10 },
+                callback: v => v >= 1000 ? '$' + (v/1000).toFixed(0) + 'k' : '$' + v
+              },
+              grid: { color: 'rgba(255,255,255,0.05)' }
+            }
+          }
+        },
+        plugins: [{
+          id: 'backlogCatLabels',
+          afterDatasetsDraw(chart) {
+            const ctx2 = chart.ctx;
+            chart.getDatasetMeta(0).data.forEach((bar, idx) => {
+              const val = data[idx];
+              if (!val) return;
+              const lbl = val >= 1000 ? '$' + (val/1000).toFixed(1) + 'k' : '$' + val.toFixed(0);
+              ctx2.save();
+              ctx2.fillStyle = '#c8c8d8';
+              ctx2.font = '600 10px DM Sans, sans-serif';
+              ctx2.textAlign = 'center';
+              ctx2.textBaseline = 'bottom';
+              ctx2.fillText(lbl, bar.x, bar.y - 3);
+              ctx2.restore();
+            });
+          }
+        }]
+      });
+    };
+
   }, 120);
 
   // ── Booking Report chart ─────────────────────────────────────────────
@@ -779,7 +859,22 @@ function _setView3(prefix, view) {
   }
 }
 function setSalesView(view)   { _setView3('sales', view); }
-function setBacklogView(view) { _setView3('backlog', view); }
+function setBacklogView(view) {
+  const allViews = ['chart', 'cat', 'summary', 'detail'];
+  allViews.forEach(v => {
+    const wrap = document.getElementById('backlog' + v.charAt(0).toUpperCase() + v.slice(1) + 'Wrap');
+    const btn  = document.getElementById('backlogBtn' + v.charAt(0).toUpperCase() + v.slice(1));
+    if (wrap) wrap.style.display = v === view ? '' : 'none';
+    if (btn) {
+      const active = v === view;
+      btn.style.background  = active ? 'var(--amber-glow)' : 'transparent';
+      btn.style.color       = active ? 'var(--amber)' : 'var(--muted)';
+      btn.style.borderColor = active ? 'var(--amber-dim)' : 'var(--border)';
+    }
+  });
+  if (view === 'chart'  && typeof _drawBacklogGauge  === 'function') setTimeout(() => _drawBacklogGauge(),  50);
+  if (view === 'cat'    && typeof _drawBacklogByCat   === 'function') setTimeout(() => _drawBacklogByCat(),  50);
+}
 function setBookingView(view) { _setView3('booking', view); }
 
 

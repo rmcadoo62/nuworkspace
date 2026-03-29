@@ -237,6 +237,16 @@ async function bulkMarkBilled() {
       if (error) console.error('bulkMarkBilled', error);
     }
   }
+  // Sync billedCatData (in-memory) and DB summary table
+  const deltaMap = {};
+  ids.forEach(id => {
+    const t = taskStore.find(x => x._id === id);
+    if (!t || !t.billedDate || !t.fixedPrice) return;
+    const key = t.billedDate.slice(0, 7) + '|' + (t.salesCat || 'Uncategorized');
+    deltaMap[key] = (deltaMap[key] || 0) + t.fixedPrice;
+  });
+  await _applyBilledCatDelta(deltaMap);
+
   bqSelected.clear();
   renderBillingQueue();
   renderReportsOverview();

@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="css/clients.css">
   <link rel="stylesheet" href="css/chatter.css">
   <link rel="stylesheet" href="css/scheduler.css">
+  <link rel="stylesheet" href="css/jobpack.css">
 </head>
 <body>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -591,6 +592,7 @@
           <div class="proj-tab" data-sub="sub-invoicing">&#x1F4C4; Invoicing</div>
           <div class="proj-tab" data-sub="sub-shipping" id="projShippingTab">&#x1F4E6; Shipping</div>
           <div class="proj-tab" data-sub="sub-chatter">&#x1F4AC; Chatter</div>
+          <div class="proj-tab" data-sub="sub-jobpack">&#x1F4CB; Job Pack</div>
           <div class="proj-tab" data-sub="sub-activity" id="projActivityTab" style="display:none">&#x1F4DD; Activity</div>
         </div>
       </div>
@@ -653,6 +655,9 @@
       </div>
       <div class="proj-sub" id="sub-shipping">
         <div id="shippingProjWrap" style="padding:24px 32px;max-width:900px"></div>
+      </div>
+      <div class="proj-sub" id="sub-jobpack">
+        <div id="jobPackWrap"></div>
       </div>
 
     </div>
@@ -1034,6 +1039,7 @@
   <script src="js/chatter.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/scheduler.js"></script>
+  <script src="js/jobpack.js"></script>
   <script src="js/supabase-patches.js"></script>
 
 </div><!-- /appShell -->
