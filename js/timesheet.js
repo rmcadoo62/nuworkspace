@@ -176,8 +176,17 @@ function getWeekStatusObj(key) {
   return match || null;
 }
 
-// Override isWeekLocked for proxy — paper employees never lock
-
+// Override isWeekLocked — uses proxyEmployee when set, and strips empId prefix from key
+function isWeekLocked(key) {
+  const emp = proxyEmployee || currentEmployee;
+  if (!emp) return false;
+  // key may be 'empId|weekDate' — strip to just the date for status lookup
+  const weekDate = key.includes('|') ? key.split('|')[1] : key;
+  const status = Object.values(tsWeekStatuses).find(s => s.weekKey === weekDate && s.employeeId === emp.id);
+  // Rejected timesheets are always editable so corrections can be made
+  if (!status) return false;
+  return status.status === 'submitted' || status.status === 'approved';
+}
 
 
 async function autoApproveProxyTimesheet() {
@@ -193,30 +202,36 @@ async function autoApproveProxyTimesheet() {
 
   const weekDateAA = key.includes('|') ? key.split('|')[1] : key;
 
-  // Save project rows
+  // DELETE existing entries then INSERT fresh — avoids duplicate rows
+  await sb.from('timesheet_entries')
+    .delete()
+    .eq('employee_id', emp.id)
+    .eq('week_start', weekDateAA);
+
+  // INSERT project rows
   for (const row of rows) {
     const hasHours = Object.values(row.hours).some(h=>h>0);
     if (!hasHours) continue;
-    await sb.from('timesheet_entries').upsert({
+    await sb.from('timesheet_entries').insert({
       week_start: weekDateAA, project_id: row.isOverhead ? null : (row.projId||null),
       task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName||null),
       hours_json: JSON.stringify(row.hours),
       employee_id: emp.id,
       is_overhead: row.isOverhead||false, overhead_cat: row.overheadCat||null,
-    }, {onConflict:'week_start,employee_id,task_name,project_id'});
+    });
   }
-  // Save pinned overhead rows
+  // INSERT overhead rows
   const ohData = tsData['oh_' + key] || {};
   for (const cat of OVERHEAD_CATS) {
     const hours = ohData[cat] || {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
     if (!Object.values(hours).some(h=>h>0)) continue;
-    await sb.from('timesheet_entries').upsert({
+    await sb.from('timesheet_entries').insert({
       week_start: weekDateAA, project_id: null,
       task_name: '⬡ ' + cat,
       hours_json: JSON.stringify(hours),
       employee_id: emp.id,
       is_overhead: true, overhead_cat: cat,
-    }, {onConflict:'week_start,employee_id,task_name,project_id'});
+    });
   }
 
   // Upsert as approved directly
@@ -244,7 +259,34 @@ async function autoApproveProxyTimesheet() {
   }
   toast('✓ Timesheet saved & approved for ' + emp.name);
   await loadTsStatuses();
-  updateTsStatusBadge(key);
+
+  // Re-fetch this employee's entries from DB into tsData so any
+  // subsequent re-renders (including realtime-triggered ones) show
+  // the correctly saved values — not stale in-memory data.
+  try {
+    const { data: freshRows } = await sb.from('timesheet_entries')
+      .select('*')
+      .eq('employee_id', emp.id)
+      .eq('week_start', weekDate2);
+    if (freshRows) {
+      tsData[key] = [];
+      const ohKey = 'oh_' + key;
+      tsData[ohKey] = {};
+      freshRows.forEach(r => {
+        if (r.is_overhead && r.overhead_cat) {
+          tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+        } else {
+          tsData[key].push({
+            _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
+            hours: JSON.parse(r.hours_json||'{}'),
+          });
+        }
+      });
+    }
+  } catch(e) { console.warn('Could not refresh timesheet entries after save:', e); }
+
+  renderTimesheet();
 }
 
 async function submitTimesheet() {
@@ -257,8 +299,9 @@ async function submitTimesheet() {
     await autoApproveProxyTimesheet();
     return;
   }
-  const key = getTsKey(tsWeekOffset);
-  const weekDate = key.includes('|') ? key.split('|')[1] : key;
+  // Build key using currentEmployee only — never proxy — this is the employee's own submit
+  const weekDate = getWeekKey(tsWeekOffset);
+  const key = currentEmployee.id + '|' + weekDate;
   const emp = currentEmployee;
   if (!emp) { toast('You must be signed in as an employee to submit'); return; }
 
@@ -279,8 +322,8 @@ async function submitTimesheet() {
     week_start: weekDate
   };
 
-  // Upsert
-  const existing = Object.values(tsWeekStatuses).find(s => s.weekKey === key && s.employeeId === emp.id);
+  // Upsert — strip empId prefix from key before comparing weekKey
+  const existing = Object.values(tsWeekStatuses).find(s => s.weekKey === weekDate && s.employeeId === emp.id);
   let saved;
   if (existing) {
     const { data } = await sb.from('timesheet_weeks').update(row).eq('id', existing.id).select().single();
@@ -315,16 +358,26 @@ async function submitTimesheet() {
 }
 
 async function saveTsWeekToSupabase(key) {
-  if (!sb || !currentEmployee) return;
-  const empId = currentEmployee.id;
+  if (!sb) return;
   const weekDate = key.includes('|') ? key.split('|')[1] : key;
+  const empIdFromKey = key.includes('|') ? key.split('|')[0] : null;
+  const empId = (empIdFromKey && empIdFromKey !== '__me__') ? empIdFromKey : currentEmployee?.id;
+  if (!empId) return;
 
-  // Save project rows
+  // DELETE all existing entries for this employee+week first, then INSERT fresh.
+  // This is the only reliable approach — upsert requires a unique DB constraint
+  // that may not exist, causing duplicate rows on every submit.
+  await sb.from('timesheet_entries')
+    .delete()
+    .eq('employee_id', empId)
+    .eq('week_start', weekDate);
+
+  // INSERT project rows
   const rows = tsData[key] || [];
   for (const row of rows) {
     const hasHours = Object.values(row.hours).some(h=>h>0);
-    if (!hasHours && !row._id) continue;
-    const payload = {
+    if (!hasHours) continue;
+    const { data } = await sb.from('timesheet_entries').insert({
       week_start: weekDate,
       project_id: row.projId || null,
       task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName || ''),
@@ -332,22 +385,16 @@ async function saveTsWeekToSupabase(key) {
       employee_id: empId,
       is_overhead: row.isOverhead || false,
       overhead_cat: row.overheadCat || null
-    };
-    if (row._id) {
-      await sb.from('timesheet_entries').update(payload).eq('id', row._id);
-    } else {
-      const { data } = await sb.from('timesheet_entries').insert(payload).select().single();
-      if (data) row._id = data.id;
-    }
+    }).select().single();
+    if (data) row._id = data.id;
   }
 
-  // Save pinned overhead rows
+  // INSERT overhead rows
   const ohData = tsData['oh_' + key] || {};
   for (const cat of OVERHEAD_CATS) {
     const hours = ohData[cat] || {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
-    const hasHours = Object.values(hours).some(h=>h>0);
-    if (!hasHours) continue;
-    const payload = {
+    if (!Object.values(hours).some(h=>h>0)) continue;
+    await sb.from('timesheet_entries').insert({
       week_start: weekDate,
       project_id: null,
       task_name: '⬡ ' + cat,
@@ -355,25 +402,16 @@ async function saveTsWeekToSupabase(key) {
       employee_id: empId,
       is_overhead: true,
       overhead_cat: cat
-    };
-    // Use upsert to avoid duplicates
-    await sb.from('timesheet_entries').upsert(payload,
-      {onConflict: 'week_start,employee_id,task_name,project_id'});
+    });
   }
 
-  // Sync actual_hours on project_info for each project touched this week
+  // Sync actual_hours on project_info
   const affectedProjIds = [...new Set((tsData[key]||[]).map(r => r.projId).filter(Boolean))];
   for (const projId of affectedProjIds) {
     if (typeof syncProjActualHours === 'function') await syncProjActualHours(projId);
   }
 }
 
-function isWeekLocked(key) {
-  const emp = currentEmployee;
-  if (!emp) return false;
-  const status = Object.values(tsWeekStatuses).find(s => s.weekKey === key && s.employeeId === emp.id);
-  return status && (status.status === 'submitted' || status.status === 'approved');
-}
 
 // getWeekStatusObj defined earlier
 
@@ -412,11 +450,11 @@ async function resetTimesheetToDraft(weekStatusId) {
   if (!ws) return;
   if (sb) {
     const { error } = await sb.from('timesheet_weeks')
-      .update({ status: 'draft', approved_by: null, submitted_by: null })
+      .update({ status: 'open', approved_by: null, submitted_by: null })
       .eq('id', weekStatusId);
     if (error) { toast('⚠ Could not reopen timesheet'); console.error(error); return; }
   }
-  ws.status = 'draft';
+  ws.status = 'open';
   ws.approvedBy = null;
   ws.submittedBy = null;
   toast('✓ Timesheet reopened — employee can now edit and resubmit');
@@ -430,11 +468,14 @@ function renderApprovalsPanel() {
 
   // Get submitted timesheets for this approver's employees
   const myEmployeeIds = employees.filter(e => e.approverId === currentEmployee?.id).map(e => e.id);
+
+
   const pending   = Object.values(tsWeekStatuses).filter(s => s.status === 'submitted' && myEmployeeIds.includes(s.employeeId));
   const rejected  = Object.values(tsWeekStatuses).filter(s => s.status === 'rejected'  && myEmployeeIds.includes(s.employeeId));
   const approved  = Object.values(tsWeekStatuses).filter(s => s.status === 'approved'  && myEmployeeIds.includes(s.employeeId))
     .sort((a,b) => b.weekKey.localeCompare(a.weekKey)).slice(0, 10); // show last 10 approved
-  const all = [...pending, ...rejected];
+  const draft    = Object.values(tsWeekStatuses).filter(s => (s.status === 'open' || s.status === 'draft') && myEmployeeIds.includes(s.employeeId));
+  const all = [...pending, ...rejected, ...draft];
 
   if (all.length === 0) {
     body.innerHTML = '<div class="approval-queue-title">Approvals <span style="font-size:14px;color:var(--muted);font-family:monospace;font-weight:400">(0 pending)</span></div>'+
@@ -463,14 +504,10 @@ function renderApprovalsPanel() {
   const cards = all.map(ws => {
     const emp = employees.find(e => e.id === ws.employeeId);
     if (!emp) return '';
-    const weekRows = Object.values(tsData).flat().filter(r => r.employeeId === ws.employeeId);
-    const hrs = Object.values(tsWeekStatuses).find(s => s.id === ws.id);
 
-    // Calculate hours for this week using empId|weekKey
     const storeKey = emp.id + '|' + ws.weekKey;
     let totalHrs = 0;
     (tsData[storeKey] || []).forEach(r => Object.values(r.hours).forEach(h => totalHrs += h));
-    // Add overhead
     const ohStore = tsData['oh_' + storeKey] || {};
     OVERHEAD_CATS.forEach(cat => Object.values(ohStore[cat] || {}).forEach(h => totalHrs += h));
 
@@ -478,40 +515,51 @@ function renderApprovalsPanel() {
       submitted: '<span class="ts-status-badge ts-status-submitted">⏳ Pending Review</span>',
       approved:  '<span class="ts-status-badge ts-status-approved">✓ Approved</span>',
       rejected:  '<span class="ts-status-badge ts-status-rejected">✗ Rejected</span>',
+      open:      '<span class="ts-status-badge ts-status-draft">✏ Awaiting Resubmit</span>',
+      draft:     '<span class="ts-status-badge ts-status-draft">✏ Awaiting Resubmit</span>',
     }[ws.status] || '';
 
     const isPending = ws.status === 'submitted';
+    const isActionable = isPending || ws.status === 'open' || ws.status === 'draft';
     const fmtWeek = (() => { const d = new Date(ws.weekKey+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); })();
+    const isSelf = emp.id === currentEmployee?.id;
+    const wsId = ws.id;
+    const empId = ws.employeeId;
+    const weekKey = ws.weekKey;
 
-    return '<div class="approval-card" id="acard-'+ws.id+'">'+
+    let actions = '';
+    if (isActionable) {
+      actions += '<button class="btn-approve" onclick="approveTimesheet(\''+wsId+'\')">&#x2713; Approve</button>';
+      actions += '<button class="btn-reject" onclick="showRejectInput(\''+wsId+'\')">&#x2717; Reject</button>';
+      actions += '<button class="btn-view-ts" style="border-color:rgba(124,92,191,.4);color:var(--purple)" onclick="editAndApprove(\''+wsId+'\',\''+empId+'\',\''+weekKey+'\')">&#x270F; Edit &amp; Approve</button>';
+    }
+    if (ws.status === 'approved' || ws.status === 'rejected') {
+      actions += '<button class="btn-reject" style="background:rgba(232,162,52,0.15);color:var(--amber);border-color:rgba(232,162,52,0.4)" onclick="resetTimesheetToDraft(\''+wsId+'\')">&#x21A9; Reopen</button>';
+    }
+    actions += '<button class="btn-view-ts" onclick="viewEmployeeTimesheet(\''+empId+'\',\''+weekKey+'\')">View</button>';
+
+    return '<div class="approval-card" id="acard-'+wsId+'">'+
       '<div class="approval-emp-av" style="background:'+emp.color+'">'+emp.initials+'</div>'+
       '<div class="approval-info">'+
-        '<div class="approval-emp-name">'+emp.name+'</div>'+
-        '<div class="approval-week">Week of '+fmtWeek+' · '+statusBadge+
-          (ws.rejectionNote ? ' <span style="color:var(--muted);font-size:11px">· "'+ws.rejectionNote+'"</span>' : '')+
+        '<div class="approval-emp-name">'+emp.name+(isSelf ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(You)</span>' : '')+'</div>'+
+        '<div class="approval-week">Week of '+fmtWeek+' &middot; '+statusBadge+
+          (ws.rejectionNote ? ' <span style="color:var(--muted);font-size:11px">&middot; "'+ws.rejectionNote+'"</span>' : '')+
         '</div>'+
       '</div>'+
       '<span class="approval-hours">'+totalHrs.toFixed(1)+'h</span>'+
-      '<div class="approval-actions">'+
-        (isPending ? 
-          '<button class="btn-approve" onclick="approveTimesheet(\''+ws.id+'\')">&#x2713; Approve</button>'+
-          '<button class="btn-reject" onclick="showRejectInput(\''+ws.id+'\')">&#x2717; Reject</button>' 
-        : '')+
-        (ws.status === 'approved' ?
-          '<button class="btn-reject" style="background:rgba(232,162,52,0.15);color:var(--amber);border-color:rgba(232,162,52,0.4)" onclick="resetTimesheetToDraft(\''+ws.id+'\')">↩ Reopen</button>'
-        : '')+
-        '<button class="btn-view-ts" onclick="viewEmployeeTimesheet(\''+ws.employeeId+'\',\''+ws.weekKey+'\')">View</button>'+
-      '</div>'+
-      '<div class="reject-note-wrap" id="reject-wrap-'+ws.id+'">'+
-        '<input class="reject-note-input" id="reject-note-'+ws.id+'" placeholder="Rejection reason (optional)…" />'+
-        '<button class="btn-reject" onclick="confirmReject(\''+ws.id+'\')">Send</button>'+
-        '<button class="btn-view-ts" onclick="hideRejectInput(\''+ws.id+'\')">Cancel</button>'+
+      '<div class="approval-actions">'+actions+'</div>'+
+      '<div class="reject-note-wrap" id="reject-wrap-'+wsId+'">'+
+        '<input class="reject-note-input" id="reject-note-'+wsId+'" placeholder="Rejection reason (optional)\u2026" />'+
+        '<button class="btn-reject" onclick="confirmReject(\''+wsId+'\')">Send</button>'+
+        '<button class="btn-view-ts" onclick="hideRejectInput(\''+wsId+'\')">Cancel</button>'+
       '</div>'+
     '</div>';
   }).join('');
 
+
   body.innerHTML = '<div class="approval-queue-title">Approvals <span style="font-size:14px;color:var(--muted);font-family:monospace;font-weight:400">('+pending.length+' pending)</span></div>' + cards;
 }
+
 
 function showRejectInput(wsId) {
   const wrap = document.getElementById('reject-wrap-'+wsId);
@@ -545,7 +593,7 @@ async function confirmReject(wsId) {
   updateApprovalsBadge();
 }
 
-function viewEmployeeTimesheet(empId, weekKey) {
+async function viewEmployeeTimesheet(empId, weekKey) {
   const offset = (() => {
     const target = new Date(weekKey+'T00:00:00');
     const thisWeek = getWeekMonday(0);
@@ -561,6 +609,180 @@ function viewEmployeeTimesheet(empId, weekKey) {
   document.getElementById('topbarName').textContent = 'Timesheet';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-timesheet').classList.add('active');
+
+  // Always reload fresh entries from DB so the grid shows the true saved
+  // state — prevents stale in-memory data from masking corrections after
+  // a reject/reopen cycle (the "reverts to old hours" bug).
+  if (sb && empId) {
+    try {
+      const storeKey = empId + '|' + weekKey;
+      const ohKey = 'oh_' + storeKey;
+      const { data: freshRows } = await sb.from('timesheet_entries')
+        .select('*')
+        .eq('employee_id', empId)
+        .eq('week_start', weekKey);
+      if (freshRows) {
+        tsData[storeKey] = [];
+        tsData[ohKey] = {};
+        freshRows.forEach(r => {
+          if (r.is_overhead && r.overhead_cat) {
+            tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+          } else {
+            tsData[storeKey].push({
+              _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+              isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
+              hours: JSON.parse(r.hours_json||'{}'),
+            });
+          }
+        });
+      }
+    } catch(e) { console.warn('Could not refresh timesheet entries for view:', e); }
+  }
+
+  renderTimesheet();
+}
+
+
+
+
+// ===== EDIT & APPROVE =====
+// Opens the employee's timesheet in editable proxy mode with a Save & Approve button
+async function editAndApprove(wsId, empId, weekKey) {
+  const emp = employees.find(e => e.id === empId);
+  if (!emp) return;
+
+  // Set proxy and navigate to that week
+  proxyEmployee = emp;
+  const offset = (() => {
+    const target = new Date(weekKey+'T00:00:00');
+    const thisWeek = getWeekMonday(0);
+    return Math.round((target - thisWeek) / (7*24*60*60*1000));
+  })();
+  tsWeekOffset = offset;
+
+  // Switch to timesheet panel
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const navItem = document.getElementById('navTimesheetItem');
+  if (navItem) navItem.classList.add('active');
+  document.getElementById('topbarName').textContent = 'Timesheet';
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-timesheet').classList.add('active');
+
+  // Load fresh data for this employee+week
+  try {
+    const storeKey = empId + '|' + weekKey;
+    const ohKey = 'oh_' + storeKey;
+    const { data: freshRows } = await sb.from('timesheet_entries')
+      .select('*').eq('employee_id', empId).eq('week_start', weekKey);
+    if (freshRows) {
+      tsData[storeKey] = [];
+      tsData[ohKey] = {};
+      freshRows.forEach(r => {
+        if (r.is_overhead && r.overhead_cat) {
+          tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+        } else {
+          tsData[storeKey].push({
+            _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
+            hours: JSON.parse(r.hours_json||'{}'),
+          });
+        }
+      });
+    }
+  } catch(e) { console.warn('editAndApprove reload error:', e); }
+
+  // Store wsId for the Save & Approve button
+  window._editApproveWsId = wsId;
+  window._editApproveEmpId = empId;
+  window._editApproveWeekKey = weekKey;
+
+  renderTimesheet();
+
+  // Inject Save & Approve button into the status bar
+  setTimeout(() => {
+    const key = empId + '|' + weekKey;
+    const badgeId = 'ts-status-badge-' + key.replace(/[^a-z0-9]/gi,'-');
+    const badgeEl = document.getElementById(badgeId);
+    if (badgeEl) {
+      badgeEl.insertAdjacentHTML('afterend',
+        '<button class="ts-add-row-btn" style="background:var(--green);margin-left:8px" onclick="saveAndApproveForEmployee()">&#x2713; Save &amp; Approve</button>'
+      );
+    }
+  }, 100);
+}
+
+async function saveAndApproveForEmployee() {
+  const wsId    = window._editApproveWsId;
+  const empId   = window._editApproveEmpId;
+  const weekKey = window._editApproveWeekKey;
+  if (!wsId || !empId || !weekKey || !sb) return;
+
+  const key = empId + '|' + weekKey;
+  toast('Saving…');
+
+  // Delete existing entries and insert corrected ones
+  await sb.from('timesheet_entries').delete().eq('employee_id', empId).eq('week_start', weekKey);
+
+  const rows = tsData[key] || [];
+  for (const row of rows) {
+    if (!Object.values(row.hours).some(h=>h>0)) continue;
+    await sb.from('timesheet_entries').insert({
+      week_start: weekKey,
+      project_id: row.projId || null,
+      task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName || ''),
+      hours_json: JSON.stringify(row.hours),
+      employee_id: empId,
+      is_overhead: row.isOverhead || false,
+      overhead_cat: row.overheadCat || null,
+    });
+  }
+  const ohData = tsData['oh_' + key] || {};
+  for (const cat of OVERHEAD_CATS) {
+    const hours = ohData[cat] || {};
+    if (!Object.values(hours).some(h=>h>0)) continue;
+    await sb.from('timesheet_entries').insert({
+      week_start: weekKey, project_id: null,
+      task_name: '⬡ ' + cat, hours_json: JSON.stringify(hours),
+      employee_id: empId, is_overhead: true, overhead_cat: cat,
+    });
+  }
+
+  // Mark as approved
+  await sb.from('timesheet_weeks').update({
+    status: 'approved',
+    approved_by: currentEmployee ? currentEmployee.id : null,
+    rejection_note: null,
+  }).eq('id', wsId);
+
+  // Update local cache
+  if (tsWeekStatuses[wsId]) {
+    tsWeekStatuses[wsId].status = 'approved';
+    tsWeekStatuses[wsId].approvedBy = currentEmployee?.id || '';
+  }
+
+  // Clear edit state and return to approvals
+  window._editApproveWsId = null;
+  proxyEmployee = null;
+  tsWeekOffset = 0;
+
+  toast('\u2713 Timesheet corrected and approved');
+  await loadTsStatuses();
+  openApprovalsPanel(document.getElementById('navApprovals'));
+  updateApprovalsBadge();
+}
+
+
+async function forceUnlockTimesheet(wsId) {
+  if (!confirm('Unlock this timesheet for editing? You can re-approve after corrections.')) return;
+  const ws = Object.values(tsWeekStatuses).find(s => s.id === wsId);
+  if (!ws || !sb) return;
+  const { error } = await sb.from('timesheet_weeks')
+    .update({ status: 'open', approved_by: null })
+    .eq('id', wsId);
+  if (error) { toast('Could not unlock timesheet'); return; }
+  ws.status = 'open';
+  ws.approvedBy = null;
+  toast('\u2713 Timesheet unlocked — you can now edit and re-approve');
   renderTimesheet();
 }
 

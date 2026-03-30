@@ -281,6 +281,36 @@ function showEmpProfile(empId, annivOffset) {
     return { start: annivStart, end: annivEnd };
   })();
   const used = getTimeOffUsed(empId, year, _annivRange?.start, _annivRange?.end);
+  // Holiday pills are purely a timesheet fact — scan tsData directly for the calendar year,
+  // independent of hire date or anniversary range.
+  const calYearHolidayDays = (() => {
+    const result = [];
+    const yearStart = new Date(year, 0, 1);
+    const yearEnd   = new Date(year + 1, 0, 1);
+    Object.keys(tsData).forEach(key => {
+      if (!key.startsWith('oh_' + empId + '|')) return;
+      const weekKey = key.split('|')[1];
+      if (!weekKey) return;
+      const weekDate = new Date(weekKey + 'T00:00:00');
+      const weekEnd  = new Date(weekDate); weekEnd.setDate(weekDate.getDate() + 6);
+      if (weekEnd < yearStart || weekDate >= yearEnd) return;
+      const oh = tsData[key] || {};
+      const holMerged = {};
+      ['Holiday', 'Snow Day'].forEach(cat => {
+        Object.entries(oh[cat] || {}).forEach(([di, hrs]) => {
+          holMerged[di] = (holMerged[di] || 0) + (parseFloat(hrs) || 0);
+        });
+      });
+      Object.entries(holMerged).forEach(([di, h]) => {
+        if (h <= 0) return;
+        const d = new Date(weekDate);
+        d.setDate(weekDate.getDate() + parseInt(di));
+        if (d < yearStart || d >= yearEnd) return;
+        result.push({ date: d.toISOString().slice(0, 10), hrs: h });
+      });
+    });
+    return result;
+  })();
   const vacAllotment = getVacationAllotment(emp.hireDate);
   const vacAccrued = getQuarterlyAccrual(emp.hireDate, _annivRange?.start);
   const vacOpeningBalance = emp.vacBank || 0;
@@ -827,11 +857,11 @@ function showEmpProfile(empId, annivOffset) {
       <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
           <div style="font-size:12px;font-weight:600;color:var(--text)">Holidays</div>
-          <div style="font-size:11px;color:var(--muted)">${used.holiday.toFixed(1)} hrs logged</div>
+          <div style="font-size:11px;color:var(--muted)">${calYearHolidayDays.reduce((s,d)=>s+d.hrs,0).toFixed(1)} hrs logged</div>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
           ${holidays.filter(h=>h.date.startsWith(String(year))).map(h => {
-            const taken = (used.holidayDays||[]).find(d => d.date === h.date);
+            const taken = calYearHolidayDays.find(d => d.date === h.date);
             return taken
               ? `<span title="${taken.hrs}hrs logged" style="font-size:10px;padding:3px 8px;border-radius:8px;background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);color:#4caf7d">✓ ${h.name}</span>`
               : `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)">${h.name}</span>`;
@@ -839,7 +869,7 @@ function showEmpProfile(empId, annivOffset) {
         </div>
         ${(() => {
           const knownDates = new Set(holidays.map(h => h.date));
-          const extraDays = (used.holidayDays||[]).filter(d => !knownDates.has(d.date));
+          const extraDays = calYearHolidayDays.filter(d => !knownDates.has(d.date));
           if (extraDays.length === 0) return '';
           return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
             <div style="font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--amber);margin-bottom:6px">Extra Paid Days</div>
