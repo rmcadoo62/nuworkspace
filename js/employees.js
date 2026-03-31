@@ -78,20 +78,61 @@ function getVacationAllotment(hireDateStr) {
   return Math.min(120, 80 + Math.floor(yearsWorked - 5) * 8);
 }
 
+function getFirstAnniversary(hireDateStr) {
+  if (!hireDateStr) return null;
+  const hire = new Date(hireDateStr + 'T00:00:00');
+  const anniv = new Date(hire);
+  anniv.setFullYear(hire.getFullYear() + 1);
+  return anniv;
+}
+
+function isInFirstYear(hireDateStr) {
+  if (!hireDateStr) return false;
+  const firstAnniv = getFirstAnniversary(hireDateStr);
+  return firstAnniv > new Date();
+}
+
 function getQuarterlyAccrual(hireDateStr, annivStart) {
-  // Returns how much vacation has accrued so far in the current anniversary year
-  // based on quarterly drops from the anniversary date
-  const allotment = getVacationAllotment(hireDateStr);
-  const dropAmt = allotment / 4;
+  // Returns how much vacation has accrued so far in the current anniversary year.
+  // Rule: NO vacation accrues during the first year of employment.
+  // On the first anniversary the full allotment drops at once.
+  // From year 2 onward, quarterly drops apply.
   const today = new Date();
 
+  if (!hireDateStr) return 0;
+
+  // Still in first year — no vacation earned yet
+  if (isInFirstYear(hireDateStr)) return 0;
+
+  const allotment = getVacationAllotment(hireDateStr);
+  const dropAmt = allotment / 4;
+
   if (!annivStart) {
-    // Fallback to calendar quarters if no anniv date
+    // Fallback: if no annivStart, use calendar quarters but only after first anniversary
     const quarter = Math.floor(today.getMonth() / 3) + 1;
     return dropAmt * quarter;
   }
 
-  // Count how many quarterly drops have occurred since annivStart up to today
+  // Is this the first anniversary year? (annivStart === first anniversary date)
+  const firstAnniv = getFirstAnniversary(hireDateStr);
+  const isFirstAnnivYear = Math.abs(annivStart - firstAnniv) < 24 * 60 * 60 * 1000; // within 1 day
+
+  if (isFirstAnnivYear) {
+    // On first anniversary, full allotment drops at once (not quarterly)
+    // Then quarterly drops begin
+    if (today < firstAnniv) return 0; // before anniversary — nothing yet
+    // Full allotment on anniversary day, then quarterly drops after
+    let accrued = allotment; // full drop on anniversary
+    for (let q = 1; q <= 3; q++) { // 3 more quarterly drops in year 2
+      const dropDate = new Date(annivStart);
+      dropDate.setMonth(dropDate.getMonth() + (q * 3));
+      if (dropDate <= today) accrued += dropAmt;
+    }
+    // Cap at allotment (can't accrue more than allotted in one year)
+    return Math.min(allotment, accrued);
+  }
+
+  // Year 2+ — standard quarterly drops from annivStart
   let accrued = 0;
   for (let q = 1; q <= 4; q++) {
     const dropDate = new Date(annivStart);
@@ -657,9 +698,20 @@ function showEmpProfile(empId, annivOffset) {
         ${isPartTime ? '<div style="display:none">' : '<div>'}
           <div style="display:flex;justify-content:space-between;align-items:baseline">
             <div style="font-size:12px;font-weight:600;color:var(--text)">Vacation</div>
-            <div style="font-size:13px;font-weight:600;color:var(--blue)">${annivOffset === 0 ? vacBankBalance.toFixed(2)+'h bank balance' : (used.vacation + sickOverage).toFixed(1)+'h used'}</div>
+            <div style="font-size:13px;font-weight:600;color:${isInFirstYear(emp.hireDate) ? 'var(--muted)' : 'var(--blue)'}">
+              ${isInFirstYear(emp.hireDate) && annivOffset === 0
+                ? '0h — first year'
+                : annivOffset === 0 ? vacBankBalance.toFixed(2)+'h bank balance' : (used.vacation + sickOverage).toFixed(1)+'h used'}
+            </div>
           </div>
-          ${(() => {
+          ${isInFirstYear(emp.hireDate) && annivOffset === 0 ? (() => {
+            const firstAnniv = getFirstAnniversary(emp.hireDate);
+            const fmtAnniv = firstAnniv ? firstAnniv.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) : '';
+            return '<div style="margin-top:8px;padding:10px 12px;background:rgba(232,162,52,0.08);border:1px solid rgba(232,162,52,0.25);border-radius:8px;font-size:12px;color:var(--amber)">'+
+              '⏳ No vacation accrues during the first year of employment.<br>'+
+              '<b>80h will be available on ' + fmtAnniv + '</b> (first anniversary).'+
+            '</div>';
+          })() : (() => {
             // Build quarterly drop visualization
             const totalAvail = annivOffset === 0 ? vacOpeningBalance + vacAllotment : vacAllotment;
             const usedHrs = used.vacation + sickOverage;
@@ -1013,8 +1065,7 @@ async function saveEmployee() {
     email: data.email, phone: data.phone, personal_email: _personalEmail||null,
     color: data.color,
     hire_date: data.hireDate || null,
-    sick_bank: data.sickBank,
-    vac_bank: data.vacBank,
+    // sick_bank and vac_bank are managed directly in Supabase — never overwrite from the app
     role_id: _roleId || null,
     employment_type: _empType,
     is_active: _isActive,
