@@ -326,7 +326,7 @@ function renderTasksPanel(projId) {
     const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : loggedH > 0 ? 'var(--blue)' : 'var(--muted)';
 
     return `
-      <div class="itt-row" data-task-id="${t._id}" draggable="true" style="${t.status==='billed'?'background:rgba(192,132,252,0.18);border-color:rgba(192,132,252,0.45);':t.status==='cancelled'?'background:rgba(232,162,52,0.15);border-color:rgba(232,162,52,0.45);border-left:3px solid #e8a234;':t.status==='complete'||t.done?'background:rgba(120,120,130,0.16);border-color:rgba(120,120,130,0.35);':t.status==='inprogress'?'background:rgba(46,158,98,0.10);border-color:rgba(46,158,98,0.30);':''}"
+      <div class="itt-row" data-task-id="${t._id}" draggable="true" style="${t.status==='billed'?'background:rgba(192,132,252,0.25);border-color:rgba(192,132,252,0.55);':t.status==='cancelled'?'background:rgba(232,162,52,0.25);border-color:rgba(232,162,52,0.55);border-left:3px solid #e8a234;':t.status==='complete'||t.done?'background:rgba(120,120,130,0.25);border-color:rgba(120,120,130,0.45);':t.status==='inprogress'?'background:rgba(46,158,98,0.25);border-color:rgba(46,158,98,0.45);':''}"
         ondragstart="taskDragStart(event,'${t._id}')"
         ondragover="taskDragOver(event)"
         ondragleave="taskDragLeave(event)"

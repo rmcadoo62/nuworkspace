@@ -264,7 +264,7 @@ function updateTsSummary(key) {
   s('ts-sum-avg',   days.length > 0 ? (grand / 5).toFixed(1) + 'h' : '0h');
 }
 
-async function openTimesheetPanel(el) {
+function openTimesheetPanel(el) {
   if (currentEmployee && currentEmployee.isOwner) { toast('Timesheets are not tracked for owners'); return; }
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
@@ -273,86 +273,17 @@ async function openTimesheetPanel(el) {
   document.getElementById('topbarName').textContent = 'Timesheet';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-timesheet').classList.add('active');
-
-  // Reset to current week when opening own timesheet
-  tsWeekOffset = 0;
-
-  // Always reload fresh entries from DB so edits after a reject/reopen
-  // start from the true saved state, not stale in-memory data
-  if (sb && currentEmployee) {
-    try {
-      const emp = currentEmployee; // explicitly own employee, never proxy
-      const weekDate = getWeekKey(tsWeekOffset);
-      const storeKey = emp.id + '|' + weekDate;
-      const ohKey = 'oh_' + storeKey;
-      const { data: freshRows } = await sb.from('timesheet_entries')
-        .select('*')
-        .eq('employee_id', emp.id)
-        .eq('week_start', weekDate);
-      if (freshRows) {
-        tsData[storeKey] = [];
-        tsData[ohKey] = {};
-        freshRows.forEach(r => {
-          if (r.is_overhead && r.overhead_cat) {
-            tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
-          } else {
-            tsData[storeKey].push({
-              _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
-              isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
-              hours: JSON.parse(r.hours_json||'{}'),
-            });
-          }
-        });
-      }
-    } catch(e) { console.warn('openTimesheetPanel: could not reload fresh data:', e); }
-  }
-
   renderTimesheet();
 }
 
-async function navTsWeek(dir) {
+function navTsWeek(dir) {
   tsWeekOffset += dir;
-  // Pass the active employee explicitly — proxy or own
-  await reloadTsWeek(proxyEmployee || currentEmployee);
   renderTimesheet();
 }
 
-async function goTsToday() {
+function goTsToday() {
   tsWeekOffset = 0;
-  await reloadTsWeek(proxyEmployee || currentEmployee);
   renderTimesheet();
-}
-
-// Reload current week's entries fresh from DB for a specific employee
-// Always pass the employee explicitly — never rely on global proxy state
-async function reloadTsWeek(emp) {
-  if (!sb) return;
-  emp = emp || currentEmployee;
-  if (!emp) return;
-  try {
-    const weekDate = getWeekKey(tsWeekOffset);
-    const storeKey = emp.id + '|' + weekDate;
-    const ohKey = 'oh_' + storeKey;
-    const { data: freshRows } = await sb.from('timesheet_entries')
-      .select('*')
-      .eq('employee_id', emp.id)
-      .eq('week_start', weekDate);
-    if (freshRows) {
-      tsData[storeKey] = [];
-      tsData[ohKey] = {};
-      freshRows.forEach(r => {
-        if (r.is_overhead && r.overhead_cat) {
-          tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
-        } else {
-          tsData[storeKey].push({
-            _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
-            isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
-            hours: JSON.parse(r.hours_json||'{}'),
-          });
-        }
-      });
-    }
-  } catch(e) { console.warn('reloadTsWeek error:', e); }
 }
 
 function renderTimesheet() {
@@ -598,17 +529,10 @@ function renderTimesheet() {
       ? '<button class="ts-add-row-btn" style="background:var(--blue)" onclick="submitTimesheet()">Submit for Approval</button>'
       : '';
 
-    // Managers/approvers can force-unlock any approved timesheet to correct errors
-    const emp = proxyEmployee || currentEmployee;
-    const canForceUnlock = isApprover && ws && ws.status === 'approved';
-    const forceUnlockBtn = canForceUnlock
-      ? '<button class="ts-add-row-btn" style="background:rgba(232,162,52,0.2);color:var(--amber);border:1px solid var(--amber-dim);margin-left:8px" onclick="forceUnlockTimesheet(\''+ws.id+'\')">↩ Unlock to Edit</button>'
-      : '';
-
     const badgeId = 'ts-status-badge-' + key.replace(/[^a-z0-9]/gi,'-');
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-bottom:40px">';
     html += '<div id="' + badgeId + '">' + statusHTML + '</div>';
-    html += '<div>' + submitBtn + forceUnlockBtn + '</div>';
+    html += '<div>' + submitBtn + '</div>';
     html += '</div>';
 
     tsWrap.insertAdjacentHTML('beforeend', html);
@@ -736,8 +660,6 @@ function toggleSchedAccess(empId, hasAccess) {
 }
 
 async function afterLogin(user) {
-  proxyEmployee = null; // always clear proxy on any login
-  tsWeekOffset = 0;     // reset to current week
   currentUser = user;
   // Match to employee record by email
   currentEmployee = employees.find(e => e.email && e.email.toLowerCase() === user.email.toLowerCase()) || null;
@@ -782,7 +704,7 @@ async function afterLogin(user) {
 
 async function doLogout() {
   await sb.auth.signOut();
-  currentUser = null; currentEmployee = null; isApprover = false; proxyEmployee = null; tsWeekOffset = 0;
+  currentUser = null; currentEmployee = null; isApprover = false;
   document.getElementById('appShell').style.display = 'none';
   document.getElementById('sidebarUserBadge').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
@@ -800,22 +722,15 @@ window.setTsHours = async function(key, rowIdx, dayIdx, val) {
   _origSetTsHours(key, rowIdx, dayIdx, val);
   const row = tsData[key]?.[rowIdx];
   if (!row) return;
-  // The key is empId|weekDate — extract both from it directly
-  // This is the ONLY safe way: never trust global proxy state for saves
-  const keyParts = key.includes('|') ? key.split('|') : [null, key];
-  const weekStart = keyParts[1];
-  const empIdFromKey = keyParts[0];
-  const emp = (empIdFromKey && empIdFromKey !== '__me__')
-    ? (employees.find(e => e.id === empIdFromKey) || currentEmployee)
-    : currentEmployee;
-  // Just update hours on the existing row if we have an id
-  // saveTsWeekToSupabase handles full delete+insert on submit
   if (row._id) {
-    await sb.from('timesheet_entries')
-      .update({ hours_json: JSON.stringify(row.hours) })
-      .eq('id', row._id);
+    await dbUpdate('timesheet_entries', row._id, { hours_json: JSON.stringify(row.hours) });
+  } else {
+    const saved = await dbInsert('timesheet_entries', {
+      week_start: key, project_id: row.projId, task_name: row.taskName,
+      hours_json: JSON.stringify(row.hours),
+    });
+    if (saved) row._id = saved.id;
   }
-  // If no _id yet, the row will be saved properly on submit
 };
 
 
@@ -838,6 +753,7 @@ function setupRealtime() {
         if (activeSub) {
           const sid = activeSub.id;
           if (sid === 'sub-info') renderInfoSheet(activeProjectId);
+          else if (sid === 'sub-tasks') renderTasksPanel(activeProjectId);
           else if (sid === 'sub-expenses') renderExpensesPanel(activeProjectId);
         }
       }

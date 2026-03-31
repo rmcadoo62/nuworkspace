@@ -31,7 +31,7 @@ function renderInfoSheet(projId) {
 
   const statusMap = {
     'jobprep':{label:'Job Preparation',bg:'rgba(167,139,250,0.15)',color:'#a78bfa',dot:'#a78bfa'},
-    'pending':{label:'Pending',bg:'rgba(232,162,52,0.15)',color:'#e8a234',dot:'#e8a234'},
+    'pending':{label:'Pending',bg:'rgba(232,162,52,0.25)',color:'#e8a234',dot:'#e8a234'},
     'pendretest':{label:'Pending - ReTest',bg:'rgba(251,146,60,0.15)',color:'#fb923c',dot:'#fb923c'},
     'active':{label:'Active',bg:'rgba(76,175,125,0.15)',color:'#4caf7d',dot:'#4caf7d'},
     'onhold':{label:'On Hold',bg:'rgba(122,122,133,0.15)',color:'#7a7a85',dot:'#7a7a85'},
@@ -504,13 +504,13 @@ async function changeProjectStatus(projId, selectEl) {
 
     const SM = {
     jobprep:     {bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
-    pending:     {bg:'rgba(232,162,52,0.15)', color:'#e8a234'},
+    pending:     {bg:'rgba(232,162,52,0.25)', color:'#e8a234'},
     pendretest:  {bg:'rgba(251,146,60,0.15)', color:'#fb923c'},
     active:      {bg:'rgba(76,175,125,0.15)', color:'#4caf7d'},
     onhold:      {bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
     complete:    {bg:'rgba(91,156,246,0.15)', color:'#5b9cf6'},
     testcomplete:{bg:'rgba(76,175,125,0.15)', color:'#4caf7d'},
-    closing:     {bg:'rgba(232,162,52,0.15)', color:'#e8a234'},
+    closing:     {bg:'rgba(232,162,52,0.25)', color:'#e8a234'},
     closed:      {bg:'rgba(85,85,102,0.15)',  color:'#555566'},
   };
 
@@ -2631,7 +2631,7 @@ function renderInfoTasks(projId, filter) {
       const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
         `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
       return `
-        <div class="itt-row" data-task-id="${t._id}" draggable="true" style="animation:fadeUp 0.2s ease ${i*0.03}s both;${t.status==='billed'?'background:rgba(192,132,252,0.18);border-color:rgba(192,132,252,0.45);':t.status==='complete'||t.done?'background:rgba(120,120,130,0.16);border-color:rgba(120,120,130,0.35);':t.status==='inprogress'?'background:rgba(46,158,98,0.10);border-color:rgba(46,158,98,0.30);':''}"
+        <div class="itt-row" data-task-id="${t._id}" draggable="true" style="animation:fadeUp 0.2s ease ${i*0.03}s both;${t.status==='billed'?'background:rgba(192,132,252,0.25);border-color:rgba(192,132,252,0.55);':t.status==='complete'||t.done?'background:rgba(120,120,130,0.25);border-color:rgba(120,120,130,0.45);':t.status==='inprogress'?'background:rgba(46,158,98,0.25);border-color:rgba(46,158,98,0.45);':''}"
           ondragstart="taskDragStart(event,'${t._id}')"
           ondragover="taskDragOver(event)"
           ondragleave="taskDragLeave(event)"
@@ -2838,7 +2838,6 @@ function switchProjTab(subId) {
   if (subId === 'sub-activity' && activeProjectId) renderActivityPanel(activeProjectId);
   if (subId === 'sub-invoicing' && activeProjectId) renderInvoicingPanel(activeProjectId);
   if (subId === 'sub-shipping' && activeProjectId) renderShippingProjTab(activeProjectId);
-  if (subId === 'sub-jobpack'  && activeProjectId) renderJobPackPanel(activeProjectId);
 }
 
 function renderProjStickyHeader(projId) {
@@ -2869,13 +2868,13 @@ function renderProjStickyHeader(projId) {
   const info = projectInfo[projId] || {};
   const statusMap = {
     jobprep:{label:'Job Preparation',bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
-    pending:{label:'Pending',bg:'rgba(232,162,52,0.15)',color:'#e8a234'},
+    pending:{label:'Pending',bg:'rgba(232,162,52,0.25)',color:'#e8a234'},
     pendretest:{label:'Pending - ReTest',bg:'rgba(251,146,60,0.15)',color:'#fb923c'},
     active:{label:'Active',bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
     onhold:{label:'On Hold',bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
     complete:{label:'Complete',bg:'rgba(91,156,246,0.15)',color:'#5b9cf6'},
     testcomplete:{label:'Testing Complete',bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
-    closing:{label:'Closing (Pending)',bg:'rgba(232,162,52,0.15)',color:'#e8a234'},
+    closing:{label:'Closing (Pending)',bg:'rgba(232,162,52,0.25)',color:'#e8a234'},
     closed:{label:'Closed',bg:'rgba(50,50,60,0.15)',color:'#555566'},
   };
   const st = statusMap[info.status] || statusMap.active;
