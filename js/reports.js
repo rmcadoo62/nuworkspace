@@ -209,21 +209,56 @@ function confirmBulkBill() {
     return;
   }
   const selVal = selTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
-  showConfirmModal(
-    `Mark ${bqSelected.size} task${bqSelected.size!==1?'s':''} (${fmt$(selVal)}) as Billed? This will update their status across all projects.`,
-    bulkMarkBilled,
-    { title: 'Confirm Billing', btnTxt: 'Yes, Mark Billed', color: '#c084fc', icon: '&#x1F4B3;' }
-  );
+  const today = new Date().toISOString().split('T')[0];
+
+  // Build custom modal with date picker
+  let ov = document.getElementById('bulkBillDateOverlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'bulkBillDateOverlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px 32px;width:420px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.4)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+        <span style="font-size:22px">&#x1F4B3;</span>
+        <div style="font-size:17px;font-weight:700;color:var(--text)">Confirm Billing</div>
+      </div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">
+        Mark <strong style="color:var(--text)">${bqSelected.size} task${bqSelected.size!==1?'s':''}</strong>
+        (<strong style="color:#4caf7d">${fmt$(selVal)}</strong>) as Billed?
+        This will update their status across all projects.
+      </div>
+      <div style="margin-bottom:22px">
+        <label style="display:block;font-size:11px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin-bottom:7px">Billed Date</label>
+        <input type="date" id="bulkBillDateInput" value="${today}"
+          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box">
+        <div style="font-size:11px;color:var(--muted);margin-top:5px">&#x26A0; Change this to bill into a prior month (e.g. month-end catch-up)</div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button onclick="document.getElementById('bulkBillDateOverlay').style.display='none'"
+          style="padding:8px 18px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;cursor:pointer">Cancel</button>
+        <button onclick="bulkMarkBilled(document.getElementById('bulkBillDateInput').value)"
+          style="padding:8px 22px;border-radius:7px;border:none;background:#c084fc;color:#fff;font-size:13px;font-weight:600;cursor:pointer">&#x2714; Yes, Mark Billed</button>
+      </div>
+    </div>
+  `;
+  ov.style.display = 'flex';
 }
 
-async function bulkMarkBilled() {
+async function bulkMarkBilled(billedDate) {
+  const usedDate = billedDate || new Date().toISOString().split('T')[0];
+  const ov = document.getElementById('bulkBillDateOverlay');
+  if (ov) ov.style.display = 'none';
+
   const ids = [...bqSelected];
   const today = new Date().toISOString().split('T')[0];
   ids.forEach(id => {
     const t = taskStore.find(x => x._id === id);
     if (!t) return;
     t.status = 'billed';
-    if (!t.billedDate)    t.billedDate    = today;
+    t.billedDate    = usedDate;
     if (!t.completedDate) t.completedDate = today;
   });
   if (sb) {
@@ -237,16 +272,6 @@ async function bulkMarkBilled() {
       if (error) console.error('bulkMarkBilled', error);
     }
   }
-  // Sync billedCatData (in-memory) and DB summary table
-  const deltaMap = {};
-  ids.forEach(id => {
-    const t = taskStore.find(x => x._id === id);
-    if (!t || !t.billedDate || !t.fixedPrice) return;
-    const key = t.billedDate.slice(0, 7) + '|' + (t.salesCat || 'Uncategorized');
-    deltaMap[key] = (deltaMap[key] || 0) + t.fixedPrice;
-  });
-  await _applyBilledCatDelta(deltaMap);
-
   bqSelected.clear();
   renderBillingQueue();
   renderReportsOverview();
