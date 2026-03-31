@@ -104,28 +104,45 @@ function renderDashboard() {
   const readyToBill  = taskStore.filter(t => t.status === 'complete' && _openProjIds.has(t.proj)).reduce((s,t) => s + (t.fixedPrice||0), 0);
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 
-  // ── Booking Report — tasks entered this month grouped by sales category ─
+  // ── Booking Report — tasks booked this month (positive) + cancelled this month (negative reversal) ─
   const _now = new Date();
   const _thisMonthKey = _now.getFullYear() + '-' + String(_now.getMonth()+1).padStart(2,'0');
   const _thisMonthLabel = _now.toLocaleDateString('en-US', {month:'long', year:'numeric'});
   const bookingByCat = {};
+
+  // Positive bookings: tasks CREATED this month that are not currently cancelled
   taskStore.forEach(t => {
-    const created = (t.createdAt || '').slice(0,7); // 'YYYY-MM'
+    const created = (t.createdAt || '').slice(0,7);
     if (created !== _thisMonthKey) return;
+    if (t.status === 'cancelled') return; // same-month cancel — handled as reversal below
     const cat = t.salesCat || 'Uncategorized';
     bookingByCat[cat] = (bookingByCat[cat] || 0) + (t.fixedPrice || 0);
   });
-  const bookingCats   = Object.keys(bookingByCat).sort((a,b) => bookingByCat[b] - bookingByCat[a]);
-  const bookingTotal  = Object.values(bookingByCat).reduce((s,v) => s+v, 0);
-  // Detail list for audit view — all tasks this month sorted by category then project
-  const bookingDetailTasks = taskStore
-    .filter(t => (t.createdAt||'').slice(0,7) === _thisMonthKey)
-    .sort((a,b) => {
-      const catA = a.salesCat||'Uncategorized', catB = b.salesCat||'Uncategorized';
-      if (catA !== catB) return catA.localeCompare(catB);
-      const pA = (projects.find(p=>p.id===a.proj)||{}).name||'', pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
-      return pA.localeCompare(pB);
-    });
+
+  // Negative reversals: tasks CANCELLED this month regardless of when originally booked
+  taskStore.forEach(t => {
+    const cancelled = (t.cancelledDate || '').slice(0,7);
+    if (!cancelled || cancelled !== _thisMonthKey) return;
+    const cat = t.salesCat || 'Uncategorized';
+    bookingByCat[cat] = (bookingByCat[cat] || 0) - (t.fixedPrice || 0);
+  });
+
+  const bookingCats  = Object.keys(bookingByCat).sort((a,b) => bookingByCat[b] - bookingByCat[a]);
+  const bookingTotal = Object.values(bookingByCat).reduce((s,v) => s+v, 0);
+
+  // Detail list: tasks booked this month (non-cancelled) + tasks cancelled this month (reversals)
+  const _cancelledThisMonth = new Set(
+    taskStore.filter(t => (t.cancelledDate||'').slice(0,7) === _thisMonthKey).map(t => t._id)
+  );
+  const bookingDetailTasks = [
+    ...taskStore.filter(t => (t.createdAt||'').slice(0,7) === _thisMonthKey && t.status !== 'cancelled'),
+    ...taskStore.filter(t => _cancelledThisMonth.has(t._id)),
+  ].sort((a,b) => {
+    const catA = a.salesCat||'Uncategorized', catB = b.salesCat||'Uncategorized';
+    if (catA !== catB) return catA.localeCompare(catB);
+    const pA = (projects.find(p=>p.id===a.proj)||{}).name||'', pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
+    return pA.localeCompare(pB);
+  });
 
   // Sales by Category detail — billed tasks this year by category and project
   const curYearStr = new Date().getFullYear().toString();
@@ -273,7 +290,6 @@ function renderDashboard() {
           <span style="font-size:11px;color:var(--muted);letter-spacing:0;text-transform:none;font-weight:400;margin-left:6px">excl. billed</span>
           <div style="display:flex;gap:4px;margin-left:auto">
             <button id="backlogBtnChart" onclick="setBacklogView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
-            <button id="backlogBtnCat" onclick="setBacklogView('cat')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Category</button>
             <button id="backlogBtnSummary" onclick="setBacklogView('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
             <button id="backlogBtnDetail" onclick="setBacklogView('detail')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
           </div>
@@ -284,9 +300,6 @@ function renderDashboard() {
             <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#e05c5c;display:inline-block"></span>$0 – $1M</span>
             <span style="display:flex;align-items:center;gap:5px"><span style="width:10px;height:10px;border-radius:2px;background:#4caf7d;display:inline-block"></span>$1M – $2M</span>
           </div>
-        </div>
-        <div id="backlogCatWrap" style="display:none;width:100%">
-          <canvas id="backlogByCatChart" height="150"></canvas>
         </div>
         <div id="backlogSummaryWrap" style="display:none;max-height:400px;overflow-y:scroll;width:100%">
           ${(() => {
@@ -402,9 +415,10 @@ function renderDashboard() {
                    byCat[cat].push(t);
                  });
                  const sortedCatsD = Object.keys(byCat).sort((a,b)=>
-                   (byCat[b].reduce((s,t)=>s+(t.fixedPrice||0),0)) - (byCat[a].reduce((s,t)=>s+(t.fixedPrice||0),0))
+                   (byCat[b].reduce((s,t)=>s+((t.cancelledDate||'').slice(0,7)===_thisMonthKey?-(t.fixedPrice||0):(t.fixedPrice||0)),0)) -
+                   (byCat[a].reduce((s,t)=>s+((t.cancelledDate||'').slice(0,7)===_thisMonthKey?-(t.fixedPrice||0):(t.fixedPrice||0)),0))
                  );
-                 const statusColors = {new:'var(--muted)',inprogress:'var(--green)',complete:'var(--blue)',billed:'#c084fc',cancelled:'var(--amber)',prohold:'var(--amber)',accthold:'var(--red)'};
+                 const statusColors = {new:'var(--muted)',inprogress:'var(--green)',complete:'var(--blue)',billed:'#c084fc',cancelled:'var(--red)',prohold:'var(--amber)',accthold:'var(--red)'};
                  return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
                    '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
                    '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat / Task</th>'+
@@ -414,18 +428,31 @@ function renderDashboard() {
                    '</tr></thead><tbody>'+
                    sortedCatsD.map(cat => {
                      const tasks = byCat[cat];
-                     const catTotal = tasks.reduce((s,t)=>s+(t.fixedPrice||0),0);
+                     const catTotal = tasks.reduce((s,t)=>s+((t.cancelledDate||'').slice(0,7)===_thisMonthKey?-(t.fixedPrice||0):(t.fixedPrice||0)),0);
+                     const catColor = catTotal < 0 ? 'var(--red)' : 'var(--amber)';
+                     const catDisplay = catTotal < 0
+                       ? '($'+Math.abs(catTotal).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
+                       : fmt$(catTotal);
                      return '<tr style="background:var(--surface2);border-bottom:1px solid var(--border)">'+
                        '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--amber)">Cat '+cat+'</td>'+
-                       '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--amber)">'+fmt$(catTotal)+'</td>'+
+                       '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:'+catColor+'">'+catDisplay+'</td>'+
                        '</tr>'+
                        tasks.map(t => {
                          const p = projects.find(x=>x.id===t.proj);
-                         return '<tr style="border-bottom:1px solid var(--border)">'+
-                           '<td style="padding:5px 12px 5px 24px;color:var(--text);font-size:11px">'+t.name+'</td>'+
+                         const isReversal = (t.cancelledDate||'').slice(0,7) === _thisMonthKey;
+                         const priceColor = isReversal ? 'var(--red)' : 'var(--green)';
+                         const priceDisplay = t.fixedPrice > 0
+                           ? isReversal
+                             ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
+                             : fmt$(t.fixedPrice)
+                           : '—';
+                         return '<tr style="border-bottom:1px solid var(--border);'+(isReversal?'opacity:0.8':'')+'">'+
+                           '<td style="padding:5px 12px 5px 24px;color:'+(isReversal?'var(--muted)':'var(--text)')+';font-size:11px">'+
+                             (isReversal?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+t.name+
+                           '</td>'+
                            '<td style="padding:5px 12px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
                            '<td style="padding:5px 12px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
-                           '<td style="padding:5px 12px;text-align:right;font-family:monospace;color:var(--green);font-size:11px">'+(t.fixedPrice>0?fmt$(t.fixedPrice):'—')+'</td>'+
+                           '<td style="padding:5px 12px;text-align:right;font-family:monospace;color:'+priceColor+';font-size:11px">'+priceDisplay+'</td>'+
                          '</tr>';
                        }).join('');
                    }).join('')+
@@ -709,82 +736,6 @@ function renderDashboard() {
       ctx.restore();
     };
     window._drawBacklogGauge();
-
-    // ── Backlog by Category bar chart ──
-    window._drawBacklogByCat = function() {
-      const catCanv = document.getElementById('backlogByCatChart');
-      if (!catCanv || typeof Chart === 'undefined') return;
-      const existing = Chart.getChart(catCanv);
-      if (existing) existing.destroy();
-
-      // Build cat totals from backlogDetailTasks
-      const catTotals = {};
-      backlogDetailTasks.forEach(t => {
-        const cat = t.salesCat || 'Uncategorized';
-        catTotals[cat] = (catTotals[cat] || 0) + (t.fixedPrice || 0);
-      });
-      const sorted = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
-      const labels = sorted.map(([k]) => k);
-      const data   = sorted.map(([, v]) => v);
-      const BCOLORS = ['#5b9cf6','#a78bfa','#e8a234','#4caf7d','#e05c5c','#f472b6',
-                       '#34d399','#fb923c','#60a5fa','#c084fc','#facc15','#2dd4bf',
-                       '#7c3aed','#db2777','#059669','#d97706'];
-
-      new Chart(catCanv, {
-        type: 'bar',
-        data: {
-          labels,
-          datasets: [{
-            data,
-            backgroundColor: labels.map((_, i) => BCOLORS[i % BCOLORS.length] + 'cc'),
-            borderColor:     labels.map((_, i) => BCOLORS[i % BCOLORS.length]),
-            borderWidth: 1,
-            borderRadius: 4,
-          }]
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                label: ctx => ' $' + ctx.parsed.y.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0})
-              }
-            }
-          },
-          scales: {
-            x: { ticks: { color: '#9a9aaa', font: { size: 11 } }, grid: { display: false } },
-            y: {
-              beginAtZero: true,
-              ticks: {
-                color: '#9a9aaa', font: { size: 10 },
-                callback: v => v >= 1000 ? '$' + (v/1000).toFixed(0) + 'k' : '$' + v
-              },
-              grid: { color: 'rgba(255,255,255,0.05)' }
-            }
-          }
-        },
-        plugins: [{
-          id: 'backlogCatLabels',
-          afterDatasetsDraw(chart) {
-            const ctx2 = chart.ctx;
-            chart.getDatasetMeta(0).data.forEach((bar, idx) => {
-              const val = data[idx];
-              if (!val) return;
-              const lbl = val >= 1000 ? '$' + (val/1000).toFixed(1) + 'k' : '$' + val.toFixed(0);
-              ctx2.save();
-              ctx2.fillStyle = '#c8c8d8';
-              ctx2.font = '600 10px DM Sans, sans-serif';
-              ctx2.textAlign = 'center';
-              ctx2.textBaseline = 'bottom';
-              ctx2.fillText(lbl, bar.x, bar.y - 3);
-              ctx2.restore();
-            });
-          }
-        }]
-      });
-    };
-
   }, 120);
 
   // ── Booking Report chart ─────────────────────────────────────────────
@@ -859,22 +810,7 @@ function _setView3(prefix, view) {
   }
 }
 function setSalesView(view)   { _setView3('sales', view); }
-function setBacklogView(view) {
-  const allViews = ['chart', 'cat', 'summary', 'detail'];
-  allViews.forEach(v => {
-    const wrap = document.getElementById('backlog' + v.charAt(0).toUpperCase() + v.slice(1) + 'Wrap');
-    const btn  = document.getElementById('backlogBtn' + v.charAt(0).toUpperCase() + v.slice(1));
-    if (wrap) wrap.style.display = v === view ? '' : 'none';
-    if (btn) {
-      const active = v === view;
-      btn.style.background  = active ? 'var(--amber-glow)' : 'transparent';
-      btn.style.color       = active ? 'var(--amber)' : 'var(--muted)';
-      btn.style.borderColor = active ? 'var(--amber-dim)' : 'var(--border)';
-    }
-  });
-  if (view === 'chart'  && typeof _drawBacklogGauge  === 'function') setTimeout(() => _drawBacklogGauge(),  50);
-  if (view === 'cat'    && typeof _drawBacklogByCat   === 'function') setTimeout(() => _drawBacklogByCat(),  50);
-}
+function setBacklogView(view) { _setView3('backlog', view); }
 function setBookingView(view) { _setView3('booking', view); }
 
 

@@ -131,72 +131,31 @@ taskStore = [];
 // ===== STARTUP =====
 // ===== STARTUP =====
 (async function startup() {
-  // Only show setup screen if credentials are genuinely absent —
-  // never because of a transient network/timing error.
-  if (!SUPABASE_URL || !SUPABASE_KEY) {
-    showSetupScreen();
-    return;
-  }
-
   try {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: false }
     });
-  } catch(e) {
-    console.error('Supabase client init failed:', e);
-    // Still don't show setup screen — credentials are present, this is a library error
-    // Show a user-friendly message instead
-    showAppLoader(false);
-    document.getElementById('appShell').style.display = 'none';
-    document.getElementById('loginScreen').style.display = 'flex';
-    const err = document.getElementById('loginError');
-    if (err) err.textContent = 'App failed to initialize. Please refresh the page.';
-    return;
-  }
 
-  // Keep the session alive — handles silent token refresh and expiry across tabs
-  sb.auth.onAuthStateChange(async (event, session) => {
-    if (event === 'TOKEN_REFRESHED') {
-      console.log('Auth: token refreshed silently');
-    } else if (event === 'SIGNED_OUT') {
-      // Session expired or signed out in another tab — force back to login
-      currentUser = null; currentEmployee = null;
-      document.getElementById('appShell').style.display = 'none';
-      document.getElementById('loginScreen').style.display = 'flex';
-    }
-  });
+    // Keep the session alive — handles silent token refresh and expiry across tabs
+    sb.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'TOKEN_REFRESHED') {
+        console.log('Auth: token refreshed silently');
+      } else if (event === 'SIGNED_OUT') {
+        // Session expired or signed out in another tab — force back to login
+        currentUser = null; currentEmployee = null;
+        document.getElementById('appShell').style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'flex';
+      }
+    });
 
-  // Load data with retry — transient network errors get 2 retries before giving up
-  let loadError = null;
-  for (let attempt = 1; attempt <= 3; attempt++) {
-    try {
-      await loadAllData();
-      loadError = null;
-      break;
-    } catch(e) {
-      loadError = e;
-      console.warn('loadAllData attempt ' + attempt + ' failed:', e);
-      if (attempt < 3) await new Promise(r => setTimeout(r, 800 * attempt));
-    }
-  }
-  if (loadError) {
-    // Data load failed after retries — show login screen with error, NOT setup screen
-    console.error('loadAllData failed after 3 attempts:', loadError);
-    showAppLoader(false);
-    document.getElementById('appShell').style.display = 'none';
-    document.getElementById('loginScreen').style.display = 'flex';
-    const err = document.getElementById('loginError');
-    if (err) err.textContent = 'Could not connect to server. Please check your connection and refresh.';
-    return;
-  }
-
-  showAppLoader(false);
-  setTimeout(()=>{ if(typeof ittSetW==='function') ittSetW(ittGetW()); },200);
-
-  // Check if already logged in (session persists)
-  try {
+    // Check session FIRST — only load data once we have a valid auth session.
+    // Previously loadAllData() ran before the session check, so an expired token
+    // caused Supabase RLS to silently return empty data, leaving the app blank
+    // until a hard refresh (Ctrl+Shift+R).
     const { data: { session } } = await sb.auth.getSession();
     if (session?.user) {
+      await loadAllData(); // load data with confirmed valid session
+      setTimeout(()=>{ if(typeof ittSetW==='function') ittSetW(ittGetW()); },200);
       await afterLogin(session.user);
     } else {
       document.getElementById('appShell').style.display = 'none';
@@ -204,10 +163,8 @@ taskStore = [];
       showAppLoader(false);
     }
   } catch(e) {
-    console.error('Session check failed:', e);
-    document.getElementById('appShell').style.display = 'none';
-    document.getElementById('loginScreen').style.display = 'flex';
-    showAppLoader(false);
+    console.error('Startup failed:', e);
+    showSetupScreen();
   }
 })();
 

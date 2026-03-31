@@ -382,6 +382,7 @@ async function saveTsWeekToSupabase(key) {
       project_id: row.projId || null,
       task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName || ''),
       hours_json: JSON.stringify(row.hours),
+      notes_json: row.comments ? JSON.stringify(row.comments) : null,
       employee_id: empId,
       is_overhead: row.isOverhead || false,
       overhead_cat: row.overheadCat || null
@@ -394,11 +395,13 @@ async function saveTsWeekToSupabase(key) {
   for (const cat of OVERHEAD_CATS) {
     const hours = ohData[cat] || {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
     if (!Object.values(hours).some(h=>h>0)) continue;
+    const ohComments = (tsData['oh_comments_' + key] && tsData['oh_comments_' + key][cat]) || null;
     await sb.from('timesheet_entries').insert({
       week_start: weekDate,
       project_id: null,
       task_name: '⬡ ' + cat,
       hours_json: JSON.stringify(hours),
+      notes_json: ohComments ? JSON.stringify(ohComments) : null,
       employee_id: empId,
       is_overhead: true,
       overhead_cat: cat

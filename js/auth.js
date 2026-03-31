@@ -753,7 +753,6 @@ function setupRealtime() {
         if (activeSub) {
           const sid = activeSub.id;
           if (sid === 'sub-info') renderInfoSheet(activeProjectId);
-          else if (sid === 'sub-tasks') renderTasksPanel(activeProjectId);
           else if (sid === 'sub-expenses') renderExpensesPanel(activeProjectId);
         }
       }
@@ -825,7 +824,8 @@ function setupRealtime() {
         fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
         budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
         taskStartDate: r.task_start_date||'', completedDate: r.completed_date||'',
-        billedDate: r.billed_date||'', quoteNum: r.quote_number||'',
+        billedDate: r.billed_date||'', cancelledDate: r.cancelled_date||'',
+        quoteNum: r.quote_number||'',
         poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
         createdAt: r.created_at ? r.created_at.split('T')[0] : '',
         revenueType: r.revenue_type||'fixed',
@@ -844,7 +844,7 @@ function setupRealtime() {
         t.due_raw = r.due_date||'';
         t.due = r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
         t.section = r.section||t.section; t.fixedPrice = r.fixed_price ? parseFloat(r.fixed_price) : t.fixedPrice;
-        t.completedDate = r.completed_date||''; t.billedDate = r.billed_date||'';
+        t.completedDate = r.completed_date||''; t.billedDate = r.billed_date||''; t.cancelledDate = r.cancelled_date||'';
       }
       if (!wasDone && r.done) toast('✓ Task completed: ' + r.name);
       refreshCurrentView();
