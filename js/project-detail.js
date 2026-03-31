@@ -31,7 +31,7 @@ function renderInfoSheet(projId) {
 
   const statusMap = {
     'jobprep':{label:'Job Preparation',bg:'rgba(167,139,250,0.15)',color:'#a78bfa',dot:'#a78bfa'},
-    'pending':{label:'Pending',bg:'rgba(232,162,52,0.25)',color:'#e8a234',dot:'#e8a234'},
+    'pending':{label:'Pending',bg:'rgba(232,162,52,0.50)',color:'#e8a234',dot:'#e8a234'},
     'pendretest':{label:'Pending - ReTest',bg:'rgba(251,146,60,0.15)',color:'#fb923c',dot:'#fb923c'},
     'active':{label:'Active',bg:'rgba(76,175,125,0.15)',color:'#4caf7d',dot:'#4caf7d'},
     'onhold':{label:'On Hold',bg:'rgba(122,122,133,0.15)',color:'#7a7a85',dot:'#7a7a85'},
@@ -504,13 +504,13 @@ async function changeProjectStatus(projId, selectEl) {
 
     const SM = {
     jobprep:     {bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
-    pending:     {bg:'rgba(232,162,52,0.25)', color:'#e8a234'},
+    pending:     {bg:'rgba(232,162,52,0.50)', color:'#e8a234'},
     pendretest:  {bg:'rgba(251,146,60,0.15)', color:'#fb923c'},
     active:      {bg:'rgba(76,175,125,0.15)', color:'#4caf7d'},
     onhold:      {bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
     complete:    {bg:'rgba(91,156,246,0.15)', color:'#5b9cf6'},
     testcomplete:{bg:'rgba(76,175,125,0.15)', color:'#4caf7d'},
-    closing:     {bg:'rgba(232,162,52,0.25)', color:'#e8a234'},
+    closing:     {bg:'rgba(232,162,52,0.50)', color:'#e8a234'},
     closed:      {bg:'rgba(85,85,102,0.15)',  color:'#555566'},
   };
 
@@ -2631,7 +2631,7 @@ function renderInfoTasks(projId, filter) {
       const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
         `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
       return `
-        <div class="itt-row" data-task-id="${t._id}" draggable="true" style="animation:fadeUp 0.2s ease ${i*0.03}s both;${t.status==='billed'?'background:rgba(192,132,252,0.25);border-color:rgba(192,132,252,0.55);':t.status==='complete'||t.done?'background:rgba(120,120,130,0.25);border-color:rgba(120,120,130,0.45);':t.status==='inprogress'?'background:rgba(46,158,98,0.25);border-color:rgba(46,158,98,0.45);':''}"
+        <div class="itt-row" data-task-id="${t._id}" draggable="true" style="animation:fadeUp 0.2s ease ${i*0.03}s both;${t.status==='billed'?'background:rgba(192,132,252,0.50);border-color:rgba(192,132,252,0.70);':t.status==='complete'||t.done?'background:rgba(120,120,130,0.50);border-color:rgba(120,120,130,0.65);':t.status==='inprogress'?'background:rgba(46,158,98,0.50);border-color:rgba(46,158,98,0.65);':''}"
           ondragstart="taskDragStart(event,'${t._id}')"
           ondragover="taskDragOver(event)"
           ondragleave="taskDragLeave(event)"
@@ -2640,8 +2640,8 @@ function renderInfoTasks(projId, filter) {
           <div class="itt-check ${t.done?'done':''}" onclick="toggleInfoTask(${taskStore.indexOf(t)}, '${projId}');event.stopPropagation()" title="Mark task complete">${t.done?'&#x2713;':''}</div>
           <div class="itt-name ${t.done?'done':''} itt-cell-edit" onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()" title="Click to edit">${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;letter-spacing:0.6px;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red);vertical-align:middle;flex-shrink:0">NC</span>':''}</div>
           <div onclick="event.stopPropagation()">
-            <select class="status-pill-select" style="color:${statusColor(t.status||'new')};background:${statusColor(t.status||'new')}18;border-color:${statusColor(t.status||'new')}55"
-              onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color=statusColor(this.value);this.style.background=statusColor(this.value)+'18';this.style.borderColor=statusColor(this.value)+'55'">
+            <select class="status-pill-select" style="color:#000;background:${statusColor(t.status||'new')}18;border-color:${statusColor(t.status||'new')}55"
+              onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=statusColor(this.value)+'18';this.style.borderColor=statusColor(this.value)+'55'">
               ${statusOpts}
             </select>
           </div>
@@ -2650,10 +2650,10 @@ function renderInfoTasks(projId, filter) {
               ${salesOpts}
             </select>
           </div>
-          <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" title="Click to edit price" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);cursor:text">
+          <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" title="Click to edit price" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);font-weight:700;cursor:text">
             ${t.fixedPrice ? '$' + t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
           </div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${getHoursForTask(t.name,t.proj) > 0 ? 'var(--blue)' : 'var(--muted)'}">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#000">>
             ${getHoursForTask(t.name,t.proj) > 0 ? getHoursForTask(t.name,t.proj).toFixed(1) + 'h' : '—'}
           </div>
           <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px">
@@ -2868,13 +2868,13 @@ function renderProjStickyHeader(projId) {
   const info = projectInfo[projId] || {};
   const statusMap = {
     jobprep:{label:'Job Preparation',bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
-    pending:{label:'Pending',bg:'rgba(232,162,52,0.25)',color:'#e8a234'},
+    pending:{label:'Pending',bg:'rgba(232,162,52,0.50)',color:'#e8a234'},
     pendretest:{label:'Pending - ReTest',bg:'rgba(251,146,60,0.15)',color:'#fb923c'},
     active:{label:'Active',bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
     onhold:{label:'On Hold',bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
     complete:{label:'Complete',bg:'rgba(91,156,246,0.15)',color:'#5b9cf6'},
     testcomplete:{label:'Testing Complete',bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
-    closing:{label:'Closing (Pending)',bg:'rgba(232,162,52,0.25)',color:'#e8a234'},
+    closing:{label:'Closing (Pending)',bg:'rgba(232,162,52,0.50)',color:'#e8a234'},
     closed:{label:'Closed',bg:'rgba(50,50,60,0.15)',color:'#555566'},
   };
   const st = statusMap[info.status] || statusMap.active;

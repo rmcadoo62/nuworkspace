@@ -42,7 +42,7 @@ function runGlobalSearch(q) {
   if (clientMatches.length) {
     html += '<div class="gs-section"><div class="gs-section-label">Clients</div>';
     clientMatches.forEach(c => {
-      html += '<div class="gs-item" data-action="clients">' +
+      html += '<div class="gs-item" data-action="client" data-id="' + c.id + '">' +
         '<span class="gs-item-icon">🏢</span>' +
         '<div><div class="gs-item-main">' + c.name + '</div></div></div>';
     });
@@ -56,7 +56,7 @@ function runGlobalSearch(q) {
   if (contactMatches.length) {
     html += '<div class="gs-section"><div class="gs-section-label">Contacts</div>';
     contactMatches.forEach(c => {
-      html += '<div class="gs-item" data-action="clients">' +
+      html += '<div class="gs-item" data-action="client" data-id="' + (c.clientId||'') + '">' +
         '<span class="gs-item-icon">👤</span>' +
         '<div><div class="gs-item-main">' + c.firstName + ' ' + c.lastName + '</div>' +
         '<div class="gs-item-sub">' + (c.email||'') + '</div></div></div>';
@@ -95,8 +95,9 @@ document.addEventListener('DOMContentLoaded', function() {
           if (row) { row.scrollIntoView({behavior:'smooth',block:'center'}); row.style.background='var(--amber-glow)'; setTimeout(()=>row.style.background='',1500); }
         }, 300);
       }, 150);
-    } else if (action === 'clients') {
+    } else if (action === 'client') {
       openClientsPanel(document.getElementById('navClients'));
+      setTimeout(() => openClientDrawer(id), 150);
     }
   });
 });
