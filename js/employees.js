@@ -40,7 +40,7 @@ function getHolidays(year) {
   const addDays = (d, n) => { const r = new Date(d); r.setDate(r.getDate()+n); return r; };
   const nthWeekday = (y, m, wd, n) => { const d = new Date(y, m, 1); let c = 0; while(d.getMonth()===m){if(d.getDay()===wd){c++;if(c===n)return new Date(d);}d.setDate(d.getDate()+1);} };
   const lastWeekday = (y, m, wd) => { const d = new Date(y, m+1, 0); while(d.getDay()!==wd)d.setDate(d.getDate()-1); return d; };
-  const fmt = d => d.toISOString().split('T')[0];
+  const fmt = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
   const easter = easterDate(year);
   const goodFriday = addDays(easter, -2);
   const memorialDay = lastWeekday(year, 4, 1); // last Monday of May
@@ -215,7 +215,7 @@ function getTimeOffUsed(empId, year, annivStart, annivEnd) {
       const d = new Date(weekDate);
       d.setDate(weekDate.getDate() + parseInt(di));
       if (d < rangeStart || d >= rangeEnd) return;
-      const dateStr = d.toISOString().slice(0,10);
+      const dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
       used.holiday += h;
       used.holidayDays.push({ date: dateStr, hrs: h });
     });
@@ -317,6 +317,8 @@ function showEmpProfile(empId, annivOffset) {
     return { start: annivStart, end: annivEnd };
   })();
   const used = getTimeOffUsed(empId, year, _annivRange?.start, _annivRange?.end);
+  // For holiday display, always use calendar year so Jan holidays aren't missed for mid-year hire dates
+  const usedHolidays = getTimeOffUsed(empId, year, null, null);
   const vacAllotment = getVacationAllotment(emp.hireDate);
   const vacAccrued = getQuarterlyAccrual(emp.hireDate, _annivRange?.start);
   const vacOpeningBalance = emp.vacBank || 0;
@@ -878,7 +880,7 @@ function showEmpProfile(empId, annivOffset) {
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">
           ${holidays.filter(h=>h.date.startsWith(String(year))).map(h => {
-            const taken = (used.holidayDays||[]).find(d => d.date === h.date);
+            const taken = (usedHolidays.holidayDays||[]).find(d => d.date === h.date);
             return taken
               ? `<span title="${taken.hrs}hrs logged" style="font-size:10px;padding:3px 8px;border-radius:8px;background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);color:#4caf7d">✓ ${h.name}</span>`
               : `<span style="font-size:10px;padding:3px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border);color:var(--muted)">${h.name}</span>`;
@@ -886,7 +888,7 @@ function showEmpProfile(empId, annivOffset) {
         </div>
         ${(() => {
           const knownDates = new Set(holidays.map(h => h.date));
-          const extraDays = (used.holidayDays||[]).filter(d => !knownDates.has(d.date));
+          const extraDays = (usedHolidays.holidayDays||[]).filter(d => !knownDates.has(d.date));
           if (extraDays.length === 0) return '';
           return `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border)">
             <div style="font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--amber);margin-bottom:6px">Extra Paid Days</div>
