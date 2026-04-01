@@ -343,8 +343,8 @@ function renderTasksPanel(projId) {
         </div>
         <div class="itt-cell-edit" onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);cursor:text">${t.quoteNum||'—'}</div>
         <div class="itt-cell-edit" onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);cursor:text">${t.poNumber||'—'}</div>
-        <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);cursor:text">
-          ${t.fixedPrice ? '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
+        <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled' ? 'var(--red)' : 'var(--green)'};cursor:text">
+          ${t.fixedPrice ? (t.status==='cancelled' ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})) : '—'}
         </div>
         <div style="font-size:12px;color:var(--muted)">${fmtShortDate(t.createdAt)}</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${hColor}">
@@ -597,6 +597,10 @@ async function inlineSave(taskId, projId, field, value) {
         t.completedDate = today;
         extraUpdates.completed_date = today;
       }
+    }
+    if (value === 'cancelled' && !t.cancelledDate) {
+      t.cancelledDate = today;
+      extraUpdates.cancelled_date = today;
     }
     // Save status first (always works), then dates separately (in case columns are new)
     if (sb) {
