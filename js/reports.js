@@ -266,6 +266,7 @@ function switchReportsTab(el) {
   if (el.dataset.tab === 'tab-billing') renderBillingQueue();
   if (el.dataset.tab === 'tab-timesheets') renderTimesheetsReport();
   if (el.dataset.tab === 'tab-employees') renderReportsEmployees();
+  if (el.dataset.tab === 'tab-stale') renderStaleProjects();
 }
 
 function renderTimesheetsReport(filterEmp, filterStatus) {
@@ -541,928 +542,325 @@ function renderReportsTasks() {
 }
 
 // ── Employees Report ─────────────────────────────────────────────────────
+function empReportSetYear(y){var el=document.getElementById('tab-employees');if(el){el.dataset.filterYear=y;renderReportsEmployees();}}
+
 function renderReportsEmployees() {
   const el = document.getElementById('tab-employees');
   if (!el) return;
 
-  const rows = employees.map(e => {
-    const tasks = taskStore.filter(t => t.assign === e.initials);
-    const done = tasks.filter(t => t.done||t.status==='complete'||t.status==='billed').length;
-    const billedVal = tasks.filter(t=>t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0);
-    const fmt$ = n => n>0 ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:0}) : '—';
-    return { e, tasks:tasks.length, done, active:tasks.length-done, billedVal };
-  }).sort((a,b) => b.tasks-a.tasks);
+  const activeEmps = employees.filter(e => e.isActive !== false && !e.isOwner);
 
-  el.innerHTML = `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
-      <div class="report-card">
-        <div class="report-card-title">&#x1F4B0; Billed Revenue by Employee</div>
-        <canvas id="chartBilledByEmp" height="260"></canvas>
-      </div>
-      <div class="report-card">
-        <div class="report-card-title">&#x1F4CA; Task Load by Employee</div>
-        <canvas id="chartLoadByEmp" height="260"></canvas>
-      </div>
-    </div>
-    <div class="report-card" style="margin-top:0">
-      <div class="report-card-title">&#x1F465; Employee Summary</div>
-      <table class="ai-report-table">
-        <thead><tr><th>Employee</th><th>Dept</th><th>Total Tasks</th><th>Active</th><th>Done</th><th>Billed Revenue</th></tr></thead>
-        <tbody>${rows.map(r => `<tr>
-          <td><div style="display:flex;align-items:center;gap:8px"><div class="emp-av" style="background:${r.e.color};width:28px;height:28px;font-size:10px">${getInitials(r.e.name)}</div>${r.e.name}</div></td>
-          <td style="color:var(--muted);font-size:12px">${r.e.dept||'—'}</td>
-          <td style="font-family:'JetBrains Mono',monospace">${r.tasks}</td>
-          <td style="color:var(--blue);font-family:'JetBrains Mono',monospace">${r.active}</td>
-          <td style="color:var(--green);font-family:'JetBrains Mono',monospace">${r.done}</td>
-          <td style="color:#c084fc;font-family:'JetBrains Mono',monospace">${'$'+r.billedVal.toLocaleString('en-US',{minimumFractionDigits:0})}</td>
-        </tr>`).join('')}</tbody>
-      </table>
-    </div>
-  `;
-
-  setTimeout(() => {
-    new Chart(document.getElementById('chartBilledByEmp'), {
-      type: 'bar',
-      data: {
-        labels: rows.map(r => r.e.name.split(' ')[0]),
-        datasets: [{ label:'Billed $', data: rows.map(r=>r.billedVal), backgroundColor: rows.map(r=>r.e.color+'cc'), borderColor: rows.map(r=>r.e.color), borderWidth:1.5, borderRadius:5 }]
-      },
-      options: { responsive:true, plugins:{ legend:{display:false} }, scales:{ x:{ticks:{color:'#9a9aaa',font:{size:10}},grid:{display:false}}, y:{ticks:{color:'#9a9aaa',font:{size:10},callback:v=>'$'+v.toLocaleString()},grid:{color:'rgba(255,255,255,0.05)'}} } }
-    });
-    new Chart(document.getElementById('chartLoadByEmp'), {
-      type: 'doughnut',
-      data: {
-        labels: rows.map(r => r.e.name.split(' ')[0]),
-        datasets: [{ data: rows.map(r=>r.tasks), backgroundColor: rows.map(r=>r.e.color+'cc'), borderColor: rows.map(r=>r.e.color), borderWidth:1.5 }]
-      },
-      options: { responsive:true, plugins:{ legend:{ position:'right', labels:{color:'#9a9aaa',font:{size:11}} } } }
-    });
-  }, 50);
-}
-
-
-// ── Anthropic API Key management ─────────────────────────────────────────
-function getAnthropicKey() {
-  return localStorage.getItem('nuworkspace_anthropic_key') || '';
-}
-
-function saveAnthropicKey(key) {
-  localStorage.setItem('nuworkspace_anthropic_key', key.trim());
-}
-
-// ── AI Analysis ──────────────────────────────────────────────────────────
-let aiHistory = []; // { question, report }
-
-function setAiPrompt(text) {
-  document.getElementById('aiReportPrompt').value = text;
-  document.getElementById('aiReportPrompt').focus();
-}
-
-function clearAiHistory() {
-  aiHistory = [];
-  document.getElementById('aiConversation').innerHTML = '';
-}
-
-function showApiKeyPrompt() {
-  const conv = document.getElementById('aiConversation');
-  // Remove any existing key prompt
-  const existing = document.getElementById('apiKeyPromptDiv');
-  if (existing) existing.remove();
-
-  const div = document.createElement('div');
-  div.id = 'apiKeyPromptDiv';
-  div.style.cssText = 'background:var(--surface2);border:1.5px solid var(--amber-dim);border-radius:12px;padding:20px 24px;margin-bottom:16px';
-  div.innerHTML = `
-    <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px">&#x1F511; Anthropic API Key Required</div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:14px;line-height:1.6">
-      To use AI Reports, enter your Anthropic API key. It's stored only in your browser's local storage and never sent anywhere except directly to Anthropic.<br>
-      Get a key at <a href="https://console.anthropic.com" target="_blank" style="color:var(--amber)">console.anthropic.com</a>
-    </div>
-    <div style="display:flex;gap:8px">
-      <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="flex:1;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;padding:8px 12px;outline:none" 
-        onkeydown="if(event.key==='Enter')saveAndCloseKeyPrompt()" />
-      <button class="btn btn-primary" style="padding:8px 18px;font-size:13px" onclick="saveAndCloseKeyPrompt()">Save & Continue</button>
-    </div>
-  `;
-  conv.prepend(div);
-  setTimeout(() => document.getElementById('apiKeyInput').focus(), 80);
-}
-
-function saveAndCloseKeyPrompt() {
-  const key = document.getElementById('apiKeyInput').value.trim();
-  if (!key) return;
-  saveAnthropicKey(key);
-  document.getElementById('apiKeyPromptDiv').remove();
-  // Re-focus prompt and let user try again
-  document.getElementById('aiReportPrompt').focus();
-}
-
-function buildDataContext() {
-  return {
-    projects: projects.map(p => {
-      const info = projectInfo[p.id] || {};
-      const tasks = taskStore.filter(t => t.proj === p.id);
-      const expTotal = (expenseStore||[]).filter(e=>e.projId===p.id).reduce((s,e)=>s+(e.amount||0),0);
-      return {
-        name: p.name, status: info.status, phase: info.phase,
-        startDate: info.startDate, endDate: info.endDate,
-        contractValue: info.contractValue || 0,
-        billedRevenue: tasks.filter(t=>t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0),
-        readyToBill: tasks.filter(t=>t.status==='complete').reduce((s,t)=>s+(t.fixedPrice||0),0),
-        unbilled: tasks.filter(t=>!['billed','complete','cancelled'].includes(t.status)).reduce((s,t)=>s+(t.fixedPrice||0),0),
-        totalTaskValue: tasks.reduce((s,t)=>s+(t.fixedPrice||0),0),
-        totalTasks: tasks.length,
-        completedTasks: tasks.filter(t=>t.done||t.status==='complete'||t.status==='billed').length,
-        overdueTasks: tasks.filter(t=>t.overdue&&!t.done).length,
-        expenses: expTotal,
-        client: info.clientName || '',
-        creditHold: info.creditHold || false,
-        needUpdatedPo: info.needUpdatedPo || false
-      };
-    }),
-    tasks: taskStore.map(t => ({
-      name: t.name, status: t.status, priority: t.priority,
-      assignee: t.assign,
-      project: (projects.find(p=>p.id===t.proj)||{}).name || '',
-      due: t.due, overdue: t.overdue, done: t.done,
-      fixedPrice: t.fixedPrice || 0,
-      taskNum: t.taskNum
-    })),
-    employees: employees.map(e => ({
-      name: e.name, dept: e.dept, role: e.role,
-      totalTasks: taskStore.filter(t=>t.assign===e.initials).length,
-      activeTasks: taskStore.filter(t=>t.assign===e.initials&&!t.done).length,
-      overdueTasks: taskStore.filter(t=>t.assign===e.initials&&t.overdue&&!t.done).length,
-      completedTasks: taskStore.filter(t=>t.assign===e.initials&&t.done).length,
-      billedValue: taskStore.filter(t=>t.assign===e.initials&&t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0)
-    })),
-    summary: {
-      totalProjects: projects.length,
-      activeProjects: projects.filter(p=>(projectInfo[p.id]||{}).status==='active').length,
-      totalTasks: taskStore.length,
-      overdueTasks: taskStore.filter(t=>t.overdue&&!t.done).length,
-      billedRevenue: taskStore.filter(t=>t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0),
-      readyToBill: taskStore.filter(t=>t.status==='complete').reduce((s,t)=>s+(t.fixedPrice||0),0),
-      totalContractValue: taskStore.reduce((s,t)=>s+(t.fixedPrice||0),0)
-    }
-  };
-}
-
-async function runAiReport() {
-  const prompt = document.getElementById('aiReportPrompt').value.trim();
-  if (!prompt) return;
-
-  // Check for API key
-  if (!getAnthropicKey()) {
-    showApiKeyPrompt();
-    return;
-  }
-  const btn = document.getElementById('aiRunBtn');
-  const conv = document.getElementById('aiConversation');
-
-  // Add user bubble immediately
-  const msgId = 'aiMsg_' + Date.now();
-  const msgDiv = document.createElement('div');
-  msgDiv.className = 'ai-msg';
-  msgDiv.id = msgId;
-  msgDiv.innerHTML = `
-    <div class="ai-msg-user"><div class="ai-msg-user-bubble">${prompt}</div></div>
-    <div class="ai-msg-response">
-      <div class="ai-thinking"><div class="ai-thinking-dot"></div> Claude is analyzing your data…</div>
-    </div>`;
-  conv.appendChild(msgDiv);
-  msgDiv.scrollIntoView({behavior:'smooth', block:'start'});
-
-  document.getElementById('aiReportPrompt').value = '';
-  btn.disabled = true;
-  btn.innerHTML = '⏳';
-
-  const ctx = buildDataContext();
-
-  try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': getAnthropicKey(),
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 2000,
-        system: `You are a business intelligence assistant for NU Labs, analyzing live project management data.
-Respond ONLY in valid JSON, no markdown, no prose outside JSON.
-Schema:
-{
-  "summary": "2-3 sentence executive insight",
-  "sections": [
-    {
-      "title": "Section title",
-      "text": "1-2 sentence insight",
-      "chart": {
-        "type": "bar|doughnut|line",
-        "title": "Chart title",
-        "labels": ["A","B","C"],
-        "datasets": [{"label":"Series name","data":[1,2,3],"color":"#hexcolor"}]
-      },
-      "table": {
-        "headers": ["Col1","Col2","Col3"],
-        "rows": [["val","val","val"]]
-      }
-    }
-  ]
-}
-Rules:
-- Include charts wherever data can be visualized (revenue by project, tasks by status, workload by employee etc.)
-- For doughnut charts use one dataset with multiple colors: datasets[0].colors = ["#hex","#hex"]
-- Tables and charts are both optional but prefer charts for numerical comparisons
-- Be concise and actionable. Use $ formatting for money values in tables.
-- Max 4 sections per response.`,
-        messages: [{ role: 'user', content: `Question: ${prompt}\n\nLive Data:\n${JSON.stringify(ctx, null, 1)}` }]
-      })
-    });
-    const data = await res.json();
-    const raw = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
-    const clean = raw.replace(/```json|```/g,'').trim();
-    const report = JSON.parse(clean);
-
-    aiHistory.push({ question: prompt, report });
-    const responseEl = msgDiv.querySelector('.ai-msg-response');
-    renderAiReport(report, responseEl);
-    msgDiv.scrollIntoView({behavior:'smooth', block:'start'});
-  } catch(err) {
-    const responseEl = msgDiv.querySelector('.ai-msg-response');
-    responseEl.innerHTML = `<div style="color:var(--red);font-size:13px">&#x26A0; Could not generate report: ${err.message}</div>`;
-  }
-
-  btn.disabled = false;
-  btn.innerHTML = '&#x2728; Ask';
-}
-
-function renderAiReport(report, container) {
-  const CHART_COLORS = ['#5b9cf6','#4caf7d','#e8a234','#e05c5c','#a78bfa','#c084fc','#2dd4bf','#fb923c'];
-  let innerHtml = '';
-
-  if (report.summary) {
-    innerHtml += `<div class="ai-response-summary">${report.summary}</div>`;
-  }
-
-  const sections = report.sections || [];
-  // Put chart sections in a grid if 2+ charts side by side
-  const chartSections = sections.filter(s => s.chart);
-  const tableSections = sections.filter(s => !s.chart && s.table);
-
-  if (chartSections.length >= 2) {
-    innerHtml += '<div class="ai-chart-grid">';
-    chartSections.forEach((sec, si) => {
-      const chartId = 'aiChart_' + si + '_' + Date.now();
-      innerHtml += `<div class="ai-section">
-        <div class="ai-section-title">${sec.title}</div>
-        ${sec.text ? `<div class="ai-section-text">${sec.text}</div>` : ''}
-        <div class="ai-chart-wrap"><canvas id="${chartId}" height="220"></canvas></div>
-        ${sec.table ? renderAiTable(sec.table) : ''}
-      </div>`;
-      setTimeout(() => drawAiChart(chartId, sec.chart, CHART_COLORS), 100);
-    });
-    innerHtml += '</div>';
-  } else {
-    chartSections.forEach((sec, si) => {
-      const chartId = 'aiChart_s' + si + '_' + Date.now();
-      innerHtml += `<div class="ai-section">
-        <div class="ai-section-title">${sec.title}</div>
-        ${sec.text ? `<div class="ai-section-text">${sec.text}</div>` : ''}
-        <div class="ai-chart-wrap" style="max-width:${sec.chart.type==='doughnut'?'360px':'100%'}"><canvas id="${chartId}" height="${sec.chart.type==='doughnut'?'260':'200'}"></canvas></div>
-        ${sec.table ? renderAiTable(sec.table) : ''}
-      </div>`;
-      setTimeout(() => drawAiChart(chartId, sec.chart, CHART_COLORS), 100);
-    });
-  }
-
-  tableSections.forEach(sec => {
-    innerHtml += `<div class="ai-section">
-      <div class="ai-section-title">${sec.title}</div>
-      ${sec.text ? `<div class="ai-section-text">${sec.text}</div>` : ''}
-      ${renderAiTable(sec.table)}
-    </div>`;
+  const monthSet = new Set();
+  Object.keys(tsData).forEach(k => {
+    if (k.startsWith('oh_')) return;
+    const parts = k.split('|');
+    if (parts.length !== 2 || !parts[1] || parts[1].length < 7) return;
+    monthSet.add(parts[1].slice(0, 7));
   });
+  const months = [...monthSet].sort();
 
-  container.innerHTML = innerHtml;
-}
-
-function renderAiTable(table) {
-  if (!table) return '';
-  return `<table class="ai-report-table">
-    <thead><tr>${table.headers.map(h=>`<th>${h}</th>`).join('')}</tr></thead>
-    <tbody>${table.rows.map(row=>`<tr>${row.map(cell=>`<td>${cell}</td>`).join('')}</tr>`).join('')}</tbody>
-  </table>`;
-}
-
-function drawAiChart(chartId, chartDef, COLORS) {
-  const canv = document.getElementById(chartId);
-  if (!canv || !chartDef) return;
-  const isDoughnut = chartDef.type === 'doughnut';
-  const ds = chartDef.datasets.map((d, i) => {
-    const baseColor = d.color || COLORS[i % COLORS.length];
-    const bgColors = isDoughnut
-      ? (d.colors || chartDef.labels.map((_,li) => COLORS[li % COLORS.length]))
-      : baseColor + 'bb';
-    return {
-      label: d.label,
-      data: d.data,
-      backgroundColor: bgColors,
-      borderColor: isDoughnut ? 'transparent' : baseColor,
-      borderWidth: isDoughnut ? 0 : 1.5,
-      borderRadius: chartDef.type === 'bar' ? 5 : 0,
-      fill: chartDef.type === 'line' ? {target:'origin', above: baseColor+'22'} : false,
-      tension: 0.4,
-      pointBackgroundColor: baseColor,
-      pointRadius: chartDef.type === 'line' ? 4 : 0
-    };
-  });
-  new Chart(canv, {
-    type: chartDef.type,
-    data: { labels: chartDef.labels, datasets: ds },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: {
-          display: isDoughnut || chartDef.datasets.length > 1,
-          position: isDoughnut ? 'right' : 'top',
-          labels: { color: '#9a9aaa', font: { size: 11 }, boxWidth: 12, padding: 12 }
-        },
-        title: chartDef.title ? {
-          display: true, text: chartDef.title,
-          color: '#9a9aaa', font: { size: 11, weight: '600' }, padding: { bottom: 10 }
-        } : { display: false }
-      },
-      scales: isDoughnut ? {} : {
-        x: { ticks: { color: '#9a9aaa', font: { size: 10 } }, grid: { display: false } },
-        y: { ticks: { color: '#9a9aaa', font: { size: 10 } }, grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true }
-      },
-      cutout: isDoughnut ? '65%' : undefined
-    }
-  });
-}
-
-
-// ===== CLOSING REPORT =====
-// ===== CLOSING REPORT =====
-function openClosingReport(el) {
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  if (el) el.classList.add('active');
-  activeProjectId = null;
-  document.getElementById('topbarName').textContent = 'Closing Report';
-  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('panel-closing-report').classList.add('active');
-  renderClosingReport();
-}
-
-function renderClosingReport() {
-  const body = document.getElementById('closingReportBody');
-  if (!body) return;
-
-  const today = new Date();
-  const msPerDay = 24 * 60 * 60 * 1000;
-
-  const getDays = (dateStr) => {
-    if (!dateStr) return null;
-    return Math.floor((today - new Date(dateStr + 'T00:00:00')) / msPerDay);
-  };
-
-  const fmtDate = ds => ds ? new Date(ds+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
-
-  // Categorize projects
-  const testComplete60 = [];
-  const readyToClose = [];
-  const pendingJordan = [];
-
-  projects.forEach(p => {
-    const info = projectInfo[p.id];
-    if (!info) return;
-    if (info.status === 'testcomplete') {
-      const projTasks = taskStore.filter(t => t.proj === p.id);
-      const openTasks = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
-      if (openTasks.length > 0) return; // skip — still has open tasks
-
-      let refDate = info.testcompleteDate || '';
-      let days = getDays(refDate);
-
-      // If tasks are loaded, use the most recent date across ALL tasks (billed, complete, cancelled)
-      if (projTasks.length > 0) {
-        const lastAnyDate = projTasks.reduce((latest, t) => {
-          const d = t.billedDate || t.completedDate || '';
-          return d > latest ? d : latest;
-        }, '');
-        if (lastAnyDate) { refDate = lastAnyDate; days = getDays(refDate); }
-      }
-
-      if (days === null || days >= 60) testComplete60.push({p, info, days, refDate});
-    } else if (info.status === 'complete') {
-      readyToClose.push({p, info});
-    } else if (info.status === 'closing') {
-      pendingJordan.push({p, info});
-    }
-  });
-
-  const projectCard = ({p, info, days, refDate, section}) => {
-    const projTasks = taskStore.filter(t => t.proj === p.id);
-    const openTasks = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
-    const canClose = openTasks.length === 0;
-
-    let buttons = '';
-    if (section === 'testcomplete' && canClose && isManager()) {
-      buttons += `<button onclick="markProjectComplete('${p.id}')"
-        style="background:rgba(91,156,246,0.15);border:1px solid rgba(91,156,246,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--blue);cursor:pointer;font-weight:600">
-        Mark Complete
-      </button>`;
-    }
-    if (section === 'readytoclose' && isManager()) {
-      buttons += `<button onclick="generateClosingPdf('${p.id}')"
-        style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600">
-        📄 Generate PDF &amp; Mark Closing
-      </button>`;
-    }
-    if (section === 'pending') {
-      buttons += `<span style="font-size:11px;color:var(--amber);padding:6px 12px;background:rgba(232,162,52,0.1);border:1px solid rgba(232,162,52,0.3);border-radius:8px">⏳ Awaiting Jordan</span>`;
-      if (currentEmployee && currentEmployee.name === 'Jordan McAdoo') {
-        buttons += `<button onclick="approveClosing('${p.id}')"
-          style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600;margin-left:6px">
-          ✓ Approve Close
-        </button>
-        <button onclick="rejectClosing('${p.id}')"
-          style="background:rgba(224,92,92,0.1);border:1px solid rgba(224,92,92,0.3);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--red);cursor:pointer;margin-left:6px">
-          ✗ Reject
-        </button>`;
-      }
-    }
-
-    return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
-      <div style="flex:1;min-width:200px">
-        <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px">${p.emoji||'📁'} ${p.name}</div>
-        <div style="display:flex;gap:16px;flex-wrap:wrap">
-          ${info.client ? `<span style="font-size:12px;color:var(--muted)">🏢 ${info.client}</span>` : ''}
-          ${info.pm ? `<span style="font-size:12px;color:var(--muted)">👤 ${info.pm}</span>` : ''}
-          ${info.testcompleteDate ? `<span style="font-size:12px;color:var(--muted)">📅 TC: ${fmtDate(info.testcompleteDate)}</span>` : ''}
-          ${refDate && refDate !== info.testcompleteDate ? `<span style="font-size:12px;color:var(--muted)">🏷 Last billed: ${fmtDate(refDate)}</span>` : ''}
-          ${days !== null && days !== undefined ? `<span style="font-size:12px;font-weight:700;color:${days>=90?'var(--red)':'var(--amber)'}">${days} days since last billed</span>` : ''}
-        </div>
-        ${!canClose && section !== 'pending' ? `<div style="margin-top:6px;font-size:11px;color:var(--red)">⚠ ${openTasks.length} open task${openTasks.length>1?'s':''} remaining</div>` : ''}
-        ${canClose && section === 'testcomplete' ? `<div style="margin-top:6px;font-size:11px;color:#4caf7d">✓ All tasks complete</div>` : ''}
-      </div>
-      <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;align-items:center">
-        <button onclick="selectProject('${p.id}',null);document.getElementById('navProjects')?.classList.add('active')"
-          style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--text);cursor:pointer">
-          View
-        </button>
-        ${buttons}
-      </div>
-    </div>`;
-  };
-
-  const section = (title, color, icon, items, sectionKey, emptyMsg) => {
-    let html = `<div style="margin-bottom:32px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid ${color}22">
-        <span style="font-size:18px">${icon}</span>
-        <div style="font-size:14px;font-weight:700;color:var(--text)">${title}</div>
-        <div style="font-size:12px;font-weight:600;color:${color};background:${color}22;padding:2px 10px;border-radius:20px">${items.length}</div>
-      </div>`;
-    if (items.length === 0) {
-      html += `<div style="font-size:13px;color:var(--muted);padding:16px;text-align:center;background:var(--surface);border-radius:8px;border:1px solid var(--border)">${emptyMsg}</div>`;
-    } else {
-      html += `<div style="display:flex;flex-direction:column;gap:10px">`;
-      items.forEach(item => { html += projectCard({...item, section: sectionKey}); });
-      html += `</div>`;
-    }
-    html += `</div>`;
-    return html;
-  };
-
-  let html = '';
-  html += section('Testing Complete — 60+ Days', '#e8a234', '🕐', testComplete60, 'testcomplete', 'No projects have been in Testing Complete for 60+ days.');
-  html += section('Ready to Close', '#4caf7d', '✅', readyToClose, 'readytoclose', 'No projects are ready to close yet.');
-  html += section("Pending Jordan's Approval", '#5b9cf6', '⏳', pendingJordan, 'pending', 'No projects pending approval.');
-
-  body.innerHTML = html;
-}
-
-function markProjectComplete(projId) {
-  const info = projectInfo[projId];
-  if (!info) return;
-  const projTasks = taskStore.filter(t => t.proj === projId);
-  const blocking = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
-  if (blocking.length > 0) {
-    toast(`⚠ Cannot mark Complete — ${blocking.length} open task${blocking.length>1?'s':''} remaining.`, 'error');
-    return;
-  }
-  info.status = 'complete';
-  if (sb) dbUpdate('project_info', projId, { status: 'complete' });
-  toast('Project marked Complete');
-  renderClosingReport();
-}
-
-function approveClosing(projId) {
-  const info = projectInfo[projId];
-  if (!info) return;
-  info.status = 'closed';
-  if (sb) dbUpdate('project_info', projId, { status: 'closed' });
-  toast('Project approved and closed.');
-  renderClosingReport();
-}
-
-function rejectClosing(projId) {
-  const reason = prompt('Reason for rejection (will be noted):');
-  if (reason === null) return; // cancelled
-  const info = projectInfo[projId];
-  if (!info) return;
-  info.status = 'complete';
-  if (sb) dbUpdate('project_info', projId, { status: 'complete' });
-  toast('Closing rejected — project returned to Complete.');
-  renderClosingReport();
-}
-
-function generateClosingPdf(projId) {
-  const info = projectInfo[projId];
-  if (!info) return;
-
-  // Block if open tasks
-  const projTasks = taskStore.filter(t => t.proj === projId);
-  const blocking = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
-  if (blocking.length > 0) {
-    toast('⚠ Cannot close — ' + blocking.length + ' open task(s) remaining.', 'error');
+  if (months.length === 0) {
+    el.innerHTML = '<div style="color:var(--muted);padding:40px;text-align:center">No timesheet data available.</div>';
     return;
   }
 
-  const proj = projects.find(p => p.id === projId);
-  if (!proj) return;
+  function getMonthHours(empId, yearMonth) {
+    let total = 0;
+    Object.keys(tsData).forEach(k => {
+      if (!k.startsWith(empId + '|')) return;
+      const weekDate = k.split('|')[1];
+      if (!weekDate || weekDate.slice(0, 7) !== yearMonth) return;
+      const rows = tsData[k];
+      if (!Array.isArray(rows)) return;
+      rows.forEach(r => {
+        if (r.hours) total += Object.values(r.hours).reduce((s, h) => s + (parseFloat(h) || 0), 0);
+      });
+    });
+    Object.keys(tsData).forEach(k => {
+      if (!k.startsWith('oh_' + empId + '|')) return;
+      const weekDate = k.split('|')[1];
+      if (!weekDate || weekDate.slice(0, 7) !== yearMonth) return;
+      const ohData = tsData[k];
+      if (!ohData || typeof ohData !== 'object') return;
+      Object.values(ohData).forEach(dayMap => {
+        if (dayMap && typeof dayMap === 'object') {
+          Object.values(dayMap).forEach(h => { total += parseFloat(h) || 0; });
+        }
+      });
+    });
+    return total;
+  }
 
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
-
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const margin = 48;
-  const contentW = pageW - margin * 2;
-  let y = margin;
-
-  const fmtDate = ds => ds ? new Date(ds+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
-
-  // ── Header ──
-  doc.setFillColor(30, 30, 40);
-  doc.rect(0, 0, pageW, 72, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(20);
-  doc.text('NUWorkspace — Project Closing Report', margin, 30);
-  doc.setFontSize(11);
-  doc.setFont('helvetica', 'normal');
-  doc.text('Generated: ' + new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}), margin, 50);
-  doc.text('Status: Closing (Pending Approval)', pageW - margin, 50, {align:'right'});
-  y = 90;
-
-  // ── Project Title ──
-  doc.setTextColor(20, 20, 30);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.text(proj.name, margin, y);
-  y += 8;
-  doc.setDrawColor(91, 156, 246);
-  doc.setLineWidth(2);
-  doc.line(margin, y, margin + contentW, y);
-  y += 16;
-
-  // ── Project Info Grid ──
-  const infoItems = [
-    ['Client', info.client || '—'],
-    ['Project Manager', info.pm || '—'],
-    ['Quote Number', info.quoteNumber || '—'],
-    ['PO Number', info.po || '—'],
-    ['Created Date', fmtDate(info.startDate)],
-    ['Closed Date', fmtDate(info.endDate)],
-    ['Billing Type', info.billingType || '—'],
-    ['Contract Amount', info.contract ? '$' + parseFloat(info.contract).toLocaleString() : '—'],
-  ];
-
-  doc.setFontSize(10);
-  const colW = contentW / 2;
-  infoItems.forEach((item, i) => {
-    const x = margin + (i % 2 === 0 ? 0 : colW);
-    const rowY = y + Math.floor(i / 2) * 22;
-    doc.setFont('helvetica', 'bold');
-    doc.setTextColor(100, 100, 120);
-    doc.text(item[0].toUpperCase(), x, rowY);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(20, 20, 30);
-    doc.text(String(item[1]), x, rowY + 12);
-  });
-  y += Math.ceil(infoItems.length / 2) * 22 + 20;
-
-  // ── Section helper ──
-  const sectionHeader = (title) => {
-    if (y > pageH - 120) { doc.addPage(); y = margin; }
-    doc.setFillColor(240, 242, 255);
-    doc.rect(margin, y - 12, contentW, 20, 'F');
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(11);
-    doc.setTextColor(60, 80, 160);
-    doc.text(title, margin + 6, y + 2);
-    y += 16;
-    doc.setTextColor(20, 20, 30);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
+  const fmtMonth = ym => {
+    const [y, m] = ym.split('-');
+    return new Date(+y, +m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
   };
 
-  // ── Tasks ──
-  sectionHeader('TASKS');
-  const taskData = projTasks.map(t => [
-    t.name.length > 50 ? t.name.substring(0,50)+'...' : t.name,
-    t.status.charAt(0).toUpperCase() + t.status.slice(1),
-    t.assignee || '—',
-    t.dueDate ? fmtDate(t.dueDate) : '—',
-    t.fixedPrice ? '$' + parseFloat(t.fixedPrice).toLocaleString() : '—',
-  ]);
+  const currentYear = new Date().getFullYear();
+  const allYears = [...new Set(months.map(m => m.slice(0, 4)))].sort().reverse();
+  const selYear = el.dataset.filterYear || String(currentYear);
+  el.dataset.filterYear = selYear;
+  const filteredMonths = months.filter(m => m.startsWith(selYear));
 
-  doc.autoTable({
-    startY: y,
-    head: [['Task Name', 'Status', 'Assigned To', 'Due Date', 'Value']],
-    body: taskData,
-    margin: { left: margin, right: margin },
-    styles: { fontSize: 9, cellPadding: 4 },
-    headStyles: { fillColor: [50, 50, 70], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [248, 248, 252] },
-    columnStyles: { 0: { cellWidth: 'auto' }, 1: { cellWidth: 60 }, 2: { cellWidth: 80 }, 3: { cellWidth: 65 }, 4: { cellWidth: 65 } },
-  });
-  y = doc.lastAutoTable.finalY + 20;
+  const sortedEmps = [...activeEmps].sort((a, b) => a.name.localeCompare(b.name));
+  const colTotals = {};
+  filteredMonths.forEach(m => { colTotals[m] = 0; });
+  let grandTotal = 0;
 
-  // ── Expenses ──
-  sectionHeader('EXPENSES');
-  const expenses = (window.expenseStore || expenseStore || []).filter(e => e.projId === projId);
-  if (expenses.length === 0) {
-    doc.text('No expenses recorded.', margin + 6, y + 4);
-    y += 20;
-  } else {
-    const plannedTotal = expenses.reduce((s,e) => s + (parseFloat(e.planned)||0), 0);
-    const actualTotal  = expenses.reduce((s,e) => s + (parseFloat(e.actual)||0), 0);
-    const taskName = (taskId) => { const t = taskStore.find(t=>t._id===taskId); return t ? t.name : '—'; };
-    const expData = expenses.map(e => [
-      e.name || '—',
-      e.taskId ? taskName(e.taskId) : '—',
-      e.planned > 0 ? '$' + parseFloat(e.planned).toLocaleString('en-US',{minimumFractionDigits:2}) : '—',
-      e.actual > 0 ? '$' + parseFloat(e.actual).toLocaleString('en-US',{minimumFractionDigits:2}) : '—',
-    ]);
-    expData.push(['', 'TOTAL',
-      '$' + plannedTotal.toLocaleString('en-US',{minimumFractionDigits:2}),
-      '$' + actualTotal.toLocaleString('en-US',{minimumFractionDigits:2}),
-    ]);
-    doc.autoTable({
-      startY: y,
-      head: [['Description', 'Task', 'Planned', 'Actual']],
-      body: expData,
-      margin: { left: margin, right: margin },
-      styles: { fontSize: 9, cellPadding: 4 },
-      headStyles: { fillColor: [50, 50, 70], textColor: 255, fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248, 248, 252] },
+  const empHours = sortedEmps.map(emp => {
+    const monthHours = {};
+    let empYTD = 0;
+    filteredMonths.forEach(m => {
+      const h = getMonthHours(emp.id, m);
+      monthHours[m] = h;
+      colTotals[m] += h;
+      empYTD += h;
+      grandTotal += h;
     });
-    y = doc.lastAutoTable.finalY + 20;
-  }
-
-  // ── Invoice Summary ──
-  sectionHeader('INVOICE SUMMARY');
-  const billedTasks = projTasks.filter(t => t.status === 'billed');
-  const totalBilled = billedTasks.reduce((s,t) => s + (parseFloat(t.fixedPrice)||0), 0);
-  const totalContract = parseFloat(info.contract) || 0;
-  const invData = [
-    ['Contract Amount', '$' + totalContract.toLocaleString('en-US',{minimumFractionDigits:2})],
-    ['Total Billed (tasks)', '$' + totalBilled.toLocaleString('en-US',{minimumFractionDigits:2})],
-    ['Remaining', '$' + (totalContract - totalBilled).toLocaleString('en-US',{minimumFractionDigits:2})],
-  ];
-  doc.autoTable({
-    startY: y,
-    body: invData,
-    margin: { left: margin, right: margin },
-    styles: { fontSize: 10, cellPadding: 5 },
-    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 200 }, 1: { cellWidth: 150 } },
-    alternateRowStyles: { fillColor: [248, 248, 252] },
+    return { emp, monthHours, empYTD };
   });
-  y = doc.lastAutoTable.finalY + 20;
 
-  // ── Hours Summary ──
-  sectionHeader('HOURS SUMMARY');
-  const hoursMap = {};
-  Object.entries(tsData).forEach(([key, rows]) => {
-    if (!key.includes('|') || key.startsWith('oh_')) return;
-    if (!Array.isArray(rows)) return;
-    const empId = key.split('|')[0];
-    rows.forEach(row => {
-      if (row.projId !== projId) return;
-      const hrs = Object.values(row.hours||{}).reduce((s,h)=>s+(parseFloat(h)||0),0);
-      if (hrs > 0) hoursMap[empId] = (hoursMap[empId]||0) + hrs;
-    });
+  let yearOpts = allYears.map(y => '<option value="' + y + '"' + (y === selYear ? ' selected' : '') + '>' + y + '</option>').join('');
+  let headCols = filteredMonths.map(m => '<th style="padding:10px 12px;text-align:center;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap">' + fmtMonth(m) + '</th>').join('');
+
+  let bodyHtml = '';
+  empHours.forEach(function(item, idx) {
+    const emp = item.emp, monthHours = item.monthHours, empYTD = item.empYTD;
+    const bg = idx % 2 === 1 ? 'var(--surface)' : '';
+    const bgOut = idx % 2 === 1 ? 'var(--surface)' : '';
+    let cells = filteredMonths.map(function(m) {
+      const h = monthHours[m];
+      return '<td style="padding:10px 12px;text-align:center;border-bottom:1px solid var(--border);font-family:JetBrains Mono,monospace;font-size:12px;color:' + (h === 0 ? 'var(--muted)' : 'var(--text)') + '">' + (h > 0 ? h.toFixed(1) : '&mdash;') + '</td>';
+    }).join('');
+    bodyHtml += '<tr style="' + (bg ? 'background:' + bg : '') + '">' +
+      '<td style="padding:10px 16px;border-bottom:1px solid var(--border)">' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<div style="width:28px;height:28px;border-radius:50%;background:' + emp.color + ';display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">' + emp.initials + '</div>' +
+          '<div><div style="font-size:13px;font-weight:500;color:var(--text)">' + emp.name + '</div>' +
+          (emp.dept ? '<div style="font-size:10px;color:var(--muted)">' + emp.dept + '</div>' : '') + '</div>' +
+        '</div></td>' +
+      cells +
+      '<td style="padding:10px 12px;text-align:center;border-bottom:1px solid var(--border);border-left:1px solid var(--border);font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:var(--amber)">' + (empYTD > 0 ? empYTD.toFixed(1) : '&mdash;') + '</td></tr>';
   });
-  const grandHrs = Object.values(hoursMap).reduce((s,h)=>s+h,0);
-  const hrsData = Object.entries(hoursMap).map(([empId, hrs]) => {
-    const emp = employees.find(e => e.id === empId);
-    return [emp ? emp.name : empId, hrs.toFixed(1) + ' hrs'];
-  });
-  if (hrsData.length === 0) {
-    doc.text('No hours logged.', margin + 6, y + 4);
-    y += 20;
-  } else {
-    hrsData.push(['TOTAL', grandHrs.toFixed(1) + ' hrs']);
-    doc.autoTable({
-      startY: y,
-      head: [['Employee', 'Total Hours']],
-      body: hrsData,
-      margin: { left: margin, right: margin },
-      styles: { fontSize: 10, cellPadding: 5 },
-      headStyles: { fillColor: [50, 50, 70], textColor: 255, fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248, 248, 252] },
-      columnStyles: { 0: { cellWidth: 200 }, 1: { cellWidth: 120 } },
-    });
-    y = doc.lastAutoTable.finalY + 20;
-  }
 
-  // ── Footer on each page ──
-  const pageCount = doc.internal.getNumberOfPages();
-  for (let i = 1; i <= pageCount; i++) {
-    doc.setPage(i);
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 160);
-    doc.text('NUWorkspace — CONFIDENTIAL', margin, pageH - 20);
-    doc.text('Page ' + i + ' of ' + pageCount, pageW - margin, pageH - 20, {align:'right'});
-    doc.text(proj.name, pageW/2, pageH - 20, {align:'center'});
-  }
+  let footCols = filteredMonths.map(function(m) {
+    return '<td style="padding:10px 12px;text-align:center;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:var(--amber);border-top:2px solid var(--border)">' + (colTotals[m] > 0 ? colTotals[m].toFixed(1) : '&mdash;') + '</td>';
+  }).join('');
 
-  // ── Save PDF ──
-  const safeName = proj.name.replace(/[^a-z0-9]/gi,'_');
-  doc.save('Closing_' + safeName + '_' + new Date().toISOString().slice(0,10) + '.pdf');
-
-  // ── Mark as closing in app ──
-  info.status = 'closing';
-  if (sb) dbUpdate('project_info', projId, { status: 'closing' });
-  toast('PDF downloaded — project marked as Closing.');
-  renderClosingReport();
+  el.innerHTML = '<div style="max-width:1200px">' +
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">' +
+      '<div><div style="font-family:DM Serif Display,serif;font-size:22px;color:var(--text)">&#x1F465; Employee Hours</div>' +
+      '<div style="font-size:12px;color:var(--muted);margin-top:2px">Monthly hours per employee</div></div>' +
+      '<select onchange="empReportSetYear(this.value)" ' +
+        'style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text)">' +
+        yearOpts + '</select></div>' +
+    '<div style="overflow-x:auto;border-radius:10px;border:1px solid var(--border)">' +
+      '<table style="width:100%;border-collapse:collapse;min-width:600px">' +
+        '<thead><tr style="background:var(--surface)">' +
+          '<th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);min-width:160px">Employee</th>' +
+          headCols +
+          '<th style="padding:10px 12px;text-align:center;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--amber);border-bottom:1px solid var(--border);border-left:1px solid var(--border)">YTD Total</th>' +
+        '</tr></thead>' +
+        '<tbody>' + bodyHtml + '</tbody>' +
+        '<tfoot><tr style="background:var(--surface)">' +
+          '<td style="padding:10px 16px;font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Total</td>' +
+          footCols +
+          '<td style="padding:10px 12px;text-align:center;font-family:JetBrains Mono,monospace;font-size:14px;font-weight:700;color:var(--amber);border-top:2px solid var(--border);border-left:1px solid var(--border)">' + grandTotal.toFixed(1) + '</td>' +
+        '</tr></tfoot>' +
+      '</table></div></div>';
 }
 
-
-
-// ===== LOAD CLOSED PROJECTS ON DEMAND =====
-// ===== LOAD CLOSED PROJECTS ON DEMAND =====
-let closedProjectsLoaded = false;
-
-async function loadClosedProjects(el) {
-  if (closedProjectsLoaded) {
-    toast('Closed jobs already loaded');
-    return;
-  }
-  if (el) { el.textContent = '⏳ Loading...'; el.style.pointerEvents = 'none'; }
-  toast('Loading closed jobs...');
-
-  try {
-    // Load closed project_info
-    let closedInfo = [];
-    let page = 0;
-    while (true) {
-      const { data } = await sb.from('project_info')
-        .select('*')
-        .eq('status', 'closed')
-        .range(page * 1000, page * 1000 + 999);
-      if (!data || data.length === 0) break;
-      closedInfo = closedInfo.concat(data);
-      if (data.length < 1000) break;
-      page++;
-    }
-
-    const closedProjIds = new Set(closedInfo.map(r => r.project_id));
-
-    // Add to projectInfo store
-    closedInfo.forEach(r => {
-      if (!projectInfo[r.project_id]) {
-        projectInfo[r.project_id] = {
-          pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
-          phase: r.phase||'Waiting on TP Approval', status: r.status||'closed',
-          startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
-          client: r.client||'', clientContact: r.client_contact||'',
-          clientEmail: r.client_email||'', clientPhone: r.client_phone||'',
-          clientId: r.client_id||null, contactId: r.contact_id||null,
-          billingType: r.billing_type||'Fixed Fee', invoiced: r.invoiced||'',
-          remaining: r.remaining||'', notes: r.notes||'', desc: r.description||'',
-          dcas: r.dcas||'', customerWitness: r.customer_witness||'', tpApproval: r.tp_approval||'',
-          dpas: r.dpas||'', noforn: r.noforn||'', quoteNumber: r.quote_number||'',
-          creditHold: r.credit_hold||false, needUpdatedPo: r.need_updated_po||false,
-          testcompleteDate: r.testcomplete_date||'',
-          testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'',
-          billedRevenue: r.billed_revenue ? parseFloat(r.billed_revenue) : 0,
-          expectedRevenue: r.expected_revenue ? parseFloat(r.expected_revenue) : 0,
-          po_number: r.po_number||'',
-        };
-      }
-    });
-
-    // Load tasks for closed projects
-    if (closedProjIds.size > 0) {
-      let taskPage = 0;
-      while (true) {
-        const { data } = await sb.from('tasks')
-          .select('*')
-          .in('project_id', [...closedProjIds])
-          .range(taskPage * 1000, taskPage * 1000 + 999);
-        if (!data || data.length === 0) break;
-        data.forEach(r => {
-          if (taskStore.find(t => t._id === r.id)) return; // skip duplicates
-          taskStore.push({
-            _id: r.id, taskNum: r.task_num||0, proj: r.project_id,
-            name: r.name||'', status: r.status||'new',
-            assign: r.assignee||'',
-            due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
-            due_raw: r.due_date||'',
-            overdue: false, done: r.done||false,
-            priority: r.priority||'medium',
-            section: r.section||'sprint', sectionId: r.section_id||null,
-            taskStartDate: r.task_start_date||'',
-            completedDate: r.completed_date||'', billedDate: r.billed_date||'',
-            fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
-            budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
-            salesCat: r.sales_category||'', quoteNum: r.quote_number||'',
-            poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
-            createdAt: r.created_at ? r.created_at.split('T')[0] : '',
-            revenueType: r.revenue_type||'fixed',
-          });
-        });
-        if (data.length < 1000) break;
-        taskPage++;
-      }
-    }
-
-    closedProjectsLoaded = true;
-    if (el) { el.innerHTML = '<span class="icon">✓</span> Closed Jobs Loaded'; el.style.color = 'var(--green)'; }
-    
-    // Re-render
-    renderProjectNav();
-    renderAllViews();
-    toast('✓ Closed jobs loaded (' + closedInfo.length + ' projects)');
-
-  } catch(e) {
-    console.error('loadClosedProjects:', e);
-    toast('⚠ Error loading closed jobs: ' + e.message);
-    if (el) { el.innerHTML = '<span class="icon">🔒</span> Load Closed Jobs'; el.style.pointerEvents = ''; }
-  }
-}
-
-
-
-// ===== ACTIVITY PANEL (per project) =====
-// ===== ACTIVITY PANEL (per project) =====
-async function renderActivityPanel(projId) {
-  const el = document.getElementById('activityPanelBody');
+// ===== STALE PROJECTS REPORT =====
+// ===== STALE PROJECTS REPORT =====
+async function renderStaleProjects() {
+  const el = document.getElementById('tab-stale');
   if (!el) return;
-  el.innerHTML = '<div style="color:var(--muted);font-size:13px">Loading...</div>';
 
-  const proj = projects.find(p => p.id === projId);
-  let logs = [];
-  if (sb) {
-    const { data } = await sb.from('activity_log')
-      .select('*')
-      .or('record_id.eq.' + projId + ',record_id.in.(' + taskStore.filter(t => t.proj === projId).map(t => t._id).join(',') + ')')
-      .order('created_at', { ascending: false })
-      .limit(100);
-    logs = data || [];
+  const days = parseInt(el.dataset.days || '45');
+  el.dataset.days = days;
+
+  el.innerHTML = '<div style="color:var(--muted);padding:40px;text-align:center">&#x23F3; Loading activity data...</div>';
+
+  // Open (non-closed) projects only
+  const openProjects = projects.filter(p => {
+    const st = (projectInfo[p.id] || {}).status;
+    return st !== 'closed';
+  });
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - days);
+  const cutoffStr = cutoff.toISOString().split('T')[0];
+
+  // Fetch last activity_log entry per project
+  let lastActivity = {}; // projId -> { date, description }
+
+  try {
+    if (sb && openProjects.length > 0) {
+      const projIds = openProjects.map(p => p.id);
+
+      // Get most recent activity_log entry per project
+      const { data: logRows } = await sb.from('activity_log')
+        .select('record_id, created_at, field_changed, new_value, employee_name, record_type, record_label')
+        .in('record_id', projIds)
+        .order('created_at', { ascending: false })
+        .limit(2000);
+
+      (logRows || []).forEach(r => {
+        if (!lastActivity[r.record_id] || r.created_at > lastActivity[r.record_id].date) {
+          lastActivity[r.record_id] = {
+            date: r.created_at,
+            desc: (r.employee_name || 'Unknown') + ' updated ' + (r.field_changed || 'field') + (r.new_value ? ' to "' + String(r.new_value).slice(0, 40) + '"' : ''),
+            type: 'log'
+          };
+        }
+      });
+
+      // Also check task activity_log entries (record_id is task id, not proj id)
+      // Get tasks for open projects and their last log entry
+      const taskIds = taskStore.filter(t => projIds.includes(t.proj)).map(t => t._id);
+      if (taskIds.length > 0) {
+        const { data: taskLogRows } = await sb.from('activity_log')
+          .select('record_id, created_at, field_changed, new_value, employee_name')
+          .in('record_id', taskIds)
+          .order('created_at', { ascending: false })
+          .limit(3000);
+
+        (taskLogRows || []).forEach(r => {
+          const task = taskStore.find(t => t._id === r.record_id);
+          if (!task) return;
+          const projId = task.proj;
+          if (!lastActivity[projId] || r.created_at > lastActivity[projId].date) {
+            lastActivity[projId] = {
+              date: r.created_at,
+              desc: (r.employee_name || 'Unknown') + ' updated task "' + task.name.slice(0, 40) + '"',
+              type: 'task'
+            };
+          }
+        });
+      }
+
+      // Also check chatter
+      const { data: chatRows } = await sb.from('chatter')
+        .select('proj_id, created_at, author_name, text')
+        .in('proj_id', projIds)
+        .order('created_at', { ascending: false })
+        .limit(1000);
+
+      (chatRows || []).forEach(r => {
+        if (!lastActivity[r.proj_id] || r.created_at > lastActivity[r.proj_id].date) {
+          lastActivity[r.proj_id] = {
+            date: r.created_at,
+            desc: (r.author_name || 'Unknown') + ' posted: "' + String(r.text || '').slice(0, 60) + '"',
+            type: 'chatter'
+          };
+        }
+      });
+    }
+  } catch(e) {
+    console.warn('Stale projects query error:', e);
   }
 
-  const fmtDate = d => new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
-  const fieldLabels = {};
-  Object.values(AUDIT_FIELD_DEFS).forEach(arr => arr.forEach(f => fieldLabels[f.key] = f.label));
+  const now = new Date();
+  const daysSince = date => Math.floor((now - new Date(date)) / 86400000);
+  const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const typeIcon = t => t === 'chatter' ? '&#x1F4AC;' : t === 'task' ? '&#x2705;' : '&#x1F4CB;';
 
-  if (logs.length === 0) {
-    el.innerHTML = '<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">📋</div><div>No activity recorded yet for this project.</div></div>';
-    return;
+  // Build stale list
+  const staleRows = openProjects.map(p => {
+    const act = lastActivity[p.id];
+    const lastDate = act ? act.date : (p.createdAt || null);
+    const age = lastDate ? daysSince(lastDate) : 9999;
+    const info = projectInfo[p.id] || {};
+    return { p, act, lastDate, age, info };
+  }).filter(r => r.age >= days)
+    .sort((a, b) => b.age - a.age);
+
+  const statusColors = {
+    jobprep: '#e8a234', active: '#4caf7d', inprogress: '#4caf7d',
+    prohold: '#e05c5c', accthold: '#e05c5c', complete: '#888899',
+    cancelled: '#5b7fa6', billed: '#c084fc'
+  };
+  const statusLabels = {
+    jobprep: 'Job Prep', active: 'Active', inprogress: 'In Progress',
+    prohold: 'Production Hold', accthold: 'Accounting Hold',
+    complete: 'Complete', cancelled: 'Cancelled', billed: 'Billed'
+  };
+
+  let dayOptions = [14, 30, 45, 60, 90, 120].map(d =>
+    '<option value="' + d + '"' + (d === days ? ' selected' : '') + '>' + d + ' days</option>'
+  ).join('');
+
+  let rows = '';
+  if (staleRows.length === 0) {
+    rows = '<tr><td colspan="6" style="padding:48px;text-align:center;color:var(--muted)">' +
+      '<div style="font-size:32px;margin-bottom:12px">&#x2705;</div>' +
+      '<div style="font-size:14px;font-weight:600;color:var(--text)">All projects have recent activity!</div>' +
+      '<div style="font-size:12px;margin-top:4px">No projects found without activity in the last ' + days + ' days.</div>' +
+      '</td></tr>';
+  } else {
+    staleRows.forEach(function(r) {
+      const st = r.info.status || 'active';
+      const stColor = statusColors[st] || '#888';
+      const stLabel = statusLabels[st] || st;
+      const ageBg = r.age >= 120 ? 'var(--red)' : r.age >= 90 ? '#e8a234' : r.age >= 60 ? '#5b9cf6' : 'var(--muted)';
+      rows += '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="staleOpenProject(\"' + r.p.id + '\")">' +
+        '<td style="padding:11px 14px">' +
+          '<div style="font-size:13px;font-weight:600;color:var(--text)">' + (r.p.emoji ? r.p.emoji + ' ' : '') + r.p.name + '</div>' +
+          '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + (r.info.clientName || r.info.client || '') + '</div>' +
+        '</td>' +
+        '<td style="padding:11px 14px">' +
+          '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:' + stColor + '22;color:' + stColor + '">' + stLabel + '</span>' +
+        '</td>' +
+        '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '&mdash;') + '</td>' +
+        '<td style="padding:11px 14px;text-align:center">' +
+          '<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:' + ageBg + '">' + r.age + 'd</span>' +
+        '</td>' +
+        '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' +
+          (r.lastDate ? fmtDate(r.lastDate) : '&mdash;') +
+        '</td>' +
+        '<td style="padding:11px 14px;font-size:11px;color:var(--muted);max-width:260px">' +
+          (r.act ? typeIcon(r.act.type) + ' ' + r.act.desc : '<span style="color:var(--border)">No activity recorded</span>') +
+        '</td>' +
+      '</tr>';
+    });
   }
 
-  el.innerHTML = '<div style="margin-bottom:16px"><div style="font-family:DM Serif Display,serif;font-size:20px;color:var(--text)">📋 Activity Log</div>' +
-    '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + logs.length + ' changes recorded</div></div>' +
-    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">' +
-    '<table style="width:100%;border-collapse:collapse">' +
-    '<thead><tr style="border-bottom:2px solid var(--border)">' +
-    '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">When</th>' +
-    '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Who</th>' +
-    '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Record</th>' +
-    '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Field</th>' +
-    '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">From</th>' +
-    '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">To</th>' +
-    '</tr></thead><tbody>' +
-    logs.map(l =>
-      '<tr style="border-bottom:1px solid var(--border)">' +
-      '<td style="padding:9px 14px;font-size:11px;color:var(--muted);white-space:nowrap">' + fmtDate(l.created_at) + '</td>' +
-      '<td style="padding:9px 14px;font-size:13px;font-weight:500">' + (l.employee_name||'—') + '</td>' +
-      '<td style="padding:9px 14px;font-size:12px">' +
-        '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface2);color:var(--muted);margin-right:6px">' + l.record_type + '</span>' +
-        (l.record_label||'—') + '</td>' +
-      '<td style="padding:9px 14px;font-size:12px">' + (fieldLabels[l.field_changed] || l.field_changed) + '</td>' +
-      '<td style="padding:9px 14px;font-size:12px;color:var(--red);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (l.old_value||'—') + '</td>' +
-      '<td style="padding:9px 14px;font-size:12px;color:var(--green);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (l.new_value||'—') + '</td>' +
-      '</tr>'
-    ).join('') +
-    '</tbody></table></div>';
+  el.innerHTML =
+    '<div style="max-width:1100px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:12px">' +
+        '<div>' +
+          '<div style="font-family:DM Serif Display,serif;font-size:22px;color:var(--text)">&#x1F4A4; Stale Projects</div>' +
+          '<div style="font-size:12px;color:var(--muted);margin-top:2px">Open projects with no recorded activity in the selected period</div>' +
+        '</div>' +
+        '<div style="display:flex;align-items:center;gap:8px">' +
+          '<span style="font-size:12px;color:var(--muted)">No activity for:</span>' +
+          '<select onchange="staleSetDays(this.value)" style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:DM Sans,sans-serif;font-size:13px;padding:5px 10px;outline:none;cursor:pointer">' +
+            dayOptions +
+          '</select>' +
+          '<span style="font-size:12px;color:var(--muted);font-family:JetBrains Mono,monospace">' + staleRows.length + ' project' + (staleRows.length !== 1 ? 's' : '') + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+        '<table style="width:100%;border-collapse:collapse">' +
+          '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
+            '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>' +
+            '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>' +
+            '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
+            '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Days Silent</th>' +
+            '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Last Activity</th>' +
+            '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">What Happened</th>' +
+          '</tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+    '</div>';
+}
+
+function staleOpenProject(id){selectProject(id);var n=document.getElementById('navProjects');if(n)n.click();}
+
+function staleSetDays(val) {
+  const el = document.getElementById('tab-stale');
+  if (el) { el.dataset.days = val; renderStaleProjects(); }
 }
 
 
