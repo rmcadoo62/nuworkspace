@@ -397,6 +397,13 @@ function setSavedFilters(filters) {
     if (saved.sortCol) projSortCol = saved.sortCol;
     if (saved.sortDir) projSortDir = saved.sortDir;
   } catch(e) {}
+  // Sync UI once DOM is ready
+  document.addEventListener('DOMContentLoaded', () => {
+    const inp = document.getElementById('filterNamePattern');
+    if (inp && navFilter.namePattern) inp.value = navFilter.namePattern;
+    updateNavFilterDot();
+    renderSavedFiltersBar();
+  });
 })();
 
 function persistFilterState() {
