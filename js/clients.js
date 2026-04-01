@@ -11,6 +11,8 @@ let _articleProjId = null;
 function mapArticle(r) {
   return {
     _id: r.id, projId: r.project_id,
+    clientId: r.client_id||null,
+    clientName: r.client_name||'',
     desc: r.description||'',
     receivedDate: r.received_date||'',
     receivedBy: r.received_by||'',
@@ -59,6 +61,7 @@ function renderShippingGlobal() {
           </td>
           <td style="padding:10px 14px;font-size:13.5px;font-weight:500;color:var(--text)">${a.desc}</td>
           <td style="padding:10px 14px;font-size:12px;">${proj ? `<span onclick="navToProject('${a.projId}')" style="color:var(--amber);cursor:pointer;font-weight:600" title="Go to project">${proj.emoji} ${proj.name}</span>` : '—'}</td>
+          <td style="padding:10px 14px;font-size:12px;color:var(--muted)">${a.clientName || (proj ? '' : '—')}</td>
           <td style="padding:10px 14px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${fmt(a.receivedDate)}</td>
           <td style="padding:10px 14px;font-size:12px;color:var(--muted)">${a.receivedBy||'—'}</td>
           <td style="padding:10px 14px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${a.shippedDate ? fmt(a.shippedDate) : '—'}</td>
@@ -82,6 +85,7 @@ function renderShippingGlobal() {
             <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Status</th>
             <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Article</th>
             <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Project</th>
+            <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Client</th>
             <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Received</th>
             <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Received By</th>
             <th style="padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);text-align:left">Shipped</th>
@@ -164,6 +168,15 @@ function openArticleModal(articleId, projId) {
       `<option value="${e.name}" ${a && a.receivedBy===e.name ? 'selected' : ''}>${e.name}</option>`
     ).join('');
 
+  // Populate client picker
+  const clientSearch = document.getElementById('articleClientSearch');
+  const clientIdInp  = document.getElementById('articleClientId');
+  if (clientSearch && clientIdInp) {
+    const existingClient = a ? clientStore.find(c => c.id === a.clientId) : null;
+    clientSearch.value = existingClient ? existingClient.name : (a ? a.clientName || '' : '');
+    clientIdInp.value  = a ? (a.clientId || '') : '';
+  }
+
   document.getElementById('articleModal').classList.add('open');
   setTimeout(() => document.getElementById('articleDesc').focus(), 80);
 }
@@ -185,13 +198,20 @@ async function saveArticle() {
   const projField = document.getElementById('articleProjField');
   const projSel   = document.getElementById('articleProjSelect');
   const resolvedProjId = (projField.style.display !== 'none' ? projSel.value : null) || _articleProjId;
-  if (!resolvedProjId) {
+  const hasClient = document.getElementById('articleClientId')?.value || document.getElementById('articleClientSearch')?.value.trim();
+  if (!resolvedProjId && !hasClient) {
     projSel.style.borderColor = 'var(--red)'; setTimeout(() => projSel.style.borderColor='', 1800);
-    toast('⚠ Please select a project'); return;
+    toast('⚠ Please select a project or client'); return;
   }
 
+  const clientId   = document.getElementById('articleClientId')?.value || null;
+  const clientName = document.getElementById('articleClientSearch')?.value.trim() || '';
+  const resolvedClient = clientStore.find(c => c.id === clientId);
+
   const payload = {
-    project_id:    resolvedProjId,
+    project_id:    resolvedProjId || null,
+    client_id:     clientId || null,
+    client_name:   resolvedClient ? resolvedClient.name : clientName || null,
     description:   desc,
     received_date: document.getElementById('articleReceivedDate').value || null,
     received_by:   document.getElementById('articleReceivedBy').value || null,
@@ -240,6 +260,27 @@ async function deleteArticle() {
   const activeProjId = activeProjectId;
   if (document.getElementById('panel-shipping')?.classList.contains('active')) renderShippingGlobal();
   if (activeProjId) { renderShippingProjTab(activeProjId); renderInfoSheet(activeProjId); }
+}
+
+function articleClientFilter(q) {
+  const drop = document.getElementById('articleClientDrop');
+  const idInp = document.getElementById('articleClientId');
+  if (!drop) return;
+  const matches = clientStore.filter(c => !q || c.name.toLowerCase().includes(q.toLowerCase())).slice(0, 8);
+  if (!matches.length) { drop.style.display = 'none'; return; }
+  drop.innerHTML = matches.map(c =>
+    '<div style="padding:8px 12px;cursor:pointer;font-size:13px;color:var(--text);border-bottom:1px solid var(--border)" ' +
+    'onmousedown="articlePickClient(\'' + c.id + '\',\'' + c.name.replace(/'/g,"\\'") + '\')"' +
+    'onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'\'">' +
+    c.name + '</div>'
+  ).join('');
+  drop.style.display = '';
+}
+
+function articlePickClient(id, name) {
+  document.getElementById('articleClientId').value = id;
+  document.getElementById('articleClientSearch').value = name;
+  document.getElementById('articleClientDrop').style.display = 'none';
 }
 
 function openClientsPanel(el) {
