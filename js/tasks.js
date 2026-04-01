@@ -76,7 +76,7 @@ function buildTaskChips(){
     grid.innerHTML = '<div style="font-size:12.5px;color:var(--muted);padding:8px 4px">No employees yet — add some in the Employees panel first.</div>';
     return;
   }
-  grid.innerHTML = employees.filter(e => e.isActive !== false).map(e=>`
+  grid.innerHTML = employees.filter(e => e.isActive !== false && e.dept !== 'Ballantine').map(e=>`
     <div class="chip ${tAssign.has(e.id)?'sel':''}" onclick="togAssign('${e.id}',this)">
       <div class="chip-av" style="background:${e.color}">${e.initials}</div>
       <span class="chip-name">${e.name}</span>
@@ -333,7 +333,6 @@ function renderTasksPanel(projId) {
         ondrop="taskDrop(event,'${projId}')">
         <div class="itt-drag-handle" onclick="event.stopPropagation()">⠿</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);padding-left:2px">${t.taskNum||''}</div>
-        <div class="itt-check" onclick="tpToggleDone('${t._id}','${projId}');event.stopPropagation()"></div>
         <div onclick="event.stopPropagation()">
           <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%">${salesOpts}</select>
         </div>
@@ -344,12 +343,8 @@ function renderTasksPanel(projId) {
         </div>
         <div class="itt-cell-edit" onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);cursor:text">${t.quoteNum||'—'}</div>
         <div class="itt-cell-edit" onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);cursor:text">${t.poNumber||'—'}</div>
-        <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled'?'var(--red)':'var(--green)'};cursor:text">
-          ${t.fixedPrice
-            ? t.status === 'cancelled'
-              ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
-              : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
-            : '—'}
+        <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);cursor:text">
+          ${t.fixedPrice ? '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
         </div>
         <div style="font-size:12px;color:var(--muted)">${fmtShortDate(t.createdAt)}</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${hColor}">
@@ -362,7 +357,7 @@ function renderTasksPanel(projId) {
           <div class="itt-av" style="background:${empM.color}" id="av_${t._id}">${t.assign||'?'}</div>
           <select class="inline-edit-select" style="font-size:10px;padding:2px 2px;border:none;background:transparent;color:var(--muted);width:auto;max-width:70px" onchange="inlineSave('${t._id}','${projId}','assign',this.value);document.getElementById('av_${t._id}').style.background=(employees.find(e=>e.initials===this.value)||{color:'#555'}).color;document.getElementById('av_${t._id}').textContent=this.value||'?'">
             <option value="">—</option>
-            ${employees.filter(e=>e.isActive!==false).map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
+            ${employees.filter(e=>e.isActive!==false && e.dept!=='Ballantine').map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
           </select>
         </div>
         <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()" style="font-size:12px;color:var(--muted);cursor:text">${fmtShortDate(t.taskStartDate)}</div>
@@ -391,7 +386,6 @@ function renderTasksPanel(projId) {
     </div>
     <div class="itt-head" id="ittHead">
       <div class="itt-head-cell"></div><div class="itt-head-cell" style="color:var(--muted);font-size:10px">#<span class="itt-resizer" data-col="num"></span></div>
-      <div class="itt-head-cell"><span class="itt-resizer" data-col="pri"></span></div>
       <div class="itt-head-cell">Cat.<span class="itt-resizer" data-col="cat"></span></div>
       <div class="itt-head-cell">Task<span class="itt-resizer" data-col="task"></span></div>
       <div class="itt-head-cell">Status<span class="itt-resizer" data-col="status"></span></div>
@@ -603,15 +597,6 @@ async function inlineSave(taskId, projId, field, value) {
         t.completedDate = today;
         extraUpdates.completed_date = today;
       }
-    }
-    if (value === 'cancelled') {
-      // Record the date this task was cancelled — used for cross-month booking reversals
-      t.cancelledDate = today;
-      extraUpdates.cancelled_date = today;
-    } else if (t.cancelledDate) {
-      // Task was un-cancelled — clear the cancelled date
-      t.cancelledDate = '';
-      extraUpdates.cancelled_date = null;
     }
     // Save status first (always works), then dates separately (in case columns are new)
     if (sb) {

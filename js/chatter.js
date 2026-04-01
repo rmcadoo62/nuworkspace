@@ -7,6 +7,7 @@ let chatterMentionQuery = '';
 let chatterMentionActive = false;
 let chatterMentionSel = 0;
 let chatterReplyTo = null; // { id, authorName, text }
+let chatterNotifySelected = []; // array of employee ids chosen in notify dropdown
 let notifStore = []; // { id, projId, projName, msgId, fromName, fromColor, fromInitials, text, ts, read }
 
 function chatterMsgs(projId) { return chatterStore[projId] || []; }
@@ -140,7 +141,7 @@ async function chatterPost() {
   // Collect @mentioned employee ids
   const mentionedNames = [...text.matchAll(/@([\w][\w ]*?)(?=\s|$)/g)].map(m => m[1].toLowerCase());
   const mentionedIds = employees.filter(e => mentionedNames.some(n => e.name?.toLowerCase().startsWith(n))).map(e => e.id);
-  const allNotifyIds = [...new Set(mentionedIds)];
+  const allNotifyIds = [...new Set([...mentionedIds, ...chatterNotifySelected])];
   const msg = {
     proj_id: activeProjectId,
     author_id: currentUser?.id || null,
@@ -167,9 +168,10 @@ async function chatterPost() {
   renderChatter(activeProjectId);
   input.innerText = '';
   chatterAttachPending = [];
+  chatterNotifySelected = [];
   chatterCancelReply();
   document.getElementById('chatterAttachPreview').innerHTML = '';
-  try {
+  chatterRenderNotifyChips();  try {
     const { data, error } = await sb.from('chatter').insert([msg]).select().single();
     if (!error && data) {
       const idx = chatterStore[activeProjectId].findIndex(m => m.id === localMsg.id);
@@ -352,6 +354,80 @@ function chatterPickMention(name) {
   try { range.setStart(node, offset); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); } catch(e) {}
   chatterCloseMention();
 }
+
+// ── Notify Multi-Select ────────────────────────────────────────────────
+function chatterToggleNotifyDrop(e) {
+  e.stopPropagation();
+  const drop = document.getElementById('chatterNotifyDrop');
+  const btn  = document.getElementById('chatterNotifyBtn');
+  if (!drop) return;
+  const isOpen = drop.style.display !== 'none';
+  if (isOpen) { drop.style.display = 'none'; return; }
+  // Position fixed relative to button (avoids overflow:hidden clipping)
+  if (btn) {
+    const rect = btn.getBoundingClientRect();
+    drop.style.left   = rect.left + 'px';
+    drop.style.top    = (rect.bottom + 6) + 'px';
+    drop.style.bottom = 'auto';
+    drop.style.width  = Math.max(230, rect.width) + 'px';
+  }
+  chatterRenderNotifyList('');
+  drop.style.display = '';
+  const s = document.getElementById('chatterNotifySearch');
+  if (s) { s.value = ''; s.focus(); }
+}
+function chatterFilterNotifyList() {
+  const q = (document.getElementById('chatterNotifySearch')?.value || '').toLowerCase();
+  chatterRenderNotifyList(q);
+}
+function chatterRenderNotifyList(q) {
+  const list = document.getElementById('chatterNotifyList');
+  if (!list) return;
+  const matches = employees.filter(e => e.name && (!q || e.name.toLowerCase().includes(q)));
+  if (!matches.length) { list.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted)">No employees found</div>'; return; }
+  list.innerHTML = matches.map(e => {
+    const sel = chatterNotifySelected.includes(e.id);
+    return '<div class="chatter-notify-item' + (sel ? ' selected' : '') + '" onclick="chatterToggleNotifyEmp(\'' + e.id + '\')">' +
+      '<div class="chatter-notify-avatar" style="background:' + e.color + ';color:#fff">' + e.initials + '</div>' +
+      '<div class="chatter-notify-name">' + e.name + '</div>' +
+      '<div class="chatter-notify-check">' + (sel ? '✓' : '') + '</div>' +
+    '</div>';
+  }).join('');
+}
+function chatterToggleNotifyEmp(empId) {
+  const idx = chatterNotifySelected.indexOf(empId);
+  if (idx > -1) chatterNotifySelected.splice(idx, 1);
+  else chatterNotifySelected.push(empId);
+  chatterRenderNotifyList((document.getElementById('chatterNotifySearch')?.value || '').toLowerCase());
+  chatterRenderNotifyChips();
+  // Update button label
+  const btn = document.getElementById('chatterNotifyBtn');
+  if (btn) btn.textContent = chatterNotifySelected.length ? '🔔 Notify (' + chatterNotifySelected.length + ')' : '🔔 Notify';
+  if (chatterNotifySelected.length) btn?.classList.add('has-selections');
+  else btn?.classList.remove('has-selections');
+}
+function chatterRenderNotifyChips() {
+  const wrap = document.getElementById('chatterNotifyChips');
+  if (!wrap) return;
+  if (!chatterNotifySelected.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  wrap.style.display = 'flex';
+  wrap.innerHTML = chatterNotifySelected.map(id => {
+    const e = employees.find(x => x.id === id);
+    if (!e) return '';
+    return '<div class="chatter-notify-chip">' +
+      '<div class="chatter-notify-chip-av" style="background:' + e.color + ';color:#fff">' + e.initials + '</div>' +
+      e.name +
+      '<button onclick="chatterToggleNotifyEmp(\'' + e.id + '\')" title="Remove">✕</button>' +
+    '</div>';
+  }).filter(Boolean).join('');
+}
+// Close notify dropdown on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('#chatterNotifyWrap')) {
+    const drop = document.getElementById('chatterNotifyDrop');
+    if (drop) drop.style.display = 'none';
+  }
+});
 
 // ── Attachments ────────────────────────────────────────────────────────
 function chatterAttachFile(e) {

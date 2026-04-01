@@ -142,15 +142,16 @@ function renderProjectsTable() {
   if (!showClosed) {
     filtered = filtered.filter(p => (projectInfo[p.id] || {}).status !== 'closed');
   }
-  // Name pattern filter
+  // Name pattern filter — supports:
+  //   ^N        → exclude names starting with N
+  //   ^N,P      → exclude names starting with N or P
+  //   smith     → include only names containing "smith"
   const namePattern = (document.getElementById('filterNamePattern')?.value.trim()) || navFilter.namePattern || '';
   if (namePattern) {
     if (namePattern.startsWith('^')) {
-      // Exclude names matching the rest of the pattern
-      const excl = namePattern.slice(1).toLowerCase();
-      filtered = filtered.filter(p => !p.name.toLowerCase().startsWith(excl));
+      const parts = namePattern.slice(1).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+      filtered = filtered.filter(p => !parts.some(excl => p.name.toLowerCase().startsWith(excl)));
     } else {
-      // Include only names containing the pattern
       const incl = namePattern.toLowerCase();
       filtered = filtered.filter(p => p.name.toLowerCase().includes(incl));
     }
