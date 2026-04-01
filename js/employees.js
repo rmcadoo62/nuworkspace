@@ -118,25 +118,20 @@ function getQuarterlyAccrual(hireDateStr, annivStart) {
   const isFirstAnnivYear = Math.abs(annivStart - firstAnniv) < 24 * 60 * 60 * 1000; // within 1 day
 
   if (isFirstAnnivYear) {
-    // On first anniversary, full allotment drops at once (not quarterly)
-    // Then quarterly drops begin
-    if (today < firstAnniv) return 0; // before anniversary — nothing yet
-    // Full allotment on anniversary day, then quarterly drops after
-    let accrued = allotment; // full drop on anniversary
-    for (let q = 1; q <= 3; q++) { // 3 more quarterly drops in year 2
-      const dropDate = new Date(annivStart);
-      dropDate.setMonth(dropDate.getMonth() + (q * 3));
+    // The 80h lump sum already dropped at the first anniversary and is reflected
+    // in the employee's vacBank opening balance. Just apply standard quarterly drops.
+    let accrued = 0;
+    for (let q = 1; q <= 4; q++) {
+      const dropDate = new Date(annivStart.getFullYear(), annivStart.getMonth() + (q * 3), annivStart.getDate());
       if (dropDate <= today) accrued += dropAmt;
     }
-    // Cap at allotment (can't accrue more than allotted in one year)
-    return Math.min(allotment, accrued);
+    return accrued;
   }
 
   // Year 2+ — standard quarterly drops from annivStart
   let accrued = 0;
   for (let q = 1; q <= 4; q++) {
-    const dropDate = new Date(annivStart);
-    dropDate.setMonth(dropDate.getMonth() + (q * 3));
+    const dropDate = new Date(annivStart.getFullYear(), annivStart.getMonth() + (q * 3), annivStart.getDate());
     if (dropDate <= today) accrued += dropAmt;
   }
   return accrued;
@@ -765,7 +760,7 @@ function showEmpProfile(empId, annivOffset) {
               </div>
               <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:-20px">
                 <span>${usedHrs.toFixed(1)}h used${over?' ⚠ Over':''}</span>
-                ${annivOffset === 0 ? `<span>opened ${vacOpeningBalance}h + ${vacAllotment}h = ${totalAvail}h</span>` : `<span>${vacAllotment}h allotted</span>`}
+                ${annivOffset === 0 ? `<span>opened ${vacOpeningBalance}h + ${vacAccrued}h accrued = ${(vacOpeningBalance + vacAccrued).toFixed(1)}h</span>` : `<span>${vacAllotment}h allotted</span>`}
               </div>`;
           })()}
           ${(() => {
