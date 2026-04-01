@@ -92,7 +92,7 @@ function ensureWeek(key) {
 
 function addTsRow(key, rerender=true) {
   if (!tsData[key]) tsData[key] = [];
-  tsData[key].push({projId: '', taskName:'', isOverhead:false, overheadCat:'', hours:{0:0,1:0,2:0,3:0,4:0,5:0,6:0}});
+  tsData[key].push({projId: '', taskName:'', isOverhead:false, overheadCat:'', hours:{0:0,1:0,2:0,3:0,4:0,5:0,6:0}, comments:{0:'',1:'',2:'',3:'',4:'',5:'',6:''}});
   if (rerender) renderTimesheet();
 }
 
@@ -102,12 +102,48 @@ function deleteTsRow(key, idx) {
   renderTimesheet();
 }
 
+function setTsComment(key, rowIdx, dayIdx, val) {
+  if (!tsData[key] || !tsData[key][rowIdx]) return;
+  if (!tsData[key][rowIdx].comments) tsData[key][rowIdx].comments = {};
+  tsData[key][rowIdx].comments[dayIdx] = val;
+}
+
+function setOhComment(key, cat, di, val) {
+  const cKey = 'oh_comments_' + key;
+  if (!tsData[cKey]) tsData[cKey] = {};
+  if (!tsData[cKey][cat]) tsData[cKey][cat] = {0:'',1:'',2:'',3:'',4:'',5:'',6:''};
+  tsData[cKey][cat][di] = val;
+}
+
+function toggleTsComment(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const isOpen = el.style.display !== 'none';
+  el.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) el.querySelector('textarea')?.focus();
+}
+
+// Debounce timers for autosave — keyed by timesheet week key
+const _tsAutoSaveTimers = {};
+
+function _tsDebounceAutosave(key) {
+  // Don't autosave locked weeks
+  if (typeof isWeekLocked === 'function' && isWeekLocked(key)) return;
+  if (_tsAutoSaveTimers[key]) clearTimeout(_tsAutoSaveTimers[key]);
+  _tsAutoSaveTimers[key] = setTimeout(async () => {
+    if (typeof saveTsWeekToSupabase === 'function') {
+      await saveTsWeekToSupabase(key);
+    }
+  }, 1500); // 1.5 second debounce after last keystroke
+}
+
 function setOhHours(key, cat, di, val) {
   const overheadKey = 'oh_' + key;
   if (!tsData[overheadKey]) tsData[overheadKey] = {};
   if (!tsData[overheadKey][cat]) tsData[overheadKey][cat] = {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
   tsData[overheadKey][cat][di] = parseFloat(val) || 0;
   updateTsTotals(key);
+  _tsDebounceAutosave(key);
 }
 
 window.setTsHours = function setTsHours(key, rowIdx, dayIdx, val) {
@@ -264,7 +300,7 @@ function updateTsSummary(key) {
   s('ts-sum-avg',   days.length > 0 ? (grand / 5).toFixed(1) + 'h' : '0h');
 }
 
-function openTimesheetPanel(el) {
+async function openTimesheetPanel(el) {
   if (currentEmployee && currentEmployee.isOwner) { toast('Timesheets are not tracked for owners'); return; }
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
@@ -273,17 +309,86 @@ function openTimesheetPanel(el) {
   document.getElementById('topbarName').textContent = 'Timesheet';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-timesheet').classList.add('active');
-  renderTimesheet();
-}
 
-function navTsWeek(dir) {
-  tsWeekOffset += dir;
-  renderTimesheet();
-}
-
-function goTsToday() {
+  // Reset to current week when opening own timesheet
   tsWeekOffset = 0;
+
+  // Always reload fresh entries from DB so edits after a reject/reopen
+  // start from the true saved state, not stale in-memory data
+  if (sb && currentEmployee) {
+    try {
+      const emp = currentEmployee; // explicitly own employee, never proxy
+      const weekDate = getWeekKey(tsWeekOffset);
+      const storeKey = emp.id + '|' + weekDate;
+      const ohKey = 'oh_' + storeKey;
+      const { data: freshRows } = await sb.from('timesheet_entries')
+        .select('*')
+        .eq('employee_id', emp.id)
+        .eq('week_start', weekDate);
+      if (freshRows) {
+        tsData[storeKey] = [];
+        tsData[ohKey] = {};
+        freshRows.forEach(r => {
+          if (r.is_overhead && r.overhead_cat) {
+            tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+          } else {
+            tsData[storeKey].push({
+              _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+              isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
+              hours: JSON.parse(r.hours_json||'{}'),
+            });
+          }
+        });
+      }
+    } catch(e) { console.warn('openTimesheetPanel: could not reload fresh data:', e); }
+  }
+
   renderTimesheet();
+}
+
+async function navTsWeek(dir) {
+  tsWeekOffset += dir;
+  // Pass the active employee explicitly — proxy or own
+  await reloadTsWeek(proxyEmployee || currentEmployee);
+  renderTimesheet();
+}
+
+async function goTsToday() {
+  tsWeekOffset = 0;
+  await reloadTsWeek(proxyEmployee || currentEmployee);
+  renderTimesheet();
+}
+
+// Reload current week's entries fresh from DB for a specific employee
+// Always pass the employee explicitly — never rely on global proxy state
+async function reloadTsWeek(emp) {
+  if (!sb) return;
+  emp = emp || currentEmployee;
+  if (!emp) return;
+  try {
+    const weekDate = getWeekKey(tsWeekOffset);
+    const storeKey = emp.id + '|' + weekDate;
+    const ohKey = 'oh_' + storeKey;
+    const { data: freshRows } = await sb.from('timesheet_entries')
+      .select('*')
+      .eq('employee_id', emp.id)
+      .eq('week_start', weekDate);
+    if (freshRows) {
+      tsData[storeKey] = [];
+      tsData[ohKey] = {};
+      freshRows.forEach(r => {
+        if (r.is_overhead && r.overhead_cat) {
+          tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+        } else {
+          tsData[storeKey].push({
+            _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
+            hours: JSON.parse(r.hours_json||'{}'),
+          });
+        }
+      });
+    }
+  } catch(e) { console.warn('reloadTsWeek error:', e); }
 }
 
 function renderTimesheet() {
@@ -302,12 +407,26 @@ function renderTimesheet() {
 
     const cells = days.map((d, di) => {
       const val = row.hours[di] || 0;
-      return '<td class="ts-cell"><input class="ts-input '+(val>0?'has-val':'')+'" type="number" min="0" max="24" step="0.5"'+
-        ' value="'+(val>0?val:'')+'" placeholder="—"'+
-        ' id="ts-inp-'+key+'-'+ri+'-'+di+'"'+
-        ' oninput="this.classList.toggle(\'has-val\',!!this.value);setTsHours(\''+key+'\','+ri+','+di+',this.value)"'+
-        (isWeekLocked(key) ? ' disabled' : '')+
-        ' onfocus="this.select()" /></td>';
+      const comment = (row.comments && row.comments[di]) || '';
+      const hasComment = comment.trim().length > 0;
+      const cellId = 'ts-comment-wrap-'+key+'-'+ri+'-'+di;
+      const locked = isWeekLocked(key);
+      return '<td class="ts-cell">'+
+        '<div class="ts-cell-inner'+(hasComment?' has-comment':'')+'" onclick="toggleTsComment(\''+cellId+'\')">'+
+          '<input class="ts-input '+(val>0?'has-val':'')+'" type="number" min="0" max="24" step="0.5"'+
+          ' value="'+(val>0?val:'')+'" placeholder="—"'+
+          ' id="ts-inp-'+key+'-'+ri+'-'+di+'"'+
+          ' oninput="this.classList.toggle(\'has-val\',!!this.value);setTsHours(\''+key+'\','+ri+','+di+',this.value);event.stopPropagation()"'+
+          (locked ? ' disabled' : '')+
+          ' onfocus="this.select()" onclick="event.stopPropagation()" />'+
+          '<div class="ts-cell-tab"></div>'+
+        '</div>'+
+        '<div class="ts-comment-wrap" id="'+cellId+'" style="display:'+(hasComment?'block':'none')+'">'+
+          '<textarea class="ts-comment-input" placeholder="Add a note…"'+
+          (locked ? ' readonly' : '')+
+          ' oninput="setTsComment(\''+key+'\','+ri+','+di+',this.value);document.getElementById(\''+cellId+'\').previousSibling.classList.toggle(\'has-comment\',!!this.value)">'+(comment||'')+'</textarea>'+
+        '</div>'+
+      '</td>';
     }).join('');
 
     let labelCell;
@@ -477,10 +596,24 @@ function renderTimesheet() {
       html += '<tr><td class="ts-row-label"><span style="font-size:13px">' + cat + '</span></td>';
       days.forEach((d,di) => {
         const val = ohHours[di] || 0;
-        html += '<td class="ts-cell"><input class="ts-input ' + (val>0?'has-val':'') + '" type="number" min="0" max="24" step="0.5"' +
-          ' value="' + (val>0?val:'') + '" placeholder="—"' +
-          ' oninput="this.classList.toggle(\'has-val\',!!this.value);setOhHours(\'' + key + '\',\'' + escapedCat + '\',' + di + ',this.value)"' +
-          (locked ? ' disabled' : '') + ' onfocus="this.select()" /></td>';
+        const ohCmtKey = 'oh_comments_' + key;
+        const ohComment = (tsData[ohCmtKey] && tsData[ohCmtKey][cat] && tsData[ohCmtKey][cat][di]) || '';
+        const ohHasComment = ohComment.trim().length > 0;
+        const ohCellId = 'ts-oh-comment-wrap-' + key + '-' + cat.replace(/[^a-z0-9]/gi,'-') + '-' + di;
+        html += '<td class="ts-cell">'+
+          '<div class="ts-cell-inner' + (ohHasComment?' has-comment':'') + '" onclick="toggleTsComment(\'' + ohCellId + '\')">'+
+            '<input class="ts-input ' + (val>0?'has-val':'') + '" type="number" min="0" max="24" step="0.5"' +
+            ' value="' + (val>0?val:'') + '" placeholder="—"' +
+            ' oninput="this.classList.toggle(\'has-val\',!!this.value);setOhHours(\'' + key + '\',\'' + escapedCat + '\',' + di + ',this.value);event.stopPropagation()"' +
+            (locked ? ' disabled' : '') + ' onfocus="this.select()" onclick="event.stopPropagation()" />' +
+            '<div class="ts-cell-tab"></div>'+
+          '</div>'+
+          '<div class="ts-comment-wrap" id="' + ohCellId + '" style="display:' + (ohHasComment?'block':'none') + '">' +
+            '<textarea class="ts-comment-input" placeholder="Add a note…"' +
+            (locked ? ' readonly' : '') +
+            ' oninput="setOhComment(\'' + key + '\',\'' + escapedCat + '\',' + di + ',this.value);document.getElementById(\'' + ohCellId + '\').previousSibling.classList.toggle(\'has-comment\',!!this.value)">' + (ohComment||'') + '</textarea>' +
+          '</div>' +
+        '</td>';
       });
       const ohRowId = 'oh-rowtotal-' + key + '-' + cat.replace(/[^a-z]/gi,'');
       html += '<td class="ts-row-total" id="' + ohRowId + '">' + (ohTotal>0?ohTotal.toFixed(1)+'h':'—') + '</td>';
@@ -529,10 +662,17 @@ function renderTimesheet() {
       ? '<button class="ts-add-row-btn" style="background:var(--blue)" onclick="submitTimesheet()">Submit for Approval</button>'
       : '';
 
+    // Managers/approvers can force-unlock any approved timesheet to correct errors
+    const emp = proxyEmployee || currentEmployee;
+    const canForceUnlock = isApprover && ws && ws.status === 'approved';
+    const forceUnlockBtn = canForceUnlock
+      ? '<button class="ts-add-row-btn" style="background:rgba(232,162,52,0.2);color:var(--amber);border:1px solid var(--amber-dim);margin-left:8px" onclick="forceUnlockTimesheet(\''+ws.id+'\')">↩ Unlock to Edit</button>'
+      : '';
+
     const badgeId = 'ts-status-badge-' + key.replace(/[^a-z0-9]/gi,'-');
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-bottom:40px">';
     html += '<div id="' + badgeId + '">' + statusHTML + '</div>';
-    html += '<div>' + submitBtn + '</div>';
+    html += '<div>' + submitBtn + forceUnlockBtn + '</div>';
     html += '</div>';
 
     tsWrap.insertAdjacentHTML('beforeend', html);
@@ -660,6 +800,8 @@ function toggleSchedAccess(empId, hasAccess) {
 }
 
 async function afterLogin(user) {
+  proxyEmployee = null; // always clear proxy on any login
+  tsWeekOffset = 0;     // reset to current week
   currentUser = user;
   // Match to employee record by email
   currentEmployee = employees.find(e => e.email && e.email.toLowerCase() === user.email.toLowerCase()) || null;
@@ -704,7 +846,7 @@ async function afterLogin(user) {
 
 async function doLogout() {
   await sb.auth.signOut();
-  currentUser = null; currentEmployee = null; isApprover = false;
+  currentUser = null; currentEmployee = null; isApprover = false; proxyEmployee = null; tsWeekOffset = 0;
   document.getElementById('appShell').style.display = 'none';
   document.getElementById('sidebarUserBadge').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';
@@ -722,14 +864,22 @@ window.setTsHours = async function(key, rowIdx, dayIdx, val) {
   _origSetTsHours(key, rowIdx, dayIdx, val);
   const row = tsData[key]?.[rowIdx];
   if (!row) return;
+  // The key is empId|weekDate — extract both from it directly
+  // This is the ONLY safe way: never trust global proxy state for saves
+  const keyParts = key.includes('|') ? key.split('|') : [null, key];
+  const weekStart = keyParts[1];
+  const empIdFromKey = keyParts[0];
+  const emp = (empIdFromKey && empIdFromKey !== '__me__')
+    ? (employees.find(e => e.id === empIdFromKey) || currentEmployee)
+    : currentEmployee;
+  // If row already exists in DB, update it directly (fast path)
   if (row._id) {
-    await dbUpdate('timesheet_entries', row._id, { hours_json: JSON.stringify(row.hours) });
+    await sb.from('timesheet_entries')
+      .update({ hours_json: JSON.stringify(row.hours) })
+      .eq('id', row._id);
   } else {
-    const saved = await dbInsert('timesheet_entries', {
-      week_start: key, project_id: row.projId, task_name: row.taskName,
-      hours_json: JSON.stringify(row.hours),
-    });
-    if (saved) row._id = saved.id;
+    // New row not yet in DB — debounce a full save so it persists on refresh
+    _tsDebounceAutosave(key);
   }
 };
 
@@ -824,8 +974,7 @@ function setupRealtime() {
         fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
         budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
         taskStartDate: r.task_start_date||'', completedDate: r.completed_date||'',
-        billedDate: r.billed_date||'', cancelledDate: r.cancelled_date||'',
-        quoteNum: r.quote_number||'',
+        billedDate: r.billed_date||'', quoteNum: r.quote_number||'',
         poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
         createdAt: r.created_at ? r.created_at.split('T')[0] : '',
         revenueType: r.revenue_type||'fixed',
@@ -844,7 +993,7 @@ function setupRealtime() {
         t.due_raw = r.due_date||'';
         t.due = r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
         t.section = r.section||t.section; t.fixedPrice = r.fixed_price ? parseFloat(r.fixed_price) : t.fixedPrice;
-        t.completedDate = r.completed_date||''; t.billedDate = r.billed_date||''; t.cancelledDate = r.cancelled_date||'';
+        t.completedDate = r.completed_date||''; t.billedDate = r.billed_date||'';
       }
       if (!wasDone && r.done) toast('✓ Task completed: ' + r.name);
       refreshCurrentView();
