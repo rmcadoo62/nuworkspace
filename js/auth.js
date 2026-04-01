@@ -658,6 +658,10 @@ function renderTimesheet() {
       statusHTML = '<span style="padding:6px 12px;border-radius:6px;border:1px solid rgba(224,92,92,.3);background:rgba(224,92,92,.08);font-size:12px;color:#e05c5c">✗ Rejected' + (ws.rejectionNote ? ': ' + ws.rejectionNote : '') + '</span>';
     }
 
+    const saveBtn = (currentUser && !locked)
+      ? '<button class="ts-add-row-btn" style="background:var(--green);margin-right:8px" onclick="saveTsNow(\'' + key + '\')">&#x1F4BE; Save</button>'
+      : '';
+
     const submitBtn = (currentUser && !locked)
       ? '<button class="ts-add-row-btn" style="background:var(--blue)" onclick="submitTimesheet()">Submit for Approval</button>'
       : '';
@@ -672,7 +676,7 @@ function renderTimesheet() {
     const badgeId = 'ts-status-badge-' + key.replace(/[^a-z0-9]/gi,'-');
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;padding-bottom:40px">';
     html += '<div id="' + badgeId + '">' + statusHTML + '</div>';
-    html += '<div>' + submitBtn + forceUnlockBtn + '</div>';
+    html += '<div>' + saveBtn + submitBtn + forceUnlockBtn + '</div>';
     html += '</div>';
 
     tsWrap.insertAdjacentHTML('beforeend', html);
@@ -845,6 +849,19 @@ async function afterLogin(user) {
 }
 
 async function doLogout() {
+  // Flush any pending debounced autosaves before signing out
+  if (typeof _tsAutoSaveTimers !== 'undefined') {
+    const pendingKeys = Object.keys(_tsAutoSaveTimers);
+    if (pendingKeys.length > 0) {
+      for (const key of pendingKeys) {
+        clearTimeout(_tsAutoSaveTimers[key]);
+        delete _tsAutoSaveTimers[key];
+        if (typeof saveTsWeekToSupabase === 'function' && !isWeekLocked(key)) {
+          await saveTsWeekToSupabase(key);
+        }
+      }
+    }
+  }
   await sb.auth.signOut();
   currentUser = null; currentEmployee = null; isApprover = false; proxyEmployee = null; tsWeekOffset = 0;
   document.getElementById('appShell').style.display = 'none';

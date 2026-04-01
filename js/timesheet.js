@@ -415,6 +415,17 @@ async function saveTsWeekToSupabase(key) {
   }
 }
 
+async function saveTsNow(key) {
+  if (typeof isWeekLocked === 'function' && isWeekLocked(key)) return;
+  // Cancel any pending debounced save for this key
+  if (typeof _tsAutoSaveTimers !== 'undefined' && _tsAutoSaveTimers[key]) {
+    clearTimeout(_tsAutoSaveTimers[key]);
+    delete _tsAutoSaveTimers[key];
+  }
+  await saveTsWeekToSupabase(key);
+  toast('✅ Timesheet saved');
+}
+
 
 // getWeekStatusObj defined earlier
 
