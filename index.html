@@ -21,6 +21,7 @@
   <link rel="stylesheet" href="css/clients.css">
   <link rel="stylesheet" href="css/chatter.css">
   <link rel="stylesheet" href="css/scheduler.css">
+  <link rel="stylesheet" href="css/jobpack.css">
 </head>
 <body>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -595,6 +596,7 @@
           <div class="proj-tab" data-sub="sub-invoicing">&#x1F4C4; Invoicing</div>
           <div class="proj-tab" data-sub="sub-shipping" id="projShippingTab">&#x1F4E6; Shipping</div>
           <div class="proj-tab" data-sub="sub-chatter">&#x1F4AC; Chatter</div>
+          <div class="proj-tab" data-sub="sub-jobpack">&#x1F4CB; Job Pack</div>
           <div class="proj-tab" data-sub="sub-activity" id="projActivityTab" style="display:none">&#x1F4DD; Activity</div>
         </div>
       </div>
@@ -671,6 +673,10 @@
       </div>
       <div class="proj-sub" id="sub-shipping">
         <div id="shippingProjWrap" style="padding:24px 32px;max-width:900px"></div>
+      </div>
+
+      <div class="proj-sub" id="sub-jobpack">
+        <div id="jobPackWrap"></div>
       </div>
 
     </div>
@@ -1052,7 +1058,10 @@
   <script src="js/chatter.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/scheduler.js"></script>
+  <script src="js/jobpack.js"></script>
   <script src="js/supabase-patches.js"></script>
+  <script src="js/nav.js"></script>
+  <script src="js/router.js"></script>
 
 </div><!-- /appShell -->
 
@@ -1286,17 +1295,6 @@
           <select class="f-input" id="articleProjSelect" style="cursor:pointer">
             <option value="">— Select Project —</option>
           </select>
-        </div>
-        <div class="field">
-          <label class="field-label">Client / Company <span style="font-size:10px;color:var(--muted)">(optional — if no project yet)</span></label>
-          <div style="position:relative">
-            <input class="f-input" id="articleClientSearch" type="text" placeholder="Search clients…" autocomplete="off"
-              oninput="articleClientFilter(this.value)"
-              onfocus="articleClientFilter(this.value)"
-              onblur="setTimeout(()=>document.getElementById('articleClientDrop').style.display='none',200)" />
-            <input type="hidden" id="articleClientId" value="" />
-            <div id="articleClientDrop" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;box-shadow:0 4px 20px rgba(0,0,0,0.25);z-index:999;max-height:180px;overflow-y:auto;margin-top:2px"></div>
-          </div>
         </div>
         <div class="field">
           <label class="field-label">Article Description <span style="color:var(--red)">*</span></label>

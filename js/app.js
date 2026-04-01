@@ -157,6 +157,7 @@ taskStore = [];
       await loadAllData(); // load data with confirmed valid session
       setTimeout(()=>{ if(typeof ittSetW==='function') ittSetW(ittGetW()); },200);
       await afterLogin(session.user);
+      if (typeof initRouter === 'function') initRouter();
     } else {
       document.getElementById('appShell').style.display = 'none';
       document.getElementById('loginScreen').style.display = 'flex';
