@@ -199,7 +199,7 @@ function renderInfoSheet(projId) {
               ${(()=>{
                 const ct = contactStore.find(c => c.id === info.contactId);
                 const nm = ct ? ct.firstName+' '+ct.lastName : (info.clientContact || '<span style="color:var(--border)">—</span>');
-                const em = ct ? ct.email : '';
+                const em = ct ? ct.email : (info.clientEmail || '');
                 return `<div class="client-picker-selected" id="contactPickerSelected" onclick="openContactPicker('${projId}')">
                   <div>
                     <div class="client-picker-name">${nm}</div>
@@ -215,7 +215,7 @@ function renderInfoSheet(projId) {
               })()}
             </div>
           </div>
-          ${dateField('Created Date', fmtDate(info.startDate), 'startDate')}
+          <div class="info-field"><div class="info-field-label">Created Date</div><div class="info-field-value" style="font-family:'JetBrains Mono',monospace;font-size:12px">${proj.createdAt ? fmtDate(proj.createdAt) : '<span style="color:var(--border)">—</span>'}</div></div>
           ${dateField('Test Complete Date', fmtDate(info.testcompleteDate), 'testcompleteDate')}
           ${dateField('Closed Date', fmtDate(info.endDate), 'endDate')}
           ${dateField('Tentative Test Date', fmtDate(info.tentativeTestDate), 'tentativeTestDate')}
@@ -660,7 +660,7 @@ function renderProjSummary(projId) {
 
   // Revenue
   const tasks      = taskStore.filter(t => t.proj === projId);
-  const expected   = tasks.filter(t => t.status !== 'cancelled').reduce((s,t) => s + (t.fixedPrice||0), 0);
+  const expected   = tasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
   // Billed = tasks with status 'billed'
   const billed     = tasks.filter(t => t.status === 'billed')
                           .reduce((s,t) => s + (t.fixedPrice||0), 0);
@@ -679,7 +679,7 @@ function renderProjSummary(projId) {
     <div class="proj-sum-card">
       <div class="proj-sum-label">Expected Revenue</div>
       <div class="proj-sum-val" style="color:var(--green)">${expected > 0 ? fmt$(expected) : '—'}</div>
-      <div class="proj-sum-sub">Excl. cancelled tasks</div>
+      <div class="proj-sum-sub">Total value of all task prices</div>
     </div>
     <div class="proj-sum-card">
       <div class="proj-sum-label">Billed Revenue</div>
@@ -2650,12 +2650,8 @@ function renderInfoTasks(projId, filter) {
               ${salesOpts}
             </select>
           </div>
-          <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" title="Click to edit price" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled'?'var(--red)':'var(--green)'};cursor:text">
-            ${t.fixedPrice
-              ? t.status === 'cancelled'
-                ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
-                : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
-              : '—'}
+          <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" title="Click to edit price" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);cursor:text">
+            ${t.fixedPrice ? '$' + t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
           </div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${getHoursForTask(t.name,t.proj) > 0 ? 'var(--blue)' : 'var(--muted)'}">
             ${getHoursForTask(t.name,t.proj) > 0 ? getHoursForTask(t.name,t.proj).toFixed(1) + 'h' : '—'}
@@ -3383,8 +3379,8 @@ async function deleteExpenseFromPanel(expId, projId) {
 async function syncProjBilledRevenue(projId) {
   if (!sb || !projId) return;
   const tasks = taskStore.filter(t => t.proj === projId);
-  const billedRevenue   = tasks.filter(t => t.status === 'billed').reduce((s,t) => s+(t.fixedPrice||0), 0);
-  const expectedRevenue = tasks.filter(t => t.status !== 'cancelled').reduce((s,t) => s+(t.fixedPrice||0), 0);
+  const billedRevenue = tasks.filter(t => t.status === 'billed').reduce((s,t) => s+(t.fixedPrice||0), 0);
+  const expectedRevenue = tasks.reduce((s,t) => s+(t.fixedPrice||0), 0);
   if (projectInfo[projId]) {
     projectInfo[projId].billedRevenue = billedRevenue;
     projectInfo[projId].expectedRevenue = expectedRevenue;

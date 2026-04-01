@@ -209,56 +209,21 @@ function confirmBulkBill() {
     return;
   }
   const selVal = selTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
-  const today = new Date().toISOString().split('T')[0];
-
-  // Build custom modal with date picker
-  let ov = document.getElementById('bulkBillDateOverlay');
-  if (!ov) {
-    ov = document.createElement('div');
-    ov.id = 'bulkBillDateOverlay';
-    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;display:flex;align-items:center;justify-content:center';
-    document.body.appendChild(ov);
-  }
-  ov.innerHTML = `
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:28px 32px;width:420px;max-width:95vw;box-shadow:0 20px 60px rgba(0,0,0,0.4)">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
-        <span style="font-size:22px">&#x1F4B3;</span>
-        <div style="font-size:17px;font-weight:700;color:var(--text)">Confirm Billing</div>
-      </div>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.5">
-        Mark <strong style="color:var(--text)">${bqSelected.size} task${bqSelected.size!==1?'s':''}</strong>
-        (<strong style="color:#4caf7d">${fmt$(selVal)}</strong>) as Billed?
-        This will update their status across all projects.
-      </div>
-      <div style="margin-bottom:22px">
-        <label style="display:block;font-size:11px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin-bottom:7px">Billed Date</label>
-        <input type="date" id="bulkBillDateInput" value="${today}"
-          style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 12px;font-size:14px;color:var(--text);outline:none;box-sizing:border-box">
-        <div style="font-size:11px;color:var(--muted);margin-top:5px">&#x26A0; Change this to bill into a prior month (e.g. month-end catch-up)</div>
-      </div>
-      <div style="display:flex;gap:10px;justify-content:flex-end">
-        <button onclick="document.getElementById('bulkBillDateOverlay').style.display='none'"
-          style="padding:8px 18px;border-radius:7px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:13px;cursor:pointer">Cancel</button>
-        <button onclick="bulkMarkBilled(document.getElementById('bulkBillDateInput').value)"
-          style="padding:8px 22px;border-radius:7px;border:none;background:#c084fc;color:#fff;font-size:13px;font-weight:600;cursor:pointer">&#x2714; Yes, Mark Billed</button>
-      </div>
-    </div>
-  `;
-  ov.style.display = 'flex';
+  showConfirmModal(
+    `Mark ${bqSelected.size} task${bqSelected.size!==1?'s':''} (${fmt$(selVal)}) as Billed? This will update their status across all projects.`,
+    bulkMarkBilled,
+    { title: 'Confirm Billing', btnTxt: 'Yes, Mark Billed', color: '#c084fc', icon: '&#x1F4B3;' }
+  );
 }
 
-async function bulkMarkBilled(billedDate) {
-  const usedDate = billedDate || new Date().toISOString().split('T')[0];
-  const ov = document.getElementById('bulkBillDateOverlay');
-  if (ov) ov.style.display = 'none';
-
+async function bulkMarkBilled() {
   const ids = [...bqSelected];
   const today = new Date().toISOString().split('T')[0];
   ids.forEach(id => {
     const t = taskStore.find(x => x._id === id);
     if (!t) return;
     t.status = 'billed';
-    t.billedDate    = usedDate;
+    if (!t.billedDate)    t.billedDate    = today;
     if (!t.completedDate) t.completedDate = today;
   });
   if (sb) {
@@ -301,7 +266,6 @@ function switchReportsTab(el) {
   if (el.dataset.tab === 'tab-billing') renderBillingQueue();
   if (el.dataset.tab === 'tab-timesheets') renderTimesheetsReport();
   if (el.dataset.tab === 'tab-employees') renderReportsEmployees();
-  // tab-ai is static HTML — no render function needed
 }
 
 function renderTimesheetsReport(filterEmp, filterStatus) {
@@ -576,144 +540,67 @@ function renderReportsTasks() {
   }, 50);
 }
 
-// ── Employees Report — Hours per Employee per Month ──────────────────────
-// REPLACE everything from this comment through the closing }
-// of the old renderReportsEmployees() function with this block.
-// Stop replacing just before: // ── Anthropic API Key management
-
+// ── Employees Report ─────────────────────────────────────────────────────
 function renderReportsEmployees() {
   const el = document.getElementById('tab-employees');
   if (!el) return;
 
-  const activeEmps = employees.filter(e => e.isActive !== false && !e.isOwner);
+  const rows = employees.map(e => {
+    const tasks = taskStore.filter(t => t.assign === e.initials);
+    const done = tasks.filter(t => t.done||t.status==='complete'||t.status==='billed').length;
+    const billedVal = tasks.filter(t=>t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0);
+    const fmt$ = n => n>0 ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:0}) : '—';
+    return { e, tasks:tasks.length, done, active:tasks.length-done, billedVal };
+  }).sort((a,b) => b.tasks-a.tasks);
 
-  // Build month list from tsData keys
-  const monthSet = new Set();
-  Object.keys(tsData).forEach(k => {
-    if (k.startsWith('oh_')) return;
-    const parts = k.split('|');
-    if (parts.length !== 2 || !parts[1] || parts[1].length < 7) return;
-    monthSet.add(parts[1].slice(0, 7));
-  });
-  const months = [...monthSet].sort();
-
-  if (months.length === 0) {
-    el.innerHTML = '<div style="color:var(--muted);padding:40px;text-align:center">No timesheet data available.</div>';
-    return;
-  }
-
-  function getMonthHours(empId, yearMonth) {
-    let total = 0;
-    // Project rows
-    Object.keys(tsData).forEach(k => {
-      if (!k.startsWith(empId + '|')) return;
-      const weekDate = k.split('|')[1];
-      if (!weekDate || weekDate.slice(0, 7) !== yearMonth) return;
-      const rows = tsData[k];
-      if (!Array.isArray(rows)) return;
-      rows.forEach(r => {
-        if (r.hours) total += Object.values(r.hours).reduce((s, h) => s + (parseFloat(h) || 0), 0);
-      });
-    });
-    // Overhead rows
-    Object.keys(tsData).forEach(k => {
-      if (!k.startsWith('oh_' + empId + '|')) return;
-      const weekDate = k.split('|')[1];
-      if (!weekDate || weekDate.slice(0, 7) !== yearMonth) return;
-      const ohData = tsData[k];
-      if (!ohData || typeof ohData !== 'object') return;
-      Object.values(ohData).forEach(dayMap => {
-        if (dayMap && typeof dayMap === 'object') {
-          Object.values(dayMap).forEach(h => { total += parseFloat(h) || 0; });
-        }
-      });
-    });
-    return total;
-  }
-
-  const fmtMonth = ym => {
-    const [y, m] = ym.split('-');
-    return new Date(+y, +m - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-  };
-
-  const currentYear = new Date().getFullYear();
-  const allYears = [...new Set(months.map(m => m.slice(0, 4)))].sort().reverse();
-  const selYear = el.dataset.filterYear || String(currentYear);
-  el.dataset.filterYear = selYear;
-  const filteredMonths = months.filter(m => m.startsWith(selYear));
-
-  const sortedEmps = [...activeEmps].sort((a, b) => a.name.localeCompare(b.name));
-  const colTotals = {};
-  filteredMonths.forEach(m => { colTotals[m] = 0; });
-  let grandTotal = 0;
-
-  // Pre-compute all hours
-  const empHours = sortedEmps.map(emp => {
-    const monthHours = {};
-    let empYTD = 0;
-    filteredMonths.forEach(m => {
-      const h = getMonthHours(emp.id, m);
-      monthHours[m] = h;
-      colTotals[m] += h;
-      empYTD += h;
-      grandTotal += h;
-    });
-    return { emp, monthHours, empYTD };
-  });
-
-  let html = `
-    <div style="max-width:1200px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
-        <div>
-          <div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--text)">&#x1F465; Employee Hours</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px">Monthly hours per employee</div>
-        </div>
-        <select onchange="document.getElementById('tab-employees').dataset.filterYear=this.value;renderReportsEmployees();"
-          style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif">
-          ${allYears.map(y => `<option value="${y}" ${y===selYear?'selected':''}>${y}</option>`).join('')}
-        </select>
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div class="report-card">
+        <div class="report-card-title">&#x1F4B0; Billed Revenue by Employee</div>
+        <canvas id="chartBilledByEmp" height="260"></canvas>
       </div>
-      <div style="overflow-x:auto;border-radius:10px;border:1px solid var(--border)">
-        <table style="width:100%;border-collapse:collapse;min-width:600px">
-          <thead>
-            <tr style="background:var(--surface)">
-              <th style="padding:10px 16px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;min-width:160px">Employee</th>
-              ${filteredMonths.map(m => `<th style="padding:10px 12px;text-align:center;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap">${fmtMonth(m)}</th>`).join('')}
-              <th style="padding:10px 12px;text-align:center;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--amber);border-bottom:1px solid var(--border);border-left:1px solid var(--border);white-space:nowrap">YTD Total</th>
-            </tr>
-          </thead>
-          <tbody>`;
+      <div class="report-card">
+        <div class="report-card-title">&#x1F4CA; Task Load by Employee</div>
+        <canvas id="chartLoadByEmp" height="260"></canvas>
+      </div>
+    </div>
+    <div class="report-card" style="margin-top:0">
+      <div class="report-card-title">&#x1F465; Employee Summary</div>
+      <table class="ai-report-table">
+        <thead><tr><th>Employee</th><th>Dept</th><th>Total Tasks</th><th>Active</th><th>Done</th><th>Billed Revenue</th></tr></thead>
+        <tbody>${rows.map(r => `<tr>
+          <td><div style="display:flex;align-items:center;gap:8px"><div class="emp-av" style="background:${r.e.color};width:28px;height:28px;font-size:10px">${getInitials(r.e.name)}</div>${r.e.name}</div></td>
+          <td style="color:var(--muted);font-size:12px">${r.e.dept||'—'}</td>
+          <td style="font-family:'JetBrains Mono',monospace">${r.tasks}</td>
+          <td style="color:var(--blue);font-family:'JetBrains Mono',monospace">${r.active}</td>
+          <td style="color:var(--green);font-family:'JetBrains Mono',monospace">${r.done}</td>
+          <td style="color:#c084fc;font-family:'JetBrains Mono',monospace">${'$'+r.billedVal.toLocaleString('en-US',{minimumFractionDigits:0})}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+  `;
 
-  empHours.forEach(({ emp, monthHours, empYTD }, idx) => {
-    const rowBg = idx % 2 === 0 ? '' : 'background:var(--surface)';
-    html += `<tr style="${rowBg}" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='${idx%2===0?'':'var(--surface)'}'">
-      <td style="padding:10px 16px;border-bottom:1px solid var(--border)">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="width:28px;height:28px;border-radius:50%;background:${emp.color};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0">${emp.initials}</div>
-          <div>
-            <div style="font-size:13px;font-weight:500;color:var(--text)">${emp.name}</div>
-            ${emp.dept ? `<div style="font-size:10px;color:var(--muted)">${emp.dept}</div>` : ''}
-          </div>
-        </div>
-      </td>
-      ${filteredMonths.map(m => {
-        const h = monthHours[m];
-        const color = h === 0 ? 'var(--muted)' : 'var(--text)';
-        return `<td style="padding:10px 12px;text-align:center;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:12px;color:${color}">${h > 0 ? h.toFixed(1) : '—'}</td>`;
-      }).join('')}
-      <td style="padding:10px 12px;text-align:center;border-bottom:1px solid var(--border);border-left:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--amber)">${empYTD > 0 ? empYTD.toFixed(1) : '—'}</td>
-    </tr>`;
-  });
-
-  html += `<tr style="background:var(--surface)">
-    <td style="padding:10px 16px;font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Total</td>
-    ${filteredMonths.map(m => `<td style="padding:10px 12px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--amber);border-top:2px solid var(--border)">${colTotals[m] > 0 ? colTotals[m].toFixed(1) : '—'}</td>`).join('')}
-    <td style="padding:10px 12px;text-align:center;font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:700;color:var(--amber);border-top:2px solid var(--border);border-left:1px solid var(--border)">${grandTotal.toFixed(1)}</td>
-  </tr>`;
-
-  html += `</tbody></table></div></div>`;
-  el.innerHTML = html;
+  setTimeout(() => {
+    new Chart(document.getElementById('chartBilledByEmp'), {
+      type: 'bar',
+      data: {
+        labels: rows.map(r => r.e.name.split(' ')[0]),
+        datasets: [{ label:'Billed $', data: rows.map(r=>r.billedVal), backgroundColor: rows.map(r=>r.e.color+'cc'), borderColor: rows.map(r=>r.e.color), borderWidth:1.5, borderRadius:5 }]
+      },
+      options: { responsive:true, plugins:{ legend:{display:false} }, scales:{ x:{ticks:{color:'#9a9aaa',font:{size:10}},grid:{display:false}}, y:{ticks:{color:'#9a9aaa',font:{size:10},callback:v=>'$'+v.toLocaleString()},grid:{color:'rgba(255,255,255,0.05)'}} } }
+    });
+    new Chart(document.getElementById('chartLoadByEmp'), {
+      type: 'doughnut',
+      data: {
+        labels: rows.map(r => r.e.name.split(' ')[0]),
+        datasets: [{ data: rows.map(r=>r.tasks), backgroundColor: rows.map(r=>r.e.color+'cc'), borderColor: rows.map(r=>r.e.color), borderWidth:1.5 }]
+      },
+      options: { responsive:true, plugins:{ legend:{ position:'right', labels:{color:'#9a9aaa',font:{size:11}} } } }
+    });
+  }, 50);
 }
+
+
 // ── Anthropic API Key management ─────────────────────────────────────────
 function getAnthropicKey() {
   return localStorage.getItem('nuworkspace_anthropic_key') || '';
@@ -724,7 +611,7 @@ function saveAnthropicKey(key) {
 }
 
 // ── AI Analysis ──────────────────────────────────────────────────────────
-let aiHistory = [];
+let aiHistory = []; // { question, report }
 
 function setAiPrompt(text) {
   document.getElementById('aiReportPrompt').value = text;
@@ -738,8 +625,10 @@ function clearAiHistory() {
 
 function showApiKeyPrompt() {
   const conv = document.getElementById('aiConversation');
+  // Remove any existing key prompt
   const existing = document.getElementById('apiKeyPromptDiv');
   if (existing) existing.remove();
+
   const div = document.createElement('div');
   div.id = 'apiKeyPromptDiv';
   div.style.cssText = 'background:var(--surface2);border:1.5px solid var(--amber-dim);border-radius:12px;padding:20px 24px;margin-bottom:16px';
@@ -750,7 +639,7 @@ function showApiKeyPrompt() {
       Get a key at <a href="https://console.anthropic.com" target="_blank" style="color:var(--amber)">console.anthropic.com</a>
     </div>
     <div style="display:flex;gap:8px">
-      <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="flex:1;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;padding:8px 12px;outline:none"
+      <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="flex:1;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;padding:8px 12px;outline:none" 
         onkeydown="if(event.key==='Enter')saveAndCloseKeyPrompt()" />
       <button class="btn btn-primary" style="padding:8px 18px;font-size:13px" onclick="saveAndCloseKeyPrompt()">Save & Continue</button>
     </div>
@@ -764,6 +653,7 @@ function saveAndCloseKeyPrompt() {
   if (!key) return;
   saveAnthropicKey(key);
   document.getElementById('apiKeyPromptDiv').remove();
+  // Re-focus prompt and let user try again
   document.getElementById('aiReportPrompt').focus();
 }
 
@@ -821,9 +711,16 @@ function buildDataContext() {
 async function runAiReport() {
   const prompt = document.getElementById('aiReportPrompt').value.trim();
   if (!prompt) return;
-  if (!getAnthropicKey()) { showApiKeyPrompt(); return; }
+
+  // Check for API key
+  if (!getAnthropicKey()) {
+    showApiKeyPrompt();
+    return;
+  }
   const btn = document.getElementById('aiRunBtn');
   const conv = document.getElementById('aiConversation');
+
+  // Add user bubble immediately
   const msgId = 'aiMsg_' + Date.now();
   const msgDiv = document.createElement('div');
   msgDiv.className = 'ai-msg';
@@ -835,10 +732,13 @@ async function runAiReport() {
     </div>`;
   conv.appendChild(msgDiv);
   msgDiv.scrollIntoView({behavior:'smooth', block:'start'});
+
   document.getElementById('aiReportPrompt').value = '';
   btn.disabled = true;
   btn.innerHTML = '⏳';
+
   const ctx = buildDataContext();
+
   try {
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -849,7 +749,7 @@ async function runAiReport() {
         'anthropic-dangerous-direct-browser-access': 'true'
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
+        model: 'claude-sonnet-4-20250514',
         max_tokens: 2000,
         system: `You are a business intelligence assistant for NU Labs, analyzing live project management data.
 Respond ONLY in valid JSON, no markdown, no prose outside JSON.
@@ -874,7 +774,7 @@ Schema:
   ]
 }
 Rules:
-- Include charts wherever data can be visualized
+- Include charts wherever data can be visualized (revenue by project, tasks by status, workload by employee etc.)
 - For doughnut charts use one dataset with multiple colors: datasets[0].colors = ["#hex","#hex"]
 - Tables and charts are both optional but prefer charts for numerical comparisons
 - Be concise and actionable. Use $ formatting for money values in tables.
@@ -883,10 +783,10 @@ Rules:
       })
     });
     const data = await res.json();
-    console.log('AI raw response:', data);
     const raw = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
     const clean = raw.replace(/```json|```/g,'').trim();
     const report = JSON.parse(clean);
+
     aiHistory.push({ question: prompt, report });
     const responseEl = msgDiv.querySelector('.ai-msg-response');
     renderAiReport(report, responseEl);
@@ -894,8 +794,8 @@ Rules:
   } catch(err) {
     const responseEl = msgDiv.querySelector('.ai-msg-response');
     responseEl.innerHTML = `<div style="color:var(--red);font-size:13px">&#x26A0; Could not generate report: ${err.message}</div>`;
-    console.error('AI report error:', err);
   }
+
   btn.disabled = false;
   btn.innerHTML = '&#x2728; Ask';
 }
@@ -903,10 +803,16 @@ Rules:
 function renderAiReport(report, container) {
   const CHART_COLORS = ['#5b9cf6','#4caf7d','#e8a234','#e05c5c','#a78bfa','#c084fc','#2dd4bf','#fb923c'];
   let innerHtml = '';
-  if (report.summary) innerHtml += `<div class="ai-response-summary">${report.summary}</div>`;
+
+  if (report.summary) {
+    innerHtml += `<div class="ai-response-summary">${report.summary}</div>`;
+  }
+
   const sections = report.sections || [];
+  // Put chart sections in a grid if 2+ charts side by side
   const chartSections = sections.filter(s => s.chart);
   const tableSections = sections.filter(s => !s.chart && s.table);
+
   if (chartSections.length >= 2) {
     innerHtml += '<div class="ai-chart-grid">';
     chartSections.forEach((sec, si) => {
@@ -932,6 +838,7 @@ function renderAiReport(report, container) {
       setTimeout(() => drawAiChart(chartId, sec.chart, CHART_COLORS), 100);
     });
   }
+
   tableSections.forEach(sec => {
     innerHtml += `<div class="ai-section">
       <div class="ai-section-title">${sec.title}</div>
@@ -939,6 +846,7 @@ function renderAiReport(report, container) {
       ${renderAiTable(sec.table)}
     </div>`;
   });
+
   container.innerHTML = innerHtml;
 }
 
@@ -956,9 +864,12 @@ function drawAiChart(chartId, chartDef, COLORS) {
   const isDoughnut = chartDef.type === 'doughnut';
   const ds = chartDef.datasets.map((d, i) => {
     const baseColor = d.color || COLORS[i % COLORS.length];
-    const bgColors = isDoughnut ? (d.colors || chartDef.labels.map((_,li) => COLORS[li % COLORS.length])) : baseColor + 'bb';
+    const bgColors = isDoughnut
+      ? (d.colors || chartDef.labels.map((_,li) => COLORS[li % COLORS.length]))
+      : baseColor + 'bb';
     return {
-      label: d.label, data: d.data,
+      label: d.label,
+      data: d.data,
       backgroundColor: bgColors,
       borderColor: isDoughnut ? 'transparent' : baseColor,
       borderWidth: isDoughnut ? 0 : 1.5,
@@ -980,7 +891,10 @@ function drawAiChart(chartId, chartDef, COLORS) {
           position: isDoughnut ? 'right' : 'top',
           labels: { color: '#9a9aaa', font: { size: 11 }, boxWidth: 12, padding: 12 }
         },
-        title: chartDef.title ? { display: true, text: chartDef.title, color: '#9a9aaa', font: { size: 11, weight: '600' }, padding: { bottom: 10 } } : { display: false }
+        title: chartDef.title ? {
+          display: true, text: chartDef.title,
+          color: '#9a9aaa', font: { size: 11, weight: '600' }, padding: { bottom: 10 }
+        } : { display: false }
       },
       scales: isDoughnut ? {} : {
         x: { ticks: { color: '#9a9aaa', font: { size: 10 } }, grid: { display: false } },
@@ -1007,24 +921,42 @@ function openClosingReport(el) {
 function renderClosingReport() {
   const body = document.getElementById('closingReportBody');
   if (!body) return;
+
   const today = new Date();
   const msPerDay = 24 * 60 * 60 * 1000;
-  const getDays = (dateStr) => { if (!dateStr) return null; return Math.floor((today - new Date(dateStr + 'T00:00:00')) / msPerDay); };
+
+  const getDays = (dateStr) => {
+    if (!dateStr) return null;
+    return Math.floor((today - new Date(dateStr + 'T00:00:00')) / msPerDay);
+  };
+
   const fmtDate = ds => ds ? new Date(ds+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
-  const testComplete60 = [], readyToClose = [], pendingJordan = [];
+
+  // Categorize projects
+  const testComplete60 = [];
+  const readyToClose = [];
+  const pendingJordan = [];
+
   projects.forEach(p => {
     const info = projectInfo[p.id];
     if (!info) return;
     if (info.status === 'testcomplete') {
       const projTasks = taskStore.filter(t => t.proj === p.id);
       const openTasks = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
-      if (openTasks.length > 0) return;
+      if (openTasks.length > 0) return; // skip — still has open tasks
+
       let refDate = info.testcompleteDate || '';
       let days = getDays(refDate);
+
+      // If tasks are loaded, use the most recent date across ALL tasks (billed, complete, cancelled)
       if (projTasks.length > 0) {
-        const lastAnyDate = projTasks.reduce((latest, t) => { const d = t.billedDate || t.completedDate || ''; return d > latest ? d : latest; }, '');
+        const lastAnyDate = projTasks.reduce((latest, t) => {
+          const d = t.billedDate || t.completedDate || '';
+          return d > latest ? d : latest;
+        }, '');
         if (lastAnyDate) { refDate = lastAnyDate; days = getDays(refDate); }
       }
+
       if (days === null || days >= 60) testComplete60.push({p, info, days, refDate});
     } else if (info.status === 'complete') {
       readyToClose.push({p, info});
@@ -1037,20 +969,34 @@ function renderClosingReport() {
     const projTasks = taskStore.filter(t => t.proj === p.id);
     const openTasks = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
     const canClose = openTasks.length === 0;
+
     let buttons = '';
     if (section === 'testcomplete' && canClose && isManager()) {
-      buttons += `<button onclick="markProjectComplete('${p.id}')" style="background:rgba(91,156,246,0.15);border:1px solid rgba(91,156,246,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--blue);cursor:pointer;font-weight:600">Mark Complete</button>`;
+      buttons += `<button onclick="markProjectComplete('${p.id}')"
+        style="background:rgba(91,156,246,0.15);border:1px solid rgba(91,156,246,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--blue);cursor:pointer;font-weight:600">
+        Mark Complete
+      </button>`;
     }
     if (section === 'readytoclose' && isManager()) {
-      buttons += `<button onclick="generateClosingPdf('${p.id}')" style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600">📄 Generate PDF &amp; Mark Closing</button>`;
+      buttons += `<button onclick="generateClosingPdf('${p.id}')"
+        style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600">
+        📄 Generate PDF &amp; Mark Closing
+      </button>`;
     }
     if (section === 'pending') {
       buttons += `<span style="font-size:11px;color:var(--amber);padding:6px 12px;background:rgba(232,162,52,0.1);border:1px solid rgba(232,162,52,0.3);border-radius:8px">⏳ Awaiting Jordan</span>`;
       if (currentEmployee && currentEmployee.name === 'Jordan McAdoo') {
-        buttons += `<button onclick="approveClosing('${p.id}')" style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600;margin-left:6px">✓ Approve Close</button>
-        <button onclick="rejectClosing('${p.id}')" style="background:rgba(224,92,92,0.1);border:1px solid rgba(224,92,92,0.3);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--red);cursor:pointer;margin-left:6px">✗ Reject</button>`;
+        buttons += `<button onclick="approveClosing('${p.id}')"
+          style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:7px 14px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600;margin-left:6px">
+          ✓ Approve Close
+        </button>
+        <button onclick="rejectClosing('${p.id}')"
+          style="background:rgba(224,92,92,0.1);border:1px solid rgba(224,92,92,0.3);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--red);cursor:pointer;margin-left:6px">
+          ✗ Reject
+        </button>`;
       }
     }
+
     return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap">
       <div style="flex:1;min-width:200px">
         <div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px">${p.emoji||'📁'} ${p.name}</div>
@@ -1065,7 +1011,10 @@ function renderClosingReport() {
         ${canClose && section === 'testcomplete' ? `<div style="margin-top:6px;font-size:11px;color:#4caf7d">✓ All tasks complete</div>` : ''}
       </div>
       <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap;align-items:center">
-        <button onclick="selectProject('${p.id}',null);document.getElementById('navProjects')?.classList.add('active')" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--text);cursor:pointer">View</button>
+        <button onclick="selectProject('${p.id}',null);document.getElementById('navProjects')?.classList.add('active')"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 14px;font-size:12px;color:var(--text);cursor:pointer">
+          View
+        </button>
         ${buttons}
       </div>
     </div>`;
@@ -1093,6 +1042,7 @@ function renderClosingReport() {
   html += section('Testing Complete — 60+ Days', '#e8a234', '🕐', testComplete60, 'testcomplete', 'No projects have been in Testing Complete for 60+ days.');
   html += section('Ready to Close', '#4caf7d', '✅', readyToClose, 'readytoclose', 'No projects are ready to close yet.');
   html += section("Pending Jordan's Approval", '#5b9cf6', '⏳', pendingJordan, 'pending', 'No projects pending approval.');
+
   body.innerHTML = html;
 }
 
@@ -1101,7 +1051,10 @@ function markProjectComplete(projId) {
   if (!info) return;
   const projTasks = taskStore.filter(t => t.proj === projId);
   const blocking = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
-  if (blocking.length > 0) { toast(`⚠ Cannot mark Complete — ${blocking.length} open task${blocking.length>1?'s':''} remaining.`, 'error'); return; }
+  if (blocking.length > 0) {
+    toast(`⚠ Cannot mark Complete — ${blocking.length} open task${blocking.length>1?'s':''} remaining.`, 'error');
+    return;
+  }
   info.status = 'complete';
   if (sb) dbUpdate('project_info', projId, { status: 'complete' });
   toast('Project marked Complete');
@@ -1119,7 +1072,7 @@ function approveClosing(projId) {
 
 function rejectClosing(projId) {
   const reason = prompt('Reason for rejection (will be noted):');
-  if (reason === null) return;
+  if (reason === null) return; // cancelled
   const info = projectInfo[projId];
   if (!info) return;
   info.status = 'complete';
@@ -1131,20 +1084,30 @@ function rejectClosing(projId) {
 function generateClosingPdf(projId) {
   const info = projectInfo[projId];
   if (!info) return;
+
+  // Block if open tasks
   const projTasks = taskStore.filter(t => t.proj === projId);
   const blocking = projTasks.filter(t => !['complete','billed','cancelled'].includes(t.status));
-  if (blocking.length > 0) { toast('⚠ Cannot close — ' + blocking.length + ' open task(s) remaining.', 'error'); return; }
+  if (blocking.length > 0) {
+    toast('⚠ Cannot close — ' + blocking.length + ' open task(s) remaining.', 'error');
+    return;
+  }
+
   const proj = projects.find(p => p.id === projId);
   if (!proj) return;
+
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   const margin = 48;
   const contentW = pageW - margin * 2;
   let y = margin;
+
   const fmtDate = ds => ds ? new Date(ds+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
 
+  // ── Header ──
   doc.setFillColor(30, 30, 40);
   doc.rect(0, 0, pageW, 72, 'F');
   doc.setTextColor(255, 255, 255);
@@ -1157,6 +1120,7 @@ function generateClosingPdf(projId) {
   doc.text('Status: Closing (Pending Approval)', pageW - margin, 50, {align:'right'});
   y = 90;
 
+  // ── Project Title ──
   doc.setTextColor(20, 20, 30);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(18);
@@ -1167,35 +1131,48 @@ function generateClosingPdf(projId) {
   doc.line(margin, y, margin + contentW, y);
   y += 16;
 
+  // ── Project Info Grid ──
   const infoItems = [
-    ['Client', info.client || '—'], ['Project Manager', info.pm || '—'],
-    ['Quote Number', info.quoteNumber || '—'], ['PO Number', info.po || '—'],
-    ['Created Date', fmtDate(info.startDate)], ['Closed Date', fmtDate(info.endDate)],
+    ['Client', info.client || '—'],
+    ['Project Manager', info.pm || '—'],
+    ['Quote Number', info.quoteNumber || '—'],
+    ['PO Number', info.po || '—'],
+    ['Created Date', fmtDate(info.startDate)],
+    ['Closed Date', fmtDate(info.endDate)],
     ['Billing Type', info.billingType || '—'],
     ['Contract Amount', info.contract ? '$' + parseFloat(info.contract).toLocaleString() : '—'],
   ];
+
   doc.setFontSize(10);
   const colW = contentW / 2;
   infoItems.forEach((item, i) => {
     const x = margin + (i % 2 === 0 ? 0 : colW);
     const rowY = y + Math.floor(i / 2) * 22;
-    doc.setFont('helvetica', 'bold'); doc.setTextColor(100, 100, 120);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(100, 100, 120);
     doc.text(item[0].toUpperCase(), x, rowY);
-    doc.setFont('helvetica', 'normal'); doc.setTextColor(20, 20, 30);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(20, 20, 30);
     doc.text(String(item[1]), x, rowY + 12);
   });
   y += Math.ceil(infoItems.length / 2) * 22 + 20;
 
+  // ── Section helper ──
   const sectionHeader = (title) => {
     if (y > pageH - 120) { doc.addPage(); y = margin; }
     doc.setFillColor(240, 242, 255);
     doc.rect(margin, y - 12, contentW, 20, 'F');
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(60, 80, 160);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(60, 80, 160);
     doc.text(title, margin + 6, y + 2);
     y += 16;
-    doc.setTextColor(20, 20, 30); doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    doc.setTextColor(20, 20, 30);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
   };
 
+  // ── Tasks ──
   sectionHeader('TASKS');
   const taskData = projTasks.map(t => [
     t.name.length > 50 ? t.name.substring(0,50)+'...' : t.name,
@@ -1204,49 +1181,77 @@ function generateClosingPdf(projId) {
     t.dueDate ? fmtDate(t.dueDate) : '—',
     t.fixedPrice ? '$' + parseFloat(t.fixedPrice).toLocaleString() : '—',
   ]);
-  doc.autoTable({ startY: y, head: [['Task Name','Status','Assigned To','Due Date','Value']], body: taskData,
-    margin: { left: margin, right: margin }, styles: { fontSize: 9, cellPadding: 4 },
-    headStyles: { fillColor: [50,50,70], textColor: 255, fontStyle: 'bold' },
-    alternateRowStyles: { fillColor: [248,248,252] },
-    columnStyles: { 0:{cellWidth:'auto'}, 1:{cellWidth:60}, 2:{cellWidth:80}, 3:{cellWidth:65}, 4:{cellWidth:65} },
+
+  doc.autoTable({
+    startY: y,
+    head: [['Task Name', 'Status', 'Assigned To', 'Due Date', 'Value']],
+    body: taskData,
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 9, cellPadding: 4 },
+    headStyles: { fillColor: [50, 50, 70], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [248, 248, 252] },
+    columnStyles: { 0: { cellWidth: 'auto' }, 1: { cellWidth: 60 }, 2: { cellWidth: 80 }, 3: { cellWidth: 65 }, 4: { cellWidth: 65 } },
   });
   y = doc.lastAutoTable.finalY + 20;
 
+  // ── Expenses ──
   sectionHeader('EXPENSES');
   const expenses = (window.expenseStore || expenseStore || []).filter(e => e.projId === projId);
-  if (expenses.length === 0) { doc.text('No expenses recorded.', margin + 6, y + 4); y += 20; }
-  else {
+  if (expenses.length === 0) {
+    doc.text('No expenses recorded.', margin + 6, y + 4);
+    y += 20;
+  } else {
     const plannedTotal = expenses.reduce((s,e) => s + (parseFloat(e.planned)||0), 0);
     const actualTotal  = expenses.reduce((s,e) => s + (parseFloat(e.actual)||0), 0);
     const taskName = (taskId) => { const t = taskStore.find(t=>t._id===taskId); return t ? t.name : '—'; };
-    const expData = expenses.map(e => [e.name||'—', e.taskId ? taskName(e.taskId) : '—',
+    const expData = expenses.map(e => [
+      e.name || '—',
+      e.taskId ? taskName(e.taskId) : '—',
       e.planned > 0 ? '$' + parseFloat(e.planned).toLocaleString('en-US',{minimumFractionDigits:2}) : '—',
-      e.actual > 0 ? '$' + parseFloat(e.actual).toLocaleString('en-US',{minimumFractionDigits:2}) : '—']);
-    expData.push(['','TOTAL','$'+plannedTotal.toLocaleString('en-US',{minimumFractionDigits:2}),'$'+actualTotal.toLocaleString('en-US',{minimumFractionDigits:2})]);
-    doc.autoTable({ startY: y, head: [['Description','Task','Planned','Actual']], body: expData,
-      margin: { left: margin, right: margin }, styles: { fontSize: 9, cellPadding: 4 },
-      headStyles: { fillColor: [50,50,70], textColor: 255, fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248,248,252] } });
+      e.actual > 0 ? '$' + parseFloat(e.actual).toLocaleString('en-US',{minimumFractionDigits:2}) : '—',
+    ]);
+    expData.push(['', 'TOTAL',
+      '$' + plannedTotal.toLocaleString('en-US',{minimumFractionDigits:2}),
+      '$' + actualTotal.toLocaleString('en-US',{minimumFractionDigits:2}),
+    ]);
+    doc.autoTable({
+      startY: y,
+      head: [['Description', 'Task', 'Planned', 'Actual']],
+      body: expData,
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: [50, 50, 70], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 248, 252] },
+    });
     y = doc.lastAutoTable.finalY + 20;
   }
 
+  // ── Invoice Summary ──
   sectionHeader('INVOICE SUMMARY');
   const billedTasks = projTasks.filter(t => t.status === 'billed');
   const totalBilled = billedTasks.reduce((s,t) => s + (parseFloat(t.fixedPrice)||0), 0);
   const totalContract = parseFloat(info.contract) || 0;
-  doc.autoTable({ startY: y, body: [
+  const invData = [
     ['Contract Amount', '$' + totalContract.toLocaleString('en-US',{minimumFractionDigits:2})],
     ['Total Billed (tasks)', '$' + totalBilled.toLocaleString('en-US',{minimumFractionDigits:2})],
     ['Remaining', '$' + (totalContract - totalBilled).toLocaleString('en-US',{minimumFractionDigits:2})],
-  ], margin: { left: margin, right: margin }, styles: { fontSize: 10, cellPadding: 5 },
-    columnStyles: { 0:{fontStyle:'bold',cellWidth:200}, 1:{cellWidth:150} },
-    alternateRowStyles: { fillColor: [248,248,252] } });
+  ];
+  doc.autoTable({
+    startY: y,
+    body: invData,
+    margin: { left: margin, right: margin },
+    styles: { fontSize: 10, cellPadding: 5 },
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 200 }, 1: { cellWidth: 150 } },
+    alternateRowStyles: { fillColor: [248, 248, 252] },
+  });
   y = doc.lastAutoTable.finalY + 20;
 
+  // ── Hours Summary ──
   sectionHeader('HOURS SUMMARY');
   const hoursMap = {};
   Object.entries(tsData).forEach(([key, rows]) => {
-    if (!key.includes('|') || key.startsWith('oh_') || !Array.isArray(rows)) return;
+    if (!key.includes('|') || key.startsWith('oh_')) return;
+    if (!Array.isArray(rows)) return;
     const empId = key.split('|')[0];
     rows.forEach(row => {
       if (row.projId !== projId) return;
@@ -1259,28 +1264,40 @@ function generateClosingPdf(projId) {
     const emp = employees.find(e => e.id === empId);
     return [emp ? emp.name : empId, hrs.toFixed(1) + ' hrs'];
   });
-  if (hrsData.length === 0) { doc.text('No hours logged.', margin + 6, y + 4); y += 20; }
-  else {
+  if (hrsData.length === 0) {
+    doc.text('No hours logged.', margin + 6, y + 4);
+    y += 20;
+  } else {
     hrsData.push(['TOTAL', grandHrs.toFixed(1) + ' hrs']);
-    doc.autoTable({ startY: y, head: [['Employee','Total Hours']], body: hrsData,
-      margin: { left: margin, right: margin }, styles: { fontSize: 10, cellPadding: 5 },
-      headStyles: { fillColor: [50,50,70], textColor: 255, fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248,248,252] },
-      columnStyles: { 0:{cellWidth:200}, 1:{cellWidth:120} } });
+    doc.autoTable({
+      startY: y,
+      head: [['Employee', 'Total Hours']],
+      body: hrsData,
+      margin: { left: margin, right: margin },
+      styles: { fontSize: 10, cellPadding: 5 },
+      headStyles: { fillColor: [50, 50, 70], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 248, 252] },
+      columnStyles: { 0: { cellWidth: 200 }, 1: { cellWidth: 120 } },
+    });
     y = doc.lastAutoTable.finalY + 20;
   }
 
+  // ── Footer on each page ──
   const pageCount = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
-    doc.setFontSize(8); doc.setTextColor(150, 150, 160);
+    doc.setFontSize(8);
+    doc.setTextColor(150, 150, 160);
     doc.text('NUWorkspace — CONFIDENTIAL', margin, pageH - 20);
     doc.text('Page ' + i + ' of ' + pageCount, pageW - margin, pageH - 20, {align:'right'});
     doc.text(proj.name, pageW/2, pageH - 20, {align:'center'});
   }
 
+  // ── Save PDF ──
   const safeName = proj.name.replace(/[^a-z0-9]/gi,'_');
   doc.save('Closing_' + safeName + '_' + new Date().toISOString().slice(0,10) + '.pdf');
+
+  // ── Mark as closing in app ──
   info.status = 'closing';
   if (sb) dbUpdate('project_info', projId, { status: 'closing' });
   toast('PDF downloaded — project marked as Closing.');
@@ -1288,25 +1305,37 @@ function generateClosingPdf(projId) {
 }
 
 
+
 // ===== LOAD CLOSED PROJECTS ON DEMAND =====
 // ===== LOAD CLOSED PROJECTS ON DEMAND =====
 let closedProjectsLoaded = false;
 
 async function loadClosedProjects(el) {
-  if (closedProjectsLoaded) { toast('Closed jobs already loaded'); return; }
+  if (closedProjectsLoaded) {
+    toast('Closed jobs already loaded');
+    return;
+  }
   if (el) { el.textContent = '⏳ Loading...'; el.style.pointerEvents = 'none'; }
   toast('Loading closed jobs...');
+
   try {
+    // Load closed project_info
     let closedInfo = [];
     let page = 0;
     while (true) {
-      const { data } = await sb.from('project_info').select('*').eq('status', 'closed').range(page * 1000, page * 1000 + 999);
+      const { data } = await sb.from('project_info')
+        .select('*')
+        .eq('status', 'closed')
+        .range(page * 1000, page * 1000 + 999);
       if (!data || data.length === 0) break;
       closedInfo = closedInfo.concat(data);
       if (data.length < 1000) break;
       page++;
     }
+
     const closedProjIds = new Set(closedInfo.map(r => r.project_id));
+
+    // Add to projectInfo store
     closedInfo.forEach(r => {
       if (!projectInfo[r.project_id]) {
         projectInfo[r.project_id] = {
@@ -1329,20 +1358,29 @@ async function loadClosedProjects(el) {
         };
       }
     });
+
+    // Load tasks for closed projects
     if (closedProjIds.size > 0) {
       let taskPage = 0;
       while (true) {
-        const { data } = await sb.from('tasks').select('*').in('project_id', [...closedProjIds]).range(taskPage * 1000, taskPage * 1000 + 999);
+        const { data } = await sb.from('tasks')
+          .select('*')
+          .in('project_id', [...closedProjIds])
+          .range(taskPage * 1000, taskPage * 1000 + 999);
         if (!data || data.length === 0) break;
         data.forEach(r => {
-          if (taskStore.find(t => t._id === r.id)) return;
+          if (taskStore.find(t => t._id === r.id)) return; // skip duplicates
           taskStore.push({
             _id: r.id, taskNum: r.task_num||0, proj: r.project_id,
-            name: r.name||'', status: r.status||'new', assign: r.assignee||'',
+            name: r.name||'', status: r.status||'new',
+            assign: r.assignee||'',
             due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
-            due_raw: r.due_date||'', overdue: false, done: r.done||false,
-            priority: r.priority||'medium', section: r.section||'sprint', sectionId: r.section_id||null,
-            taskStartDate: r.task_start_date||'', completedDate: r.completed_date||'', billedDate: r.billed_date||'',
+            due_raw: r.due_date||'',
+            overdue: false, done: r.done||false,
+            priority: r.priority||'medium',
+            section: r.section||'sprint', sectionId: r.section_id||null,
+            taskStartDate: r.task_start_date||'',
+            completedDate: r.completed_date||'', billedDate: r.billed_date||'',
             fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
             budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
             salesCat: r.sales_category||'', quoteNum: r.quote_number||'',
@@ -1355,11 +1393,15 @@ async function loadClosedProjects(el) {
         taskPage++;
       }
     }
+
     closedProjectsLoaded = true;
     if (el) { el.innerHTML = '<span class="icon">✓</span> Closed Jobs Loaded'; el.style.color = 'var(--green)'; }
+    
+    // Re-render
     renderProjectNav();
     renderAllViews();
     toast('✓ Closed jobs loaded (' + closedInfo.length + ' projects)');
+
   } catch(e) {
     console.error('loadClosedProjects:', e);
     toast('⚠ Error loading closed jobs: ' + e.message);
@@ -1368,12 +1410,15 @@ async function loadClosedProjects(el) {
 }
 
 
+
 // ===== ACTIVITY PANEL (per project) =====
 // ===== ACTIVITY PANEL (per project) =====
 async function renderActivityPanel(projId) {
   const el = document.getElementById('activityPanelBody');
   if (!el) return;
   el.innerHTML = '<div style="color:var(--muted);font-size:13px">Loading...</div>';
+
+  const proj = projects.find(p => p.id === projId);
   let logs = [];
   if (sb) {
     const { data } = await sb.from('activity_log')
@@ -1383,13 +1428,16 @@ async function renderActivityPanel(projId) {
       .limit(100);
     logs = data || [];
   }
+
   const fmtDate = d => new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
   const fieldLabels = {};
   Object.values(AUDIT_FIELD_DEFS).forEach(arr => arr.forEach(f => fieldLabels[f.key] = f.label));
+
   if (logs.length === 0) {
     el.innerHTML = '<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">📋</div><div>No activity recorded yet for this project.</div></div>';
     return;
   }
+
   el.innerHTML = '<div style="margin-bottom:16px"><div style="font-family:DM Serif Display,serif;font-size:20px;color:var(--text)">📋 Activity Log</div>' +
     '<div style="font-size:12px;color:var(--muted);margin-top:2px">' + logs.length + ' changes recorded</div></div>' +
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">' +
@@ -1406,7 +1454,9 @@ async function renderActivityPanel(projId) {
       '<tr style="border-bottom:1px solid var(--border)">' +
       '<td style="padding:9px 14px;font-size:11px;color:var(--muted);white-space:nowrap">' + fmtDate(l.created_at) + '</td>' +
       '<td style="padding:9px 14px;font-size:13px;font-weight:500">' + (l.employee_name||'—') + '</td>' +
-      '<td style="padding:9px 14px;font-size:12px"><span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface2);color:var(--muted);margin-right:6px">' + l.record_type + '</span>' + (l.record_label||'—') + '</td>' +
+      '<td style="padding:9px 14px;font-size:12px">' +
+        '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface2);color:var(--muted);margin-right:6px">' + l.record_type + '</span>' +
+        (l.record_label||'—') + '</td>' +
       '<td style="padding:9px 14px;font-size:12px">' + (fieldLabels[l.field_changed] || l.field_changed) + '</td>' +
       '<td style="padding:9px 14px;font-size:12px;color:var(--red);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (l.old_value||'—') + '</td>' +
       '<td style="padding:9px 14px;font-size:12px;color:var(--green);max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (l.new_value||'—') + '</td>' +
@@ -1414,3 +1464,164 @@ async function renderActivityPanel(projId) {
     ).join('') +
     '</tbody></table></div>';
 }
+
+
+// ===== AI BUSINESS INTELLIGENCE =====
+// ===== AI BUSINESS INTELLIGENCE =====
+let aiConversationHistory = [];
+
+function setAiPrompt(text) {
+  const inp = document.getElementById('aiReportPrompt');
+  if (inp) { inp.value = text; inp.focus(); }
+}
+
+function clearAiHistory() {
+  aiConversationHistory = [];
+  const conv = document.getElementById('aiConversation');
+  if (conv) conv.innerHTML = '';
+}
+
+function buildAiContext() {
+  const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const openProjects = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed');
+  const projSummary = openProjects.map(p => {
+    const info = projectInfo[p.id] || {};
+    const tasks = taskStore.filter(t => t.proj === p.id);
+    const done   = tasks.filter(t => ['complete','billed','cancelled'].includes(t.status)).length;
+    const billed = tasks.filter(t => t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0);
+    const ready  = tasks.filter(t => t.status==='complete').reduce((s,t)=>s+(t.fixedPrice||0),0);
+    return {
+      n:p.name, st:info.status||'unknown', ph:(info.phase||'').slice(0,30),
+      pm:(info.pm||'').slice(0,20), cl:(info.clientName||info.client||'').slice(0,30),
+      tt:tasks.length, td:done, to:tasks.filter(t=>t.overdue&&!t.done).length,
+      br:Math.round(billed), rb:Math.round(ready), ch:info.creditHold||false,
+    };
+  });
+  const empWorkload = employees.map(e => {
+    const mt = taskStore.filter(t => t.assign===e.initials);
+    return { n:e.name, d:e.dept||'',
+      a:mt.filter(t=>!['complete','billed','cancelled'].includes(t.status)).length,
+      o:mt.filter(t=>t.overdue&&!t.done).length,
+      c:mt.filter(t=>['complete','billed'].includes(t.status)).length };
+  });
+  const totalBilled = taskStore.filter(t=>t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0);
+  const totalReady  = taskStore.filter(t=>t.status==='complete'&&t.revenueType!=='nocharge').reduce((s,t)=>s+(t.fixedPrice||0),0);
+  const today = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  return "You are a business intelligence assistant for NU Labs, a testing laboratory.\n" +
+    "Today: " + today + "\n" +
+    "REVENUE: Billed=" + fmt$(totalBilled) + " | Ready-to-bill=" + fmt$(totalReady) + "\n\n" +
+    "OPEN PROJECTS (" + openProjects.length + ") fields: n=name,st=status,ph=phase,pm=PM,cl=client,tt=totalTasks,td=done,to=overdue,br=billedRevenue,rb=readyToBill,ch=creditHold\n" +
+    JSON.stringify(projSummary) + "\n\n" +
+    "EMPLOYEES (" + employees.length + ") fields: n=name,d=dept,a=active,o=overdue,c=completed\n" +
+    JSON.stringify(empWorkload) + "\n\n" +
+    "Answer concisely. Use markdown tables. Be specific with numbers.";
+}
+
+async function runAiReport() {
+  const inp  = document.getElementById('aiReportPrompt');
+  const btn  = document.getElementById('aiRunBtn');
+  const conv = document.getElementById('aiConversation');
+  if (!inp || !conv) return;
+
+  const question = inp.value.trim();
+  if (!question) { inp.focus(); return; }
+
+  const ts = new Date().toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' });
+  aiConversationHistory.push({ role:'user', content:question, ts });
+  renderAiConversation();
+  inp.value = '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Thinking…'; }
+
+  const loadingId = 'ai-loading-' + Date.now();
+  conv.insertAdjacentHTML('beforeend',
+    `<div id="${loadingId}" class="ai-bubble ai-bubble-assistant">
+      <div class="ai-bubble-avatar">✨</div>
+      <div class="ai-bubble-body"><div class="ai-loading-dots"><span></span><span></span><span></span></div></div>
+    </div>`);
+  conv.scrollTop = conv.scrollHeight;
+
+  try {
+    const messages = aiConversationHistory.map(m => ({ role:m.role, content:m.content }));
+    const aiTimeout = new Promise((_,rej) => setTimeout(()=>rej(new Error('Request timed out after 30 seconds')), 30000));
+    const aiCall = sb.functions.invoke('ai-analysis', { body: { system: buildAiContext(), messages } });
+    const { data: aiData, error: aiError } = await Promise.race([aiCall, aiTimeout]);
+    if (aiError) throw new Error(aiError.message || 'Edge function error');
+    const answer = aiData?.content?.[0]?.text || 'Sorry, I could not generate a response.';
+    document.getElementById(loadingId)?.remove();
+    aiConversationHistory.push({ role:'assistant', content:answer, ts: new Date().toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) });
+    renderAiConversation();
+  } catch(err) {
+    document.getElementById(loadingId)?.remove();
+    aiConversationHistory.push({ role:'assistant', content:'⚠ Error reaching AI: ' + err.message, ts });
+    renderAiConversation();
+  }
+
+  if (btn) { btn.disabled = false; btn.innerHTML = '&#x2728; Ask'; }
+  conv.scrollTop = conv.scrollHeight;
+}
+
+function renderAiConversation() {
+  const conv = document.getElementById('aiConversation');
+  if (!conv) return;
+  if (!aiConversationHistory.length) { conv.innerHTML = ''; return; }
+  conv.innerHTML = aiConversationHistory.map(m => {
+    const isUser = m.role === 'user';
+    const bodyHtml = isUser
+      ? `<div style="white-space:pre-wrap;font-size:13.5px">${m.content.replace(/</g,'&lt;')}</div>`
+      : aiMarkdownToHtml(m.content);
+    return `<div class="ai-bubble ${isUser ? 'ai-bubble-user' : 'ai-bubble-assistant'}">
+      ${isUser ? '' : '<div class="ai-bubble-avatar">✨</div>'}
+      <div class="ai-bubble-body">${bodyHtml}<div class="ai-bubble-ts">${m.ts||''}</div></div>
+      ${isUser ? '<div class="ai-bubble-avatar ai-bubble-avatar-user">You</div>' : ''}
+    </div>`;
+  }).join('');
+  conv.scrollTop = conv.scrollHeight;
+}
+
+function aiMarkdownToHtml(text) {
+  // Tables
+  text = text.replace(/\|(.+)\|\n\|[-| :]+\|\n((?:\|.+\|\n?)*)/g, (_, header, rows) => {
+    const ths = header.split('|').map(c=>c.trim()).filter(Boolean).map(c=>`<th>${c}</th>`).join('');
+    const trs = rows.trim().split('\n').map(row => {
+      const tds = row.split('|').map(c=>c.trim()).filter(Boolean).map(c=>`<td>${c}</td>`).join('');
+      return `<tr>${tds}</tr>`;
+    }).join('');
+    return `<table class="ai-table"><thead><tr>${ths}</tr></thead><tbody>${trs}</tbody></table>`;
+  });
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  text = text.replace(/`([^`]+)`/g, '<code style="font-family:JetBrains Mono,monospace;font-size:11px;background:var(--surface2);padding:1px 5px;border-radius:3px">$1</code>');
+  text = text.replace(/^### (.+)$/gm, '<div style="font-size:13px;font-weight:700;color:var(--amber);margin:10px 0 4px">$1</div>');
+  text = text.replace(/^## (.+)$/gm, '<div style="font-size:14px;font-weight:700;color:var(--text);margin:12px 0 4px">$1</div>');
+  text = text.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+  text = text.replace(/((<li>.*<\/li>\n?)+)/g, '<ul style="margin:6px 0 6px 16px;padding:0">$1</ul>');
+  text = text.replace(/\n{2,}/g, '</p><p style="margin:6px 0">');
+  text = text.replace(/\n/g, '<br>');
+  return `<div class="ai-response" style="font-size:13.5px;line-height:1.65"><p style="margin:0">${text}</p></div>`;
+}
+
+(function injectAiStyles() {
+  if (document.getElementById('ai-report-styles')) return;
+  const s = document.createElement('style');
+  s.id = 'ai-report-styles';
+  s.textContent = `
+    .ai-bubble{display:flex;gap:10px;margin-bottom:14px;align-items:flex-start;}
+    .ai-bubble-user{flex-direction:row-reverse;}
+    .ai-bubble-avatar{width:30px;height:30px;border-radius:50%;background:var(--amber);color:#0e0e0f;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0;}
+    .ai-bubble-avatar-user{background:var(--surface3);color:var(--text);}
+    .ai-bubble-body{max-width:82%;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:11px 14px;}
+    .ai-bubble-user .ai-bubble-body{background:var(--amber-glow);border-color:var(--amber-dim);}
+    .ai-bubble-ts{font-size:10px;color:var(--muted);margin-top:6px;text-align:right;}
+    .ai-table{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0;}
+    .ai-table th{background:var(--surface2);padding:6px 10px;text-align:left;font-weight:600;border:1px solid var(--border);font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);}
+    .ai-table td{padding:6px 10px;border:1px solid var(--border);color:var(--text);}
+    .ai-table tr:nth-child(even) td{background:var(--surface2);}
+    .ai-prompt-chip{background:var(--surface2);border:1.5px solid var(--border);border-radius:20px;padding:5px 12px;font-size:11.5px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s;white-space:nowrap;}
+    .ai-prompt-chip:hover{border-color:var(--amber-dim);color:var(--amber);background:var(--amber-glow);}
+    .ai-loading-dots{display:flex;gap:5px;align-items:center;padding:4px 0;}
+    .ai-loading-dots span{width:7px;height:7px;border-radius:50%;background:var(--amber);opacity:.4;animation:aiDot 1.2s infinite;}
+    .ai-loading-dots span:nth-child(2){animation-delay:.2s;}
+    .ai-loading-dots span:nth-child(3){animation-delay:.4s;}
+    @keyframes aiDot{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+  `;
+  document.head.appendChild(s);
+})();

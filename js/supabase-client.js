@@ -161,7 +161,8 @@ async function loadAllData() {
 
     // Projects
     projects = projRows.map(r => ({
-      id: r.id, name: r.name, color: r.color, emoji: r.emoji, desc: r.description || '', description: r.description || ''
+      id: r.id, name: r.name, color: r.color, emoji: r.emoji, desc: r.description || '', description: r.description || '',
+      createdAt: r.created_at ? r.created_at.split('T')[0] : ''
     }));
 
     // Project info
@@ -218,7 +219,6 @@ async function loadAllData() {
       taskStartDate: r.task_start_date||'',
       completedDate: r.completed_date||'',
       billedDate: r.billed_date||'',
-      cancelledDate: r.cancelled_date||'',
       quoteNum: r.quote_number||'',
       poNumber: r.po_number||'',
       peachtreeInv: r.peachtree_inv||'',

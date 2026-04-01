@@ -849,7 +849,7 @@ async function saveProject() {
     start_date: today, end_date: null,
   });
 
-  projects.push({ id: saved.id, name, color: pColor, emoji: pEmoji, desc });
+  projects.push({ id: saved.id, name, color: pColor, emoji: pEmoji, desc, createdAt: new Date().toISOString().split('T')[0] });
   projectInfo[saved.id] = { pm:'', po:'', contract:'', phase:'Waiting on TP Approval', status:'jobprep',
     startDate: today, endDate: '', tentativeTestDate: '', client:'', clientContact:'', clientEmail:'',
     clientPhone:'', billingType:'Fixed Fee', invoiced:'', remaining:'', notes:'', desc,
