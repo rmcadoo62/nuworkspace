@@ -258,14 +258,15 @@ function renderTasksPanel(projId) {
 
   let tasks = taskStore.filter(t => t.proj === projId).sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
   const total   = tasks.length;
-  const done    = tasks.filter(t => t.status === 'complete' || t.status === 'billed' || t.status === 'cancelled' || t.done).length;
+  const isDone  = t => t.status === 'complete' || t.status === 'billed' || t.status === 'cancelled' || !!t.done;
+  const done    = tasks.filter(isDone).length;
   const active  = total - done;
   const overdue = tasks.filter(t => t.overdue && !t.done).length;
 
   // Get current filter from button state
   const activeFilter = wrap.getAttribute('data-filter') || 'all';
-  if (activeFilter === 'active')  tasks = tasks.filter(t => !t.done);
-  if (activeFilter === 'done')    tasks = tasks.filter(t => t.done);
+  if (activeFilter === 'active')  tasks = tasks.filter(t => !isDone(t));
+  if (activeFilter === 'done')    tasks = tasks.filter(isDone);
   if (activeFilter === 'overdue') tasks = tasks.filter(t => t.overdue && !t.done);
 
   const statusStyles = {
@@ -323,10 +324,10 @@ function renderTasksPanel(projId) {
       `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
     const loggedH = getHoursForTask(t.name, t.proj);
     const budgetH = t.budgetHours || 0;
-    const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : loggedH > 0 ? 'var(--blue)' : 'var(--muted)';
+    const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : '#000';
 
     return `
-      <div class="itt-row" data-task-id="${t._id}" draggable="true" style="${t.status==='billed'?'background:rgba(192,132,252,0.18);border-color:rgba(192,132,252,0.45);':t.status==='cancelled'?'background:rgba(232,162,52,0.15);border-color:rgba(232,162,52,0.45);border-left:3px solid #e8a234;':t.status==='complete'||t.done?'background:rgba(120,120,130,0.16);border-color:rgba(120,120,130,0.35);':t.status==='inprogress'?'background:rgba(46,158,98,0.10);border-color:rgba(46,158,98,0.30);':''}"
+      <div class="itt-row" data-task-id="${t._id}" draggable="true" style="${t.status==='billed'?'background:rgba(192,132,252,0.50);border-color:rgba(192,132,252,0.70);':t.status==='cancelled'?'background:rgba(232,162,52,0.50);border-color:rgba(232,162,52,0.70);border-left:3px solid #e8a234;':t.status==='complete'||t.done?'background:rgba(120,120,130,0.50);border-color:rgba(120,120,130,0.70);':t.status==='inprogress'?'background:rgba(46,158,98,0.50);border-color:rgba(46,158,98,0.70);':''}"
         ondragstart="taskDragStart(event,'${t._id}')"
         ondragover="taskDragOver(event)"
         ondragleave="taskDragLeave(event)"
@@ -338,30 +339,30 @@ function renderTasksPanel(projId) {
         </div>
         <div class="itt-name ${t.done?'done':''} itt-cell-edit" onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()">${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red)">NC</span>':''}</div>
         <div onclick="event.stopPropagation()">
-          <select class="status-pill-select" style="color:${statusColor(t.status||'new')};background:${statusColor(t.status||'new')}18;border-color:${statusColor(t.status||'new')}55"
-            onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color=statusColor(this.value);this.style.background=statusColor(this.value)+'18';this.style.borderColor=statusColor(this.value)+'55'">${statusOpts}</select>
+          <select class="status-pill-select" style="color:#000;background:${(t.status||'new')==='new'?'#fff':statusColor(t.status||'new')+('80')};border-color:${(t.status||'new')==='new'?'#bbb':statusColor(t.status||'new')+('99')}"
+            onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'">${statusOpts}</select>
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);cursor:text">${t.quoteNum||'—'}</div>
+        <div class="itt-cell-edit" onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#000;cursor:text">${t.quoteNum||'—'}</div>
         <div class="itt-cell-edit" onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);cursor:text">${t.poNumber||'—'}</div>
-        <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled' ? 'var(--red)' : 'var(--green)'};cursor:text">
+        <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled' ? 'var(--red)' : 'var(--green)'};font-weight:700;cursor:text">
           ${t.fixedPrice ? (t.status==='cancelled' ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})) : '—'}
         </div>
-        <div style="font-size:12px;color:var(--muted)">${fmtShortDate(t.createdAt)}</div>
+        <div style="font-size:12px;color:#000">${fmtShortDate(t.createdAt)}</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${hColor}">
-          ${loggedH > 0 ? loggedH.toFixed(1)+'h' : '—'}${budgetH > 0 ? '<span style="color:var(--muted);font-size:10px"> /'+budgetH+'</span>' : ''}
+          <div style="display:flex;flex-direction:column;line-height:1.2">${loggedH > 0 ? loggedH.toFixed(1)+'h' : '—'}${budgetH > 0 ? '<span style="color:var(--muted);font-size:9px">/'+budgetH+'h</span>' : ''}</div>
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditBudgetHours('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);cursor:text">
+        <div class="itt-cell-edit" onclick="inlineEditBudgetHours('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);font-weight:700;cursor:text">
           ${budgetH > 0 ? budgetH+'h' : '—'}
         </div>
-        <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px">
+        <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px;overflow:hidden;min-width:0">
           <div class="itt-av" style="background:${empM.color}" id="av_${t._id}">${t.assign||'?'}</div>
-          <select class="inline-edit-select" style="font-size:10px;padding:2px 2px;border:none;background:transparent;color:var(--muted);width:auto;max-width:70px" onchange="inlineSave('${t._id}','${projId}','assign',this.value);document.getElementById('av_${t._id}').style.background=(employees.find(e=>e.initials===this.value)||{color:'#555'}).color;document.getElementById('av_${t._id}').textContent=this.value||'?'">
+          <select class="inline-edit-select" style="font-size:10px;padding:2px 0;border:none;background:transparent;color:var(--muted);width:0;flex:1;min-width:0" onchange="inlineSave('${t._id}','${projId}','assign',this.value);document.getElementById('av_${t._id}').style.background=(employees.find(e=>e.initials===this.value)||{color:'#555'}).color;document.getElementById('av_${t._id}').textContent=this.value||'?'">
             <option value="">—</option>
             ${employees.filter(e=>e.isActive!==false && e.dept!=='Ballantine').map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
           </select>
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()" style="font-size:12px;color:var(--muted);cursor:text">${fmtShortDate(t.taskStartDate)}</div>
-        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()" style="font-size:12px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};cursor:text">${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
+        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()" style="font-size:12px;color:var(--muted);font-weight:700;cursor:text">${fmtShortDate(t.taskStartDate)}</div>
+        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()" style="font-size:12px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};font-weight:700;cursor:text">${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
         <div class="itt-row-actions">
           ${can('edit_tasks') ? '<button class="itt-row-action-btn" onclick="openEditTaskModal(\''+t._id+'\');event.stopPropagation()">&#x270E;</button>' : ''}
         </div>
@@ -386,18 +387,19 @@ function renderTasksPanel(projId) {
     </div>
     <div class="itt-head" id="ittHead">
       <div class="itt-head-cell"></div><div class="itt-head-cell" style="color:var(--muted);font-size:10px">#<span class="itt-resizer" data-col="num"></span></div>
-      <div class="itt-head-cell">Cat.<span class="itt-resizer" data-col="cat"></span></div>
-      <div class="itt-head-cell">Task<span class="itt-resizer" data-col="task"></span></div>
-      <div class="itt-head-cell">Status<span class="itt-resizer" data-col="status"></span></div>
-      <div class="itt-head-cell">Quote #<span class="itt-resizer" data-col="quote"></span></div>
-      <div class="itt-head-cell">PO #<span class="itt-resizer" data-col="po"></span></div>
-      <div class="itt-head-cell">Price<span class="itt-resizer" data-col="price"></span></div>
-      <div class="itt-head-cell">Created<span class="itt-resizer" data-col="created"></span></div>
-      <div class="itt-head-cell">Hrs Logged<span class="itt-resizer" data-col="hrs"></span></div>
-      <div class="itt-head-cell">Budget Hrs<span class="itt-resizer" data-col="bhrs"></span></div>
-      <div class="itt-head-cell">Assignee<span class="itt-resizer" data-col="assign"></span></div>
-      <div class="itt-head-cell">Start Date<span class="itt-resizer" data-col="start"></span></div>
-      <div class="itt-head-cell">Done/Billed<span class="itt-resizer" data-col="comp"></span></div>
+      <div class="itt-head-cell">Cat.<span class="itt-resizer" data-col="pri"></span></div>
+      <div class="itt-head-cell">Task<span class="itt-resizer" data-col="cat"></span></div>
+      <div class="itt-head-cell">Status<span class="itt-resizer" data-col="task"></span></div>
+      <div class="itt-head-cell">Quote #<span class="itt-resizer" data-col="status"></span></div>
+      <div class="itt-head-cell">PO #<span class="itt-resizer" data-col="quote"></span></div>
+      <div class="itt-head-cell">Price<span class="itt-resizer" data-col="po"></span></div>
+      <div class="itt-head-cell">Created<span class="itt-resizer" data-col="price"></span></div>
+      <div class="itt-head-cell">Hrs Logged<span class="itt-resizer" data-col="created"></span></div>
+      <div class="itt-head-cell">Budget Hrs<span class="itt-resizer" data-col="hrs"></span></div>
+      <div class="itt-head-cell">Assignee<span class="itt-resizer" data-col="bhrs"></span></div>
+      <div class="itt-head-cell">Start Date<span class="itt-resizer" data-col="assign"></span></div>
+      <div class="itt-head-cell">Done/Billed<span class="itt-resizer" data-col="start"></span></div>
+      <div class="itt-head-cell"><span class="itt-resizer" data-col="comp"></span></div>
       <div class="itt-head-cell"></div>
     </div>
     </div>

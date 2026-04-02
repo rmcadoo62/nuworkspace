@@ -199,7 +199,7 @@ function renderInfoSheet(projId) {
               ${(()=>{
                 const ct = contactStore.find(c => c.id === info.contactId);
                 const nm = ct ? ct.firstName+' '+ct.lastName : (info.clientContact || '<span style="color:var(--border)">—</span>');
-                const em = ct ? ct.email : (info.clientEmail || '');
+                const em = ct ? ct.email : '';
                 return `<div class="client-picker-selected" id="contactPickerSelected" onclick="openContactPicker('${projId}')">
                   <div>
                     <div class="client-picker-name">${nm}</div>
@@ -215,7 +215,7 @@ function renderInfoSheet(projId) {
               })()}
             </div>
           </div>
-          <div class="info-field"><div class="info-field-label">Created Date</div><div class="info-field-value" style="font-family:'JetBrains Mono',monospace;font-size:12px">${proj.createdAt ? fmtDate(proj.createdAt) : '<span style="color:var(--border)">—</span>'}</div></div>
+          ${dateField('Created Date', fmtDate(info.startDate), 'startDate')}
           ${dateField('Test Complete Date', fmtDate(info.testcompleteDate), 'testcompleteDate')}
           ${dateField('Closed Date', fmtDate(info.endDate), 'endDate')}
           ${dateField('Tentative Test Date', fmtDate(info.tentativeTestDate), 'tentativeTestDate')}
@@ -2678,7 +2678,7 @@ function renderInfoTasks(projId, filter) {
 }
 
 // ── Task column resize ──
-const ITT_DEFAULTS={num:'36px',pri:'28px',cat:'50px',task:'1fr',status:'130px',quote:'80px',price:'90px',created:'75px',hrs:'60px',bhrs:'60px',assign:'70px',start:'80px',comp:'80px'};
+const ITT_DEFAULTS={num:'36px',pri:'55px',cat:'1fr',task:'130px',status:'130px',quote:'80px',price:'90px',created:'75px',hrs:'60px',bhrs:'60px',assign:'70px',start:'80px',comp:'80px'};
 const ITT_MINS={num:28,pri:20,cat:36,task:80,status:80,quote:60,price:60,created:60,hrs:50,bhrs:50,assign:50,start:60,comp:60};
 function ittGetW(){try{return Object.assign({},ITT_DEFAULTS,JSON.parse(localStorage.getItem('ittCols')||'{}'));}catch{return Object.assign({},ITT_DEFAULTS);}}
 function ittSetW(w){Object.entries(w).forEach(([k,v])=>document.documentElement.style.setProperty('--itc-'+k,v));}
@@ -2838,7 +2838,6 @@ function switchProjTab(subId) {
   if (subId === 'sub-activity' && activeProjectId) renderActivityPanel(activeProjectId);
   if (subId === 'sub-invoicing' && activeProjectId) renderInvoicingPanel(activeProjectId);
   if (subId === 'sub-shipping' && activeProjectId) renderShippingProjTab(activeProjectId);
-  if (subId === 'sub-jobpack'  && activeProjectId) renderJobPackPanel(activeProjectId);
 }
 
 function renderProjStickyHeader(projId) {
