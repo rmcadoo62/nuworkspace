@@ -137,23 +137,39 @@ function getQuarterlyAccrual(hireDateStr, annivStart) {
   return accrued;
 }
 
-function getPartTimeSickAccrued(empId, annivStart, annivEnd) {
-  // NJ rule: 1 hour sick for every 30 hours worked, calculated from timesheet data
-  const rangeEnd = annivEnd || new Date();
+function getPartTimeSickAccrued(empId, calYear) {
+  // Part-time only: 1h sick per 30h worked, calendar year Jan 1 – Dec 31, max 40h
+  // Counts both project hours AND overhead work hours (General Overhead, Sales Support, etc.)
+  // Does NOT count sick/vacation/holiday/personal/snow day hours
+  const NON_WORK_CATS = ['Sick', 'Sick Time', 'Vacation Time', 'Personal Time', 'Holiday', 'Snow Day'];
+  const yr = calYear || new Date().getFullYear();
+  const rangeStart = new Date(yr, 0, 1);
+  const rangeEnd   = new Date(yr + 1, 0, 1);
   let totalHoursWorked = 0;
   Object.entries(tsData).forEach(([key, rows]) => {
-    if (key.startsWith('oh_') || !Array.isArray(rows)) return;
-    if (!key.startsWith(empId + '|')) return;
-    const weekKey = key.split('|')[1];
+    const isOh = key.startsWith('oh_');
+    const baseKey = isOh ? key.slice(3) : key;
+    if (!baseKey.startsWith(empId + '|')) return;
+    const weekKey = baseKey.split('|')[1];
     if (!weekKey) return;
     const weekDate = new Date(weekKey + 'T00:00:00');
-    if (annivStart && weekDate < annivStart) return;
-    if (weekDate >= rangeEnd) return;
-    rows.forEach(row => {
-      if (row.hours) totalHoursWorked += Object.values(row.hours).reduce((s,h)=>s+(parseFloat(h)||0),0);
-    });
+    if (weekDate < rangeStart || weekDate >= rangeEnd) return;
+    if (!isOh && Array.isArray(rows)) {
+      // Regular project hours
+      rows.forEach(row => {
+        if (row.hours) totalHoursWorked += Object.values(row.hours).reduce((s,h)=>s+(parseFloat(h)||0),0);
+      });
+    } else if (isOh && rows && typeof rows === 'object') {
+      // Overhead work hours only — skip PTO categories
+      Object.entries(rows).forEach(([cat, dayMap]) => {
+        const normCat = cat.replace(/^\d+-/, '').replace(/^⬡\s*/, '').trim();
+        if (NON_WORK_CATS.some(c => normCat.includes(c))) return;
+        if (!dayMap) return;
+        Object.values(dayMap).forEach(h => { totalHoursWorked += parseFloat(h) || 0; });
+      });
+    }
   });
-  return Math.floor(totalHoursWorked / 30); // 1h per 30h worked, no fractional hours
+  return Math.min(40, Math.floor(totalHoursWorked / 30)); // 1h per 30h worked, capped at 40h
 }
 
 function getTimeOffUsed(empId, year, annivStart, annivEnd) {
@@ -316,7 +332,11 @@ function showEmpProfile(empId, annivOffset) {
     const annivEnd = new Date(annivStart); annivEnd.setFullYear(annivStart.getFullYear() + 1);
     return { start: annivStart, end: annivEnd };
   })();
-  const used = getTimeOffUsed(empId, year, _annivRange?.start, _annivRange?.end);
+  // Part-time: sick tracking uses calendar year; full-time uses anniversary year
+  const isPartTime = emp.empType === 'parttime';
+  const usedStart = isPartTime ? new Date(year, 0, 1) : _annivRange?.start;
+  const usedEnd   = isPartTime ? new Date(year + 1, 0, 1) : _annivRange?.end;
+  const used = getTimeOffUsed(empId, year, usedStart, usedEnd);
   // For holiday display, always use calendar year so Jan holidays aren't missed for mid-year hire dates
   const usedHolidays = getTimeOffUsed(empId, year, null, null);
   const vacAllotment = getVacationAllotment(emp.hireDate);
@@ -326,11 +346,10 @@ function showEmpProfile(empId, annivOffset) {
 
   // Sick accrual: opening balance (sick_bank) + drops on Jan 1 and May 1 within anniversary year, capped at 48h
   // Part-time: NJ rule — 1h per 30h worked, no fixed drops
-  const isPartTime = emp.empType === 'parttime';
   let sickAllotment = 0;
   const sickOpeningBalance = emp.sickBank || 0;
   if (isPartTime) {
-    const ptAccrued = getPartTimeSickAccrued(empId, _annivRange?.start, _annivRange?.end);
+    const ptAccrued = getPartTimeSickAccrued(empId, new Date().getFullYear());
     sickAllotment = sickOpeningBalance + ptAccrued;
   } else if (emp.hireDate && _annivRange) {
     const annivStart = _annivRange.start;
@@ -811,7 +830,7 @@ function showEmpProfile(empId, annivOffset) {
           ${(() => {
             if (isPartTime) {
               // Part-time: show hours worked and NJ accrual rate
-              const ptAccrued = getPartTimeSickAccrued(empId, _annivRange?.start, _annivRange?.end);
+              const ptAccrued = getPartTimeSickAccrued(empId, new Date().getFullYear());
               const totalHrsWorked = ptAccrued * 30;
               const usedPct = sickAllotment > 0 ? Math.min(100, (used.sick / sickAllotment) * 100) : 0;
               return `
