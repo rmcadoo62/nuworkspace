@@ -97,9 +97,26 @@ async function loadAllData() {
     const tsCutoffStr = tsWeekCutoff.toISOString().split('T')[0];
 
     // Phase 1: load projects and project_info first so we can filter tasks by open projects
+    // project_info uses project_id as PK — fetch with cursor pagination to avoid 500s at high offsets
+    const fetchProjectInfo = async () => {
+      let rows = [], lastId = null;
+      while (true) {
+        let q = sb.from('project_info').select('*')
+          .order('project_id', { ascending: true })
+          .limit(1000);
+        if (lastId) q = q.gt('project_id', lastId);
+        const { data } = await q;
+        if (!data || data.length === 0) break;
+        rows = rows.concat(data);
+        lastId = data[data.length - 1].project_id;
+        if (data.length < 1000) break;
+      }
+      return rows;
+    };
+
     const [projRows, infoRows] = await Promise.all([
-      fetchAllPages('projects',     '*', 'created_at'),
-      fetchAllPages('project_info', '*', null, null),
+      fetchAllPages('projects', '*', 'created_at'),
+      fetchProjectInfo(),
     ]);
 
     // Get open project IDs (everything except closed)
@@ -112,16 +129,22 @@ async function loadAllData() {
     // Phase 2: load remaining tables in parallel, filtering tasks to open projects only
     const [taskRows, empRows, clientRows, contactRows, expRows, , sectionRows, roleRows, billedMonthlyRows, billedCatRows, articleRows] = await Promise.all([
       (async () => {
-        // Only load tasks for open projects (145 open vs 2252 closed)
-        let rows = [], page = 0;
-        while (true) {
-          const { data } = await sb.from('tasks').select('*')
-            .in('project_id', openProjIds)
-            .range(page * 1000, page * 1000 + 999);
-          if (!data || data.length === 0) break;
-          rows = rows.concat(data);
-          if (data.length < 1000) break;
-          page++;
+        // Chunk openProjIds into batches of 100 to avoid URL length limits
+        // (large .in() lists generate query strings that exceed server limits)
+        const CHUNK = 100;
+        let rows = [];
+        for (let i = 0; i < openProjIds.length; i += CHUNK) {
+          const chunk = openProjIds.slice(i, i + CHUNK);
+          let page = 0;
+          while (true) {
+            const { data } = await sb.from('tasks').select('*')
+              .in('project_id', chunk)
+              .range(page * 1000, page * 1000 + 999);
+            if (!data || data.length === 0) break;
+            rows = rows.concat(data);
+            if (data.length < 1000) break;
+            page++;
+          }
         }
         return rows;
       })(),
@@ -292,27 +315,25 @@ async function loadAllData() {
     // Test Articles
     articleStore = (articleRows || []).map(mapArticle);
 
-    // Timesheet — loaded sequentially AFTER other queries, with count-based pagination
-    // to guarantee all rows are fetched regardless of Supabase rate limiting
+    // Timesheet — cursor-based pagination by id avoids 500 errors at high offsets
     const tsRows = await (async () => {
-      // First get the exact count so we know how many pages to fetch
-      const { count } = await sb.from('timesheet_entries')
-        .select('*', { count: 'exact', head: true })
-        .gte('week_start', tsCutoffStr);
-      const totalPages = Math.ceil((count || 0) / 1000);
-      let rows = [];
-      for (let page = 0; page < totalPages; page++) {
+      let rows = [], lastId = null;
+      while (true) {
+        let q = sb.from('timesheet_entries').select('*')
+          .gte('week_start', tsCutoffStr)
+          .order('id', { ascending: true })
+          .limit(1000);
+        if (lastId) q = q.gt('id', lastId);
         let data = null;
-        // Retry up to 3 times per page
         for (let attempt = 0; attempt < 3; attempt++) {
-          const res = await sb.from('timesheet_entries').select('*')
-            .gte('week_start', tsCutoffStr)
-            .order('id', { ascending: true })
-            .range(page * 1000, page * 1000 + 999);
+          const res = await q;
           if (res.data && res.data.length > 0) { data = res.data; break; }
-          await new Promise(r => setTimeout(r, 300));
+          if (attempt < 2) await new Promise(r => setTimeout(r, 300));
         }
-        if (data) rows = rows.concat(data);
+        if (!data || data.length === 0) break;
+        rows = rows.concat(data);
+        lastId = data[data.length - 1].id;
+        if (data.length < 1000) break;
       }
       return rows;
     })();

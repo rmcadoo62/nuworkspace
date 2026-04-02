@@ -287,6 +287,44 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
     return { ...ws, empName: emp.name||'—', empColor: emp.color||'#555', empInitials: emp.initials||'?', totalHrs };
   });
 
+  // Excluded employees by name or department
+  const EXCLUDED_EMP_NAMES = ['Russ McAdoo', 'Jordan McAdoo'];
+  const EXCLUDED_EMP_DEPT  = 'Ballantine';
+
+  // Eligible active employees for timesheet audit (strip exclusions)
+  const eligibleEmps = employees.filter(e =>
+    !EXCLUDED_EMP_NAMES.includes(e.name) &&
+    (e.dept || '').toLowerCase() !== EXCLUDED_EMP_DEPT.toLowerCase() &&
+    e.isActive !== false
+  );
+  const eligibleEmpIds = new Set(eligibleEmps.map(e => e.id));
+
+  // Remove excluded employees from existing entries
+  entries = entries.filter(ws => eligibleEmpIds.has(ws.employeeId));
+
+  // For every week that already has at least one submission, add a
+  // "not_submitted" placeholder for any eligible employee who is missing.
+  const allWeekKeys = [...new Set(entries.map(e => e.weekKey))];
+  allWeekKeys.forEach(wk => {
+    const submittedIds = new Set(entries.filter(e => e.weekKey === wk).map(e => e.employeeId));
+    eligibleEmps.forEach(emp => {
+      if (!submittedIds.has(emp.id)) {
+        entries.push({
+          employeeId:    emp.id,
+          weekKey:       wk,
+          status:        'not_submitted',
+          empName:       emp.name    || '—',
+          empColor:      emp.color   || '#555',
+          empInitials:   emp.initials|| '?',
+          totalHrs:      0,
+          submittedAt:   null,
+          approvedBy:    null,
+          rejectionNote: null,
+        });
+      }
+    });
+  });
+
   // Sort newest week first, then by employee name
   entries.sort((a,b) => b.weekKey.localeCompare(a.weekKey) || a.empName.localeCompare(b.empName));
 
@@ -300,10 +338,12 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
     (!selStatus || e.status === selStatus)
   );
 
-  const uniqueEmps = [...new Map(entries.map(e => [e.employeeId, {id:e.employeeId,name:e.empName}])).values()]
+  const uniqueEmps = eligibleEmps
+    .map(e => ({ id: e.id, name: e.name }))
     .sort((a,b) => a.name.localeCompare(b.name));
 
   const statusBadge = s => ({
+    not_submitted: '<span style="background:rgba(224,92,92,0.12);color:#e05c5c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">⚠ Not Submitted</span>',
     submitted: '<span style="background:rgba(232,162,52,0.15);color:#e8a234;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">⏳ Pending</span>',
     approved:  '<span style="background:rgba(76,175,125,0.15);color:#4caf7d;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✓ Approved</span>',
     rejected:  '<span style="background:rgba(224,92,92,0.15);color:#e05c5c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✗ Rejected</span>',
@@ -316,7 +356,7 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">
         <div>
           <div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--text)">&#x1F4C5; Timesheet History</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px">${entries.length} total submissions across ${uniqueEmps.length} employee${uniqueEmps.length!==1?'s':''}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${entries.filter(e=>e.status!=='not_submitted').length} submission${entries.filter(e=>e.status!=='not_submitted').length!==1?'s':''} · ${entries.filter(e=>e.status==='not_submitted').length} not submitted · ${uniqueEmps.length} employee${uniqueEmps.length!==1?'s':''}</div>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <select onchange="renderTimesheetsReport(this.value, '${selStatus}')"
@@ -327,9 +367,10 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
           <select onchange="renderTimesheetsReport('${selEmp}', this.value)"
             style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif">
             <option value="">All Statuses</option>
-            <option value="submitted" ${selStatus==='submitted'?'selected':''}>Pending</option>
-            <option value="approved"  ${selStatus==='approved' ?'selected':''}>Approved</option>
-            <option value="rejected"  ${selStatus==='rejected' ?'selected':''}>Rejected</option>
+            <option value="submitted"     ${selStatus==='submitted'    ?'selected':''}>Pending</option>
+            <option value="approved"      ${selStatus==='approved'     ?'selected':''}>Approved</option>
+            <option value="rejected"      ${selStatus==='rejected'     ?'selected':''}>Rejected</option>
+            <option value="not_submitted" ${selStatus==='not_submitted'?'selected':''}>Not Submitted</option>
           </select>
         </div>
       </div>
@@ -369,7 +410,7 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
           html += '<tr style="background:var(--surface2);border-top:2px solid var(--border)">' +
             '<td colspan="3" style="padding:7px 12px;font-size:11px;font-weight:700;color:var(--text);letter-spacing:.3px">Week ending ' + weekLabel + '</td>' +
             '<td style="padding:7px 12px;text-align:right;font-family:JetBrains Mono,monospace;font-size:12px;font-weight:700;color:var(--amber)">' + weekTotal.toFixed(1) + 'h</td>' +
-            '<td colspan="2"></td></tr>';
+            '<td colspan="2" style="padding:7px 12px;text-align:right"><button onclick="printPayrollWeek(\'' + wk + '\')" style="background:var(--blue);color:#fff;border:none;border-radius:6px;padding:4px 14px;font-size:11px;font-weight:600;cursor:pointer">&#x1F5A8; Print Payroll</button></td></tr>';
           rows.forEach(ws => {
             const rowStyle = 'border-bottom:1px solid var(--border);transition:background .12s';
             const hrsColor = ws.totalHrs > 0 ? 'var(--text)' : 'var(--muted)';
@@ -391,6 +432,103 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
     </div>
   `;
 }
+
+// ── Payroll Print Summary ────────────────────────────────────────────────
+function printPayrollWeek(weekKey) {
+  const EXCLUDED_NAMES = ['Russ McAdoo', 'Jordan McAdoo'];
+  const EXCLUDED_DEPT  = 'Ballantine';
+  const eligible = employees.filter(e =>
+    !EXCLUDED_NAMES.includes(e.name) &&
+    (e.dept || '').toLowerCase() !== EXCLUDED_DEPT.toLowerCase() &&
+    e.isActive !== false
+  );
+
+  const sat = new Date(weekKey + 'T00:00:00'); sat.setDate(sat.getDate() + 6);
+  const weekLabel = sat.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  function getEmpHours(emp) {
+    const storeKey = emp.id + '|' + weekKey;
+    const rows     = tsData[storeKey] || [];
+    const ohStore  = tsData['oh_' + storeKey] || {};
+    let projHrs = 0;
+    rows.forEach(r => Object.values(r.hours || {}).forEach(h => projHrs += parseFloat(h) || 0));
+    const ohCat = cat => Object.values(ohStore[cat] || {}).reduce((s, h) => s + (parseFloat(h) || 0), 0);
+    const genOh   = ohCat('General Overhead') + ohCat('Sales Support');
+    const sick    = ohCat('Sick');
+    const vac     = ohCat('Vacation Time');
+    const pt      = ohCat('Personal Time');
+    const holiday = ohCat('Holiday');
+    const snow    = ohCat('Snow Day');
+    const total   = projHrs + genOh + sick + vac + pt + holiday + snow;
+    return { projHrs, genOh, sick, vac, pt, holiday, snow, total };
+  }
+
+  const submittedIds = new Set(
+    Object.values(tsWeekStatuses)
+      .filter(ws => ws.weekKey === weekKey)
+      .map(ws => ws.employeeId)
+  );
+  const empsToShow = eligible
+    .filter(e => { const h = getEmpHours(e); return h.total > 0 || submittedIds.has(e.id); })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const fmtH = h => h > 0 ? h.toFixed(1) : '—';
+  const empData = empsToShow.map(e => ({ emp: e, hrs: getEmpHours(e) }));
+
+  const catRows = [
+    { label: 'Project Total',  key: 'projHrs' },
+    { label: 'Overhead Total', key: 'genOh'   },
+    { label: 'Sick Total',     key: 'sick'    },
+    { label: 'Vacation Total', key: 'vac'     },
+    { label: 'PT Total',       key: 'pt'      },
+    { label: 'Holiday Total',  key: 'holiday' },
+    { label: 'Snow Day Total', key: 'snow'    },
+  ];
+
+  const tableHTML = '<table>' +
+    '<thead><tr><th class="lc">Category</th>' +
+    empsToShow.map(e => {
+      const parts = e.name.split(' ');
+      const first = parts[0];
+      const last  = parts.slice(1).join(' ');
+      return '<th>' + first + (last ? '<br><span style="font-weight:400;font-size:9px">' + last + '</span>' : '') + '</th>';
+    }).join('') +
+    '</tr></thead><tbody>' +
+    catRows.map(r =>
+      '<tr><td class="lc">' + r.label + '</td>' +
+      empData.map(d => '<td>' + fmtH(d.hrs[r.key]) + '</td>').join('') +
+      '</tr>'
+    ).join('') +
+    '<tr class="div-row"><td colspan="' + (empsToShow.length + 1) + '"></td></tr>' +
+    '<tr class="tot"><td class="lc">Weekly Sum</td>' +
+    empData.map(d => '<td>' + fmtH(d.hrs.total) + '</td>').join('') +
+    '</tr></tbody></table>';
+
+  const win = window.open('', '_blank', 'width=1000,height=650');
+  win.document.write('<!DOCTYPE html><html><head><title>Payroll Summary — Week Ending ' + weekLabel + '</title>' +
+    '<style>' +
+    '* { box-sizing:border-box; margin:0; padding:0; }' +
+    'body { font-family:Arial,sans-serif; font-size:11px; color:#111; padding:24px; }' +
+    'h2 { font-size:15px; margin-bottom:4px; }' +
+    '.sub { font-size:11px; color:#555; margin-bottom:18px; }' +
+    'table { border-collapse:collapse; width:100%; }' +
+    'th,td { border:1px solid #ccc; padding:5px 8px; text-align:center; }' +
+    'th { background:#f0f0f0; font-weight:700; font-size:10px; }' +
+    'th.lc,td.lc { text-align:left; font-weight:600; background:#fafafa; min-width:110px; }' +
+    'tr:nth-child(even) td { background:#f9f9f9; }' +
+    'tr:nth-child(even) td.lc { background:#f4f4f4; }' +
+    '.tot td { font-weight:700; background:#dbeafe !important; border-top:2px solid #333; }' +
+    '.div-row td { border:none; padding:3px; background:transparent !important; }' +
+    '@media print { body { padding:12px; } }' +
+    '</style></head><body>' +
+    '<h2>Payroll Summary</h2>' +
+    '<div class="sub">Week Ending: <strong>' + weekLabel + '</strong> &nbsp;|&nbsp; ' + empsToShow.length + ' employee' + (empsToShow.length !== 1 ? 's' : '') + ' &nbsp;|&nbsp; Printed: ' + new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + '</div>' +
+    tableHTML +
+    '<scr' + 'ipt>window.onload=()=>{window.print();}</scr' + 'ipt>' +
+    '</body></html>');
+  win.document.close();
+}
+window.printPayrollWeek = printPayrollWeek;
 
 // ── Overview Report ──────────────────────────────────────────────────────
 function renderReportsOverview() {
