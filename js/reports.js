@@ -1161,3 +1161,109 @@ function aiMarkdownToHtml(text) {
   `;
   document.head.appendChild(s);
 })();
+
+
+// ===== LOAD CLOSED PROJECTS ON DEMAND =====
+// ===== LOAD CLOSED PROJECTS ON DEMAND =====
+let closedProjectsLoaded = false;
+
+async function loadClosedProjects(el) {
+  if (closedProjectsLoaded) {
+    toast('Closed jobs already loaded');
+    return;
+  }
+  if (el) { el.textContent = '⏳ Loading...'; el.style.pointerEvents = 'none'; }
+  toast('Loading closed jobs...');
+
+  try {
+    // Load closed project_info with cursor pagination
+    let closedInfo = [], lastId = null;
+    while (true) {
+      let q = sb.from('project_info').select('*')
+        .eq('status', 'closed')
+        .order('project_id', { ascending: true })
+        .limit(1000);
+      if (lastId) q = q.gt('project_id', lastId);
+      const { data } = await q;
+      if (!data || data.length === 0) break;
+      closedInfo = closedInfo.concat(data);
+      lastId = data[data.length - 1].project_id;
+      if (data.length < 1000) break;
+    }
+
+    const closedProjIds = new Set(closedInfo.map(r => r.project_id));
+
+    // Add to projectInfo store
+    closedInfo.forEach(r => {
+      if (!projectInfo[r.project_id]) {
+        projectInfo[r.project_id] = {
+          pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
+          phase: r.phase||'Waiting on TP Approval', status: r.status||'closed',
+          startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
+          client: r.client||'', clientContact: r.client_contact||'',
+          clientEmail: r.client_email||'', clientPhone: r.client_phone||'',
+          clientId: r.client_id||null, contactId: r.contact_id||null,
+          billingType: r.billing_type||'Fixed Fee', invoiced: r.invoiced||'',
+          remaining: r.remaining||'', notes: r.notes||'', desc: r.description||'',
+          dcas: r.dcas||'', customerWitness: r.customer_witness||'', tpApproval: r.tp_approval||'',
+          dpas: r.dpas||'', noforn: r.noforn||'', quoteNumber: r.quote_number||'',
+          creditHold: r.credit_hold||false, needUpdatedPo: r.need_updated_po||false,
+          testcompleteDate: r.testcomplete_date||'',
+          testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'',
+          billedRevenue: r.billed_revenue ? parseFloat(r.billed_revenue) : 0,
+          expectedRevenue: r.expected_revenue ? parseFloat(r.expected_revenue) : 0,
+          po_number: r.po_number||'',
+        };
+      }
+    });
+
+    // Load tasks for closed projects — chunked to avoid URL length limits
+    if (closedProjIds.size > 0) {
+      const CHUNK = 100;
+      const ids = [...closedProjIds];
+      for (let i = 0; i < ids.length; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        let taskPage = 0;
+        while (true) {
+          const { data } = await sb.from('tasks').select('*')
+            .in('project_id', chunk)
+            .range(taskPage * 1000, taskPage * 1000 + 999);
+          if (!data || data.length === 0) break;
+          data.forEach(r => {
+            if (taskStore.find(t => t._id === r.id)) return;
+            taskStore.push({
+              _id: r.id, taskNum: r.task_num||0, proj: r.project_id,
+              name: r.name||'', status: r.status||'new',
+              assign: r.assignee||'',
+              due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
+              due_raw: r.due_date||'', overdue: false, done: r.done||false,
+              priority: r.priority||'medium',
+              section: r.section||'sprint', sectionId: r.section_id||null,
+              taskStartDate: r.task_start_date||'',
+              completedDate: r.completed_date||'', billedDate: r.billed_date||'',
+              fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
+              budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
+              salesCat: r.sales_category||'', quoteNum: r.quote_number||'',
+              poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
+              createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+              revenueType: r.revenue_type||'fixed',
+            });
+          });
+          if (data.length < 1000) break;
+          taskPage++;
+        }
+      }
+    }
+
+    closedProjectsLoaded = true;
+    if (el) { el.innerHTML = '✓ Closed Jobs Loaded'; el.style.color = 'var(--green)'; }
+    renderProjectNav();
+    renderAllViews();
+    toast('✓ Closed jobs loaded (' + closedInfo.length + ' projects)');
+
+  } catch(e) {
+    console.error('loadClosedProjects:', e);
+    toast('⚠ Error loading closed jobs: ' + e.message);
+    if (el) { el.innerHTML = '🔒 Load Closed Jobs'; el.style.pointerEvents = ''; }
+  }
+}

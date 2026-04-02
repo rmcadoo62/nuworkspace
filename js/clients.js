@@ -487,7 +487,7 @@ function renderClientDrawerBody() {
 
     // Build as a proper table so columns align regardless of content
     const th = (label, align='left') =>
-      `<th style="padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);text-align:${align};white-space:nowrap;border-bottom:2px solid var(--border)">${label}</th>`;
+      `<th style="padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);text-align:${align};white-space:nowrap;border-bottom:2px solid var(--border)">${label}</th>`;
 
     const jobRows = jobs.map(p => {
       const info = projectInfo[p.id]||{};
@@ -495,23 +495,23 @@ function renderClientDrawerBody() {
       const bil  = info.billedRevenue||0;
       const hrs  = info.actualHours||0;
       const td   = (val, color='var(--text)', align='left') =>
-        `<td style="padding:9px 12px;font-size:12px;color:${color};text-align:${align};white-space:nowrap;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace">${val}</td>`;
+        `<td style="padding:6px 8px;font-size:11px;color:${color};text-align:${align};white-space:nowrap;border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace">${val}</td>`;
       return `<tr style="cursor:pointer;transition:background .12s" onclick="closeClientDrawer();navToProject('${p.id}')"
           onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
-        <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace;white-space:nowrap">${p.name.match(/^\d+/)?.[0]||''}</td>
-        <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px;color:var(--text);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.emoji||''} ${p.name}</td>
-        <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;white-space:nowrap">${p.name.match(/^\d+/)?.[0]||''}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.emoji||''} ${p.name}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border)">
           <span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:${statusColors[st]||'var(--surface2)'};color:var(--muted);white-space:nowrap">${statusText[st]||st}</span>
         </td>
         ${td(fmt$(bil), bil > 0 ? 'var(--green)' : 'var(--muted)', 'right')}
         ${td(fmtH(hrs), hrs > 0 ? 'var(--blue)' : 'var(--muted)', 'right')}
         ${td(fmtRate(bil, hrs), (bil > 0 && hrs > 0) ? 'var(--amber)' : 'var(--muted)', 'right')}
-        <td style="padding:9px 12px;border-bottom:1px solid var(--border);color:var(--muted);font-size:12px">›</td>
+        <td style="padding:6px 8px;border-bottom:1px solid var(--border);color:var(--muted);font-size:12px">›</td>
       </tr>`;
     }).join('');
 
     const table = `
-      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="border:1px solid var(--border);border-radius:10px;overflow-x:auto">
         <table style="width:100%;border-collapse:collapse">
           <thead style="background:var(--surface2)">
             <tr>
