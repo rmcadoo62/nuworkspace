@@ -1315,6 +1315,7 @@ window.saveTask = async function(another=false) {
   toast('"' + (title.length>40?title.slice(0,40)+'…':title) + '" created');
   const _proj = projects.find(p => p.id === projId);
   logActivity('tasks', saved.id, title, 'Task Created' + (_proj ? ' on ' + _proj.name : ''));
+  syncProjBilledRevenue(projId); // sync expected revenue to projects list
 
   // Targeted render — avoid renderAllViews() which can cause double-render with realtime
   if (activeProjectId) {
