@@ -7,6 +7,7 @@
 let articleStore = []; // loaded at startup
 let _editingArticleId = null;
 let _articleProjId = null;
+let _showArchivedShipping = false;
 
 function mapArticle(r) {
   return {
@@ -38,26 +39,44 @@ function renderShippingGlobal() {
   if (!el) return;
   const fmt = d => d ? new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
 
-  // Sort: in-house first (no shipped date), then by received date desc
-  const sorted = [...articleStore].sort((a,b) => {
+  // Determine archive cutoff: shipped 30+ days ago
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 30);
+  const cutoffStr = cutoff.toISOString().split('T')[0];
+
+  const isArchived = a => !!a.shippedDate && a.shippedDate < cutoffStr;
+
+  const archivedCount  = articleStore.filter(isArchived).length;
+  const inHouseCount   = articleStore.filter(a => !a.shippedDate).length;
+  const totalCount     = articleStore.length;
+
+  // Active = in-house OR shipped within last 30 days
+  const visible = _showArchivedShipping
+    ? [...articleStore]
+    : articleStore.filter(a => !isArchived(a));
+
+  // Sort: in-house first, then by received date desc
+  visible.sort((a,b) => {
     const aIn = !a.shippedDate, bIn = !b.shippedDate;
     if (aIn !== bIn) return aIn ? -1 : 1;
     return (b.receivedDate||'').localeCompare(a.receivedDate||'');
   });
 
-  const inHouseCount = articleStore.filter(a => !a.shippedDate).length;
-  const totalCount   = articleStore.length;
-
-  const rows = sorted.length === 0
-    ? `<div style="text-align:center;padding:60px;color:var(--muted)"><div style="font-size:36px;margin-bottom:12px">📦</div><div>No articles logged yet.</div></div>`
-    : sorted.map(a => {
-        const proj = projects.find(p => p.id === a.projId);
-        const inHouse = !a.shippedDate;
-        return `<tr style="border-bottom:1px solid var(--border)"
+  const rows = visible.length === 0
+    ? `<tr><td colspan="9"><div style="text-align:center;padding:60px;color:var(--muted)"><div style="font-size:36px;margin-bottom:12px">📦</div><div>No articles logged yet.</div></div></td></tr>`
+    : visible.map(a => {
+        const proj     = projects.find(p => p.id === a.projId);
+        const inHouse  = !a.shippedDate;
+        const archived = isArchived(a);
+        const rowStyle = archived ? 'opacity:0.6;' : '';
+        return `<tr style="border-bottom:1px solid var(--border);${rowStyle}"
           onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
           <td style="padding:10px 14px">
-            ${inHouse ? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">📦 In House</span>'
-            : '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">Shipped</span>'}
+            ${inHouse
+              ? '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">📦 In House</span>'
+              : archived
+                ? '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">🗄 Archived</span>'
+                : '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">Shipped</span>'}
           </td>
           <td style="padding:10px 14px;font-size:13.5px;font-weight:500;color:var(--text)">${a.desc}</td>
           <td style="padding:10px 14px;font-size:12px;">${proj ? `<span onclick="navToProject('${a.projId}')" style="color:var(--amber);cursor:pointer;font-weight:600" title="Go to project">${proj.emoji} ${proj.name}</span>` : '—'}</td>
@@ -70,13 +89,26 @@ function renderShippingGlobal() {
         </tr>`;
       }).join('');
 
+  const archiveBtnLabel = _showArchivedShipping
+    ? `Hide Archived`
+    : `🗄 Show Archived (${archivedCount})`;
+  const archiveBtnStyle = _showArchivedShipping
+    ? `background:var(--surface2);border:1.5px solid var(--border);color:var(--muted);`
+    : `background:var(--surface2);border:1.5px solid var(--border);color:var(--muted);`;
+
   el.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
       <div>
         <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text)">📦 Shipping & Receiving</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:3px">${inHouseCount} in house · ${totalCount} total articles</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">${inHouseCount} in house · ${totalCount - archivedCount} active · ${archivedCount} archived</div>
       </div>
-      <button class="btn btn-primary" onclick="openArticleModal(null,null)">+ Log Article</button>
+      <div style="display:flex;gap:10px;align-items:center">
+        ${archivedCount > 0 ? `<button onclick="_showArchivedShipping=!_showArchivedShipping;renderShippingGlobal()"
+          style="${archiveBtnStyle}border-radius:8px;font-size:12px;font-weight:600;padding:7px 14px;cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s"
+          onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">${archiveBtnLabel}</button>` : ''}
+        <button class="btn btn-primary" onclick="openArticleModal(null,null)">+ Log Article</button>
+      </div>
     </div>
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
       <table style="width:100%;border-collapse:collapse">
