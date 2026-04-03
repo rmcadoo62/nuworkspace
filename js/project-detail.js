@@ -2678,7 +2678,7 @@ function renderInfoTasks(projId, filter) {
 }
 
 // ── Task column resize ──
-const ITT_DEFAULTS={num:'36px',pri:'55px',cat:'1fr',task:'130px',status:'130px',quote:'80px',price:'90px',created:'75px',hrs:'60px',bhrs:'60px',assign:'70px',start:'80px',comp:'80px'};
+const ITT_DEFAULTS={num:'36px',pri:'28px',cat:'50px',task:'1fr',status:'130px',quote:'80px',price:'90px',created:'75px',hrs:'60px',bhrs:'60px',assign:'70px',start:'80px',comp:'80px'};
 const ITT_MINS={num:28,pri:20,cat:36,task:80,status:80,quote:60,price:60,created:60,hrs:50,bhrs:50,assign:50,start:60,comp:60};
 function ittGetW(){try{return Object.assign({},ITT_DEFAULTS,JSON.parse(localStorage.getItem('ittCols')||'{}'));}catch{return Object.assign({},ITT_DEFAULTS);}}
 function ittSetW(w){Object.entries(w).forEach(([k,v])=>document.documentElement.style.setProperty('--itc-'+k,v));}
@@ -3386,8 +3386,7 @@ async function syncProjBilledRevenue(projId) {
     projectInfo[projId].expectedRevenue = expectedRevenue;
   }
   try {
-    await sb.from('project_info').update({ billed_revenue: billedRevenue, expected_revenue: expectedRevenue })
-      .eq('project_id', projId);
+    await sb.from('project_info').upsert({ project_id: projId, billed_revenue: billedRevenue, expected_revenue: expectedRevenue }, { onConflict: 'project_id' });
     // Update billed_revenue_monthly for each billed task in this project
     const billedByMonth = {};
     const todayStr = new Date().toISOString().split('T')[0];
@@ -3416,7 +3415,7 @@ async function syncProjBilledRevenue(projId) {
     for (const [ym, cats] of Object.entries(billedByCat)) {
       for (const [cat, amount] of Object.entries(cats)) {
         await sb.from('billed_revenue_by_category')
-          .upsert({ year_month: ym, sales_category: cat, amount }, { onConflict: 'year_month,sales_category' });
+          .upsert({ year_month: ym, project_id: projId, sales_category: cat, amount }, { onConflict: 'year_month,project_id,sales_category' });
       }
     }
   } catch(e) { console.warn('syncProjBilledRevenue error:', e); }
