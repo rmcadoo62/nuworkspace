@@ -253,18 +253,34 @@ async function saveArticle() {
   };
 
   if (_editingArticleId) {
+    const oldArticle = articleStore.find(a => a._id === _editingArticleId);
     if (sb) {
       const { error } = await sb.from('test_articles').update(payload).eq('id', _editingArticleId);
       if (error) { toast('⚠ Save error: ' + error.message); return; }
     }
     const idx = articleStore.findIndex(a => a._id === _editingArticleId);
     if (idx > -1) articleStore[idx] = { ...articleStore[idx], ...mapArticle({ id: _editingArticleId, ...payload, created_at: articleStore[idx].createdAt }) };
+    // Log shipped event if shipped date was just set
+    if (payload.shipped_date && (!oldArticle || !oldArticle.shippedDate)) {
+      const projLabel = projects.find(p => p.id === resolvedProjId)?.name || desc;
+      logActivity('shipping', _editingArticleId, projLabel, `📤 Shipped: ${desc}${payload.carrier ? ' via ' + payload.carrier : ''}`);
+    }
+    // Log received date change if it was updated
+    if (oldArticle && payload.received_date && payload.received_date !== oldArticle.receivedDate) {
+      const projLabel = projects.find(p => p.id === resolvedProjId)?.name || desc;
+      logActivity('shipping', _editingArticleId, projLabel, `📥 Received date updated: ${desc}`);
+    }
     toast('Article updated');
   } else {
     if (sb) {
       const { data, error } = await sb.from('test_articles').insert(payload).select().single();
       if (error) { toast('⚠ Save error: ' + error.message); return; }
-      if (data) articleStore.push(mapArticle(data));
+      if (data) {
+        articleStore.push(mapArticle(data));
+        // Log received event for new article
+        const projLabel = projects.find(p => p.id === resolvedProjId)?.name || desc;
+        logActivity('shipping', data.id, projLabel, `📥 Received: ${desc}${payload.received_by ? ' — received by ' + payload.received_by : ''}`);
+      }
     } else {
       articleStore.push({ _id: 'local-'+Date.now(), projId: resolvedProjId, desc, receivedDate: payload.received_date||'', receivedBy: payload.received_by||'', shippedDate: payload.shipped_date||'', carrier: payload.carrier||'', notes: payload.notes||'', createdAt: new Date().toISOString().split('T')[0] });
     }

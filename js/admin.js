@@ -156,7 +156,6 @@ function openSetupPanel(el) {
   if (can('view_setup') || isManager()) tiles.push(tile('&#x2705;','Approvals','Review and approve pending timesheet submissions.',"openApprovalsPanel(document.getElementById('navSetup'))"));
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F4E5;','Import Salesforce','Import accounts and contacts from a Salesforce CSV export.',"openSfImportPanel(document.getElementById('navSetup'))"));
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F9F9;','Merge Duplicate Clients','Find and merge client records with similar names.',"openMergeClientsPanel(document.getElementById('navSetup'))"));
-  if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F4C5;','Import Project Dates &amp; Contacts','Update Created Date, Closed Date, and Contact for projects from a tab-delimited file.',"openImportProjectDatesPanel(document.getElementById('navSetup'))"));
   if (can('view_setup') || isManager()) tiles.push(tile('&#x1F4C5;','Scheduler Settings','Configure block colors and employee scheduler access.',"openSchedSettingsPanel()"));
 
   const grid = document.getElementById('setupTilesGrid');
@@ -243,17 +242,22 @@ const AUDIT_FIELD_DEFS = {
     { key: 'is_paper_ts',      label: 'Paper Timesheet' },
     { key: 'termination_date', label: 'Termination Date' },
   ],
+  shipping: [
+    { key: 'received', label: 'Article Received' },
+    { key: 'shipped',  label: 'Article Shipped' },
+  ],
 };
 
 // Load tracked fields from localStorage (default: status, assignee, revenue_type for tasks)
 function getAuditSettings() {
   try {
     const saved = JSON.parse(localStorage.getItem('auditSettings') || '{}');
-    if (!saved.tasks) saved.tasks = ['status','assignee','revenue_type','fixed_price'];
-    if (!saved.projects) saved.projects = ['status','credit_hold','need_updated_po'];
+    if (!saved.tasks)     saved.tasks     = ['status','assignee','revenue_type','fixed_price'];
+    if (!saved.projects)  saved.projects  = ['status','credit_hold','need_updated_po'];
     if (!saved.employees) saved.employees = ['permission_level','termination_date'];
+    if (!saved.shipping)  saved.shipping  = ['received','shipped'];
     return saved;
-  } catch(e) { return {tasks:['status','assignee','revenue_type','fixed_price'],projects:['status','credit_hold','need_updated_po'],employees:['permission_level','termination_date']}; }
+  } catch(e) { return {tasks:['status','assignee','revenue_type','fixed_price'],projects:['status','credit_hold','need_updated_po'],employees:['permission_level','termination_date'],shipping:['received','shipped']}; }
 }
 
 function saveAuditSettings(settings) {
@@ -338,7 +342,7 @@ async function renderAuditLogPanel() {
     html += '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">⚙ Tracked Fields</div>';
     html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px">';
     Object.entries(AUDIT_FIELD_DEFS).forEach(([type, fields]) => {
-      const typeLabel = {tasks:'Tasks',projects:'Projects',employees:'Employees'}[type];
+      const typeLabel = {tasks:'Tasks',projects:'Projects',employees:'Employees',shipping:'Shipping & Receiving'}[type];
       html += '<div><div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">'+typeLabel+'</div>';
       fields.forEach(f => {
         const checked = (settings[type]||[]).includes(f.key);
@@ -736,282 +740,3 @@ async function saveRoleModal() {
   renderPermissionsPanel();
 }
 
-
-
-// ===== IMPORT PROJECT DATES & CONTACTS =====
-// ===== IMPORT PROJECT DATES & CONTACTS =====
-let _importDatesParsed = []; // [{ name, startDate, endDate, contactName, contactEmail }]
-
-// Jobs already correct in system — skip entirely
-const _IMPORT_SKIP_NAMES = new Set(['13726', '13727']);
-
-// Manual email corrections
-const _EMAIL_CORRECTIONS = {
-  '13496': 'bracht_gary@cat.com',
-};
-
-// Jobs to skip entirely due to bad data
-const _IMPORT_SKIP_ROWS = new Set(['12930', '13388']);
-
-function openImportProjectDatesPanel(el) {
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  (el || document.getElementById('navSetup'))?.classList.add('active');
-
-  if (!document.getElementById('importProjDatesModal')) {
-    const m = document.createElement('div');
-    m.id = 'importProjDatesModal';
-    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
-    m.innerHTML = `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;width:640px;max-width:95vw;max-height:85vh;overflow-y:auto;position:relative;box-shadow:0 24px 80px rgba(0,0,0,.5)">
-        <button onclick="closeImportProjectDatesPanel()" style="position:absolute;top:14px;right:16px;background:transparent;border:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1">&#x2715;</button>
-
-        <div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--text);margin-bottom:4px">&#x1F4C5; Import Project Dates &amp; Contacts</div>
-        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;line-height:1.7">
-          Updates <strong style="color:var(--text)">Created Date</strong>, <strong style="color:var(--text)">Closed Date</strong>, and <strong style="color:var(--text)">Contact</strong> from a tab-delimited file.<br>
-          Dates are always written. Contact is only written if the project has none already.
-        </div>
-        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin-bottom:20px;font-size:11px;color:var(--muted)">
-          <span style="font-weight:700;color:var(--text);font-size:10px;text-transform:uppercase;letter-spacing:.5px">Expected columns (tab-delimited)</span><br>
-          <code style="color:var(--amber);font-family:'JetBrains Mono',monospace">Name &nbsp; Entry Date &nbsp; Actual Completion Date &nbsp; Contact Name &nbsp; Contact Email</code>
-        </div>
-
-        <div id="importDatesDropzone"
-          style="border:2px dashed var(--border);border-radius:10px;padding:36px 24px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;margin-bottom:20px"
-          ondragover="event.preventDefault();this.style.borderColor='var(--amber)';this.style.background='rgba(192,122,26,0.05)'"
-          ondragleave="this.style.borderColor='var(--border)';this.style.background=''"
-          ondrop="event.preventDefault();this.style.borderColor='var(--border)';this.style.background='';handleImportDatesDrop(event)"
-          onclick="document.getElementById('importDatesFileInput').click()">
-          <div style="font-size:30px;margin-bottom:8px">&#x1F4C2;</div>
-          <div style="font-size:13px;font-weight:600;color:var(--text)">Drop your .tsv file here</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px">or click to browse</div>
-          <input type="file" id="importDatesFileInput" accept=".tsv,.txt,.csv" style="display:none" onchange="handleImportDatesFile(this.files[0])">
-        </div>
-
-        <div id="importDatesPreview" style="display:none;margin-bottom:16px;padding:14px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;font-size:13px;line-height:2"></div>
-
-        <div id="importDatesWarnings" style="display:none;margin-bottom:16px;padding:12px 14px;background:rgba(232,162,52,0.08);border:1px solid var(--amber-dim);border-radius:10px;font-size:12px;color:var(--amber);line-height:1.8"></div>
-
-        <div id="importDatesLog" style="display:none;max-height:200px;overflow-y:auto;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:11px;font-family:'JetBrains Mono',monospace;margin-bottom:16px;color:var(--muted)"></div>
-
-        <div style="display:flex;gap:10px;justify-content:flex-end">
-          <button onclick="closeImportProjectDatesPanel()" class="btn" style="font-size:13px">Cancel</button>
-          <button id="importDatesBtn" onclick="runImportProjectDates()" class="btn btn-primary" style="font-size:13px" disabled>&#x1F4C5; Run Import</button>
-        </div>
-      </div>`;
-    document.body.appendChild(m);
-  }
-
-  // Reset on each open
-  _importDatesParsed = [];
-  document.getElementById('importDatesPreview').style.display   = 'none';
-  document.getElementById('importDatesWarnings').style.display  = 'none';
-  document.getElementById('importDatesLog').style.display       = 'none';
-  document.getElementById('importDatesBtn').disabled            = true;
-  document.getElementById('importDatesBtn').textContent         = '📅 Run Import';
-  const fi = document.getElementById('importDatesFileInput');
-  if (fi) fi.value = '';
-  document.getElementById('importProjDatesModal').style.display = 'flex';
-}
-
-function closeImportProjectDatesPanel() {
-  const m = document.getElementById('importProjDatesModal');
-  if (m) m.style.display = 'none';
-}
-
-function handleImportDatesDrop(e) {
-  const file = e.dataTransfer.files[0];
-  if (file) handleImportDatesFile(file);
-}
-
-function handleImportDatesFile(file) {
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => parseImportDates(e.target.result);
-  reader.readAsText(file);
-}
-
-// Parse M/D/YY or M/D/YYYY → YYYY-MM-DD
-function _parseDateMDY(str) {
-  if (!str || !str.trim()) return null;
-  const parts = str.trim().split('/');
-  if (parts.length !== 3) return null;
-  let [m, d, y] = parts.map(Number);
-  if (!m || !d || !y) return null;
-  if (y < 100) y += 2000;
-  return `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-}
-
-// Clean email per rules:
-//   - multiple emails (comma or semicolon) → keep first
-//   - spaces in email → skip (return null) unless it's a multi-email separator
-//   - manual corrections applied first
-function _cleanEmail(name, rawEmail) {
-  if (!rawEmail || !rawEmail.trim()) return null;
-
-  // Apply manual correction first
-  if (_EMAIL_CORRECTIONS[name]) return _EMAIL_CORRECTIONS[name];
-
-  let e = rawEmail.trim();
-
-  // Multiple emails — split on comma or semicolon, keep first
-  if (e.includes(',') || e.includes(';')) {
-    const sep = e.includes(',') ? ',' : ';';
-    e = e.split(sep)[0].trim();
-  }
-
-  // If still has a space → bad email, skip
-  if (e.includes(' ')) return null;
-
-  // Must have @
-  if (!e.includes('@')) return null;
-
-  return e;
-}
-
-function parseImportDates(text) {
-  const lines = text.split('\n').map(l => l.trimEnd());
-  _importDatesParsed = [];
-  const warnings = [];
-
-  // Skip header (row 0)
-  for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split('\t');
-    const name = (cols[0] || '').trim();
-    if (!name) continue;
-
-    // Skip rows flagged as bad data
-    if (_IMPORT_SKIP_ROWS.has(name)) {
-      warnings.push(`Skipped (bad data): <strong>${name}</strong>`);
-      continue;
-    }
-
-    // Skip rows already correct in system
-    if (_IMPORT_SKIP_NAMES.has(name)) continue;
-
-    const startDate   = _parseDateMDY(cols[1]);
-    const endDate     = _parseDateMDY(cols[2]);
-    const contactName = (cols[3] || '').trim();
-    const rawEmail    = (cols[4] || '').trim();
-    const contactEmail = _cleanEmail(name, rawEmail);
-
-    // Warn if email was dropped due to bad format
-    if (rawEmail && !contactEmail && !_EMAIL_CORRECTIONS[name]) {
-      warnings.push(`Email skipped (bad format) for <strong>${name}</strong>: <code style="font-size:10px">${rawEmail}</code>`);
-    }
-
-    if (startDate || endDate || contactName) {
-      _importDatesParsed.push({ name, startDate, endDate, contactName, contactEmail });
-    }
-  }
-
-  // Match against projects
-  const projLookup = {};
-  projects.forEach(p => { projLookup[p.name.trim()] = p.id; });
-
-  const matched      = _importDatesParsed.filter(r => projLookup[r.name]);
-  const unmatched    = _importDatesParsed.filter(r => !projLookup[r.name]);
-  const withEnd      = matched.filter(r => r.endDate).length;
-  const withContact  = matched.filter(r => r.contactName).length;
-  const willSkipContact = matched.filter(r => {
-    const info = projectInfo[projLookup[r.name]];
-    return r.contactName && info && info.clientContact;
-  }).length;
-
-  // Preview
-  const preview = document.getElementById('importDatesPreview');
-  preview.style.display = 'block';
-  preview.innerHTML = `
-    <div style="font-weight:700;color:var(--text);margin-bottom:6px">&#x1F4CA; Preview</div>
-    <div>&#x2705; <strong>${matched.length}</strong> projects matched in system</div>
-    <div style="color:var(--muted)">&#x1F4C5; <strong>${matched.filter(r=>r.startDate).length}</strong> will get a Created Date written</div>
-    <div style="color:var(--muted)">&#x1F512; <strong>${withEnd}</strong> will get a Closed Date written</div>
-    <div style="color:var(--muted)">&#x1F464; <strong>${withContact - willSkipContact}</strong> will get a Contact written &nbsp;<span style="font-size:11px">(${willSkipContact} skipped — already have one)</span></div>
-    ${unmatched.length > 0 ? `<div style="color:var(--muted);margin-top:4px">&#x23ED; <strong>${unmatched.length}</strong> rows not found in system (name mismatch)</div>` : ''}
-    ${unmatched.length > 0 ? `<div style="font-size:11px;color:var(--muted);margin-top:2px">First few: ${unmatched.slice(0,5).map(r=>r.name).join(', ')}${unmatched.length>5?' …':''}</div>` : ''}`;
-
-  // Warnings
-  if (warnings.length > 0) {
-    const warnEl = document.getElementById('importDatesWarnings');
-    warnEl.style.display = 'block';
-    warnEl.innerHTML = `<div style="font-weight:700;margin-bottom:4px">&#x26A0; Data notes (${warnings.length})</div>` +
-      warnings.map(w => `<div>&#x2022; ${w}</div>`).join('');
-  }
-
-  document.getElementById('importDatesBtn').disabled = matched.length === 0;
-}
-
-async function runImportProjectDates() {
-  if (!sb) { toast('⚠ Not connected to Supabase'); return; }
-  if (!_importDatesParsed.length) return;
-
-  const btn   = document.getElementById('importDatesBtn');
-  const logEl = document.getElementById('importDatesLog');
-  btn.disabled = true;
-  btn.textContent = '⏳ Importing…';
-  logEl.style.display = 'block';
-  logEl.innerHTML = '';
-
-  const projLookup = {};
-  projects.forEach(p => { projLookup[p.name.trim()] = p.id; });
-
-  const toUpdate = _importDatesParsed
-    .filter(r => projLookup[r.name])
-    .map(r => ({ ...r, projId: projLookup[r.name] }));
-
-  logEl.innerHTML += `<div style="color:var(--amber)">▸ Updating ${toUpdate.length} projects…</div>`;
-
-  let updDates = 0, updContact = 0, skippedContact = 0, errors = 0;
-
-  for (let i = 0; i < toUpdate.length; i++) {
-    const row  = toUpdate[i];
-    const info = projectInfo[row.projId];
-
-    // Build DB update payload
-    const updates = {};
-
-    // Dates — always write if present
-    if (row.startDate) updates.start_date = row.startDate;
-    if (row.endDate)   updates.end_date   = row.endDate;
-
-    // Contact — only if project doesn't already have one
-    const alreadyHasContact = info && info.clientContact && info.clientContact.trim();
-    if (row.contactName && !alreadyHasContact) {
-      updates.client_contact = row.contactName;
-      if (row.contactEmail) updates.client_email = row.contactEmail;
-    } else if (row.contactName && alreadyHasContact) {
-      skippedContact++;
-    }
-
-    if (Object.keys(updates).length === 0) continue;
-
-    try {
-      const { error } = await sb.from('project_info').update(updates).eq('project_id', row.projId);
-      if (error) throw error;
-
-      // Sync in-memory store
-      if (info) {
-        if (updates.start_date)    { info.startDate = row.startDate; updDates++; }
-        if (updates.end_date)      info.endDate = row.endDate;
-        if (updates.client_contact) { info.clientContact = row.contactName; updContact++; }
-        if (updates.client_email)  info.clientEmail = row.contactEmail;
-      }
-    } catch(e) {
-      errors++;
-      logEl.innerHTML += `<div style="color:var(--red)">✗ ${row.name}: ${e.message}</div>`;
-    }
-
-    // Progress every 50 rows
-    if ((i + 1) % 50 === 0) {
-      btn.textContent = `⏳ ${i+1} / ${toUpdate.length}…`;
-      logEl.scrollTop = logEl.scrollHeight;
-      await new Promise(r => setTimeout(r, 10));
-    }
-  }
-
-  const summary = `✓ Done — ${updDates} dates updated, ${updContact} contacts written, ${skippedContact} contacts skipped (already set)${errors ? ', ' + errors + ' errors' : ''}`;
-  logEl.innerHTML += `<div style="color:var(--green);margin-top:6px;font-weight:600">${summary}</div>`;
-  logEl.scrollTop = logEl.scrollHeight;
-  btn.textContent = '✓ Complete';
-  btn.disabled = false;
-  toast(`✅ Import done — ${updDates} dates, ${updContact} contacts`);
-}
