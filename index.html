@@ -176,6 +176,10 @@
               oninput="quotesSearchVal=this.value;renderQuotesPanel()"
               style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 11px;outline:none;width:200px;transition:border-color var(--transition)"
               onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
+            <button id="showLostBtn" onclick="toggleLostQuotes()"
+              style="padding:6px 14px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s"
+              onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'"
+              onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">&#x1F512; Show Lost</button>
             <button onclick="refreshQuotes()"
               style="padding:6px 14px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s"
               onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'"

@@ -3,6 +3,8 @@ let quotesData      = [];
 let quotesSortCol   = 'created_at';
 let quotesSortDir   = 'desc';
 let quotesLoaded    = false;
+let quotesLostLoaded = false;
+let quotesShowLost  = false;
 let quotesSearchVal = '';
 let _resolvedCols   = [];
 
@@ -91,16 +93,70 @@ async function openQuotesPanel(el) {
 
 async function loadQuotes() {
   if (!sb) return;
-  quotesData = await dbFetch('quotes', '*');
+  let all = [], page = 0;
+  while (true) {
+    const { data, error } = await sb.from('quotes').select('*')
+      .not('stage', 'in', '("lost","Lost","closed_lost","Closed Lost")')
+      .order('created_at', { ascending: false })
+      .range(page * 1000, page * 1000 + 999);
+    if (error) { console.error('quotes:', error); break; }
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < 1000) break;
+    page++;
+  }
+  quotesData = all;
   resolveQuoteCols(quotesData);
+}
+
+async function loadLostQuotes() {
+  if (!sb) return;
+  let all = [], page = 0;
+  while (true) {
+    const { data, error } = await sb.from('quotes').select('*')
+      .in('stage', ['lost', 'Lost', 'closed_lost', 'Closed Lost'])
+      .order('created_at', { ascending: false })
+      .range(page * 1000, page * 1000 + 999);
+    if (error) { console.error('quotes lost:', error); break; }
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < 1000) break;
+    page++;
+  }
+  quotesData = [...quotesData, ...all];
+  quotesLostLoaded = true;
 }
 
 async function refreshQuotes() {
   quotesLoaded = false;
+  quotesLostLoaded = false;
+  quotesData = [];
+  quotesSearchVal = '';
+  const searchEl = document.getElementById('quotesSearch');
+  if (searchEl) searchEl.value = '';
   await loadQuotes();
   quotesLoaded = true;
+  if (quotesShowLost) {
+    await loadLostQuotes();
+  }
   renderQuotesPanel();
   toast('Quotes refreshed');
+}
+
+async function toggleLostQuotes() {
+  quotesShowLost = !quotesShowLost;
+  if (quotesShowLost && !quotesLostLoaded) {
+    toast('Loading lost quotes…');
+    await loadLostQuotes();
+  } else if (!quotesShowLost) {
+    // Remove lost records from memory
+    quotesData = quotesData.filter(r => {
+      const s = String(r.stage || '').toLowerCase().replace(/[\s-]+/g,'_');
+      return s !== 'lost' && s !== 'closed_lost';
+    });
+  }
+  resolveQuoteCols(quotesData);
+  renderQuotesPanel();
 }
 
 function quotesSortBy(key) {
@@ -128,7 +184,15 @@ function renderQuotesPanel() {
     return quotesSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
   });
 
-  if (subEl) subEl.textContent = `${rows.length} quote${rows.length !== 1 ? 's' : ''}`;
+  if (subEl) subEl.textContent = `${rows.length} quote${rows.length !== 1 ? 's' : ''}${quotesShowLost ? '' : ' (lost hidden)'}`;
+
+  // Update the Show Lost button appearance
+  const lostBtn = document.getElementById('showLostBtn');
+  if (lostBtn) {
+    lostBtn.textContent = quotesShowLost ? '🔓 Hide Lost' : '🔒 Show Lost';
+    lostBtn.style.borderColor = quotesShowLost ? 'var(--amber-dim)' : 'var(--border)';
+    lostBtn.style.color       = quotesShowLost ? 'var(--amber)'     : 'var(--muted)';
+  }
 
   if (!rows.length) {
     container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
