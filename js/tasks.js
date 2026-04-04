@@ -284,6 +284,13 @@ function renderTasksPanel(projId) {
     .filter(s => s.projId === projId)
     .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
 
+  // Count duplicate task names within this project so hours can be split evenly
+  const taskNameCount = {};
+  tasks.forEach(t => {
+    const key = (t.name||'').trim().toLowerCase();
+    taskNameCount[key] = (taskNameCount[key] || 0) + 1;
+  });
+
   // Build a flat ordered list of {type, item, num}
   const allItems = [
     ...sections.map(s => ({type:'section', item:s, num: s.taskNum||0})),
@@ -322,7 +329,8 @@ function renderTasksPanel(projId) {
       }).join('');
     const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
       `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
-    const loggedH = getHoursForTask(t.name, t.proj);
+    const dupCount = taskNameCount[(t.name||'').trim().toLowerCase()] || 1;
+    const loggedH = getHoursForTask(t.name, t.proj) / dupCount;
     const budgetH = t.budgetHours || 0;
     const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : '#000';
 
@@ -458,17 +466,27 @@ function renderHoursPanel(projId) {
   let grandTotal = 0;
   let html = '';
 
-  // Sort tasks in same order as taskStore
+  // Sort task names in same order as taskStore, deduplicated
+  const seenNames = new Set();
+  const orderedNames = [];
   tasks.forEach(task => {
-    if (!data[task.name]) return;
-    const entries = data[task.name].sort((a,b) => a.date.localeCompare(b.date));
+    if (data[task.name] && !seenNames.has(task.name)) {
+      seenNames.add(task.name);
+      orderedNames.push(task.name);
+    }
+  });
+  // Include any timesheet task names not matched in taskStore
+  taskNames.forEach(n => { if (!seenNames.has(n)) orderedNames.push(n); });
+
+  orderedNames.forEach(taskName => {
+    const entries = data[taskName].sort((a,b) => a.date.localeCompare(b.date));
     const taskTotal = entries.reduce((s,e)=>s+e.hrs,0);
     grandTotal += taskTotal;
 
     html += `<div style="margin-bottom:24px;border:1px solid var(--border);border-radius:10px;overflow:hidden">`;
     // Task header
     html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--surface2);border-bottom:1px solid var(--border)">`;
-    html += `<div style="font-size:13px;font-weight:700;color:var(--text)">📋 ${task.name}</div>`;
+    html += `<div style="font-size:13px;font-weight:700;color:var(--text)">📋 ${taskName}</div>`;
     html += `<div style="font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--blue)">${taskTotal.toFixed(1)}h total</div>`;
     html += `</div>`;
 
