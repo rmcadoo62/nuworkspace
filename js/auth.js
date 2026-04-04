@@ -175,13 +175,15 @@ function setTsProject(key, rowIdx, val) {
       tasks.map(t => {
         const statusLabels = {new:'New',inprogress:'In Progress',prohold:'Pro Hold',accthold:'Acct Hold',complete:'Complete',cancelled:'Cancelled',billed:'Billed'};
         const label = '#'+(t.taskNum||'?')+' ['+(statusLabels[t.status]||t.status)+'] '+(t.name.length>38?t.name.slice(0,38)+'…':t.name);
-        return '<option value="'+t.name+'">'+label+'</option>';
+        return '<option value="'+t._id+'" data-name="'+t.name.replace(/"/g,'&quot;')+'">'+label+'</option>';
       }).join('');
   }
 }
 
-function setTsTask(key, rowIdx, taskName) {
-  tsData[key][rowIdx].taskName = taskName;
+function setTsTask(key, rowIdx, taskId) {
+  const task = taskStore.find(t => t._id === taskId);
+  tsData[key][rowIdx].taskId = taskId || null;
+  if (task) tsData[key][rowIdx].taskName = task.name;
 }
 
 function setTsOverhead(key, rowIdx, cat) {
@@ -334,6 +336,7 @@ async function openTimesheetPanel(el) {
           } else {
             tsData[storeKey].push({
               _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+              taskId: r.task_id||null,
               isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
               hours: JSON.parse(r.hours_json||'{}'),
             });
@@ -382,6 +385,7 @@ async function reloadTsWeek(emp) {
         } else {
           tsData[storeKey].push({
             _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            taskId: r.task_id||null,
             isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
             hours: JSON.parse(r.hours_json||'{}'),
           });
@@ -449,7 +453,8 @@ function renderTimesheet() {
         projTasks.map(t => {
           const statusLabels = {new:'New',inprogress:'In Progress',prohold:'Pro Hold',accthold:'Acct Hold',complete:'Complete',cancelled:'Cancelled',billed:'Billed'};
           const label = '#'+(t.taskNum||'?')+' ['+(statusLabels[t.status]||t.status)+'] '+(t.name.length>38?t.name.slice(0,38)+'…':t.name);
-          return '<option value="'+t.name+'" '+(t.name===row.taskName?'selected':'')+'>'+label+'</option>';
+          const isSelected = row.taskId ? t._id === row.taskId : t.name === row.taskName;
+          return '<option value="'+t._id+'" data-name="'+t.name.replace(/"/g,'&quot;')+'" '+(isSelected?'selected':'')+'>'+label+'</option>';
         }).join('');
       const selProj = projects.find(p => p.id === row.projId);
       const projDisplayName = selProj ? selProj.emoji+' '+selProj.name : '';

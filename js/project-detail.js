@@ -3227,15 +3227,18 @@ async function markTaskBilled(taskId, projId) {
 
 // ===== HOURS CHARGED PER TASK =====
 // ===== HOURS CHARGED PER TASK =====
-function getHoursForTask(taskName, projId) {
-  if (!taskName) return 0;
+function getHoursForTask(taskName, projId, taskId) {
+  if (!taskName && !taskId) return 0;
   let total = 0;
   Object.entries(tsData).forEach(([k, rows]) => {
     if (k.startsWith('oh_') || !Array.isArray(rows)) return;
     rows.forEach(row => {
-      // If looking for a specific project, only count rows that explicitly belong to it
       if (projId && row.projId !== projId) return;
-      if (row.taskName && row.taskName.trim().toLowerCase() === taskName.trim().toLowerCase()) {
+      // Match by taskId when both sides have it, otherwise fall back to name
+      const matched = (taskId && row.taskId)
+        ? row.taskId === taskId
+        : (row.taskName && row.taskName.trim().toLowerCase() === (taskName||'').trim().toLowerCase());
+      if (matched) {
         total += Object.values(row.hours).reduce((a, b) => a + b, 0);
       }
     });

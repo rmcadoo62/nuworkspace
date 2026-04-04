@@ -330,7 +330,7 @@ function renderTasksPanel(projId) {
     const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
       `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
     const dupCount = taskNameCount[(t.name||'').trim().toLowerCase()] || 1;
-    const loggedH = getHoursForTask(t.name, t.proj) / dupCount;
+    const loggedH = getHoursForTask(t.name, t.proj, t._id) / (t._id ? 1 : dupCount);
     const budgetH = t.budgetHours || 0;
     const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : '#000';
 
@@ -429,7 +429,8 @@ function renderHoursPanel(projId) {
     return;
   }
 
-  // Build: { taskName: [ { date, empId, hrs } ] }
+  // Build: { taskKey: { name, entries[] } }
+  // taskKey is taskId when available, otherwise taskName (for historical rows)
   const data = {};
 
   Object.entries(tsData).forEach(([key, rows]) => {
@@ -442,21 +443,21 @@ function renderHoursPanel(projId) {
 
     rows.forEach(row => {
       if (row.projId !== projId || !row.taskName) return;
-      // Each day index
+      const taskKey = row.taskId || ('name:' + row.taskName);
       Object.entries(row.hours||{}).forEach(([di, hrs]) => {
         const h = parseFloat(hrs)||0;
         if (h <= 0) return;
         const d = new Date(weekStart);
         d.setDate(weekStart.getDate() + parseInt(di));
         const dateStr = d.toISOString().slice(0,10);
-        if (!data[row.taskName]) data[row.taskName] = [];
-        data[row.taskName].push({ date: dateStr, empId, hrs: h });
+        if (!data[taskKey]) data[taskKey] = { name: row.taskName, entries: [] };
+        data[taskKey].entries.push({ date: dateStr, empId, hrs: h });
       });
     });
   });
 
-  const taskNames = Object.keys(data);
-  if (taskNames.length === 0) {
+  const taskKeys = Object.keys(data);
+  if (taskKeys.length === 0) {
     body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No hours logged for this project yet.</div>';
     return;
   }
@@ -466,25 +467,25 @@ function renderHoursPanel(projId) {
   let grandTotal = 0;
   let html = '';
 
-  // Sort task names in same order as taskStore, deduplicated
-  const seenNames = new Set();
-  const orderedNames = [];
+  // Sort in taskStore order, deduplicated by taskKey
+  const seenKeys = new Set();
+  const orderedKeys = [];
   tasks.forEach(task => {
-    if (data[task.name] && !seenNames.has(task.name)) {
-      seenNames.add(task.name);
-      orderedNames.push(task.name);
+    const taskKey = data[task._id] ? task._id : ('name:' + task.name);
+    if (data[taskKey] && !seenKeys.has(taskKey)) {
+      seenKeys.add(taskKey);
+      orderedKeys.push(taskKey);
     }
   });
-  // Include any timesheet task names not matched in taskStore
-  taskNames.forEach(n => { if (!seenNames.has(n)) orderedNames.push(n); });
+  taskKeys.forEach(k => { if (!seenKeys.has(k)) orderedKeys.push(k); });
 
-  orderedNames.forEach(taskName => {
-    const entries = data[taskName].sort((a,b) => a.date.localeCompare(b.date));
-    const taskTotal = entries.reduce((s,e)=>s+e.hrs,0);
+  orderedKeys.forEach(taskKey => {
+    const { name: taskName, entries } = data[taskKey];
+    const sorted = entries.sort((a,b) => a.date.localeCompare(b.date));
+    const taskTotal = sorted.reduce((s,e)=>s+e.hrs,0);
     grandTotal += taskTotal;
 
     html += `<div style="margin-bottom:24px;border:1px solid var(--border);border-radius:10px;overflow:hidden">`;
-    // Task header
     html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--surface2);border-bottom:1px solid var(--border)">`;
     html += `<div style="font-size:13px;font-weight:700;color:var(--text)">📋 ${taskName}</div>`;
     html += `<div style="font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--blue)">${taskTotal.toFixed(1)}h total</div>`;
@@ -498,7 +499,7 @@ function renderHoursPanel(projId) {
       <th style="text-align:right;padding:7px 16px;font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted)">Hours</th>
     </tr></thead><tbody>`;
 
-    entries.forEach((entry, i) => {
+    sorted.forEach((entry, i) => {
       const emp = employees.find(e => e.id === entry.empId);
       if (!emp) return;
       const bg = i % 2 === 0 ? '' : 'background:var(--surface2)';

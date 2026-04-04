@@ -329,6 +329,7 @@ async function loadAllData() {
         if (!tsData[storeKey]) tsData[storeKey] = [];
         tsData[storeKey].push({
           _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+          taskId: r.task_id||null,
           isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
           hours: JSON.parse(r.hours_json||'{}'),
         });
@@ -444,6 +445,7 @@ async function loadClosedProject(projId) {
         if (!tsData[storeKey].find(x => x._id === r.id)) {
           tsData[storeKey].push({
             _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            taskId: r.task_id||null,
             isOverhead: false, overheadCat: '',
             hours: JSON.parse(r.hours_json||'{}'),
           });
@@ -490,6 +492,7 @@ async function loadFullProjectTimesheets(projId) {
         if (!tsData[storeKey].find(x => x._id === r.id)) {
           tsData[storeKey].push({
             _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            taskId: r.task_id||null,
             isOverhead: false, overheadCat: '',
             hours: JSON.parse(r.hours_json||'{}'),
           });

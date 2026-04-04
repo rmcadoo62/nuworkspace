@@ -98,12 +98,12 @@ function selectTsProjItem(e, key, ri, projId) {
   const inp = document.getElementById('ts-proj-input-'+key+'-'+ri);
   if (inp) inp.value = p ? p.emoji+' '+p.name : '';
   closeTsProjDropdown(key, ri);
-  // Update task dropdown
+  // Update task dropdown — value is task UUID, display is task name
   const taskSel = document.getElementById('ts-task-'+key+'-'+ri);
   if (taskSel) {
     const tasks = taskStore.filter(t => t.proj === projId);
     taskSel.innerHTML = '<option value="">— select task —</option>'+
-      tasks.map(t => '<option value="'+t.name+'">'+(t.name.length>38?t.name.slice(0,38)+'…':t.name)+'</option>').join('');
+      tasks.map(t => '<option value="'+t._id+'" data-name="'+t.name.replace(/"/g,'&quot;')+'">'+(t.name.length>38?t.name.slice(0,38)+'…':t.name)+'</option>').join('');
   }
 }
 
@@ -215,6 +215,7 @@ async function autoApproveProxyTimesheet() {
     await sb.from('timesheet_entries').insert({
       week_start: weekDateAA, project_id: row.isOverhead ? null : (row.projId||null),
       task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName||null),
+      task_id: row.isOverhead ? null : (row.taskId||null),
       hours_json: JSON.stringify(row.hours),
       employee_id: emp.id,
       is_overhead: row.isOverhead||false, overhead_cat: row.overheadCat||null,
@@ -278,6 +279,7 @@ async function autoApproveProxyTimesheet() {
         } else {
           tsData[key].push({
             _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            taskId: r.task_id||null,
             isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
             hours: JSON.parse(r.hours_json||'{}'),
           });
@@ -381,6 +383,7 @@ async function saveTsWeekToSupabase(key) {
       week_start: weekDate,
       project_id: row.projId || null,
       task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName || ''),
+      task_id: row.isOverhead ? null : (row.taskId || null),
       hours_json: JSON.stringify(row.hours),
       notes_json: row.comments ? JSON.stringify(row.comments) : null,
       employee_id: empId,
@@ -644,6 +647,7 @@ async function viewEmployeeTimesheet(empId, weekKey) {
           } else {
             tsData[storeKey].push({
               _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+              taskId: r.task_id||null,
               isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
               hours: JSON.parse(r.hours_json||'{}'),
             });
@@ -697,6 +701,7 @@ async function editAndApprove(wsId, empId, weekKey) {
         } else {
           tsData[storeKey].push({
             _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            taskId: r.task_id||null,
             isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
             hours: JSON.parse(r.hours_json||'{}'),
           });
@@ -744,6 +749,7 @@ async function saveAndApproveForEmployee() {
       week_start: weekKey,
       project_id: row.projId || null,
       task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName || ''),
+      task_id: row.isOverhead ? null : (row.taskId || null),
       hours_json: JSON.stringify(row.hours),
       employee_id: empId,
       is_overhead: row.isOverhead || false,
