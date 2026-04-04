@@ -53,6 +53,7 @@ document.addEventListener('DOMContentLoaded', function () {
     { name: 'openSchedSettingsPanel', label: 'Scheduler Settings'  },
     { name: 'openApprovalsPanel',     label: 'Approvals'           },
     { name: 'openImportExpensesPanel',label: 'Import Expenses'     },
+    { name: 'openQuotesPanel',        label: 'Quotes'              },
   ];
 
   NAV_FNS.forEach(({ name, label }) => {
