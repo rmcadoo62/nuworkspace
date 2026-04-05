@@ -186,8 +186,6 @@ function renderProjectsTable() {
   if (navFilter.status.size > 0 || navFilter.phase.size > 0) {
     filtered = filtered.filter(p => {
       const info = projectInfo[p.id] || {};
-      // Always pass closed projects through when showClosed is on — don't let status filter hide them
-      if (showClosed && info.status === 'closed') return true;
       const statusMatch = navFilter.status.size === 0 || navFilter.status.has(info.status || 'active');
       const phaseMatch  = navFilter.phase.size  === 0 || navFilter.phase.has(info.phase  || '');
       return statusMatch && phaseMatch;
@@ -800,10 +798,22 @@ function selectProject(id, el) {
 
   // Re-render data
   renderAllViews();
-  renderInfoSheet(activeProjectId);
   renderProjStickyHeader(activeProjectId);
-  // Switch to info sub-panel
-  switchProjTab('sub-info');
+
+  // For closed projects, wait for data to load before rendering
+  const info = projectInfo[id];
+  const isClosed = !info || info.status === 'closed';
+  if (id && isClosed && typeof loadClosedProject === 'function' && !_loadedClosedProjects.has(id)) {
+    const infoWrap = document.getElementById('infoWrap');
+    if (infoWrap) infoWrap.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px;">&#x23F3; Loading project data\u2026</div>';
+    loadClosedProject(id).then(() => {
+      renderInfoSheet(id);
+      switchProjTab('sub-info');
+    });
+  } else {
+    renderInfoSheet(activeProjectId);
+    switchProjTab('sub-info');
+  }
 }
 
 function selectAllProjects(el) { openDashboardPanel(el); } function _oldSelectAllProjects(el) {

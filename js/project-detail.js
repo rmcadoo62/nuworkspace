@@ -3425,19 +3425,26 @@ async function syncProjBilledRevenue(projId) {
 }
 async function syncProjActualHours(projId) {
   if (!sb || !projId) return;
+  // Query ALL entries from DB — not just what's in memory — so historical
+  // hours imported from other sessions are always included in the total.
   let total = 0;
-  Object.entries(tsData).forEach(([k, rows]) => {
-    if (k.startsWith('oh_') || !Array.isArray(rows)) return;
-    rows.forEach(row => {
-      if (row.projId === projId) {
-        total += Object.values(row.hours).reduce((a, b) => a + b, 0);
-      }
-    });
-  });
+  try {
+    const { data: entries } = await sb
+      .from('timesheet_entries')
+      .select('hours_json')
+      .eq('project_id', projId)
+      .eq('is_overhead', false);
+    if (entries) {
+      entries.forEach(r => {
+        const hrs = JSON.parse(r.hours_json || '{}');
+        total += Object.values(hrs).reduce((a, b) => a + parseFloat(b || 0), 0);
+      });
+    }
+  } catch(e) { console.warn('syncProjActualHours query error:', e); return; }
   if (projectInfo[projId]) projectInfo[projId].actualHours = total;
   try {
     await sb.from('project_info').update({ actual_hours: total }).eq('project_id', projId);
-  } catch(e) { console.warn('syncProjActualHours error:', e); }
+  } catch(e) { console.warn('syncProjActualHours update error:', e); }
 }
 
 

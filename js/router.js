@@ -164,7 +164,7 @@ function initRouter() {
   const hash = window.location.hash;
   if (hash && hash.length > 1) {
     // Small delay to let all panels render before navigating
-    setTimeout(() => routerNavigate(hash), 300);
+    setTimeout(() => routerNavigate(hash), 800);
   } else {
     // No hash — set default
     routerPush('projects');

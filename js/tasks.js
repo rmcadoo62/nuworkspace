@@ -435,10 +435,12 @@ function renderHoursPanel(projId) {
 
   Object.entries(tsData).forEach(([key, rows]) => {
     if (!key.includes('|')) return;
+    if (!Array.isArray(rows)) return;
     const [empId, weekKey] = key.split('|');
     if (!weekKey) return;
     const emp = employees.find(e => e.id === empId);
-    if (!emp) return;
+    // Don't skip former/unmatched employees — use a fallback display
+    const empDisplay = emp || { name: 'Former Employee', initials: '?', color: '#7a7a85' };
     const weekStart = new Date(weekKey + 'T00:00:00');
 
     rows.forEach(row => {
@@ -501,14 +503,14 @@ function renderHoursPanel(projId) {
 
     sorted.forEach((entry, i) => {
       const emp = employees.find(e => e.id === entry.empId);
-      if (!emp) return;
+      const empDisplay = emp || { name: 'Former Employee', initials: '?', color: '#7a7a85' };
       const bg = i % 2 === 0 ? '' : 'background:var(--surface2)';
       html += `<tr style="border-bottom:1px solid var(--border);${bg}">`;
       html += `<td style="padding:7px 16px;font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace">${fmtDate(entry.date)}</td>`;
       html += `<td style="padding:7px 16px">
         <div style="display:flex;align-items:center;gap:8px">
-          <div style="width:22px;height:22px;border-radius:50%;background:${emp.color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0">${emp.initials}</div>
-          <span style="font-size:12.5px;color:var(--text)">${emp.name}</span>
+          <div style="width:22px;height:22px;border-radius:50%;background:${empDisplay.color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0">${empDisplay.initials}</div>
+          <span style="font-size:12.5px;color:var(--text)">${empDisplay.name}</span>
         </div>
       </td>`;
       html += `<td style="text-align:right;padding:7px 16px;font-size:12.5px;font-weight:600;font-family:'JetBrains Mono',monospace;color:var(--text)">${entry.hrs.toFixed(1)}h</td>`;
