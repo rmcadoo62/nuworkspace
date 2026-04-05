@@ -61,6 +61,7 @@ function routerNavigate(hash) {
       case 'permissions': if (typeof openPermissionsPanel   === 'function') openPermissionsPanel();   break;
       case 'approvals':   if (typeof openApprovalsPanel     === 'function') openApprovalsPanel();     break;
       case 'quotes':      if (typeof openQuotesPanel        === 'function') openQuotesPanel();        break;
+      case 'closingreport': if (typeof openClosingReport    === 'function') openClosingReport();      break;
       default:
         if (typeof openProjectsTable === 'function') openProjectsTable();
     }
@@ -104,6 +105,7 @@ function routerHookFunctions() {
     ['openPermissionsPanel',    'permissions'],
     ['openApprovalsPanel',      'approvals'],
     ['openQuotesPanel',         'quotes'],
+    ['openClosingReport',       'closingreport'],
     ['openMergeClientsPanel',   'clients'],
     ['openSfImportPanel',       'clients'],
     ['openSchedSettingsPanel',  'scheduler'],

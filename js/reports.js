@@ -1267,3 +1267,91 @@ async function loadClosedProjects(el) {
     if (el) { el.innerHTML = '🔒 Load Closed Jobs'; el.style.pointerEvents = ''; }
   }
 }
+
+
+// ===== CLOSING REPORT =====
+function openClosingReport(el) {
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('panel-closing-report').classList.add('active');
+  if (el) el.classList.add('active');
+  activeProjectId = null;
+  document.getElementById('topbarName').textContent = 'Closing Report';
+  renderClosingReport();
+}
+
+function renderClosingReport() {
+  const el = document.getElementById('closingReportBody');
+  if (!el) return;
+
+  const now = new Date();
+  const daysSince = d => d ? Math.floor((now - new Date(d + 'T00:00:00')) / 86400000) : null;
+  const fmtDate  = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+  const fmt$     = n => n > 0 ? '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+
+  // Projects in testcomplete status
+  const rows = projects
+    .filter(p => (projectInfo[p.id] || {}).status === 'testcomplete')
+    .map(p => {
+      const info = projectInfo[p.id] || {};
+      const days = daysSince(info.testcompleteDate);
+      const tasks = taskStore.filter(t => t.proj === p.id);
+      const openTasks = tasks.filter(t => !['complete', 'billed', 'cancelled'].includes(t.status));
+      const readyToBill = tasks.filter(t => t.status === 'complete').reduce((s, t) => s + (t.fixedPrice || 0), 0);
+      return { p, info, days, openTasks, readyToBill };
+    })
+    .sort((a, b) => (b.days || 0) - (a.days || 0));
+
+  const over60  = rows.filter(r => r.days !== null && r.days >= 60);
+  const under60 = rows.filter(r => r.days === null || r.days < 60);
+
+  function buildTable(list) {
+    if (list.length === 0) return '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">None</div>';
+    return '<table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Client</th>' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Test Complete Date</th>' +
+        '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Days</th>' +
+        '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Open Tasks</th>' +
+        '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Ready to Bill</th>' +
+      '</tr></thead><tbody>' +
+      list.map(function(r) {
+        const ageBg = (r.days || 0) >= 120 ? 'var(--red)' : (r.days || 0) >= 90 ? '#e8a234' : (r.days || 0) >= 60 ? '#5b9cf6' : 'var(--muted)';
+        return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="selectProjectById(\'' + r.p.id + '\')">' +
+          '<td style="padding:11px 14px"><span style="font-size:13px;font-weight:600;color:var(--text)">' + (r.p.emoji ? r.p.emoji + ' ' : '') + r.p.name + '</span></td>' +
+          '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.client || '—') + '</td>' +
+          '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '—') + '</td>' +
+          '<td style="padding:11px 14px;font-size:12px;color:var(--muted);font-family:JetBrains Mono,monospace">' + fmtDate(r.info.testcompleteDate) + '</td>' +
+          '<td style="padding:11px 14px;text-align:center"><span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:' + ageBg + '">' + (r.days !== null ? r.days + 'd' : '—') + '</span></td>' +
+          '<td style="padding:11px 14px;text-align:center;font-size:13px;font-weight:600;color:' + (r.openTasks.length > 0 ? 'var(--red)' : 'var(--muted)') + '">' + (r.openTasks.length || '—') + '</td>' +
+          '<td style="padding:11px 14px;text-align:right;font-size:13px;font-weight:600;color:' + (r.readyToBill > 0 ? '#c084fc' : 'var(--muted)') + '">' + fmt$(r.readyToBill) + '</td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table>';
+  }
+
+  el.innerHTML =
+    // Summary chips
+    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px">' +
+      '<div style="background:rgba(224,92,92,0.1);border:1px solid rgba(224,92,92,0.3);border-radius:10px;padding:12px 20px;min-width:120px">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--red);margin-bottom:4px">60+ Days</div>' +
+        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + over60.length + '</div>' +
+      '</div>' +
+      '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 20px;min-width:120px">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Total Test Complete</div>' +
+        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + rows.length + '</div>' +
+      '</div>' +
+    '</div>' +
+    // 60+ days section
+    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--red);margin-bottom:10px">&#x26A0; Needs Attention — 60+ Days in Test Complete</div>' +
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:28px">' +
+      buildTable(over60) +
+    '</div>' +
+    // Under 60 days section
+    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Under 60 Days</div>' +
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+      buildTable(under60) +
+    '</div>';
+}

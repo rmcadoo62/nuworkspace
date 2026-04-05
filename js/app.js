@@ -122,12 +122,6 @@ function confirmDeleteTask() {
 
 
 
-// ===== INIT =====
-// ===== INIT =====
-taskStore = [];
-
-
-
 // ===== STARTUP =====
 // ===== STARTUP =====
 (async function startup() {
