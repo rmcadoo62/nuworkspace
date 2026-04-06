@@ -305,6 +305,9 @@ function renderEmployeesPanel(search) {
   if (empDetailOpen) showEmpProfile(empDetailOpen);
 }
 
+// Track which employees have had full timesheet data loaded from DB
+const _empTsLoaded = new Set();
+
 function showEmpProfile(empId, annivOffset) {
   annivOffset = annivOffset || 0;
   empDetailOpen = empId;
@@ -318,6 +321,43 @@ function showEmpProfile(empId, annivOffset) {
   if (!pane) return;
   const emp = employees.find(e => e.id === empId);
   if (!emp) return;
+
+  // If we haven't loaded full timesheet data for this employee yet, fetch it
+  // then re-render. This guarantees the chart always has complete data.
+  if (!_empTsLoaded.has(empId) && sb) {
+    _empTsLoaded.add(empId); // mark immediately to prevent duplicate fetches
+    sb.from('timesheet_entries').select('*').eq('employee_id', empId)
+      .then(({ data: empRows }) => {
+        if (empRows) {
+          empRows.forEach(r => {
+            const storeKey = empId + '|' + r.week_start;
+            if (r.is_overhead && r.overhead_cat) {
+              const ohKey = 'oh_' + storeKey;
+              if (!tsData[ohKey]) tsData[ohKey] = {};
+              tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+            } else {
+              if (!tsData[storeKey]) tsData[storeKey] = [];
+              if (!tsData[storeKey].find(x => x._id === r.id)) {
+                tsData[storeKey].push({
+                  _id: r.id, projId: r.project_id || '', taskName: r.task_name || '',
+                  taskId: r.task_id || null, isOverhead: false, overheadCat: '',
+                  hours: JSON.parse(r.hours_json || '{}'),
+                });
+              }
+            }
+          });
+        }
+        // Re-render now that tsData is complete
+        if (empDetailOpen === empId) {
+          // Destroy any existing Chart.js instance before re-render
+          const oldCanvas = document.getElementById('empHoursChart_' + empId);
+          if (oldCanvas) { const c = Chart.getChart(oldCanvas); if (c) c.destroy(); }
+          showEmpProfile(empId, annivOffset);
+        }
+      })
+      .catch(e => console.warn('showEmpProfile: fetch failed', e));
+    // Fall through and render immediately with whatever data we have
+  }
 
   const year = new Date().getFullYear() + annivOffset;
   // Calculate anniversary year window from hire date, shifted by annivOffset
@@ -486,6 +526,7 @@ function showEmpProfile(empId, annivOffset) {
     if (weekDate < chartStart) return;
     let projHrs = 0, sickHrs = 0, vacHrs = 0, holHrs = 0, ohWorkHrs = 0;
     rows.forEach(r => { if (r && r.hours) projHrs += Object.values(r.hours).reduce((s,h)=>s+(parseFloat(h)||0),0); });
+    if (weekKey === '2026-02-08') console.log('[CHART DEBUG] Feb08 rows:', rows.length, 'projHrs:', projHrs, 'tsData key:', key, 'exists:', !!tsData[key]);
     const ohKey = 'oh_' + key;
     const oh = tsData[ohKey] || {};
     // Deduplicate overhead categories — normalize names like "290-Sales Support" → "Sales Support"
