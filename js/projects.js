@@ -816,14 +816,7 @@ function selectProject(id, el) {
   }
 }
 
-function selectAllProjects(el) { openDashboardPanel(el); } function _oldSelectAllProjects(el) {
-  activeProjectId = null;
-  document.getElementById('topbarName').textContent = 'All Projects';
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-  el.classList.add('active');
-  showProjectView('panel-dashboard');
-  renderDashboard();
-}
+function selectAllProjects(el) { openDashboardPanel(el); }
 
 // ===== SAVE PROJECT =====
 async function saveProject() {

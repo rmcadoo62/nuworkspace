@@ -897,7 +897,10 @@ window.setTsHours = async function(key, rowIdx, dayIdx, val) {
   // If row already exists in DB, update it directly (fast path)
   if (row._id) {
     await sb.from('timesheet_entries')
-      .update({ hours_json: JSON.stringify(row.hours) })
+      .update({
+        hours_json: JSON.stringify(row.hours),
+        comments_json: JSON.stringify(row.comments || {}),
+      })
       .eq('id', row._id);
   } else {
     // New row not yet in DB — debounce a full save so it persists on refresh

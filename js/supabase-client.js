@@ -7,15 +7,6 @@ const SUPABASE_KEY = localStorage.getItem('nuworkspace_sb_key') || 'eyJhbGciOiJI
 
 let sb = null; // Supabase client
 
-function initSupabase() {
-  if (!SUPABASE_URL || !SUPABASE_KEY) return false;
-  try {
-    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    return true;
-  } catch(e) { return false; }
-}
-
-
 // ===== DB HELPERS =====
 // ===== DB HELPERS =====
 async function dbFetch(table, query) {

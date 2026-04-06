@@ -842,7 +842,7 @@ function showEmpProfile(empId, annivOffset) {
                   <span>~${totalHrsWorked}h worked · 1h per 30h (NJ)</span>
                 </div>`;
             }
-            const totalSick = sickOpeningBalance + 48;
+            const totalSick = 48;
             const usedSick = used.sick;
             const usedPct = totalSick > 0 ? Math.min(100, (usedSick / totalSick) * 100) : 0;
             const over = usedSick > sickAllotment;
