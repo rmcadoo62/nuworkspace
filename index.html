@@ -1320,6 +1320,16 @@
           <label class="field-label">Article Description <span style="color:var(--red)">*</span></label>
           <input class="f-input" id="articleDesc" type="text" placeholder="e.g. Valve Assembly, Unit 1" autocomplete="off" />
         </div>
+        <div class="field" id="articleClientField">
+          <label class="field-label">Client</label>
+          <div style="position:relative">
+            <input class="f-input" id="articleClientSearch" type="text" placeholder="Search clients…" autocomplete="off"
+              oninput="articleClientFilter(this.value)"
+              onblur="setTimeout(()=>{const d=document.getElementById('articleClientDrop');if(d)d.style.display='none'},200)" />
+            <input type="hidden" id="articleClientId" />
+            <div id="articleClientDrop" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;z-index:100;max-height:180px;overflow-y:auto;margin-top:2px;box-shadow:0 4px 16px rgba(0,0,0,0.3)"></div>
+          </div>
+        </div>
         <div class="field-row">
           <div class="field">
             <label class="field-label">Date Received</label>
