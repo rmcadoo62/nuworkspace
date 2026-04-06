@@ -786,28 +786,6 @@ function applySchedAccessToNav() {
   }
 }
 
-function updateSchedColor(key, value) {
-  window.loadSchedSettings();
-  window.schedSettings.colors[key] = value;
-  window.saveSchedSettings();
-  renderSchedSettingsSection();
-}
-
-function resetSchedColor(key) {
-  window.loadSchedSettings();
-  delete window.schedSettings.colors[key];
-  window.saveSchedSettings();
-  renderSchedSettingsSection();
-}
-
-function toggleSchedAccess(empId, hasAccess) {
-  window.loadSchedSettings();
-  window.schedSettings.access[empId] = hasAccess;
-  window.saveSchedSettings();
-  applySchedAccessToNav();
-  renderSchedSettingsSection();
-}
-
 async function afterLogin(user) {
   proxyEmployee = null; // always clear proxy on any login
   tsWeekOffset = 0;     // reset to current week

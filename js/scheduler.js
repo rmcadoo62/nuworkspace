@@ -149,16 +149,14 @@ let schedFlag           = null;   // null | 'reschedule' | 'tentative'
 let schedShowRooms      = true;   // toggle rooms section
 let schedShowEmps       = true;   // toggle employees section
 
-// DAY_W — 1week/week/month fill available width; quarter is fixed
-const DAY_W_FALLBACK = { '1week': 120, week: 52, month: 30, quarter: 18 };
+// DAY_W — all views fill available width dynamically
+const DAY_W_FALLBACK = { '1week': 120, week: 52, month: 22, quarter: 14 };
 function getEffectiveDayW(zoom, days) {
-  if (zoom === '1week' || zoom === 'week' || zoom === 'month') {
-    const gridArea = document.getElementById('schedCanvasScroll');
-    if (gridArea && gridArea.clientWidth > 0) {
-      const available = gridArea.clientWidth - 4;
-      const minW = zoom === '1week' ? 120 : zoom === 'week' ? 60 : 22;
-      return Math.max(minW, Math.floor(available / days));
-    }
+  const gridArea = document.getElementById('schedCanvasScroll');
+  if (gridArea && gridArea.clientWidth > 0) {
+    const available = gridArea.clientWidth - 4;
+    const minW = zoom === '1week' ? 120 : zoom === 'week' ? 60 : zoom === 'month' ? 22 : 10;
+    return Math.max(minW, Math.floor(available / days));
   }
   return DAY_W_FALLBACK[zoom] || 52;
 }
@@ -264,13 +262,19 @@ function buildBlockDisplayLines(block) {
   const lines = [];
   // For employee blocks show emp name + event type
   let lbl;
+  const rid = block.rowId || block.cat || '';
   if (block.empId || block.empEventType) {
     const emp = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === block.empId);
     const empName = emp ? emp.name : (block.label || '');
     const evtLbl  = block.empEventType === 'vacation' ? 'Vacation' : block.empEventType === 'sick' ? 'Sick' : 'Work';
     lbl = block.label || (empName ? empName + ' — ' + evtLbl : evtLbl);
+  } else if (rid.startsWith('emp_')) {
+    // Employee row block without empId set — look up by rowId
+    const empId = rid.slice(4);
+    const emp = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === empId);
+    lbl = block.label || (emp ? emp.name : 'Employee');
   } else {
-    lbl = block.label || rowLabel(block.rowId || block.cat);
+    lbl = block.label || rowLabel(rid);
   }
   // Time range on label line if set
   let timeSuffix = '';
@@ -390,54 +394,93 @@ function renderSched() {
 
   // ---- Day header ----
   const hdr = document.getElementById('schedDayHeader');
-  hdr.style.width = totalW + 'px';
+  const timeStrip = document.getElementById('schedTimeStrip');
+  hdr.style.width  = totalW + 'px';
+  hdr.style.height = (is1Week || is2Week) ? '36px' : '52px';
 
-  if (is1Week) {
-    // Each day cell contains hour sub-labels
-    const hrLabels = Array.from({length: H_COUNT + 1}, (_, i) => {
-      const hr = H_START + i;
-      const lbl = hr === 12 ? '12p' : hr < 12 ? hr + 'a' : (hr-12) + 'p';
-      return `<div style="position:absolute;left:${i * hourW}px;top:0;bottom:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-end;padding-bottom:4px;">
-        <span style="font-size:8.5px;font-family:'JetBrains Mono',monospace;color:var(--muted);opacity:.8;line-height:1;white-space:nowrap;">${lbl}</span>
-      </div>`;
-    }).join('');
-
+  if (is1Week || is2Week) {
+    // Row 1: day name banners — clean, no time labels inside
+    const dayShortNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
     hdr.innerHTML = days.map(d => {
       const isToday = toDateStr(d) === todayS;
       const isWknd  = d.getDay() === 0 || d.getDay() === 6;
-      const dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-      const cls = ['sched-day-cell', isToday?'today':'', isWknd?'weekend':''].filter(Boolean).join(' ');
-      // Half-day marker at noon position
-      const noonX = Math.round(dayW / 2);
-      const halfDayMarker = `<div style="position:absolute;left:${noonX}px;top:0;bottom:0;width:1px;background:rgba(192,122,26,0.35);pointer-events:none;"></div>
-        <div style="position:absolute;left:${noonX+3}px;bottom:5px;font-size:8px;font-family:'JetBrains Mono',monospace;color:var(--amber);opacity:.7;pointer-events:none;">½</div>`;
-      return `<div class="${cls}" style="width:${dayW}px;position:relative;flex-shrink:0;">
-        <div class="sched-day-name">${dayNames[d.getDay()]}</div>
-        <div class="sched-day-num">${d.getDate()}</div>
-        ${hrLabels}
-        ${halfDayMarker}
+      const bg      = isToday ? 'var(--amber-glow)' : isWknd ? 'var(--surface2)' : 'var(--surface)';
+      const clr     = isToday ? 'var(--amber)' : isWknd ? 'var(--muted)' : 'var(--text)';
+      const border  = `border-right:1px solid var(--border);`;
+      return `<div style="width:${dayW}px;height:36px;flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:6px;background:${bg};${border}position:relative;">
+        <span style="font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:${clr};">${dayShortNames[d.getDay()]}</span>
+        <span style="font-size:16px;font-family:'DM Serif Display',serif;color:${clr};line-height:1;">${d.getDate()}</span>
       </div>`;
     }).join('');
+
+    // Row 2: continuous time strip — labels at absolute pixel positions across all days
+    if (timeStrip) {
+      timeStrip.style.display = 'block';
+      timeStrip.style.width   = totalW + 'px';
+      let stripHtml = '';
+      if (is1Week) {
+        // Label every hour; skip if it won't fit
+        const showAllHours = hourW >= 36;
+        const KEY_HOURS = new Set([H_START, 12, H_END]);
+        days.forEach((d, di) => {
+          const isWknd = d.getDay() === 0 || d.getDay() === 6;
+          const bg = isWknd ? 'rgba(0,0,0,0.018)' : 'transparent';
+          // Day background strip
+          stripHtml += `<div style="position:absolute;left:${di*dayW}px;top:0;bottom:0;width:${dayW}px;background:${bg};"></div>`;
+          // Day boundary line
+          stripHtml += `<div style="position:absolute;left:${di*dayW}px;top:0;bottom:0;width:1px;background:var(--border);"></div>`;
+          // Hour labels
+          for (let h = 0; h <= H_COUNT; h++) {
+            const hr = H_START + h;
+            if (!showAllHours && !KEY_HOURS.has(hr)) continue;
+            const x    = di * dayW + h * hourW;
+            const h12  = hr === 12 ? 12 : hr > 12 ? hr - 12 : hr;
+            const ampm = hr < 12 ? 'AM' : 'PM';
+            const isKey = KEY_HOURS.has(hr);
+            const clr  = hr === 12 ? 'var(--amber)' : 'var(--muted)';
+            const fw   = isKey ? '700' : '500';
+            stripHtml += `<div style="position:absolute;left:${x+2}px;top:0;bottom:0;display:flex;align-items:center;">
+              <span style="font-size:8px;font-family:'JetBrains Mono',monospace;color:${clr};font-weight:${fw};white-space:nowrap;line-height:1;">
+                ${h12}${isKey ? `<span style="font-size:7px;">${ampm}</span>` : ''}
+              </span>
+            </div>`;
+          }
+        });
+      } else {
+        // 2-week: just AM / noon / PM per day
+        days.forEach((d, di) => {
+          const isWknd = d.getDay() === 0 || d.getDay() === 6;
+          const bg = isWknd ? 'rgba(0,0,0,0.018)' : 'transparent';
+          stripHtml += `<div style="position:absolute;left:${di*dayW}px;top:0;bottom:0;width:${dayW}px;background:${bg};"></div>`;
+          stripHtml += `<div style="position:absolute;left:${di*dayW}px;top:0;bottom:0;width:1px;background:var(--border);"></div>`;
+          if (!isWknd) {
+            const noonX = di * dayW + Math.floor(dayW / 2);
+            stripHtml += `<div style="position:absolute;left:${noonX}px;top:0;bottom:0;width:1px;background:rgba(192,122,26,0.35);"></div>`;
+            stripHtml += `<div style="position:absolute;left:${di*dayW+3}px;top:0;bottom:0;display:flex;align-items:center;"><span style="font-size:8px;font-family:'JetBrains Mono',monospace;color:var(--muted);font-weight:600;">AM</span></div>`;
+            stripHtml += `<div style="position:absolute;left:${noonX+3}px;top:0;bottom:0;display:flex;align-items:center;"><span style="font-size:8px;font-family:'JetBrains Mono',monospace;color:var(--amber);font-weight:700;">PM</span></div>`;
+          }
+        });
+      }
+      timeStrip.innerHTML = stripHtml;
+    }
   } else {
+    // Month/quarter: hide time strip, use original single-row header
+    if (timeStrip) timeStrip.style.display = 'none';
+    const isQuarter = schedZoom === 'quarter';
     hdr.innerHTML = days.map(d => {
-      const isToday = toDateStr(d) === todayS;
-      const isWknd  = d.getDay() === 0 || d.getDay() === 6;
+      const isToday      = toDateStr(d) === todayS;
+      const isWknd       = d.getDay() === 0 || d.getDay() === 6;
       const isMonthStart = d.getDate() === 1;
       const cls = ['sched-day-cell', isToday?'today':'', isWknd?'weekend':'', isMonthStart?'month-start':''].filter(Boolean).join(' ');
-      const dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
-      const showMonth = (schedZoom !== 'week') && d.getDate() === 1;
-      // In 2-week view show AM/PM half-day markers
-      const halfMarker = is2Week
-        ? `<div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(192,122,26,0.3);pointer-events:none;"></div>
-           <div style="position:absolute;left:2px;bottom:3px;font-size:7.5px;font-family:'JetBrains Mono',monospace;color:var(--muted);opacity:.8">AM</div>
-           <div style="position:absolute;left:50%;margin-left:2px;bottom:3px;font-size:7.5px;font-family:'JetBrains Mono',monospace;color:var(--muted);opacity:.8">PM</div>`
-        : '';
+      const dayNames     = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+      const showMonth    = d.getDate() === 1;
+      const dayNumStyle  = isQuarter ? 'font-size:8px;font-family:"DM Sans",sans-serif;font-weight:600;line-height:1;' : '';
+      const dayNameStyle = isQuarter ? 'font-size:6.5px;letter-spacing:0;line-height:1;' : '';
       return `<div class="${cls}" style="width:${dayW}px;position:relative;">
         ${showMonth
-          ? `<div style="font-size:9px;color:var(--amber);font-weight:700;letter-spacing:.5px;text-transform:uppercase">${d.toLocaleString('default',{month:'short'})}</div>`
-          : `<div class="sched-day-name">${dayNames[d.getDay()]}</div>`}
-        <div class="sched-day-num">${d.getDate()}</div>
-        ${halfMarker}
+          ? `<div style="font-size:${isQuarter?'7px':'9px'};color:var(--amber);font-weight:700;letter-spacing:${isQuarter?'0':'.5px'};text-transform:uppercase">${d.toLocaleString('default',{month:'short'})}</div>`
+          : `<div class="sched-day-name" style="${dayNameStyle}">${isQuarter ? dayNames[d.getDay()][0] : dayNames[d.getDay()]}</div>`}
+        <div class="sched-day-num" style="${dayNumStyle}">${d.getDate()}</div>
       </div>`;
     }).join('');
   }
@@ -501,36 +544,30 @@ function renderSched() {
       el.style.cssText = `left:${di*dayW + Math.floor(dayW/2)}px`;
       canvas.appendChild(el);
     }
-    // Alternating day background for readability
-    if (di % 2 === 0) {
-      const bg = document.createElement('div');
-      bg.style.cssText = `position:absolute;left:${di*dayW}px;top:0;bottom:0;width:${dayW}px;background:rgba(100,100,120,0.03);pointer-events:none;z-index:0;`;
-      canvas.appendChild(bg);
-    }
-    // Day start line
-    const el = document.createElement('div');
-    el.className = 'sched-col-line';
-    el.style.cssText = `left:${di*dayW}px`;
-    canvas.appendChild(el);
+    // Day-start line
+    const dayLine = document.createElement('div');
+    dayLine.className = 'sched-col-line';
+    dayLine.style.cssText = `left:${di*dayW}px`;
+    canvas.appendChild(dayLine);
 
     if (is1Week) {
-      // Vertical hour lines within each day column
+      // Vertical hour lines within each day column — subtle, clearly lighter than day boundary
       for (let h = 1; h < H_COUNT; h++) {
         const x = di * dayW + h * hourW;
         const isNoon = (H_START + h) === 12;
         const hline = document.createElement('div');
         hline.style.cssText = `position:absolute;left:${x}px;top:0;bottom:0;width:1px;` +
           (isNoon
-            ? `background:rgba(192,122,26,0.35);z-index:2;`
-            : `background:rgba(128,128,128,0.13);z-index:1;`) +
+            ? `background:rgba(192,122,26,0.45);z-index:2;`
+            : `background:rgba(120,120,140,0.10);z-index:1;`) +
           `pointer-events:none;`;
         canvas.appendChild(hline);
       }
     } else if (is2Week && !isWknd) {
-      // Just a noon tick at the midpoint of each weekday column
+      // Noon tick — matches header noon line position exactly
       const x = di * dayW + Math.floor(dayW / 2);
       const nline = document.createElement('div');
-      nline.style.cssText = `position:absolute;left:${x}px;top:0;bottom:0;width:1px;background:rgba(192,122,26,0.18);z-index:1;pointer-events:none;`;
+      nline.style.cssText = `position:absolute;left:${x}px;top:0;bottom:0;width:1px;background:rgba(192,122,26,0.28);z-index:1;pointer-events:none;`;
       canvas.appendChild(nline);
     }
   });
@@ -571,6 +608,66 @@ function renderSched() {
     return Math.round(hrs * hourW);
   }
 
+  // ---- Lane assignment: detect overlapping blocks on the same row ----
+  // Blocks on the same row whose date (and time in 1-week) ranges overlap get
+  // stacked into sub-lanes so each bubble is individually visible.
+  function blocksOverlap(a, b) {
+    if (a.start > b.end || a.end < b.start) return false;
+    // Same date range — if both have times, check time overlap too
+    if (is1Week && a.startTime && a.endTime && b.startTime && b.endTime) {
+      return a.startTime < b.endTime && a.endTime > b.startTime;
+    }
+    return true;
+  }
+
+  const laneMap = {}; // blockId → { lane, laneCount }
+  {
+    // Group visible blocks by rowId
+    const byRow = {};
+    schedBlocks.forEach(b => {
+      if (b.start > rangeEndStr || b.end < rangeStartStr) return;
+      const rid = b.rowId || b.cat;
+      if (!byRow[rid]) byRow[rid] = [];
+      byRow[rid].push(b);
+    });
+
+    Object.values(byRow).forEach(rowBlocks => {
+      // Sort by start date for greedy lane assignment
+      const sorted = [...rowBlocks].sort((a, b) => a.start.localeCompare(b.start));
+      // lanes[i] = last block assigned to lane i
+      const lanes = [];
+      const assigned = {};
+      sorted.forEach(b => {
+        let placed = false;
+        for (let i = 0; i < lanes.length; i++) {
+          if (!blocksOverlap(lanes[i], b)) {
+            lanes[i] = b;
+            assigned[b.id] = i;
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          assigned[b.id] = lanes.length;
+          lanes.push(b);
+        }
+      });
+      // Per-block LOCAL laneCount: max lane index among this block + its direct overlaps.
+      // This means non-overlapping blocks in the same row stay full-height while
+      // overlapping groups correctly share the row height.
+      rowBlocks.forEach(b => {
+        const myLane = assigned[b.id] ?? 0;
+        let localMax = myLane;
+        rowBlocks.forEach(other => {
+          if (other.id !== b.id && blocksOverlap(b, other)) {
+            localMax = Math.max(localMax, assigned[other.id] ?? 0);
+          }
+        });
+        laneMap[b.id] = { lane: myLane, laneCount: localMax + 1 };
+      });
+    });
+  }
+
   // ---- Bars ----
   schedBlocks.forEach(block => {
     const rid = block.rowId || block.cat;
@@ -585,6 +682,10 @@ function renderSched() {
     const spanDays = diffDays(block.start, block.end);
     const color    = resolveBlockColor(block);
     const lines    = buildBlockDisplayLines(block);
+
+    // Lane info for stacking overlapping bars
+    const { lane, laneCount } = laneMap[block.id] || { lane: 0, laneCount: 1 };
+    const isStacked = laneCount > 1;
 
     let x, w;
     if (is1Week) {
@@ -604,16 +705,20 @@ function renderSched() {
     // Text layout
     let innerHtml;
     if (is1Week) {
-      // Stacked lines, each clipped, max 5 shown
-      const visLines = lines.slice(0, 5);
+      // Stacked lanes in 1-week: fewer lines if bar is thin
+      const maxLines = isStacked ? Math.max(1, Math.floor(3 / laneCount)) : 5;
+      const visLines = lines.slice(0, maxLines);
       innerHtml = `<div style="display:flex;flex-direction:column;gap:1px;overflow:hidden;height:100%;">` +
         visLines.map((ln, i) => {
-          const fs = i === 0 ? '11px' : '9.5px';
+          const fs = i === 0 ? (isStacked ? '9.5px' : '11px') : '9px';
           const fw = i === 0 ? '700'  : '500';
           const op = i === 0 ? '1'    : '0.9';
-          return `<div style="font-size:${fs};font-weight:${fw};opacity:${op};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.35;text-shadow:0 1px 2px rgba(0,0,0,0.3);flex-shrink:0;">${ln}</div>`;
+          return `<div style="font-size:${fs};font-weight:${fw};opacity:${op};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.25;text-shadow:0 1px 2px rgba(0,0,0,0.3);flex-shrink:0;">${ln}</div>`;
         }).join('') +
         `</div>`;
+    } else if (isStacked) {
+      // Stacked thin bars: single condensed line
+      innerHtml = `<div style="font-size:9.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,0.3);line-height:1.2;">${lines.join('  \u00B7  ')}</div>`;
     } else if (spanDays === 0) {
       innerHtml = `<div style="display:flex;flex-direction:column;gap:1px;overflow:hidden;">` +
         lines.map((ln, i) => `<div style="font-size:${i===0?'11px':'9.5px'};font-weight:${i===0?'700':'500'};opacity:${i===0?'1':'0.88'};white-space:normal;word-break:break-word;line-height:1.25;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${ln}</div>`).join('') +
@@ -622,17 +727,49 @@ function renderSched() {
       innerHtml = `<div style="font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,0.3);">${lines.join('  \u00B7  ')}</div>`;
     }
 
-    // In 1-week view expand bar to use most of the row height so all lines fit
-    const thisBarH   = is1Week ? rowH - 8 : barH;
-    const thisBarTop = is1Week ? 4         : barTop;
+    // Bar height & top: split row into equal sub-lanes when stacked.
+    // Always derive slotH from the full rowH so stacked bars fill the row.
+    let thisBarH, thisBarTop;
+    if (is1Week) {
+      const fullH = rowH - 8;
+      if (isStacked) {
+        const slotH = Math.floor(fullH / laneCount);
+        thisBarH   = Math.max(slotH - 3, 14);
+        thisBarTop = 4 + lane * slotH;
+      } else {
+        thisBarH   = fullH;
+        thisBarTop = 4;
+      }
+    } else {
+      if (isStacked) {
+        // Use nearly the full row height so lanes fill the row visually.
+        // Do NOT add barTop (centering offset) — stacked bars start from the top.
+        const fullH  = rowH - 4;
+        const slotH  = Math.floor(fullH / laneCount);
+        thisBarH     = Math.max(slotH - 3, 14);
+        thisBarTop   = 2 + lane * slotH;
+      } else {
+        thisBarH   = barH;
+        thisBarTop = barTop;
+      }
+    }
+
+    const isThinBar = isStacked && thisBarH < 30;
+
+    // Lane badge shown in top-right corner of stacked bars so each is identifiable
+    const laneBadge = isStacked
+      ? `<div style="position:absolute;top:2px;right:6px;font-size:7.5px;font-weight:700;color:rgba(255,255,255,0.75);line-height:1;pointer-events:none;letter-spacing:.3px;">${lane + 1}/${laneCount}</div>`
+      : '';
 
     const bar = document.createElement('div');
     bar.className = 'sched-bar';
     bar.dataset.blockId = block.id;
-    bar.style.cssText = `left:${x}px;top:${ri*rowH + thisBarTop}px;width:${w}px;height:${thisBarH}px;background:${color};box-shadow:0 2px 8px ${color}66;border-radius:6px;`;
+    // Stacked bars get a white outline so adjacent same-color bars are distinguishable
+    const stackedOutline = isStacked ? `outline:1.5px solid rgba(255,255,255,0.35);outline-offset:-1px;` : '';
+    bar.style.cssText = `left:${x}px;top:${ri*rowH + thisBarTop}px;width:${w}px;height:${thisBarH}px;background:${color};box-shadow:0 2px 6px ${color}55;border-radius:${isThinBar ? '4px' : '6px'};position:absolute;${stackedOutline}`;
     bar.innerHTML = `
       <div class="sched-bar-handle sched-bar-handle-l" data-dir="left"></div>
-      <div class="sched-bar-inner" style="flex:1;min-width:0;overflow:hidden;padding:5px 9px;display:flex;flex-direction:column;justify-content:flex-start;color:#fff;">${innerHtml}</div>
+      <div class="sched-bar-inner" style="flex:1;min-width:0;overflow:hidden;padding:${isThinBar ? '1px 6px' : '5px 9px'};display:flex;flex-direction:column;justify-content:center;color:#fff;position:relative;">${innerHtml}${laneBadge}</div>
       <div class="sched-bar-handle sched-bar-handle-r" data-dir="right"></div>`;
     canvas.appendChild(bar);
 
@@ -793,12 +930,13 @@ function attachBarDrag(bar, block, rows, range, dayW) {
       lastRowIdx: -1,
       origStart: block.start,
       origEnd:   block.end,
+      origStartTime: block.startTime || null,
+      origEndTime:   block.endTime   || null,
       origStartHalf: block._startHalf || false,
       origEndHalf:   block._endHalf   || false,
       origRowId: block.rowId || block.cat,
       origCat:   block.cat,
       origRowIdx: rows.findIndex(r => r.rowId === (block.rowId || block.cat)),
-      startClientY: e.clientY,
       hasMoved:  false,
       currentRowId: block.rowId || block.cat,
       bar,
@@ -811,12 +949,7 @@ function attachBarDrag(bar, block, rows, range, dayW) {
       drag.hasMoved = true;
       e.preventDefault();
 
-      // 1-week: snap to full days; 2-week: snap to half-days
-      const useHalfDay = schedZoom === 'week';
-      const snapPx     = dayW / (useHalfDay ? 2 : 1);
-      const rawDelta   = (e.clientX - drag.startX) / snapPx;
-      const snapped    = Math.round(rawDelta);
-      // Row tracking for whole-bar moves — delta from start row using canvas-relative coords
+      // ---- Row tracking (all zoom levels, whole-bar moves only) ----
       if (!drag.dir && drag.origRowIdx >= 0) {
         const _csRowD = document.getElementById('schedCanvasScroll');
         const _crRowD = _csRowD ? _csRowD.getBoundingClientRect() : null;
@@ -824,7 +957,6 @@ function attachBarDrag(bar, block, rows, range, dayW) {
         const rowDelta = Math.floor((currentCanvasY - drag.startCanvasY + ROW_H_FIXED * 0.5) / ROW_H_FIXED);
         let targetRi = drag.origRowIdx + rowDelta;
         targetRi = Math.max(0, Math.min(targetRi, rows.length - 1));
-        // Skip divider rows
         while (targetRi < rows.length && rows[targetRi].section === 'divider') targetRi++;
         if (targetRi !== drag.lastRowIdx && targetRi < rows.length) {
           drag.lastRowIdx = targetRi;
@@ -840,6 +972,61 @@ function attachBarDrag(bar, block, rows, range, dayW) {
           }
         }
       }
+
+      // ---- Snap granularity ----
+      // 1-week view: snap to hour grid marks
+      // 2-week view: snap to half-days
+      // month/quarter: snap to full days
+      const is1WeekDrag = schedZoom === '1week';
+      const useHalfDay  = schedZoom === 'week';
+
+      if (is1WeekDrag) {
+        // Hour-level snap for 1-week view
+        const H_START_D = 8, H_END_D = 17, H_COUNT_D = H_END_D - H_START_D;
+        const hourW = Math.floor(dayW / H_COUNT_D);
+        const rawDeltaH = (e.clientX - drag.startX) / hourW;
+        const snappedH  = Math.round(rawDeltaH);
+
+        if (snappedH === drag.lastSnap) return;
+        drag.lastSnap = snappedH;
+
+        // Shift a date+time by deltaHours, carrying across day boundaries
+        function shiftTime(dateStr, timeStr, deltaHours) {
+          const [h, m] = (timeStr || `${H_START_D}:00`).split(':').map(Number);
+          const base = h + deltaHours;
+          const newDayOffset = Math.floor((base - H_START_D) / H_COUNT_D);
+          const newH = H_START_D + ((base - H_START_D) % H_COUNT_D + H_COUNT_D) % H_COUNT_D;
+          return {
+            dateStr: toDateStr(addDays(parseDate(dateStr), newDayOffset)),
+            timeStr: `${String(newH).padStart(2,'0')}:${String(m).padStart(2,'0')}`,
+          };
+        }
+
+        if (drag.dir === 'left') {
+          const ns = shiftTime(drag.origStart, drag.origStartTime || `${H_START_D}:00`, snappedH);
+          if (ns.dateStr > drag.origEnd) return;
+          block.start     = ns.dateStr;
+          block.startTime = ns.timeStr;
+        } else if (drag.dir === 'right') {
+          const ne = shiftTime(drag.origEnd, drag.origEndTime || `${H_END_D}:00`, snappedH);
+          if (ne.dateStr < drag.origStart) return;
+          block.end     = ne.dateStr;
+          block.endTime = ne.timeStr;
+        } else {
+          const ns = shiftTime(drag.origStart, drag.origStartTime || `${H_START_D}:00`, snappedH);
+          const ne = shiftTime(drag.origEnd,   drag.origEndTime   || `${H_END_D}:00`,   snappedH);
+          block.start     = ns.dateStr;
+          block.startTime = ns.timeStr;
+          block.end       = ne.dateStr;
+          block.endTime   = ne.timeStr;
+        }
+        requestAnimationFrame(renderSched);
+        return;
+      }
+
+      const snapPx   = dayW / (useHalfDay ? 2 : 1);
+      const rawDelta = (e.clientX - drag.startX) / snapPx;
+      const snapped  = Math.round(rawDelta);
 
       if (snapped === drag.lastSnap) return;
       drag.lastSnap = snapped;
@@ -1046,7 +1233,15 @@ function renderSchedLegend() {
   el.innerHTML = rowsInUse.map(rid => {
     const repBlock = schedBlocks.find(b => (b.rowId||b.cat) === rid) || { rowId: rid, cat: rowCat(rid) };
     const color = resolveBlockColor(repBlock);
-    const lbl   = rowLabel(rid);
+    // Employee rows: rid = 'emp_<uuid>' — look up actual name
+    let lbl;
+    if (rid.startsWith('emp_')) {
+      const empId = rid.slice(4);
+      const emp = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === empId);
+      lbl = emp ? emp.name : 'Employee';
+    } else {
+      lbl = rowLabel(rid);
+    }
     return `<div style="display:flex;align-items:center;gap:5px;padding:2px 8px;background:var(--surface2);border-radius:5px;border:1px solid var(--border)">
       <div style="width:8px;height:8px;border-radius:50%;background:${color}"></div>
       <span style="font-size:11px;">${lbl}</span>
@@ -1081,6 +1276,8 @@ window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) 
   document.getElementById('schedModalTitle').textContent = blockId ? 'Edit Schedule Block' : 'New Schedule Block';
   document.getElementById('schedDeleteBtn').style.display = blockId ? '' : 'none';
   document.getElementById('schedProjSearch').value = '';
+  const clrBtn = document.getElementById('schedProjClearBtn');
+  if (clrBtn) clrBtn.style.display = 'none';
   const dd = document.getElementById('schedProjDD');
   if (dd) { dd.style.display = 'none'; dd.innerHTML = ''; }
   document.getElementById('schedProjPreview').style.display = 'none';
@@ -1241,21 +1438,45 @@ window.selectSchedLinkedProj = function(projId) {
   updateSchedProjPreview(projId);
   renderSchedTaskList(projId);
   document.getElementById('schedProjSearch')?.focus();
+  // Show clear button
+  const clrBtn = document.getElementById('schedProjClearBtn');
+  if (clrBtn) clrBtn.style.display = '';
+};
+
+window.clearSchedLinkedProj = function() {
+  schedSelectedProjId = null;
+  schedSelectedTaskId = null;
+  document.getElementById('schedProjSearch').value = '';
+  document.getElementById('schedProjPreview').style.display = 'none';
+  document.getElementById('schedTaskSection').style.display = 'none';
+  document.getElementById('schedTaskList').innerHTML = '';
+  const clrBtn = document.getElementById('schedProjClearBtn');
+  if (clrBtn) clrBtn.style.display = 'none';
+  document.getElementById('schedProjSearch').focus();
 };
 
 function updateSchedProjPreview(projId) {
   const preview = document.getElementById('schedProjPreview');
-  if (!projId) { preview.style.display = 'none'; return; }
+  const clrBtn  = document.getElementById('schedProjClearBtn');
+  if (!projId) {
+    if (preview) preview.style.display = 'none';
+    if (clrBtn)  clrBtn.style.display  = 'none';
+    return;
+  }
   const pi = getProjInfo(projId);
-  if (!pi) { preview.style.display = 'none'; return; }
+  if (!pi) {
+    if (preview) preview.style.display = 'none';
+    if (clrBtn)  clrBtn.style.display  = 'none';
+    return;
+  }
   const { proj, info } = pi;
   const rows = [];
   rows.push(`<strong>${proj.emoji||''} ${proj.name}</strong>`);
   if (info.client)           rows.push(`\uD83C\uDFE2 Customer: ${info.client}`);
   if (info.dcas)             rows.push(`DCAS: ${info.dcas}`);
   if (info.customerWitness)  rows.push(`\uD83D\uDC64 Witness: ${info.customerWitness}`);
-  preview.innerHTML = rows.join('<br>');
-  preview.style.display = 'block';
+  if (preview) { preview.innerHTML = rows.join('<br>'); preview.style.display = 'block'; }
+  if (clrBtn)  clrBtn.style.display = '';
 }
 
 function renderSchedTaskList(projId) {
@@ -1608,11 +1829,10 @@ function getSchedRowsAll() {
   return rows;
 }
 
-// Re-render on resize so 1-week fills available width
+// Re-render on resize so all views fill available width
 window.addEventListener('resize', () => {
   const panel = document.getElementById('panel-scheduler');
-  if (panel?.classList.contains('active') && schedView === 'gantt' &&
-      (schedZoom === '1week' || schedZoom === 'week' || schedZoom === 'month')) {
+  if (panel?.classList.contains('active') && schedView === 'gantt') {
     renderSched();
   }
 });

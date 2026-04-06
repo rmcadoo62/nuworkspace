@@ -517,62 +517,106 @@ function openSchedSettingsPanel() {
   renderSchedSettingsPanel();
 }
 
+const SCHED_COLOR_DEFS = [
+  { key: 'reschedule',       label: 'Reschedule',             hint: 'Status override — Yellow' },
+  { key: 'tentative',        label: 'Tentative',              hint: 'Status override — Gray' },
+  { key: 'setup',            label: 'Setup task',             hint: 'Task name contains "setup"' },
+  { key: 'teardown',         label: 'Teardown task',          hint: 'Task name contains "teardown"' },
+  { key: 'dcas_no_wit_yes',  label: 'DCAS No / Witness Yes',  hint: 'DCAS=No, Witness=Yes' },
+  { key: 'dcas_yes_wit_no',  label: 'DCAS Yes / Witness No',  hint: 'DCAS=Yes/CNF, Witness=No' },
+  { key: 'dcas_yes_wit_yes', label: 'DCAS Yes / Witness Yes', hint: 'DCAS=Yes/CNF, Witness=Yes/CNF' },
+];
+
+window.saveSchedColors = function() {
+  window.loadSchedSettings();
+  const ss = window.getSchedSettings();
+  SCHED_COLOR_DEFS.forEach(def => {
+    const inp = document.getElementById('sched-input-' + def.key);
+    if (inp) ss.colors[def.key] = inp.value;
+  });
+  window.saveSchedSettings();
+  // Flash the button to confirm
+  const btn = document.getElementById('schedColorSaveBtn');
+  if (btn) {
+    btn.textContent = '✓ Saved';
+    btn.style.background = 'var(--green)';
+    setTimeout(() => { btn.textContent = 'Save Colors'; btn.style.background = 'var(--amber)'; }, 1800);
+  }
+};
+
+window.resetSchedColorAndSave = function(key) {
+  window.loadSchedSettings();
+  delete window.getSchedSettings().colors[key];
+  window.saveSchedSettings();
+  renderSchedSettingsPanel();
+};
+
+window.saveSchedAccess = function() {
+  window.loadSchedSettings();
+  const ss = window.getSchedSettings();
+  document.querySelectorAll('.sched-access-chk').forEach(chk => {
+    ss.access[chk.dataset.empId] = chk.checked;
+  });
+  window.saveSchedSettings();
+  applySchedAccessToNav();
+  const btn = document.getElementById('schedAccessSaveBtn');
+  if (btn) {
+    btn.textContent = '✓ Saved';
+    btn.style.background = 'var(--green)';
+    setTimeout(() => { btn.textContent = 'Save Access'; btn.style.background = 'var(--amber)'; }, 1800);
+  }
+};
+
 function renderSchedSettingsPanel() {
   const body = document.getElementById('schedSettingsPanelBody');
   if (!body) return;
   window.loadSchedSettings();
   const ss = window.getSchedSettings();
 
-  const COLOR_DEFS = [
-    { key: 'reschedule',       label: 'Reschedule',             hint: 'Status override — Yellow' },
-    { key: 'tentative',        label: 'Tentative',              hint: 'Status override — Gray' },
-    { key: 'setup',            label: 'Setup task',             hint: 'Task name contains "setup"' },
-    { key: 'teardown',         label: 'Teardown task',          hint: 'Task name contains "teardown"' },
-    { key: 'dcas_no_wit_yes',  label: 'DCAS No / Witness Yes',  hint: 'DCAS=No, Witness=Yes' },
-    { key: 'dcas_yes_wit_no',  label: 'DCAS Yes / Witness No',  hint: 'DCAS=Yes/CNF, Witness=No' },
-    { key: 'dcas_yes_wit_yes', label: 'DCAS Yes / Witness Yes', hint: 'DCAS=Yes/CNF, Witness=Yes/CNF' },
-  ];
-
-  const colorRows = COLOR_DEFS.map(def => {
+  const colorRows = SCHED_COLOR_DEFS.map(def => {
     const cur = window.sc(def.key);
     const isDefault = !ss.colors?.[def.key];
-    const resetBtn = isDefault ? '' : `<button onclick="resetSchedColor(${JSON.stringify(def.key)})"
+    const resetBtn = isDefault ? '' : `<button onclick="resetSchedColorAndSave(${JSON.stringify(def.key)})"
       style="background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--muted);font-size:10px;padding:3px 7px;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x21BA; Reset</button>`;
     return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);">
-      <div style="width:26px;height:26px;border-radius:6px;border:1.5px solid rgba(0,0,0,.15);flex-shrink:0;background:${cur}"></div>
+      <div id="sched-swatch-${def.key}" style="width:26px;height:26px;border-radius:6px;border:1.5px solid rgba(0,0,0,.15);flex-shrink:0;background:${cur}"></div>
       <div style="flex:1;min-width:0;">
         <div style="font-size:12.5px;font-weight:600;">${def.label}</div>
         <div style="font-size:11px;color:var(--muted);">${def.hint}</div>
       </div>
-      <input type="color" value="${cur}"
+      <input type="color" id="sched-input-${def.key}" value="${cur}"
         style="width:34px;height:26px;border:1.5px solid var(--border);border-radius:6px;cursor:pointer;padding:1px;flex-shrink:0;"
-        oninput="updateSchedColor(${JSON.stringify(def.key)},this.value);renderSchedSettingsPanel()"
-        onchange="updateSchedColor(${JSON.stringify(def.key)},this.value);renderSchedSettingsPanel()" />
+        oninput="document.getElementById('sched-swatch-${def.key}').style.background=this.value" />
       ${resetBtn}
     </div>`;
   }).join('');
 
-  const accessRows = employees.filter(e => e.isActive !== false).map(emp => {
+  const accessRows = (typeof employees !== 'undefined' ? employees : []).filter(e => e.isActive !== false && e.name).map(emp => {
     const hasAccess = window.empHasSchedAccess(emp.id);
     return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">
       <div style="width:30px;height:30px;border-radius:50%;background:${emp.color};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;">${emp.initials}</div>
       <div style="flex:1;font-size:13px;">${emp.name}</div>
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:${hasAccess ? 'var(--green)' : 'var(--muted)'};user-select:none;">
-        <input type="checkbox" ${hasAccess ? 'checked' : ''} style="width:15px;height:15px;accent-color:var(--green);cursor:pointer;"
-          onchange="toggleSchedAccess(${JSON.stringify(emp.id)},this.checked);renderSchedSettingsPanel()" />
-        ${hasAccess ? 'Has access' : 'No access'}
-      </label>
+      <input type="checkbox" class="sched-access-chk" data-emp-id="${emp.id}" ${hasAccess ? 'checked' : ''}
+        style="width:15px;height:15px;accent-color:var(--green);cursor:pointer;" />
     </div>`;
   }).join('');
 
   body.innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
-        <div style="padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border);font-weight:700;font-size:13px;">&#x1F3A8; Block Colors</div>
+        <div style="padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-weight:700;font-size:13px;">&#x1F3A8; Block Colors</span>
+          <button id="schedColorSaveBtn" onclick="saveSchedColors()"
+            style="padding:5px 14px;border-radius:6px;background:var(--amber);color:#0e0e0f;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">Save Colors</button>
+        </div>
         <div style="padding:10px 18px;">${colorRows}</div>
       </div>
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
-        <div style="padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border);font-weight:700;font-size:13px;">&#x1F465; Employee Access</div>
+        <div style="padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-weight:700;font-size:13px;">&#x1F465; Employee Access</span>
+          <button id="schedAccessSaveBtn" onclick="saveSchedAccess()"
+            style="padding:5px 14px;border-radius:6px;background:var(--amber);color:#0e0e0f;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">Save Access</button>
+        </div>
         <div style="padding:10px 18px;">${accessRows}</div>
       </div>
     </div>`;

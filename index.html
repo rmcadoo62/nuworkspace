@@ -350,6 +350,7 @@
           <div class="sched-grid-area">
             <div class="sched-header-scroll" id="schedHeaderScroll">
               <div class="sched-day-header" id="schedDayHeader"></div>
+              <div class="sched-time-strip" id="schedTimeStrip" style="display:none;position:relative;height:24px;border-top:1px solid var(--surface2);border-bottom:1px solid var(--border);background:var(--surface);overflow:hidden;"></div>
             </div>
             <div class="sched-canvas-scroll" id="schedCanvasScroll">
               <div class="sched-canvas" id="schedCanvas"></div>
@@ -1127,11 +1128,16 @@
       </div>
       <div style="position:relative" id="schedProjWrap">
         <div class="sched-field-label">Linked Project <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></div>
-        <input class="sched-f-input" id="schedProjSearch" placeholder="Search projects…" autocomplete="off"
-          oninput="filterSchedProjDD(this.value)"
-          onmousedown="schedProjMousedown(event)"
-          onblur="schedProjBlur()"
-          style="margin-bottom:0" />
+        <div style="position:relative;display:flex;align-items:center;">
+          <input class="sched-f-input" id="schedProjSearch" placeholder="Search projects…" autocomplete="off"
+            oninput="filterSchedProjDD(this.value)"
+            onmousedown="schedProjMousedown(event)"
+            onblur="schedProjBlur()"
+            style="margin-bottom:0;padding-right:30px;" />
+          <button id="schedProjClearBtn" onclick="clearSchedLinkedProj()" title="Clear project"
+            style="display:none;position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;line-height:1;padding:2px 4px;border-radius:4px;"
+            onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--muted)'">&#x2715;</button>
+        </div>
         <div class="sched-proj-list" id="schedProjDD"
           style="display:none;position:absolute;left:0;right:0;z-index:200;max-height:180px;background:var(--surface);border:1.5px solid var(--amber-dim);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.3);margin-top:4px;"
           onmousedown="event.preventDefault()"></div>
