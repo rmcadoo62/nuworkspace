@@ -695,9 +695,12 @@ function renderSched() {
 
     let x, w;
     if (is1Week) {
-      // x = day column start + time-within-day offset
-      const xStart = startOff * dayW + timeToXOffset(block.startTime, 0);
-      const xEnd   = endOff   * dayW + timeToXOffset(block.endTime,   1);
+      // Apply startTime only if this is the actual start day (not clipped by range)
+      // Apply endTime only if this is the actual end day (not clipped by range)
+      const useStartTime = block.startTime && block.start >= rangeStartStr;
+      const useEndTime   = block.endTime   && block.end   <= rangeEndStr;
+      const xStart = startOff * dayW + timeToXOffset(useStartTime ? block.startTime : null, 0);
+      const xEnd   = endOff   * dayW + timeToXOffset(useEndTime   ? block.endTime   : null, 1);
       x = xStart + 2;
       w = Math.max(xEnd - xStart - 4, hourW - 4); // at least 1 hour wide
     } else {
