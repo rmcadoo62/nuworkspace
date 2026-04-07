@@ -486,6 +486,12 @@ function renderSched() {
   }
 
   // ---- Sidebar ----
+  // Sidebar head must match total grid header height exactly:
+  // 1-week/2-week: 36px (day banners) + 24px (time strip) = 60px
+  // month/quarter: 52px (single row, no time strip)
+  const sidebarHead = document.getElementById('schedSidebarHead');
+  if (sidebarHead) sidebarHead.style.height = (is1Week || is2Week) ? '60px' : '52px';
+
   const labelsEl = document.getElementById('schedRowLabels');
   labelsEl.style.height = totalH + 'px';
   labelsEl.innerHTML = rows.map(row => {
