@@ -119,11 +119,11 @@ function renderInfoSheet(projId) {
         <div class="desc-cards">
           <div class="desc-card">
             <div class="desc-card-header">Project Description</div>
-            <div class="desc-card-body" id="info-proj-desc" onclick="inlineEditDesc('${projId}','desc',this)" title="Click to edit" style="cursor:text;min-height:40px">${(info.desc || proj.desc) || '<span style="color:var(--border)">Click to add project description…</span>'}</div>
+            <div class="desc-card-body" id="info-proj-desc" onclick="inlineEditDesc('${projId}','desc',this)" title="Click to edit" style="cursor:text;min-height:40px;white-space:pre-wrap">${(info.desc || proj.desc) || '<span style="color:var(--border)">Click to add project description…</span>'}</div>
           </div>
           <div class="desc-card">
             <div class="desc-card-header">Test Article Description</div>
-            <div class="desc-card-body info-click-edit" id="info-test-article" onclick="inlineEditDesc('${projId}','testArticleDesc',this)" title="Click to edit" style="cursor:text;min-height:40px">${info.testArticleDesc || '<span style="color:var(--border)">Click to add test article description…</span>'}</div>
+            <div class="desc-card-body info-click-edit" id="info-test-article" onclick="inlineEditDesc('${projId}','testArticleDesc',this)" title="Click to edit" style="cursor:text;min-height:40px;white-space:pre-wrap">${info.testArticleDesc || '<span style="color:var(--border)">Click to add test article description…</span>'}</div>
           </div>
         </div>
       </div>
@@ -355,10 +355,14 @@ async function inlineEditDesc(projId, key, el) {
   const ta = document.createElement('textarea');
   ta.className = 'info-textarea';
   ta.value = current;
-  ta.style.cssText = 'width:100%;min-height:80px;margin:0;resize:vertical';
+  ta.style.cssText = 'width:100%;min-height:300px;margin:0;resize:vertical;box-sizing:border-box';
   ta.placeholder = key === 'desc' ? 'Project description…' : 'Test article description…';
   el.appendChild(ta);
   ta.focus();
+  // Auto-grow to fit existing content on open
+  requestAnimationFrame(() => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; });
+  // Auto-grow as user types
+  ta.addEventListener('input', () => { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; });
   ta.addEventListener('blur', async () => {
     const val = ta.value.trim();
     if (!projectInfo[projId]) projectInfo[projId] = {};
@@ -378,6 +382,7 @@ async function inlineEditDesc(projId, key, el) {
   });
   ta.addEventListener('keydown', e => {
     if (e.key === 'Escape') { el.innerHTML = orig; }
+    // Allow Enter for newlines — do NOT block it
   });
 }
 

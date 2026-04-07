@@ -198,57 +198,66 @@
     </div>
 
     <!-- PROJECTS TABLE PANEL -->
-    <div class="view-panel" id="panel-projects">
-      <div class="projtbl-wrap">
-        <div class="projtbl-toolbar">
-          <div>
-            <div class="projtbl-title">Projects</div>
-            <div class="projtbl-sub" id="projtblSub"></div>
+    <div class="view-panel" id="panel-projects" style="flex-direction:column;overflow:hidden;">
+      <div class="projtbl-wrap" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;width:100%;box-sizing:border-box;">
+
+        <!-- FROZEN HEADER: title + inline bubbles + filters -->
+        <div class="projtbl-sticky-header" style="flex-shrink:0;padding:20px 32px 14px;background:var(--bg);border-bottom:1.5px solid var(--border);">
+          <div class="projtbl-toolbar">
+            <div>
+              <div class="projtbl-title">Projects</div>
+              <div class="projtbl-sub" id="projtblSub"></div>
+            </div>
+            <!-- Stat bubbles inline -->
+            <div id="projStatBubbles" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex:1;margin:0 16px"></div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              <button class="nav-filter-btn" id="navFilterBtn" onclick="toggleNavFilter()" title="Filter" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">
+                &#x25BC; Filter <span id="navFilterDot" style="display:none" class="nav-filter-active-dot"></span>
+              </button>
+              <button id="showClosedBtn" onclick="toggleShowClosed()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s" title="Toggle closed jobs">
+                &#x1F512; Show Closed
+              </button>
+              <button class="btn btn-primary" id="addProjBtn2" style="font-size:12.5px;display:none" onclick="openProjectModal()">+ New Project</button>
+            </div>
           </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <button class="nav-filter-btn" id="navFilterBtn" onclick="toggleNavFilter()" title="Filter" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">
-              &#x25BC; Filter <span id="navFilterDot" style="display:none" class="nav-filter-active-dot"></span>
-            </button>
-            <button id="showClosedBtn" onclick="toggleShowClosed()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s" title="Toggle closed jobs">
-              &#x1F512; Show Closed
-            </button>
-            <button class="btn btn-primary" id="addProjBtn2" style="font-size:12.5px;display:none" onclick="openProjectModal()">+ New Project</button>
+
+          <!-- Saved filters bar -->
+          <div class="saved-filters-bar" id="savedFiltersBar" style="display:none"></div>
+
+          <!-- Filter drawer -->
+          <div class="proj-filter-drawer" id="navFilterPanel">
+            <div class="proj-filter-row">
+              <div class="proj-filter-col">
+                <label>Name Pattern</label>
+                <input type="text" id="filterNamePattern" placeholder='e.g. ^N (exclude) or 136' oninput="renderProjectsTable()" />
+                <div style="font-size:10px;color:var(--muted);margin-top:2px">Start with <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">^</code> to exclude, leave blank to include all</div>
+              </div>
+              <div class="proj-filter-col">
+                <label>Status</label>
+                <div class="nav-filter-chips" id="filterStatusChips" style="max-width:360px"></div>
+              </div>
+              <div class="proj-filter-col">
+                <label>Condition</label>
+                <div class="nav-filter-chips" id="filterPhaseChips" style="max-width:360px"></div>
+              </div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid var(--border)">
+              <input type="text" id="filterSaveName" placeholder="Filter name…" style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 10px;outline:none;width:160px;transition:border-color var(--transition);" onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
+              <button class="nav-filter-save" onclick="saveNamedFilter()" style="padding:6px 14px">&#x2713; Save Filter</button>
+              <button class="nav-filter-clear" onclick="clearNavFilter()" style="padding:6px 12px">Clear</button>
+            </div>
+            <div style="padding-top:12px;border-top:1px solid var(--border);margin-top:4px">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Optional Columns</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px" id="colToggleChips"></div>
+            </div>
           </div>
+        </div><!-- /projtbl-sticky-header -->
+
+        <!-- SCROLLABLE TABLE -->
+        <div class="projtbl-scroll-body" style="flex:1;min-height:0;overflow-y:auto;overflow-x:auto;padding:0 32px 32px;">
+          <div id="projtblContainer"></div>
         </div>
 
-        <!-- Saved filters bar -->
-        <div class="saved-filters-bar" id="savedFiltersBar" style="display:none"></div>
-
-        <!-- Filter drawer -->
-        <div class="proj-filter-drawer" id="navFilterPanel">
-          <div class="proj-filter-row">
-            <div class="proj-filter-col">
-              <label>Name Pattern</label>
-              <input type="text" id="filterNamePattern" placeholder='e.g. ^N (exclude) or 136' oninput="renderProjectsTable()" />
-              <div style="font-size:10px;color:var(--muted);margin-top:2px">Start with <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">^</code> to exclude, leave blank to include all</div>
-            </div>
-            <div class="proj-filter-col">
-              <label>Status</label>
-              <div class="nav-filter-chips" id="filterStatusChips" style="max-width:360px"></div>
-            </div>
-            <div class="proj-filter-col">
-              <label>Condition</label>
-              <div class="nav-filter-chips" id="filterPhaseChips" style="max-width:360px"></div>
-            </div>
-          </div>
-          <div style="display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid var(--border)">
-            <input type="text" id="filterSaveName" placeholder="Filter name…" style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 10px;outline:none;width:160px;transition:border-color var(--transition);" onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
-            <button class="nav-filter-save" onclick="saveNamedFilter()" style="padding:6px 14px">&#x2713; Save Filter</button>
-            <button class="nav-filter-clear" onclick="clearNavFilter()" style="padding:6px 12px">Clear</button>
-          </div>
-          <div style="padding-top:12px;border-top:1px solid var(--border);margin-top:4px">
-            <div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Optional Columns</div>
-            <div style="display:flex;flex-wrap:wrap;gap:6px" id="colToggleChips"></div>
-          </div>
-        </div>
-
-        <div id="projStatBubbles" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px"></div>
-        <div id="projtblContainer"></div>
       </div>
     </div>
 

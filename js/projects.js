@@ -12,6 +12,9 @@ function openProjectsTable(el) {
   activeProjectId = null;
   document.getElementById('topbarName').textContent = 'Projects';
   showProjectView('panel-projects');
+  // Force flex-column layout so sticky header works
+  const panel = document.getElementById('panel-projects');
+  if (panel) { panel.style.flexDirection = 'column'; panel.style.overflow = 'hidden'; }
   renderSavedFiltersBar();
   renderProjectsTable();
 }
@@ -82,9 +85,9 @@ function renderProjectsTable() {
       closing:     { label: 'Closing',       color: '#e8a234', bg: 'rgba(232,162,52,0.08)'  },
     };
     const bubble = (label, count, color, bg) =>
-      `<div style="background:${bg};border:1px solid ${color}44;border-radius:10px;padding:10px 16px;min-width:100px;cursor:default">
-        <div style="font-size:10px;color:${color};font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${label}</div>
-        <div style="font-size:24px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1">${count}</div>
+      `<div style="background:${bg};border:1px solid ${color}44;border-radius:8px;padding:5px 12px;cursor:default;display:flex;align-items:center;gap:8px;flex-shrink:0">
+        <div style="font-size:18px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1;font-weight:400">${count}</div>
+        <div style="font-size:9px;color:${color};font-weight:700;text-transform:uppercase;letter-spacing:.5px;line-height:1.2">${label}</div>
       </div>`;
     let html = bubble('All Open', openProjs.length, '#5b9cf6', 'rgba(91,156,246,0.08)');
     Object.entries(statusGroups).forEach(([status, meta]) => {
@@ -271,7 +274,6 @@ function renderProjectsTable() {
   }).join('');
 
   container.innerHTML = `
-    <div style="overflow-x:auto">
     <table class="projtbl-table" id="projtblTable" style="min-width:1200px;table-layout:fixed">
       <colgroup>
         <col style="width:var(--ptc-name,220px)">
@@ -319,8 +321,7 @@ function renderProjectsTable() {
         </tr>
       </thead>
       <tbody>${rows}</tbody>
-    </table>
-    </div>`;
+    </table>`;
   setTimeout(() => {
     ptblInitResizers();
     // Restore col filter values and styles after re-render

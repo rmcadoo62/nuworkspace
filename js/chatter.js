@@ -235,10 +235,11 @@ function updateChatterTabBadge(projId) {
     }
   });
 }
-function toggleNotifPanel() {
+async function toggleNotifPanel() {
   const panel = document.getElementById('notifPanel');
   if (!panel) return;
   if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+  await loadNotifs();
   renderNotifPanel();
   panel.style.display = '';
 }
@@ -269,7 +270,8 @@ function notifClick(notifId, projId) {
   document.getElementById('navProjects')?.classList.add('active');
   setTimeout(() => switchProjTab('sub-chatter'), 200);
 }
-function markAllNotifsRead() {
+function markAllNotifsRead(e) {
+  if (e) e.stopPropagation();
   const myEmp = currentEmployee || employees.find(e => e.userId === currentUser?.id);
   if (!myEmp) return;
   notifStore.forEach(n => n.read = true);
