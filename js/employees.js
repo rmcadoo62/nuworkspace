@@ -926,20 +926,6 @@ function showEmpProfile(empId, annivOffset) {
     <!-- Weekly hours bar chart -->
     ${weeklyHoursChartHtml}
 
-    <!-- Vacation Requests -->
-    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-        <div style="font-size:13px;font-weight:700;color:var(--text)">✈️ Vacation Requests</div>
-        <button onclick="openVacationRequestForm('${empId}')"
-          style="margin-left:auto;background:var(--amber-glow);border:1px solid var(--amber-dim);border-radius:6px;padding:4px 12px;font-size:11px;font-weight:600;color:var(--amber);cursor:pointer">
-          + New Request
-        </button>
-      </div>
-      <div id="vacReqList-${empId}">
-        <div style="color:var(--muted);font-size:12px;padding:4px 0">Loading…</div>
-      </div>
-    </div>
-
     <!-- Timesheet history -->
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -960,9 +946,6 @@ function showEmpProfile(empId, annivOffset) {
           </table>`}
     </div>
   `;
-
-  // Load vacation requests asynchronously into the placeholder
-  loadAndRenderVacRequests(empId);
 }
 
 window.deleteEmployee = function deleteEmployee(id) {
@@ -1667,4 +1650,215 @@ async function confirmRejectVacation(reqId, empId) {
   // Re-query fresh since renderVacReqList with reqId won't work — use empId
   renderVacReqList(empId);
   toast('Request rejected');
+}
+
+
+// ===== MY INFO TAB RENDERERS =====
+// ===== MY INFO TAB RENDERERS =====
+
+async function renderMyInfoVacationTab(empId) {
+  const pane = document.getElementById('myInfoPane-vacation');
+  if (!pane) return;
+  const emp = employees.find(e => e.id === empId);
+  if (!emp) return;
+
+  const canApprove = isManager() || isApprover;
+  pane.innerHTML = '<div style="color:var(--muted);font-size:13px">Loading…</div>';
+
+  // Load this employee's own requests
+  await loadAndRenderVacRequests(empId);
+
+  // Build own requests section
+  const mySection = `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">✈️ My Vacation Requests</div>
+        <button onclick="openVacationRequestForm('${empId}')"
+          style="margin-left:auto;background:var(--amber-glow);border:1px solid var(--amber-dim);border-radius:6px;padding:4px 12px;font-size:11px;font-weight:600;color:var(--amber);cursor:pointer">
+          + New Request
+        </button>
+      </div>
+      <div id="vacReqList-${empId}">
+        <div style="color:var(--muted);font-size:12px;padding:4px 0">Loading…</div>
+      </div>
+    </div>`;
+
+  // Build approver section if manager/approver
+  let approverSection = '';
+  if (canApprove) {
+    // Fetch all vacation requests for employees whose approver is this person OR all if owner/admin
+    let pendingRows = [], historyRows = [];
+    try {
+      const { data } = await sb.from('vacation_requests')
+        .select('*')
+        .order('created_at', { ascending: false });
+      const allReqs = data || [];
+
+      // Filter to requests this person is responsible for
+      const myEmpIds = employees
+        .filter(e => e.isActive !== false && e.id !== empId && (e.approverId === empId || isManager()))
+        .map(e => e.id);
+      const relevant = allReqs.filter(r => myEmpIds.includes(r.employee_id));
+
+      pendingRows = relevant.filter(r => r.status === 'pending');
+      historyRows = relevant.filter(r => r.status !== 'pending');
+    } catch(e) { console.warn('Approver vacation load error:', e); }
+
+    const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const statusColor = { pending: '#e8a234', approved: '#4caf7d', rejected: '#d04040' };
+    const statusLabel = { pending: '⏳ Pending', approved: '✓ Approved', rejected: '✗ Rejected' };
+
+    const buildRow = (r, showActions) => {
+      const sc = statusColor[r.status] || '#888';
+      const sl = statusLabel[r.status] || r.status;
+      const days = Math.round((new Date(r.end_date) - new Date(r.start_date)) / 86400000) + 1;
+      const reqEmp = employees.find(e => e.id === r.employee_id);
+      return `
+      <div style="display:flex;align-items:flex-start;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--bg)">
+        <div style="width:34px;height:34px;border-radius:50%;background:${reqEmp?.color||'#888'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${reqEmp?.initials||'?'}</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${r.employee_name}</div>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px">
+            <div style="font-size:12px;color:var(--muted)">${fmtD(r.start_date)} → ${fmtD(r.end_date)}</div>
+            <span style="font-size:10px;color:var(--muted)">${days} day${days!==1?'s':''}</span>
+            <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:${sc}22;color:${sc};border:1px solid ${sc}44">${sl}</span>
+          </div>
+          ${r.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${r.notes}</div>` : ''}
+          ${r.approver_note ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;font-style:italic">💬 ${r.approver_note}</div>` : ''}
+        </div>
+        ${showActions ? `
+        <div style="display:flex;gap:6px;flex-shrink:0">
+          <button onclick="approveVacationRequest('${r.id}','${r.employee_id}');renderMyInfoVacationTab('${empId}')"
+            style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:#4caf7d;cursor:pointer">✓ Approve</button>
+          <button onclick="openRejectVacForm('${r.id}','${r.employee_id}')"
+            style="background:rgba(208,64,64,0.1);border:1px solid rgba(208,64,64,0.3);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--red);cursor:pointer">✗ Reject</button>
+          <button onclick="deleteVacationRequest('${r.id}','${r.employee_id}');renderMyInfoVacationTab('${empId}')"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer">🗑</button>
+        </div>` : `
+        <button onclick="deleteVacationRequest('${r.id}','${r.employee_id}');renderMyInfoVacationTab('${empId}')"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer;flex-shrink:0">🗑</button>`}
+      </div>`;
+    };
+
+    const pendingHtml = pendingRows.length
+      ? pendingRows.map(r => buildRow(r, true)).join('')
+      : '<div style="color:var(--muted);font-size:12px;padding:4px 0">No pending requests.</div>';
+
+    // History — show last 20, with toggle
+    const historyHtml = historyRows.length
+      ? `<div id="vacHistoryList">
+          ${historyRows.slice(0, 5).map(r => buildRow(r, false)).join('')}
+        </div>
+        ${historyRows.length > 5 ? `
+          <button id="vacHistoryToggle" onclick="
+            const list=document.getElementById('vacHistoryList');
+            const btn=document.getElementById('vacHistoryToggle');
+            const showing=list.dataset.expanded==='1';
+            list.innerHTML=showing
+              ? ${JSON.stringify(historyRows.slice(0,5).map(r=>buildRow(r,false)).join(''))}
+              : ${JSON.stringify(historyRows.map(r=>buildRow(r,false)).join(''))};
+            list.dataset.expanded=showing?'0':'1';
+            btn.textContent=showing?'Show all ${historyRows.length} requests ▼':'Show less ▲';"
+            style="background:none;border:none;color:var(--amber);font-size:12px;cursor:pointer;padding:4px 0;margin-top:4px">
+            Show all ${historyRows.length} requests ▼
+          </button>` : ''}` 
+      : '<div style="color:var(--muted);font-size:12px;padding:4px 0">No history yet.</div>';
+
+    approverSection = `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">⏳ Pending Approvals</div>
+        ${pendingHtml}
+      </div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
+        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">📋 Approval History</div>
+        ${historyHtml}
+      </div>`;
+  }
+
+  pane.innerHTML = mySection + approverSection;
+  // Now load the employee's own requests into the placeholder
+  loadAndRenderVacRequests(empId);
+}
+
+function renderMyInfoChatterTab(empId) {
+  const pane = document.getElementById('myInfoPane-chatter');
+  if (!pane) return;
+  pane.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:20px 0">Loading…</div>';
+  _loadMyChatter(empId).then(html => { if (pane) pane.innerHTML = html; });
+}
+
+async function _loadMyChatter(empId) {
+  if (!sb || !currentUser) return '<div style="color:var(--muted);font-size:13px">Not signed in.</div>';
+
+  let sent = [], mentioned = [];
+  try {
+    const [sentRes, mentionedRes] = await Promise.all([
+      sb.from('chatter').select('*').eq('author_id', currentUser.id).order('created_at', { ascending: false }).limit(100),
+      sb.from('chatter').select('*').contains('notify_ids', [empId]).order('created_at', { ascending: false }).limit(100),
+    ]);
+    sent      = sentRes.data      || [];
+    mentioned = mentionedRes.data || [];
+  } catch(e) {
+    return '<div style="color:var(--red);font-size:13px">Error loading chatter history.</div>';
+  }
+
+  // Merge + deduplicate — tag each as sent/mentioned/both
+  const msgMap = {};
+  sent.forEach(r => { msgMap[r.id] = { ...r, _sent: true, _mentioned: false }; });
+  mentioned.forEach(r => {
+    if (msgMap[r.id]) msgMap[r.id]._mentioned = true;
+    else msgMap[r.id] = { ...r, _sent: false, _mentioned: true };
+  });
+
+  const msgs = Object.values(msgMap).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  if (msgs.length === 0) {
+    return `<div style="display:flex;align-items:center;justify-content:center;height:200px;flex-direction:column;gap:10px;color:var(--muted)">
+      <div style="font-size:32px">💬</div>
+      <div style="font-size:14px">No chatter messages yet</div>
+    </div>`;
+  }
+
+  const fmtDate = d => new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+  const textFmt = t => (t || '')
+    .replace(/\n/g, '<br>')
+    .replace(/@([\w][\w ]*?)(?=\s|$|<br>)/g, '<span style="color:var(--amber);font-weight:600">@$1</span>');
+
+  const sentCount      = msgs.filter(m => m._sent).length;
+  const mentionedCount = msgs.filter(m => m._mentioned && !m._sent).length;
+
+  const rows = msgs.map(r => {
+    const proj = (typeof projects !== 'undefined') && projects.find(p => p.id === r.proj_id);
+    const projLabel = proj ? `${proj.emoji || ''} ${proj.name}` : '—';
+    const tag = r._sent && r._mentioned
+      ? '<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;background:rgba(124,92,191,0.15);color:var(--purple);border:1px solid rgba(124,92,191,0.3)">Sent + Mentioned</span>'
+      : r._sent
+        ? '<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;background:rgba(58,127,212,0.12);color:var(--blue);border:1px solid rgba(58,127,212,0.3)">Sent</span>'
+        : '<span style="font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;background:rgba(232,162,52,0.12);color:var(--amber);border:1px solid rgba(232,162,52,0.3)">Mentioned</span>';
+
+    return `
+    <div onclick="if(typeof selectProject==='function'&&'${r.proj_id}'){selectProject('${r.proj_id}',null);setTimeout(()=>switchProjTab('sub-chatter'),250);}"
+      style="padding:12px 14px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--bg);cursor:pointer;transition:background .12s"
+      onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='var(--bg)'">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+        <div style="font-size:11px;font-weight:600;color:var(--amber)">${projLabel}</div>
+        ${tag}
+        <div style="font-size:10px;color:var(--muted);margin-left:auto;white-space:nowrap">${fmtDate(r.created_at)}</div>
+      </div>
+      ${!r._sent ? `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">from <strong style="color:var(--text)">${r.author_name}</strong></div>` : ''}
+      <div style="font-size:13px;color:var(--text);line-height:1.5">${textFmt(r.text)}</div>
+      ${r.attachments && r.attachments.length ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">📎 ${r.attachments.length} attachment${r.attachments.length>1?'s':''}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  return `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap">
+      <div style="font-size:13px;font-weight:700;color:var(--text)">💬 My Chatter</div>
+      <div style="display:flex;gap:8px;margin-left:auto">
+        <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:rgba(58,127,212,0.1);color:var(--blue);border:1px solid rgba(58,127,212,0.25)">${sentCount} sent</span>
+        <span style="font-size:11px;padding:3px 10px;border-radius:10px;background:rgba(232,162,52,0.1);color:var(--amber);border:1px solid rgba(232,162,52,0.25)">${mentionedCount} mentions</span>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Last 100 messages · Click any row to jump to that project's chatter</div>
+    ${rows}`;
 }

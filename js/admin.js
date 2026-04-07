@@ -187,21 +187,73 @@ function openMyInfoPanel(el) {
 
   if (!currentEmployee) return;
 
-  // Create a temporary empProfilePane inside myInfoBody and call showEmpProfile
   const body = document.getElementById('myInfoBody');
   if (!body) return;
 
-  // Remove ALL existing empProfilePane elements anywhere in the DOM to avoid
-  // duplicate-ID conflicts (the Employees panel renders one too, and getElementById
-  // returns the first match — which would be that hidden one, leaving My Info blank).
+  // Remove any stray empProfilePane to avoid duplicate-ID conflicts
   document.querySelectorAll('#empProfilePane').forEach(el => el.remove());
 
-  const pane = document.createElement('div');
-  pane.id = 'empProfilePane';
-  pane.style.cssText = 'flex:1;overflow-y:auto;padding:28px 32px;background:var(--bg);';
-  body.innerHTML = '';
-  body.appendChild(pane);
+  // Build tabbed layout
+  body.innerHTML = `
+    <div style="display:flex;flex-direction:column;height:100%">
+      <!-- Tab bar -->
+      <div style="display:flex;gap:2px;padding:12px 32px 0;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0">
+        <button id="myInfoTab-profile"  onclick="switchMyInfoTab('profile')"  class="myinfo-tab active-tab">👤 Profile</button>
+        <button id="myInfoTab-vacation" onclick="switchMyInfoTab('vacation')" class="myinfo-tab">✈️ Vacation</button>
+        <button id="myInfoTab-chatter"  onclick="switchMyInfoTab('chatter')"  class="myinfo-tab">💬 My Chatter</button>
+      </div>
+      <!-- Tab content -->
+      <div id="myInfoTabContent" style="flex:1;overflow-y:auto;background:var(--bg)">
+        <!-- Profile pane — showEmpProfile renders into empProfilePane -->
+        <div id="myInfoPane-profile" style="padding:28px 32px">
+          <div id="empProfilePane"></div>
+        </div>
+        <div id="myInfoPane-vacation" style="display:none;padding:28px 32px"></div>
+        <div id="myInfoPane-chatter"  style="display:none;padding:28px 32px"></div>
+      </div>
+    </div>
+  `;
+
+  // Inject tab styles if not already present
+  if (!document.getElementById('myInfoTabStyles')) {
+    const style = document.createElement('style');
+    style.id = 'myInfoTabStyles';
+    style.textContent = `
+      .myinfo-tab {
+        background: none; border: none; border-bottom: 2px solid transparent;
+        padding: 8px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
+        color: var(--muted); font-family: 'DM Sans', sans-serif;
+        margin-bottom: -1px; border-radius: 6px 6px 0 0; transition: all .15s;
+      }
+      .myinfo-tab:hover { color: var(--text); background: var(--surface2); }
+      .myinfo-tab.active-tab { color: var(--amber); border-bottom-color: var(--amber); background: var(--bg); }
+    `;
+    document.head.appendChild(style);
+  }
+
+  // Render profile tab
   showEmpProfile(currentEmployee.id);
+  window._myInfoActiveTab = 'profile';
+}
+
+function switchMyInfoTab(tab) {
+  window._myInfoActiveTab = tab;
+  ['profile','vacation','chatter'].forEach(t => {
+    const pane = document.getElementById('myInfoPane-' + t);
+    const btn  = document.getElementById('myInfoTab-' + t);
+    if (pane) pane.style.display = t === tab ? '' : 'none';
+    if (btn)  btn.classList.toggle('active-tab', t === tab);
+  });
+
+  const empId = currentEmployee?.id;
+  if (!empId) return;
+
+  if (tab === 'vacation' && typeof renderMyInfoVacationTab === 'function') {
+    renderMyInfoVacationTab(empId);
+  }
+  if (tab === 'chatter' && typeof renderMyInfoChatterTab === 'function') {
+    renderMyInfoChatterTab(empId);
+  }
 }
 
 function renderMyInfoPanel() { openMyInfoPanel(document.getElementById('navMyInfo')); }
