@@ -926,6 +926,20 @@ function showEmpProfile(empId, annivOffset) {
     <!-- Weekly hours bar chart -->
     ${weeklyHoursChartHtml}
 
+    <!-- Vacation Requests -->
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+        <div style="font-size:13px;font-weight:700;color:var(--text)">✈️ Vacation Requests</div>
+        <button onclick="openVacationRequestForm('${empId}')"
+          style="margin-left:auto;background:var(--amber-glow);border:1px solid var(--amber-dim);border-radius:6px;padding:4px 12px;font-size:11px;font-weight:600;color:var(--amber);cursor:pointer">
+          + New Request
+        </button>
+      </div>
+      <div id="vacReqList-${empId}">
+        <div style="color:var(--muted);font-size:12px;padding:4px 0">Loading…</div>
+      </div>
+    </div>
+
     <!-- Timesheet history -->
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -946,6 +960,9 @@ function showEmpProfile(empId, annivOffset) {
           </table>`}
     </div>
   `;
+
+  // Load vacation requests asynchronously into the placeholder
+  loadAndRenderVacRequests(empId);
 }
 
 window.deleteEmployee = function deleteEmployee(id) {
@@ -1307,3 +1324,347 @@ window.selectPm = async function(empId) {
   if (avEl)   { avEl.textContent = emp.initials; avEl.style.background = emp.color; }
   toast('Project Manager set to ' + emp.name);
 };
+
+
+// ===== VACATION REQUESTS =====
+// ===== VACATION REQUESTS =====
+let vacationRequestCache = {}; // empId -> array of requests
+
+async function loadAndRenderVacRequests(empId) {
+  const el = document.getElementById('vacReqList-' + empId);
+  if (!el) return;
+  if (!sb) { el.innerHTML = '<div style="color:var(--muted);font-size:12px">Not connected.</div>'; return; }
+  try {
+    const { data } = await sb.from('vacation_requests')
+      .select('*')
+      .eq('employee_id', empId)
+      .order('created_at', { ascending: false });
+    vacationRequestCache[empId] = data || [];
+  } catch(e) {
+    vacationRequestCache[empId] = [];
+  }
+  renderVacReqList(empId);
+}
+
+function renderVacReqList(empId) {
+  const el = document.getElementById('vacReqList-' + empId);
+  if (!el) return;
+  const requests = vacationRequestCache[empId] || [];
+  const statusColor = { pending: '#e8a234', approved: '#4caf7d', rejected: '#d04040' };
+  const statusLabel = { pending: '⏳ Pending', approved: '✓ Approved', rejected: '✗ Rejected' };
+  const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const canManage = isManager() || isApprover;
+
+  // Preserve any open forms (new request or reject inline)
+  const newForm = document.getElementById('vacNewReqForm-' + empId);
+  const newFormHtml = newForm ? newForm.outerHTML : '';
+
+  if (requests.length === 0) {
+    el.innerHTML = newFormHtml + '<div style="color:var(--muted);font-size:12px;padding:4px 0">No vacation requests yet.</div>';
+    return;
+  }
+
+  const rows = requests.map(r => {
+    const sc = statusColor[r.status] || '#888';
+    const sl = statusLabel[r.status] || r.status;
+    const days = Math.round((new Date(r.end_date) - new Date(r.start_date)) / 86400000) + 1;
+    return `
+    <div data-req-id="${r.id}" style="display:flex;align-items:flex-start;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--bg)">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${fmtD(r.start_date)} → ${fmtD(r.end_date)}</div>
+          <span style="font-size:10px;color:var(--muted)">${days} day${days !== 1 ? 's' : ''}</span>
+          <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:${sc}22;color:${sc};border:1px solid ${sc}44">${sl}</span>
+        </div>
+        ${r.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${r.notes}</div>` : ''}
+        ${r.approver_note ? `<div style="font-size:11px;color:var(--muted);margin-top:3px;font-style:italic">💬 ${r.approver_note}</div>` : ''}
+        <div style="font-size:10px;color:var(--muted);margin-top:4px">Submitted ${new Date(r.created_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}</div>
+      </div>
+      ${canManage && r.status === 'pending' ? `
+        <div style="display:flex;gap:6px;flex-shrink:0;margin-top:2px">
+          <button onclick="approveVacationRequest('${r.id}','${empId}')"
+            style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:#4caf7d;cursor:pointer">✓ Approve</button>
+          <button onclick="openRejectVacForm('${r.id}','${empId}')"
+            style="background:rgba(208,64,64,0.1);border:1px solid rgba(208,64,64,0.3);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--red);cursor:pointer">✗ Reject</button>
+          <button onclick="deleteVacationRequest('${r.id}','${empId}')"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer">🗑</button>
+        </div>
+      ` : ''}
+      ${canManage && r.status !== 'pending' ? `
+        <button onclick="deleteVacationRequest('${r.id}','${empId}')"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer;flex-shrink:0">🗑</button>
+      ` : ''}
+      ${!canManage && r.status === 'pending' && r.employee_id === (typeof currentEmployee !== 'undefined' ? currentEmployee?.id : null) ? `
+        <button onclick="cancelVacationRequest('${r.id}','${empId}')"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--muted);cursor:pointer;flex-shrink:0">✕ Cancel</button>
+      ` : ''}
+      ${!canManage && r.status === 'approved' && r.employee_id === (typeof currentEmployee !== 'undefined' ? currentEmployee?.id : null) ? `
+        <button onclick="cancelVacationRequest('${r.id}','${empId}')"
+          style="background:rgba(208,64,64,0.08);border:1px solid rgba(208,64,64,0.25);border-radius:6px;padding:3px 10px;font-size:11px;color:var(--red);cursor:pointer;flex-shrink:0">✕ Cancel Vacation</button>
+      ` : ''}
+    </div>`;
+  }).join('');
+
+  el.innerHTML = newFormHtml + rows;
+}
+
+function openVacationRequestForm(empId) {
+  if (document.getElementById('vacNewReqForm-' + empId)) return;
+  const el = document.getElementById('vacReqList-' + empId);
+  if (!el) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const formHtml = `
+  <div id="vacNewReqForm-${empId}" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:12px">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin-bottom:10px">New Vacation Request</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:4px">Start Date</div>
+        <input type="date" id="vacStart-${empId}" value="${today}"
+          style="background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;color-scheme:light">
+      </div>
+      <div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:4px">End Date</div>
+        <input type="date" id="vacEnd-${empId}" value="${today}"
+          style="background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;color-scheme:light">
+      </div>
+      <div style="flex:1;min-width:180px">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:4px">Notes (optional)</div>
+        <input type="text" id="vacNotes-${empId}" placeholder="Any details or context…"
+          style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box">
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px">
+      <button onclick="submitVacationRequest('${empId}')"
+        style="background:var(--amber-glow);border:1px solid var(--amber-dim);border-radius:6px;padding:5px 14px;font-size:12px;font-weight:600;color:var(--amber);cursor:pointer">Submit Request</button>
+      <button onclick="cancelVacationForm('${empId}')"
+        style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;color:var(--muted);cursor:pointer">Cancel</button>
+    </div>
+  </div>`;
+  el.insertAdjacentHTML('afterbegin', formHtml);
+}
+
+function cancelVacationForm(empId) {
+  document.getElementById('vacNewReqForm-' + empId)?.remove();
+}
+
+async function cancelVacationRequest(reqId, empId) {
+  if (!confirm('Cancel this vacation request?')) return;
+  if (!sb) return;
+  try {
+    await sb.from('vacation_requests').delete().eq('id', reqId);
+    // Also remove scheduler block if it exists
+    await sb.from('schedule_blocks').delete().eq('id', 'vac_' + reqId);
+    if (typeof window.schedAddBlock === 'function') {
+      // Remove from in-memory schedBlocks
+      const idx = (window._schedBlocks||[]).findIndex(b => b.id === 'vac_' + reqId);
+      if (idx > -1) window._schedBlocks.splice(idx, 1);
+    }
+  } catch(e) { toast('⚠ Could not cancel request'); return; }
+  vacationRequestCache[empId] = (vacationRequestCache[empId] || []).filter(r => r.id !== reqId);
+  renderVacReqList(empId);
+  toast('Vacation request cancelled');
+}
+
+async function deleteVacationRequest(reqId, empId) {
+  if (!confirm('Delete this vacation request? This will also remove the scheduler block if one was created.')) return;
+  if (!sb) return;
+  try {
+    await sb.from('vacation_requests').delete().eq('id', reqId);
+    await sb.from('schedule_blocks').delete().eq('id', 'vac_' + reqId);
+  } catch(e) { toast('⚠ Could not delete request'); return; }
+  vacationRequestCache[empId] = (vacationRequestCache[empId] || []).filter(r => r.id !== reqId);
+  renderVacReqList(empId);
+  toast('Request deleted');
+}
+
+async function submitVacationRequest(empId) {
+  const startDate = document.getElementById('vacStart-' + empId)?.value;
+  const endDate   = document.getElementById('vacEnd-'   + empId)?.value;
+  const notes     = document.getElementById('vacNotes-' + empId)?.value.trim() || null;
+
+  if (!startDate || !endDate) { toast('⚠ Please enter start and end dates'); return; }
+  if (startDate > endDate)    { toast('⚠ End date must be on or after start date'); return; }
+
+  const emp      = employees.find(e => e.id === empId);
+  if (!emp) return;
+
+  const row = {
+    employee_id:   empId,
+    employee_name: emp.name,
+    start_date:    startDate,
+    end_date:      endDate,
+    notes:         notes,
+    status:        'pending',
+    approver_id:   emp.approverId || null,
+  };
+
+  let saved;
+  try {
+    const { data, error } = await sb.from('vacation_requests').insert(row).select().single();
+    if (error) { toast('⚠ ' + error.message); return; }
+    saved = data;
+  } catch(e) { toast('⚠ Error saving request'); return; }
+
+  if (!vacationRequestCache[empId]) vacationRequestCache[empId] = [];
+  vacationRequestCache[empId].unshift(saved);
+
+  // Notify: approver + all managers/approvers
+  // Use same logic as auth.js isApprover check to catch all cases
+  const isEmpManager = (e) =>
+    e.isApprover === true || e.isApprover === 1 ||
+    ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) ||
+    e.role === 'approver' || e.role === 'manager';
+
+  const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const preview = `${emp.name} requested vacation: ${fmtD(startDate)} → ${fmtD(endDate)}||empId:${empId}`;
+  const notifyIds = [...new Set(
+    employees
+      .filter(e => e.isActive !== false && (e.id === emp.approverId || isEmpManager(e)))
+      .map(e => e.id)
+  )].filter(id => id !== empId); // don't notify the requester
+
+  if (sb && notifyIds.length > 0) {
+    try {
+      const { error: notifErr } = await sb.from('chatter_notifs').insert(
+        notifyIds.map(nid => ({
+          employee_id:    nid,
+          proj_id:        null,
+          msg_id:         null,
+          from_name:      emp.name,
+          from_initials:  emp.initials,
+          from_color:     emp.color,
+          preview:        preview,
+          is_read:        false,
+          created_at:     new Date().toISOString(),
+        }))
+      );
+      if (notifErr) {
+        toast('⚠ Notification error: ' + notifErr.message);
+        console.error('Vacation notif insert error:', notifErr);
+      }
+    } catch(e) {
+      toast('⚠ Notification failed: ' + e.message);
+      console.error('Vacation notification exception:', e);
+    }
+  } else if (notifyIds.length === 0) {
+    console.warn('Vacation request: no managers/approvers found to notify. Employees:', employees.map(e => ({name:e.name, isApprover:e.isApprover, permLevel:e.permissionLevel})));
+  }
+
+  cancelVacationForm(empId);
+  renderVacReqList(empId);
+  toast('✅ Vacation request submitted');
+}
+
+async function approveVacationRequest(reqId, empId) {
+  if (!sb) return;
+  const emp = employees.find(e => e.id === empId);
+  if (!emp) return;
+
+  try {
+    await sb.from('vacation_requests')
+      .update({ status: 'approved', approver_id: currentEmployee?.id || null, updated_at: new Date().toISOString() })
+      .eq('id', reqId);
+  } catch(e) { toast('⚠ Error approving request'); return; }
+
+  const req = (vacationRequestCache[empId] || []).find(r => r.id === reqId);
+  if (req) req.status = 'approved';
+
+  // Create scheduler block
+  if (req && typeof window.schedSaveBlock === 'function') {
+    const block = {
+      id:           'vac_' + reqId,
+      rowId:        'emp_' + empId,
+      cat:          '__emp__',
+      empId:        empId,
+      empEventType: 'vacation',
+      label:        emp.name + ' — Vacation',
+      start:        req.start_date,
+      end:          req.end_date,
+      projId:       null,
+      taskId:       null,
+      flag:         null,
+      startTime:    null,
+      endTime:      null,
+    };
+    await window.schedSaveBlock(block);
+    if (typeof window.schedAddBlock === 'function') window.schedAddBlock(block);
+  }
+
+  // Notify employee
+  if (req) {
+    const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    try {
+      await sb.from('chatter_notifs').insert({
+        employee_id:   empId,
+        proj_id:       null,
+        msg_id:        null,
+        from_name:     currentEmployee?.name || 'Manager',
+        from_initials: currentEmployee?.initials || 'M',
+        from_color:    currentEmployee?.color || '#888',
+        preview:       `✓ Your vacation (${fmtD(req.start_date)} → ${fmtD(req.end_date)}) has been approved`,
+        is_read:       false,
+        created_at:    new Date().toISOString(),
+      });
+    } catch(e) {}
+  }
+
+  renderVacReqList(empId);
+  toast('✅ Vacation approved — scheduler block created');
+}
+
+function openRejectVacForm(reqId, empId) {
+  if (document.getElementById('rejectVacInline-' + reqId)) return;
+  const el = document.getElementById('vacReqList-' + empId);
+  if (!el) return;
+  const formHtml = `
+  <div id="rejectVacInline-${reqId}" style="background:rgba(208,64,64,0.06);border:1px solid rgba(208,64,64,0.25);border-radius:8px;padding:12px;margin-bottom:8px">
+    <div style="font-size:11px;font-weight:600;color:var(--red);margin-bottom:8px">Reject / Suggest Alternative</div>
+    <input type="text" id="rejectVacNote-${reqId}" placeholder="Optional: suggest alternative dates or reason…"
+      style="width:100%;background:var(--surface);border:1.5px solid rgba(208,64,64,0.3);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;margin-bottom:8px">
+    <div style="display:flex;gap:8px">
+      <button onclick="confirmRejectVacation('${reqId}','${empId}')"
+        style="background:rgba(208,64,64,0.15);border:1px solid rgba(208,64,64,0.4);border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;color:var(--red);cursor:pointer">Confirm Reject</button>
+      <button onclick="document.getElementById('rejectVacInline-${reqId}')?.remove()"
+        style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:12px;color:var(--muted);cursor:pointer">Cancel</button>
+    </div>
+  </div>`;
+  el.insertAdjacentHTML('afterbegin', formHtml);
+}
+
+async function confirmRejectVacation(reqId, empId) {
+  if (!sb) return;
+  const note = document.getElementById('rejectVacNote-' + reqId)?.value.trim() || null;
+
+  try {
+    await sb.from('vacation_requests')
+      .update({ status: 'rejected', approver_note: note, updated_at: new Date().toISOString() })
+      .eq('id', reqId);
+  } catch(e) { toast('⚠ Error rejecting request'); return; }
+
+  const req = (vacationRequestCache[empId] || []).find(r => r.id === reqId);
+  if (req) { req.status = 'rejected'; req.approver_note = note; }
+
+  // Notify employee
+  if (req) {
+    const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    try {
+      await sb.from('chatter_notifs').insert({
+        employee_id:   empId,
+        proj_id:       null,
+        msg_id:        null,
+        from_name:     currentEmployee?.name || 'Manager',
+        from_initials: currentEmployee?.initials || 'M',
+        from_color:    currentEmployee?.color || '#888',
+        preview:       `✗ Your vacation request (${fmtD(req.start_date)} → ${fmtD(req.end_date)}) was not approved${note ? ': ' + note : ''}`,
+        is_read:       false,
+        created_at:    new Date().toISOString(),
+      });
+    } catch(e) {}
+  }
+
+  document.getElementById('rejectVacInline-' + reqId)?.remove();
+  renderVacReqList(reqId);
+  // Re-query fresh since renderVacReqList with reqId won't work — use empId
+  renderVacReqList(empId);
+  toast('Request rejected');
+}

@@ -1853,6 +1853,12 @@ window.saveSchedSettings   = saveSchedSettings;
 window.empHasSchedAccess   = empHasSchedAccess;
 window.resolveBlockColor   = resolveBlockColor;
 window.getSchedSettings    = function() { return schedSettings; };
+window.schedSaveBlock      = schedSaveBlock;
+window.schedAddBlock       = function(block) {
+  schedBlocks.push(block);
+  const panel = document.getElementById('panel-scheduler');
+  if (panel && panel.classList.contains('active')) renderSched();
+};
 
 })(); // end scheduler IIFE
 

@@ -250,22 +250,45 @@ function renderNotifPanel() {
   list.innerHTML = notifStore.map(n => {
     const proj = projects.find(p => p.id === n.projId);
     const timeStr = new Date(n.ts).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-    return '<div class="notif-item' + (n.read ? '' : ' unread') + '" onclick="notifClick(\x27' + n.id + '\x27,\x27' + n.projId + '\x27)">' +
+    const displayPreview = (n.preview || '').replace(/\|\|empId:[a-f0-9-]+$/, '');
+    return '<div class="notif-item' + (n.read ? '' : ' unread') + '" onclick="notifClick(\x27' + n.id + '\x27,\x27' + (n.projId||'') + '\x27)">' +
       '<div class="notif-item-avatar" style="background:' + (n.fromColor||'#888') + ';color:#fff">' + (n.fromInitials||'?') + '</div>' +
       '<div class="notif-item-body">' +
-        '<div class="notif-item-title"><strong>' + n.fromName + '</strong> mentioned you in <strong>' + (proj ? proj.name : 'a project') + '</strong>: ' + n.preview + '</div>' +
+        '<div class="notif-item-title">' + (proj
+          ? '<strong>' + n.fromName + '</strong> mentioned you in <strong>' + proj.name + '</strong>: ' + displayPreview
+          : displayPreview
+        ) + '</div>' +
         '<div class="notif-item-time">' + timeStr + '</div>' +
       '</div></div>';
   }).join('');
 }
 function notifClick(notifId, projId) {
-  // Mark read
   const n = notifStore.find(x => x.id === notifId);
   if (n) n.read = true;
   sb.from('chatter_notifs').update({ is_read: true }).eq('id', notifId).then(() => {});
   renderNotifBadge();
   document.getElementById('notifPanel').style.display = 'none';
-  // Navigate to project chatter
+
+  // Check for vacation notification — preview contains ||empId:uuid
+  const preview = n?.preview || '';
+  const empMatch = preview.match(/\|\|empId:([a-f0-9-]+)$/);
+  if (empMatch) {
+    const requestingEmpId = empMatch[1];
+    if (requestingEmpId === currentEmployee?.id) {
+      if (typeof openMyInfoPanel === 'function') openMyInfoPanel(document.getElementById('navMyInfo'));
+    } else {
+      if (typeof openEmployeesPanel === 'function') openEmployeesPanel(null);
+      setTimeout(() => { if (typeof showEmpProfile === 'function') showEmpProfile(requestingEmpId); }, 250);
+    }
+    return;
+  }
+
+  // Standard project chatter notification
+  const isRealProject = projId && (typeof projects !== 'undefined') && projects.find(p => p.id === projId);
+  if (!isRealProject) {
+    if (typeof openMyInfoPanel === 'function') openMyInfoPanel(document.getElementById('navMyInfo'));
+    return;
+  }
   selectProject(projId, null);
   document.getElementById('navProjects')?.classList.add('active');
   setTimeout(() => switchProjTab('sub-chatter'), 200);
