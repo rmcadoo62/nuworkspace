@@ -1123,7 +1123,9 @@
       </div>
       <div id="schedRoomSection">
         <div class="sched-field-label">Asset / Lab Room</div>
-        <div class="sched-proj-list" id="schedProjList"></div>
+        <select class="sched-f-input" id="schedRoomSelect" onchange="selectSchedCat(this.value)">
+          <option value="">— select room —</option>
+        </select>
       </div>
       <div id="schedEmpSection" style="display:none">
         <div class="sched-field-label">Employee</div>
@@ -1176,22 +1178,25 @@
           <input class="sched-f-input" id="schedEndTime" type="time" />
         </div>
       </div>
-      <div>
-        <div class="sched-field-label">Quick Duration</div>
-        <div class="sched-dur-chips" id="schedDurChips">
-          <div class="sched-dur-chip" onclick="applySchedDur(1)">1d</div>
-          <div class="sched-dur-chip" onclick="applySchedDur(3)">3d</div>
-          <div class="sched-dur-chip" onclick="applySchedDur(5)">1 wk</div>
-          <div class="sched-dur-chip" onclick="applySchedDur(10)">2 wks</div>
-          <div class="sched-dur-chip" onclick="applySchedDur(14)">2 wks+</div>
-          <div class="sched-dur-chip" onclick="applySchedDur(21)">3 wks</div>
-          <div class="sched-dur-chip" onclick="applySchedDur(30)">1 mo</div>
-          <div class="sched-dur-chip" onclick="applySchedDur(60)">2 mo</div>
-          <div class="sched-dur-chip" onclick="applySchedDur(90)">3 mo</div>
-        </div>
-      </div>
       <div id="schedDurationPreview" style="font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace;min-height:18px;"></div>
       <div class="sched-flag-section">
+        <div class="sched-field-label" style="margin-bottom:6px">Color Status</div>
+        <div style="display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;margin-bottom:12px;">
+          <div id="schedColorStatusSwatch" style="width:14px;height:14px;border-radius:50%;background:#888;flex-shrink:0;"></div>
+          <span id="schedColorStatusLabel" style="font-size:12.5px;font-weight:500;flex:1;">—</span>
+          <span id="schedColorStatusSource" style="font-size:10px;color:var(--muted);"></span>
+        </div>
+        <div class="sched-field-label" style="margin-bottom:5px">DCAS/Witness Override</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+          <div id="schedDcasOvSwatch" style="width:18px;height:18px;border-radius:4px;border:1.5px solid rgba(0,0,0,.15);flex-shrink:0;background:transparent;"></div>
+          <select class="sched-f-input" id="schedDcasOverride" onchange="schedDcasOverrideChanged(this.value)" style="margin-bottom:0;flex:1;">
+            <option value="">Auto (from job)</option>
+            <option value="dcas_no_wit_no">DCAS No / Witness No</option>
+            <option value="dcas_no_wit_yes">DCAS No / Witness Yes</option>
+            <option value="dcas_yes_wit_no">DCAS Yes / Witness No</option>
+            <option value="dcas_yes_wit_yes">DCAS Yes / Witness Yes</option>
+          </select>
+        </div>
         <div class="sched-field-label" style="margin-bottom:8px">Status Override <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(overrides all color rules)</span></div>
         <div style="display:flex;gap:12px;flex-wrap:wrap;">
           <label style="display:flex;align-items:center;gap:7px;cursor:pointer;padding:6px 12px;border-radius:7px;border:1.5px solid var(--border);transition:all .15s;user-select:none;" id="flagLabelReschedule"

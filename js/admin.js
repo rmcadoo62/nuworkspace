@@ -574,6 +574,7 @@ const SCHED_COLOR_DEFS = [
   { key: 'tentative',        label: 'Tentative',              hint: 'Status override — Gray' },
   { key: 'setup',            label: 'Setup task',             hint: 'Task name contains "setup"' },
   { key: 'teardown',         label: 'Teardown task',          hint: 'Task name contains "teardown"' },
+  { key: 'dcas_no_wit_no',  label: 'DCAS No / Witness No',   hint: 'DCAS=No, Witness=No' },
   { key: 'dcas_no_wit_yes',  label: 'DCAS No / Witness Yes',  hint: 'DCAS=No, Witness=Yes' },
   { key: 'dcas_yes_wit_no',  label: 'DCAS Yes / Witness No',  hint: 'DCAS=Yes/CNF, Witness=No' },
   { key: 'dcas_yes_wit_yes', label: 'DCAS Yes / Witness Yes', hint: 'DCAS=Yes/CNF, Witness=Yes/CNF' },
@@ -628,8 +629,8 @@ function renderSchedSettingsPanel() {
   const colorRows = SCHED_COLOR_DEFS.map(def => {
     const cur = window.sc(def.key);
     const isDefault = !ss.colors?.[def.key];
-    const resetBtn = isDefault ? '' : `<button onclick="resetSchedColorAndSave(${JSON.stringify(def.key)})"
-      style="background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--muted);font-size:10px;padding:3px 7px;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x21BA; Reset</button>`;
+    const resetBtn = `<button onclick="${isDefault ? '' : `resetSchedColorAndSave(${JSON.stringify(def.key)})`}"
+      style="background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--muted);font-size:10px;padding:3px 7px;cursor:${isDefault ? 'default' : 'pointer'};font-family:'DM Sans',sans-serif;opacity:${isDefault ? '0.35' : '1'};" ${isDefault ? 'disabled' : ''}>&#x21BA; Reset</button>`;
     return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);">
       <div id="sched-swatch-${def.key}" style="width:26px;height:26px;border-radius:6px;border:1.5px solid rgba(0,0,0,.15);flex-shrink:0;background:${cur}"></div>
       <div style="flex:1;min-width:0;">
@@ -689,6 +690,7 @@ function renderSchedSettingsSection() {
     { key: 'tentative',        label: 'Tentative',              hint: 'Status override — Gray' },
     { key: 'setup',            label: 'Setup task',             hint: 'Task name contains "setup"' },
     { key: 'teardown',         label: 'Teardown task',          hint: 'Task name contains "teardown"' },
+    { key: 'dcas_no_wit_no',  label: 'DCAS No / Witness No',   hint: 'DCAS=No, Witness=No' },
     { key: 'dcas_no_wit_yes',  label: 'DCAS No / Witness Yes',  hint: 'DCAS=No, Witness=Yes' },
     { key: 'dcas_yes_wit_no',  label: 'DCAS Yes / Witness No',  hint: 'DCAS=Yes/CNF, Witness=No' },
     { key: 'dcas_yes_wit_yes', label: 'DCAS Yes / Witness Yes', hint: 'DCAS=Yes/CNF, Witness=Yes/CNF' },
@@ -697,8 +699,8 @@ function renderSchedSettingsSection() {
   const colorRows = COLOR_DEFS.map(def => {
     const cur = window.sc(def.key);
     const isDefault = !ss.colors[def.key];
-    const resetBtn = isDefault ? '' : `<button onclick="resetSchedColor(${JSON.stringify(def.key)})"
-      style="background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--muted);font-size:10px;padding:3px 7px;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x21BA; Reset</button>`;
+    const resetBtn = `<button onclick="${isDefault ? '' : `resetSchedColor(${JSON.stringify(def.key)})`}"
+      style="background:transparent;border:1px solid var(--border);border-radius:5px;color:var(--muted);font-size:10px;padding:3px 7px;cursor:${isDefault ? 'default' : 'pointer'};font-family:'DM Sans',sans-serif;opacity:${isDefault ? '0.35' : '1'};" ${isDefault ? 'disabled' : ''}>&#x21BA; Reset</button>`;
     return `<div style="display:flex;align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--border);">
       <div style="width:26px;height:26px;border-radius:6px;border:1.5px solid rgba(0,0,0,.15);flex-shrink:0;background:${cur}"></div>
       <div style="flex:1;min-width:0;">

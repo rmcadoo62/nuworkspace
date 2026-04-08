@@ -76,6 +76,7 @@ const SCHED_COLOR_DEFAULTS = {
   tentative  : '#a0a0a0',
   setup      : '#f48fb1',
   teardown   : '#9c27b0',
+  dcas_no_wit_no     : '#607d8b',
   dcas_no_wit_yes    : '#e53935',
   dcas_yes_wit_no    : '#ff9800',
   dcas_yes_wit_yes   : '#76d275',
@@ -105,6 +106,10 @@ function resolveBlockColor(block) {
   if (block.empEventType === 'sick')     return '#e91e9e';
   if (block.flag === 'reschedule') return sc('reschedule');
   if (block.flag === 'tentative')  return sc('tentative');
+  if (block.flag === 'dcas_no_wit_no')  return sc('dcas_no_wit_no');
+  if (block.flag === 'dcas_no_wit_yes') return sc('dcas_no_wit_yes');
+  if (block.flag === 'dcas_yes_wit_no') return sc('dcas_yes_wit_no');
+  if (block.flag === 'dcas_yes_wit_yes') return sc('dcas_yes_wit_yes');
 
   // 2. Task keyword rules
   if (block.taskId) {
@@ -130,11 +135,90 @@ function resolveBlockColor(block) {
       if (dcasNo  && witnessYes) return sc('dcas_no_wit_yes');
       if (dcasYes && witnessNo)  return sc('dcas_yes_wit_no');
       if (dcasYes && witnessYes) return sc('dcas_yes_wit_yes');
+      if (dcasNo  && witnessNo)  return sc('dcas_no_wit_no');
     }
   }
 
   // 4. Default category color (use rowCat for multi-row categories)
   return getCatColor(rowCat(block.rowId || block.cat));
+}
+
+// Returns { label, color, source } describing what is driving the block color
+function resolveBlockColorInfo(block) {
+  if (!schedSettings) loadSchedSettings();
+  if (block.empEventType === 'vacation') return { label: 'Vacation',    color: '#43a047', source: 'auto' };
+  if (block.empEventType === 'sick')     return { label: 'Sick',        color: '#e91e9e', source: 'auto' };
+  if (block.flag === 'reschedule')       return { label: 'Reschedule',  color: sc('reschedule'), source: 'flag' };
+  if (block.flag === 'tentative')        return { label: 'Tentative',   color: sc('tentative'),  source: 'flag' };
+  const DCAS_FLAG_LABELS = {
+    dcas_no_wit_no:  'DCAS No / Witness No',
+    dcas_no_wit_yes: 'DCAS No / Witness Yes',
+    dcas_yes_wit_no: 'DCAS Yes / Witness No',
+    dcas_yes_wit_yes:'DCAS Yes / Witness Yes',
+  };
+  if (block.flag && DCAS_FLAG_LABELS[block.flag])
+    return { label: DCAS_FLAG_LABELS[block.flag], color: sc(block.flag), source: 'override' };
+
+  if (block.taskId) {
+    const task = (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === block.taskId);
+    if (task) {
+      const n = (task.name||'').toLowerCase();
+      if (n.includes('setup'))    return { label: 'Setup task',    color: sc('setup'),    source: 'auto' };
+      if (n.includes('teardown')) return { label: 'Teardown task', color: sc('teardown'), source: 'auto' };
+    }
+  }
+  if (block.projId) {
+    const pi = getProjInfo(block.projId);
+    if (pi) {
+      const dcas    = (pi.info.dcas||'').trim().toUpperCase();
+      const witness = (pi.info.customerWitness||'').trim().toUpperCase();
+      const dcasYes = dcas === 'YES' || dcas === 'CNF';
+      const witnessYes = witness === 'YES' || witness === 'CNF';
+      const dcasNo  = dcas === 'NO' || dcas === '';
+      const witnessNo  = witness === 'NO' || witness === '';
+      if (dcasNo  && witnessYes) return { label: 'DCAS No / Witness Yes',  color: sc('dcas_no_wit_yes'),  source: 'auto' };
+      if (dcasYes && witnessNo)  return { label: 'DCAS Yes / Witness No',  color: sc('dcas_yes_wit_no'),  source: 'auto' };
+      if (dcasYes && witnessYes) return { label: 'DCAS Yes / Witness Yes', color: sc('dcas_yes_wit_yes'), source: 'auto' };
+      if (dcasNo  && witnessNo)  return { label: 'DCAS No / Witness No',   color: sc('dcas_no_wit_no'),   source: 'auto' };
+    }
+  }
+  return { label: 'Room / category default', color: getCatColor(rowCat(block.rowId || block.cat)), source: 'auto' };
+}
+
+// Refresh the Color Status pill in the modal based on current modal state
+function updateSchedColorStatus() {
+  const swatch = document.getElementById('schedColorStatusSwatch');
+  const label  = document.getElementById('schedColorStatusLabel');
+  const source = document.getElementById('schedColorStatusSource');
+  if (!swatch || !label || !source) return;
+
+  // Build a lightweight proxy block from current modal values
+  const dcasOv = document.getElementById('schedDcasOverride')?.value || null;
+  const flag   = dcasOv || schedFlag || null;
+  const proxy  = {
+    flag,
+    projId: schedSelectedProjId,
+    taskId: schedSelectedTaskId,
+    rowId:  schedSelectedCat,
+    cat:    schedSelectedCat ? rowCat(schedSelectedCat) : null,
+  };
+  const info = resolveBlockColorInfo(proxy);
+  swatch.style.background = info.color;
+  label.textContent  = info.label;
+  source.textContent = info.source === 'override' ? '(manual override)' : info.source === 'flag' ? '(flag)' : '(from job)';
+
+  // Sync the DCAS override swatch
+  const ovSwatch = document.getElementById('schedDcasOvSwatch');
+  if (ovSwatch) {
+    if (dcasOv) {
+      ovSwatch.style.background = sc(dcasOv);
+      ovSwatch.style.opacity = '1';
+    } else {
+      // Auto — show the resolved color dimmed to indicate it's not a manual pick
+      ovSwatch.style.background = info.color;
+      ovSwatch.style.opacity = '0.35';
+    }
+  }
 }
 
 // ---- State ----
@@ -1362,6 +1446,11 @@ window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) 
   }
   renderSchedCatList();
   schedDateChanged();
+  // Initialize DCAS override dropdown
+  const dcasOvEl = document.getElementById('schedDcasOverride');
+  const DCAS_FLAGS = ['dcas_no_wit_no','dcas_no_wit_yes','dcas_yes_wit_no','dcas_yes_wit_yes'];
+  if (dcasOvEl) dcasOvEl.value = (blockId && schedFlag && DCAS_FLAGS.includes(schedFlag)) ? schedFlag : '';
+  updateSchedColorStatus();
   document.getElementById('schedModal').classList.add('open');
 };
 
@@ -1371,21 +1460,16 @@ window.closeSchedModal = function() {
 };
 
 function renderSchedCatList() {
-  const list = document.getElementById('schedProjList');
-  list.innerHTML = SCHED_ROWS.map(row => {
-    const color = getCatColor(row.cat);
-    const sel   = row.rowId === schedSelectedCat;
-    return `<div class="sched-proj-opt${sel?' selected':''}" onclick="selectSchedCat('${row.rowId}')">
-      <div class="sched-proj-opt-dot" style="background:${color}"></div>
-      <div class="sched-proj-opt-name" style="font-size:12.5px">${row.label}</div>
-      <div class="sched-proj-opt-check">&#x2713;</div>
-    </div>`;
-  }).join('');
+  const sel = document.getElementById('schedRoomSelect');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— select room —</option>' +
+    SCHED_ROWS.map(row =>
+      `<option value="${row.rowId}"${row.rowId === schedSelectedCat ? ' selected' : ''}>${row.label}</option>`
+    ).join('');
 }
 
 window.selectSchedCat = function(cat) {
-  schedSelectedCat = cat;
-  renderSchedCatList();
+  schedSelectedCat = cat || null;
 };
 
 // ---- Project picker in modal ----
@@ -1446,6 +1530,7 @@ window.selectSchedLinkedProj = function(projId) {
   if (dd) { dd.style.display = 'none'; _schedProjDDOpen = false; }
   updateSchedProjPreview(projId);
   renderSchedTaskList(projId);
+  updateSchedColorStatus();
   document.getElementById('schedProjSearch')?.focus();
   // Show clear button
   const clrBtn = document.getElementById('schedProjClearBtn');
@@ -1541,9 +1626,21 @@ window.selectSchedTask = function(taskId) {
 
 // Project dropdown close handled via blur event
 
+window.schedDcasOverrideChanged = function(val) {
+  // Selecting a DCAS override clears Reschedule/Tentative
+  if (val) { schedFlag = null; updateFlagUI(); }
+  updateSchedColorStatus();
+};
+
 window.toggleSchedFlag = function(flag) {
   schedFlag = schedFlag === flag ? null : flag;  // toggle off if already set
+  // Selecting Reschedule/Tentative clears any DCAS override
+  if (schedFlag) {
+    const dcasOvEl = document.getElementById('schedDcasOverride');
+    if (dcasOvEl) dcasOvEl.value = '';
+  }
   updateFlagUI();
+  updateSchedColorStatus();
 };
 
 function updateFlagUI() {
@@ -1584,6 +1681,14 @@ function _doSaveSchedBlock() {
   const _empId      = _isEmpBlock ? (document.getElementById('schedEmpPicker')?.value || null) : null;
   const _empEvtType = _isEmpBlock ? (document.getElementById('schedEmpEventType')?.value || null) : null;
 
+  // Read room selection from dropdown
+  if (!_isEmpBlock) {
+    schedSelectedCat = document.getElementById('schedRoomSelect')?.value || null;
+  }
+  // DCAS override takes precedence over schedFlag if set
+  const _dcasOv = document.getElementById('schedDcasOverride')?.value || null;
+  const _effectiveFlag = _dcasOv || schedFlag || null;
+
   if (!_isEmpBlock && !schedSelectedCat) { alert('Please select a lab room / asset.'); return; }
   if (_isEmpBlock && !_empId)            { alert('Please select an employee.'); return; }
   if (_isEmpBlock && !_empEvtType)       { alert('Please select Vacation, Sick, or Working.'); return; }
@@ -1611,7 +1716,7 @@ function _doSaveSchedBlock() {
       schedBlocks[idx].label     = lbl;
       schedBlocks[idx].projId    = schedSelectedProjId || null;
       schedBlocks[idx].taskId    = schedSelectedTaskId  || null;
-      schedBlocks[idx].flag      = schedFlag             || null;
+      schedBlocks[idx].flag      = _effectiveFlag        || null;
     }
   } else {
     schedBlocks.push({
@@ -1625,7 +1730,7 @@ function _doSaveSchedBlock() {
       endTime:   document.getElementById('schedEndTime').value   || null,
       label: lbl, projId: schedSelectedProjId || null,
       taskId: schedSelectedTaskId || null,
-      flag:   schedFlag           || null
+      flag:   _effectiveFlag      || null
     });
   }
   // Persist to Supabase
