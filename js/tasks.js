@@ -32,6 +32,74 @@ function toggleTask(el){
 let tPri='low',tAssign=new Set(),tTags=[];
 let lockedProjectId = null;
 
+// ── No-price task notification ─────────────────────────────────────────────
+const LINDA_UUID = 'cc75ba64-df6e-4d3d-9e12-e6c1c13b2c5f';
+
+async function notifyLindaNoPriceTask(taskId, taskName, projId) {
+  if (!sb || !currentUser) return;
+
+  const linda = employees.find(e => e.id === LINDA_UUID);
+  if (!linda) return; // safety — if Linda's record isn't loaded, bail quietly
+
+  const proj  = projects.find(p => p.id === projId);
+  const projLabel = proj ? (proj.emoji + ' ' + proj.name) : 'a project';
+
+  // Author = whoever is logged in right now
+  const authorEmp      = currentEmployee || employees.find(e => e.userId === currentUser.id) || {};
+  const authorName     = authorEmp.name     || currentUser.email?.split('@')[0] || 'System';
+  const authorInitials = authorEmp.initials || authorName[0]?.toUpperCase() || '?';
+  const authorColor    = authorEmp.color    || '#888';
+
+  const msgText = `⚠️ Task "${taskName}" was saved with no price on ${projLabel}. Needs review.`;
+
+  try {
+    // 1. Post chatter message to the project, notifying Linda
+    const { data: chatRow, error: chatErr } = await sb.from('chatter').insert([{
+      proj_id:         projId,
+      author_id:       currentUser.id,
+      author_name:     authorName,
+      author_initials: authorInitials,
+      author_color:    authorColor,
+      text:            msgText,
+      attachments:     [],
+      notify_ids:      [LINDA_UUID],
+      reply_to:        null,
+      created_at:      new Date().toISOString(),
+    }]).select().single();
+
+    if (chatErr) { console.warn('No-price chatter post failed:', chatErr); return; }
+
+    // 2. Insert bell notification row for Linda
+    await sb.from('chatter_notifs').insert([{
+      employee_id:   LINDA_UUID,
+      proj_id:       projId,
+      msg_id:        chatRow.id,
+      from_name:     authorName,
+      from_initials: authorInitials,
+      from_color:    authorColor,
+      preview:       msgText.slice(0, 80),
+      is_read:       false,
+      created_at:    new Date().toISOString(),
+    }]);
+
+    // 3. Fire email via existing edge function
+    await sb.functions.invoke('send-notification', {
+      body: {
+        type: 'chatter_mention',
+        data: {
+          mentionedIds: [LINDA_UUID],
+          authorName,
+          projectName:  projLabel,
+          messageText:  msgText,
+        }
+      }
+    });
+
+  } catch(e) {
+    console.warn('notifyLindaNoPriceTask failed:', e);
+  }
+}
+
 function rebuildProjDropdown(){
   const sel=document.getElementById('taskProject');
   const cur=sel.value;
@@ -637,7 +705,12 @@ async function inlineSave(taskId, projId, field, value) {
   }
   else if (field === 'salesCat')    { t.salesCat = value; }
   else if (field === 'priority')    { t.priority = value; }
-  else if (field === 'fixedPrice')  { t.fixedPrice = parseFloat(value) || 0; }
+  else if (field === 'fixedPrice')  {
+    const newPrice = parseFloat(value) || 0;
+    t.fixedPrice = newPrice;
+    // Notify Linda if price was cleared/zeroed on an existing task
+    if (!newPrice) notifyLindaNoPriceTask(taskId, t.name, projId);
+  }
   else if (field === 'name')        { t.name = value; }
   else if (field === 'due_raw') {
     t.due_raw = value;
@@ -1336,6 +1409,8 @@ window.saveTask = async function(another=false) {
   toast('"' + (title.length>40?title.slice(0,40)+'…':title) + '" created');
   const _proj = projects.find(p => p.id === projId);
   logActivity('tasks', saved.id, title, 'Task Created' + (_proj ? ' on ' + _proj.name : ''));
+  // Notify Linda if task was created with no price
+  if (!fixedPrice) notifyLindaNoPriceTask(saved.id, title, projId);
   syncProjBilledRevenue(projId); // sync expected revenue to projects list
 
   // Targeted render — avoid renderAllViews() which can cause double-render with realtime

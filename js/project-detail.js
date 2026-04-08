@@ -665,7 +665,7 @@ function renderProjSummary(projId) {
 
   // Revenue
   const tasks      = taskStore.filter(t => t.proj === projId);
-  const expected   = tasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
+  const expected   = tasks.filter(t => t.status !== 'cancelled').reduce((s,t) => s + (t.fixedPrice||0), 0);
   // Billed = tasks with status 'billed'
   const billed     = tasks.filter(t => t.status === 'billed')
                           .reduce((s,t) => s + (t.fixedPrice||0), 0);
@@ -3389,7 +3389,7 @@ async function syncProjBilledRevenue(projId) {
   if (!sb || !projId) return;
   const tasks = taskStore.filter(t => t.proj === projId);
   const billedRevenue = tasks.filter(t => t.status === 'billed').reduce((s,t) => s+(t.fixedPrice||0), 0);
-  const expectedRevenue = tasks.reduce((s,t) => s+(t.fixedPrice||0), 0);
+  const expectedRevenue = tasks.filter(t => t.status !== 'cancelled').reduce((s,t) => s+(t.fixedPrice||0), 0);
   if (projectInfo[projId]) {
     projectInfo[projId].billedRevenue = billedRevenue;
     projectInfo[projId].expectedRevenue = expectedRevenue;
