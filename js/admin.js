@@ -559,13 +559,14 @@ function renderPermissionsPanel() {
   }).join('');
 }
 
-function openSchedSettingsPanel() {
+async function openSchedSettingsPanel() {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('navSetup')?.classList.add('active');
   activeProjectId = null;
   document.getElementById('topbarName').textContent = 'Scheduler Settings';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-sched-settings').classList.add('active');
+  await window.loadSchedSettings();
   renderSchedSettingsPanel();
 }
 
@@ -580,15 +581,13 @@ const SCHED_COLOR_DEFS = [
   { key: 'dcas_yes_wit_yes', label: 'DCAS Yes / Witness Yes', hint: 'DCAS=Yes/CNF, Witness=Yes/CNF' },
 ];
 
-window.saveSchedColors = function() {
-  window.loadSchedSettings();
+window.saveSchedColors = async function() {
   const ss = window.getSchedSettings();
   SCHED_COLOR_DEFS.forEach(def => {
     const inp = document.getElementById('sched-input-' + def.key);
     if (inp) ss.colors[def.key] = inp.value;
   });
-  window.saveSchedSettings();
-  // Flash the button to confirm
+  await window.saveSchedSettings();
   const btn = document.getElementById('schedColorSaveBtn');
   if (btn) {
     btn.textContent = '✓ Saved';
@@ -597,20 +596,18 @@ window.saveSchedColors = function() {
   }
 };
 
-window.resetSchedColorAndSave = function(key) {
-  window.loadSchedSettings();
+window.resetSchedColorAndSave = async function(key) {
   delete window.getSchedSettings().colors[key];
-  window.saveSchedSettings();
+  await window.saveSchedSettings();
   renderSchedSettingsPanel();
 };
 
-window.saveSchedAccess = function() {
-  window.loadSchedSettings();
+window.saveSchedAccess = async function() {
   const ss = window.getSchedSettings();
   document.querySelectorAll('.sched-access-chk').forEach(chk => {
     ss.access[chk.dataset.empId] = chk.checked;
   });
-  window.saveSchedSettings();
+  await window.saveSchedSettings();
   applySchedAccessToNav();
   const btn = document.getElementById('schedAccessSaveBtn');
   if (btn) {
@@ -623,7 +620,6 @@ window.saveSchedAccess = function() {
 function renderSchedSettingsPanel() {
   const body = document.getElementById('schedSettingsPanelBody');
   if (!body) return;
-  window.loadSchedSettings();
   const ss = window.getSchedSettings();
 
   const colorRows = SCHED_COLOR_DEFS.map(def => {
@@ -682,7 +678,6 @@ function renderSchedSettingsSection() {
   const prev = document.getElementById('schedSettingsSection');
   if (prev) prev.remove();
 
-  window.loadSchedSettings();
   const ss = window.getSchedSettings();
 
   const COLOR_DEFS = [

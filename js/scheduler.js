@@ -58,16 +58,41 @@ function getCatColor(cat) { return CAT_COLORS[cat] || '#888'; }
 const SCHED_SETTINGS_KEY = 'nuws_sched_settings_v1';
 let schedSettings = null;
 
-function loadSchedSettings() {
-  try { schedSettings = JSON.parse(localStorage.getItem(SCHED_SETTINGS_KEY)||'null') || {}; }
-  catch(e) { schedSettings = {}; }
-  // Defaults
-  if (schedSettings.colors === undefined) schedSettings.colors = {};
-  if (schedSettings.access === undefined) schedSettings.access = {}; // empId → true/false
+async function loadSchedSettings() {
+  try {
+    const { data, error } = await sb.from('scheduler_settings').select('settings').eq('id', 'main').single();
+    if (error) throw error;
+    schedSettings = data.settings || {};
+    if (!schedSettings.colors) schedSettings.colors = {};
+    if (!schedSettings.access) schedSettings.access = {};
+    // One-time migration from localStorage
+    const legacy = localStorage.getItem(SCHED_SETTINGS_KEY);
+    if (legacy) {
+      try {
+        const old = JSON.parse(legacy);
+        if (old) {
+          if (old.colors && Object.keys(schedSettings.colors).length === 0)
+            schedSettings.colors = old.colors;
+          if (old.access && Object.keys(schedSettings.access).length === 0)
+            schedSettings.access = old.access;
+          await saveSchedSettings();
+          console.log('Migrated scheduler settings from localStorage to Supabase');
+        }
+      } catch(e) { console.warn('Settings migration failed:', e); }
+      localStorage.removeItem(SCHED_SETTINGS_KEY);
+    }
+  } catch(e) {
+    console.error('loadSchedSettings failed:', e);
+    schedSettings = { colors: {}, access: {} };
+  }
 }
 
-function saveSchedSettings() {
-  localStorage.setItem(SCHED_SETTINGS_KEY, JSON.stringify(schedSettings));
+async function saveSchedSettings() {
+  try {
+    await sb.from('scheduler_settings').upsert({ id: 'main', settings: schedSettings }, { onConflict: 'id' });
+  } catch(e) {
+    console.error('saveSchedSettings failed:', e);
+  }
 }
 
 // Default colors (can be overridden in settings)
@@ -84,13 +109,12 @@ const SCHED_COLOR_DEFAULTS = {
 
 function sc(key) {
   // Get effective color for a setting key
-  if (!schedSettings) loadSchedSettings();
+  if (!schedSettings) return SCHED_COLOR_DEFAULTS[key] || '#888';
   return schedSettings.colors[key] || SCHED_COLOR_DEFAULTS[key];
 }
 
-// Check if an employee has scheduler access (default: all have access)
 function empHasSchedAccess(empId) {
-  if (!schedSettings) loadSchedSettings();
+  if (!schedSettings) return true; // settings not loaded yet — default to allow
   const a = schedSettings.access;
   if (Object.keys(a).length === 0) return true; // no restrictions set → everyone in
   return a[empId] !== false;
@@ -100,7 +124,7 @@ function empHasSchedAccess(empId) {
 // Priority: override flags > task keyword > DCAS/Witness rules > category default
 function resolveBlockColor(block) {
   // 1. Override flags
-  if (!schedSettings) loadSchedSettings();
+
   // Employee event colors take priority
   if (block.empEventType === 'vacation') return '#43a047';
   if (block.empEventType === 'sick')     return '#e91e9e';
@@ -145,7 +169,7 @@ function resolveBlockColor(block) {
 
 // Returns { label, color, source } describing what is driving the block color
 function resolveBlockColorInfo(block) {
-  if (!schedSettings) loadSchedSettings();
+
   if (block.empEventType === 'vacation') return { label: 'Vacation',    color: '#43a047', source: 'auto' };
   if (block.empEventType === 'sick')     return { label: 'Sick',        color: '#e91e9e', source: 'auto' };
   if (block.flag === 'reschedule')       return { label: 'Reschedule',  color: sc('reschedule'), source: 'flag' };
@@ -428,7 +452,7 @@ window.openSchedulerPanel = async function(el) {
   document.getElementById('topbarName').textContent = 'Scheduler';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-scheduler').classList.add('active');
-  loadSchedSettings();
+  await loadSchedSettings();
   await schedLoad();
   renderSched();
 };
