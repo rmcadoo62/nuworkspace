@@ -195,7 +195,7 @@ async function chatterPost() {
                 mentionedIds: allNotifyIds,
                 authorName,
                 projectName: _notifProj ? (_notifProj.emoji + ' ' + _notifProj.name) : 'a project',
-                messageText: text.length > 200 ? text.slice(0, 200) + '…' : text,
+                messageText: text.length > 500 ? text.slice(0, 500) + '…' : text,
               }
             }
           });

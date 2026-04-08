@@ -1285,12 +1285,14 @@ function renderClosingReport() {
   if (!el) return;
 
   const now = new Date();
+  const today = now.toISOString().slice(0, 10);
   const daysSince = d => d ? Math.floor((now - new Date(d + 'T00:00:00')) / 86400000) : null;
   const fmtDate  = d => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
   const fmt$     = n => n > 0 ? '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+  const isJordan = currentEmployee && currentEmployee.name === 'Jordan McAdoo';
 
-  // Projects in testcomplete status
-  const rows = projects
+  // ── Test Complete rows (both 60+ and under 60) ──────────────────────────
+  const tcRows = projects
     .filter(p => (projectInfo[p.id] || {}).status === 'testcomplete')
     .map(p => {
       const info = projectInfo[p.id] || {};
@@ -1302,10 +1304,34 @@ function renderClosingReport() {
     })
     .sort((a, b) => (b.days || 0) - (a.days || 0));
 
-  const over60  = rows.filter(r => r.days !== null && r.days >= 60);
-  const under60 = rows.filter(r => r.days === null || r.days < 60);
+  const over60  = tcRows.filter(r => r.days !== null && r.days >= 60);
+  const under60 = tcRows.filter(r => r.days === null || r.days < 60);
 
-  function buildTable(list) {
+  // ── Ready to Close (status === 'complete') ───────────────────────────────
+  const readyRows = projects
+    .filter(p => (projectInfo[p.id] || {}).status === 'complete')
+    .map(p => {
+      const info = projectInfo[p.id] || {};
+      const tasks = taskStore.filter(t => t.proj === p.id);
+      const openTasks = tasks.filter(t => !['complete', 'billed', 'cancelled'].includes(t.status));
+      const readyToBill = tasks.filter(t => t.status === 'complete').reduce((s, t) => s + (t.fixedPrice || 0), 0);
+      return { p, info, openTasks, readyToBill };
+    })
+    .sort((a, b) => (a.p.name || '').localeCompare(b.p.name || ''));
+
+  // ── Pending Jordan (status === 'closing') ────────────────────────────────
+  const pendingRows = projects
+    .filter(p => (projectInfo[p.id] || {}).status === 'closing')
+    .map(p => {
+      const info = projectInfo[p.id] || {};
+      const tasks = taskStore.filter(t => t.proj === p.id);
+      const readyToBill = tasks.filter(t => t.status === 'complete').reduce((s, t) => s + (t.fixedPrice || 0), 0);
+      return { p, info, readyToBill };
+    })
+    .sort((a, b) => (a.p.name || '').localeCompare(b.p.name || ''));
+
+  // ── Table builder for testcomplete rows ─────────────────────────────────
+  function buildTcTable(list) {
     if (list.length === 0) return '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">None</div>';
     return '<table style="width:100%;border-collapse:collapse">' +
       '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
@@ -1332,6 +1358,64 @@ function renderClosingReport() {
       '</tbody></table>';
   }
 
+  // ── Table builder for Ready to Close rows ───────────────────────────────
+  function buildReadyTable(list) {
+    if (list.length === 0) return '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">None</div>';
+    return '<table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Client</th>' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
+        '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Open Tasks</th>' +
+        '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Ready to Bill</th>' +
+        '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Action</th>' +
+      '</tr></thead><tbody>' +
+      list.map(function(r) {
+        const canGenerate = r.openTasks.length === 0 && (isManager() || can('mark_closing'));
+        const actionBtn = canGenerate
+          ? '<button onclick="event.stopPropagation();generateClosingPdf(\'' + r.p.id + '\')" style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:6px 12px;font-size:11px;color:#4caf7d;cursor:pointer;font-weight:600;white-space:nowrap">&#x1F4C4; Generate PDF &amp; Mark Closing</button>'
+          : (r.openTasks.length > 0
+              ? '<span style="font-size:11px;color:var(--red)">' + r.openTasks.length + ' open task' + (r.openTasks.length > 1 ? 's' : '') + '</span>'
+              : '<span style="font-size:11px;color:var(--muted)">No permission</span>');
+        return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="selectProjectById(\'' + r.p.id + '\')">' +
+          '<td style="padding:11px 14px"><span style="font-size:13px;font-weight:600;color:var(--text)">' + (r.p.emoji ? r.p.emoji + ' ' : '') + r.p.name + '</span></td>' +
+          '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.client || '—') + '</td>' +
+          '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '—') + '</td>' +
+          '<td style="padding:11px 14px;text-align:center;font-size:13px;font-weight:600;color:' + (r.openTasks.length > 0 ? 'var(--red)' : 'var(--muted)') + '">' + (r.openTasks.length || '—') + '</td>' +
+          '<td style="padding:11px 14px;text-align:right;font-size:13px;font-weight:600;color:' + (r.readyToBill > 0 ? '#c084fc' : 'var(--muted)') + '">' + fmt$(r.readyToBill) + '</td>' +
+          '<td style="padding:11px 14px;text-align:right">' + actionBtn + '</td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table>';
+  }
+
+  // ── Table builder for Pending Jordan rows ───────────────────────────────
+  function buildPendingTable(list) {
+    if (list.length === 0) return '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">None</div>';
+    return '<table style="width:100%;border-collapse:collapse">' +
+      '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Client</th>' +
+        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
+        '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Ready to Bill</th>' +
+        '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Action</th>' +
+      '</tr></thead><tbody>' +
+      list.map(function(r) {
+        const approveReject = isJordan
+          ? '<button onclick="event.stopPropagation();approveClosing(\'' + r.p.id + '\')" style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:6px 12px;font-size:11px;color:#4caf7d;cursor:pointer;font-weight:600;margin-right:6px">&#x2713; Approve</button>' +
+            '<button onclick="event.stopPropagation();rejectClosing(\'' + r.p.id + '\')" style="background:rgba(224,92,92,0.1);border:1px solid rgba(224,92,92,0.3);border-radius:8px;padding:6px 12px;font-size:11px;color:var(--red);cursor:pointer;font-weight:600">&#x2717; Reject</button>'
+          : '<span style="font-size:11px;color:var(--amber);padding:5px 10px;background:rgba(232,162,52,0.1);border:1px solid rgba(232,162,52,0.3);border-radius:8px">&#x23F3; Awaiting Jordan</span>';
+        return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="selectProjectById(\'' + r.p.id + '\')">' +
+          '<td style="padding:11px 14px"><span style="font-size:13px;font-weight:600;color:var(--text)">' + (r.p.emoji ? r.p.emoji + ' ' : '') + r.p.name + '</span></td>' +
+          '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.client || '—') + '</td>' +
+          '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '—') + '</td>' +
+          '<td style="padding:11px 14px;text-align:right;font-size:13px;font-weight:600;color:' + (r.readyToBill > 0 ? '#c084fc' : 'var(--muted)') + '">' + fmt$(r.readyToBill) + '</td>' +
+          '<td style="padding:11px 14px;text-align:right">' + approveReject + '</td>' +
+        '</tr>';
+      }).join('') +
+      '</tbody></table>';
+  }
+
   el.innerHTML =
     // Summary chips
     '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px">' +
@@ -1340,18 +1424,178 @@ function renderClosingReport() {
         '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + over60.length + '</div>' +
       '</div>' +
       '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 20px;min-width:120px">' +
-        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Total Test Complete</div>' +
-        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + rows.length + '</div>' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Test Complete</div>' +
+        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + tcRows.length + '</div>' +
+      '</div>' +
+      '<div style="background:rgba(76,175,125,0.08);border:1px solid rgba(76,175,125,0.3);border-radius:10px;padding:12px 20px;min-width:120px">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#4caf7d;margin-bottom:4px">Ready to Close</div>' +
+        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + readyRows.length + '</div>' +
+      '</div>' +
+      '<div style="background:rgba(91,156,246,0.08);border:1px solid rgba(91,156,246,0.3);border-radius:10px;padding:12px 20px;min-width:120px">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--blue);margin-bottom:4px">Pending Approval</div>' +
+        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + pendingRows.length + '</div>' +
       '</div>' +
     '</div>' +
-    // 60+ days section
+
+    // ── Needs Attention (60+ days in testcomplete) ──
     '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--red);margin-bottom:10px">&#x26A0; Needs Attention — 60+ Days in Test Complete</div>' +
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:28px">' +
-      buildTable(over60) +
+      buildTcTable(over60) +
     '</div>' +
-    // Under 60 days section
-    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Under 60 Days</div>' +
+
+    // ── Under 60 days (testcomplete) ──
+    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Under 60 Days — Test Complete</div>' +
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:28px">' +
+      buildTcTable(under60) +
+    '</div>' +
+
+    // ── Ready to Close (complete status) ──
+    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#4caf7d;margin-bottom:10px">&#x2705; Ready to Close</div>' +
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:28px">' +
+      buildReadyTable(readyRows) +
+    '</div>' +
+
+    // ── Pending Jordan's Approval (closing status) ──
+    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--blue);margin-bottom:10px">&#x23F3; Pending Jordan\'s Approval</div>' +
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
-      buildTable(under60) +
+      buildPendingTable(pendingRows) +
     '</div>';
+}
+
+// ── Closing action functions ─────────────────────────────────────────────
+
+function markProjectComplete(projId) {
+  const info = projectInfo[projId];
+  if (!info) return;
+  const projTasks = taskStore.filter(t => t.proj === projId);
+  const blocking = projTasks.filter(t => !['complete', 'billed', 'cancelled'].includes(t.status));
+  if (blocking.length > 0) {
+    toast('⚠ Cannot mark Complete — ' + blocking.length + ' open task' + (blocking.length > 1 ? 's' : '') + ' remaining.', 'error');
+    return;
+  }
+  info.status = 'complete';
+  if (sb) dbUpdate('project_info', projId, { status: 'complete' });
+  toast('Project marked Complete — ready to generate closing PDF.');
+  renderClosingReport();
+}
+
+function generateClosingPdf(projId) {
+  const info = projectInfo[projId];
+  if (!info) return;
+  const proj = projects.find(p => p.id === projId);
+  if (!proj) return;
+  const projTasks = taskStore.filter(t => t.proj === projId);
+  const blocking = projTasks.filter(t => !['complete', 'billed', 'cancelled'].includes(t.status));
+  if (blocking.length > 0) {
+    toast('⚠ Cannot close — ' + blocking.length + ' open task(s) remaining.', 'error');
+    return;
+  }
+
+  // ── Build PDF ──
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 48;
+  const contentW = pageW - margin * 2;
+  let y = margin;
+
+  const fmtD = ds => ds ? new Date(ds + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+  const fmt$ = n => n > 0 ? '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+
+  // Header
+  doc.setFillColor(30, 30, 40);
+  doc.rect(0, 0, pageW, 72, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(18);
+  doc.text('CLOSING REPORT', margin, 30);
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(proj.name, margin, 48);
+  doc.text('Generated: ' + fmtD(new Date().toISOString().slice(0, 10)), margin, 63);
+  y = 90;
+
+  // Project info block
+  doc.setTextColor(40, 40, 50);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  const infoLines = [
+    ['Client', info.client || '—'],
+    ['PM', info.pm || '—'],
+    ['Start Date', fmtD(info.startDate)],
+    ['End Date', fmtD(info.endDate)],
+    ['Test Complete Date', fmtD(info.testcompleteDate)],
+  ];
+  infoLines.forEach(([label, val]) => {
+    doc.setFont('helvetica', 'bold'); doc.text(label + ':', margin, y);
+    doc.setFont('helvetica', 'normal'); doc.text(val, margin + 130, y);
+    y += 16;
+  });
+  y += 12;
+
+  // Tasks table
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.text('Tasks', margin, y); y += 6;
+  doc.setDrawColor(200, 200, 210);
+  doc.line(margin, y, margin + contentW, y); y += 12;
+
+  const billedTasks = projTasks.filter(t => ['complete', 'billed', 'cancelled'].includes(t.status));
+  if (billedTasks.length > 0) {
+    doc.autoTable({
+      startY: y,
+      margin: { left: margin, right: margin },
+      head: [['Task', 'Status', 'Fixed Price', 'Completed']],
+      body: billedTasks.map(t => [
+        t.name || '—',
+        t.status || '—',
+        t.fixedPrice > 0 ? fmt$(t.fixedPrice) : '—',
+        fmtD(t.completedDate || t.billedDate),
+      ]),
+      styles: { fontSize: 9, cellPadding: 4 },
+      headStyles: { fillColor: [50, 50, 65], textColor: 255, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [248, 248, 252] },
+    });
+    y = doc.lastAutoTable.finalY + 16;
+  }
+
+  // Totals
+  const totalBilled = projTasks.filter(t => t.status === 'billed').reduce((s, t) => s + (t.fixedPrice || 0), 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(10);
+  doc.text('Total Billed:', margin, y);
+  doc.setFont('helvetica', 'normal');
+  doc.text(fmt$(totalBilled), margin + 130, y);
+
+  doc.save(proj.name.replace(/[^a-z0-9]/gi, '_') + '_closing_report.pdf');
+
+  // ── Mark as Closing in DB and memory ──
+  info.status = 'closing';
+  if (sb) dbUpdate('project_info', projId, { status: 'closing' });
+  toast('PDF downloaded — project marked Closing. Jordan has been notified for approval.');
+  renderClosingReport();
+}
+
+function approveClosing(projId) {
+  const info = projectInfo[projId];
+  if (!info) return;
+  const today = new Date().toISOString().slice(0, 10);
+  info.status = 'closed';
+  if (!info.endDate) info.endDate = today;
+  const payload = { status: 'closed' };
+  if (!info.endDate || info.endDate === today) payload.end_date = today;
+  if (sb) dbUpdate('project_info', projId, payload);
+  toast('✓ Project approved and closed. Closed date set to today.');
+  renderClosingReport();
+}
+
+function rejectClosing(projId) {
+  const reason = prompt('Reason for rejection (will be noted):');
+  if (reason === null) return; // cancelled
+  const info = projectInfo[projId];
+  if (!info) return;
+  info.status = 'complete';
+  if (sb) dbUpdate('project_info', projId, { status: 'complete' });
+  toast('Closing rejected — project returned to Ready to Close.' + (reason ? ' Reason: ' + reason : ''));
+  renderClosingReport();
 }
