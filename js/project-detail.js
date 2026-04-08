@@ -48,9 +48,11 @@ function renderInfoSheet(projId) {
   const st = statusMap[info.status] || statusMap.active;
   const phColor = phaseColors[info.phase] || '#7a7a85';
 
-  // Calc progress from tasks
+  // Calc progress from tasks — count billed/complete/done; exclude cancelled from denominator
   const projTasks = taskStore.filter(t => t.proj === projId);
-  const pct = projTasks.length ? Math.round(projTasks.filter(t=>t.done).length / projTasks.length * 100) : 0;
+  const activeTasks = projTasks.filter(t => t.status !== 'cancelled');
+  const doneTasks   = projTasks.filter(t => ['billed','complete','done'].includes(t.status) || t.done);
+  const pct = activeTasks.length ? Math.round(doneTasks.length / activeTasks.length * 100) : 0;
   const circ = 2 * Math.PI * 20; // r=20
   const offset = circ - (pct / 100) * circ;
 
