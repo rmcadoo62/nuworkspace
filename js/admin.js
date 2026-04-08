@@ -156,7 +156,7 @@ function openSetupPanel(el) {
   if (can('view_setup') || isManager()) tiles.push(tile('&#x2705;','Approvals','Review and approve pending timesheet submissions.',"openApprovalsPanel(document.getElementById('navSetup'))"));
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F4E5;','Import Salesforce','Import accounts and contacts from a Salesforce CSV export.',"openSfImportPanel(document.getElementById('navSetup'))"));
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F9F9;','Merge Duplicate Clients','Find and merge client records with similar names.',"openMergeClientsPanel(document.getElementById('navSetup'))"));
-  if (can('view_setup') || isManager()) tiles.push(tile('&#x1F4C5;','Scheduler Settings','Configure block colors and employee scheduler access.',"openSchedSettingsPanel()"));
+  if (can('manage_permissions')) tiles.push(tile('&#x1F4C5;','Scheduler Settings','Configure block colors and employee scheduler access.',"openSchedSettingsPanel()"));
 
   const grid = document.getElementById('setupTilesGrid');
   if (grid) grid.innerHTML = tiles.join('') || '<div style="color:var(--muted);font-size:13px">No setup options available for your role.</div>';
