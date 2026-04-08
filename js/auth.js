@@ -710,12 +710,13 @@ function updateTsStatusBadge(key) {
 // ===== AUTH FUNCTIONS =====
 // ===== AUTH FUNCTIONS =====
 async function doLogin() {
+  const btn = document.getElementById('loginBtn');
+  if (btn.disabled) return; // prevent double-submission from rapid Enter presses
+  btn.disabled = true; btn.textContent = 'Signing in…';
   const email = document.getElementById('loginEmail').value.trim();
   const pass  = document.getElementById('loginPassword').value;
-  const btn   = document.getElementById('loginBtn');
   const err   = document.getElementById('loginError');
-  if (!email || !pass) { err.textContent = 'Please enter email and password.'; return; }
-  btn.disabled = true; btn.textContent = 'Signing in…';
+  if (!email || !pass) { err.textContent = 'Please enter email and password.'; btn.disabled = false; btn.textContent = 'Sign In'; return; }
   err.textContent = '';
   const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
   if (error) {
@@ -846,6 +847,7 @@ async function doLogout() {
     }
   }
   await sb.auth.signOut();
+  window._realtimeActive = false; // allow re-subscription on next login
   currentUser = null; currentEmployee = null; isApprover = false; proxyEmployee = null; tsWeekOffset = 0;
   document.getElementById('appShell').style.display = 'none';
   document.getElementById('sidebarUserBadge').style.display = 'none';

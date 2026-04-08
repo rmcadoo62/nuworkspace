@@ -500,6 +500,8 @@ async function loadFullProjectTimesheets(projId) {
 // ===== REALTIME SUBSCRIPTIONS =====
 function setupRealtime() {
   if (!sb) return;
+  if (window._realtimeActive) return; // prevent double-subscription
+  window._realtimeActive = true;
 
   // Helper: re-render whichever panel is currently visible
   function refreshCurrentView() {
@@ -641,7 +643,23 @@ function setupRealtime() {
     })
     .subscribe();
 
-  console.log('✓ Realtime subscriptions active (projects, project_info, tasks, schedule_blocks)');
+  // ── CHATTER_NOTIFS (live bell for current user) ───────────────────────────
+  const _myEmpId = currentEmployee?.id;
+  if (_myEmpId) {
+    sb.channel('rt-chatter-notifs')
+      .on('postgres_changes', {
+        event:  'INSERT',
+        schema: 'public',
+        table:  'chatter_notifs',
+      }, (payload) => {
+        if (payload.new?.employee_id === _myEmpId) {
+          loadNotifs();
+        }
+      })
+      .subscribe();
+  }
+
+  console.log('✓ Realtime subscriptions active (projects, project_info, tasks, schedule_blocks, chatter_notifs)');
 }
 
 // Re-render the scheduler if it's currently visible
