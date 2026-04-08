@@ -3453,5 +3453,121 @@ async function syncProjActualHours(projId) {
   } catch(e) { console.warn('syncProjActualHours update error:', e); }
 }
 
+// ── ACTIVITY PANEL ─────────────────────────────────────────────────────────
+async function renderActivityPanel(projId) {
+  const el = document.getElementById('activityPanelBody');
+  if (!el) return;
+  el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">Loading activity...</div>';
+
+  // Collect task IDs and shipping article IDs for this project
+  const taskIds     = taskStore.filter(t => t.proj === projId).map(t => t._id);
+  const articleIds  = (typeof articleStore !== 'undefined' ? articleStore : [])
+                        .filter(a => a.projId === projId).map(a => a.id);
+
+  // Build all relevant record IDs
+  const allIds = [projId, ...taskIds, ...articleIds];
+
+  // Use cached logs if already fetched (filter button click), otherwise fetch
+  let logs = [];
+  if (el._cachedLogs && el._cachedProjId === projId) {
+    logs = el._cachedLogs;
+  } else if (sb) {
+    const { data } = await sb.from('activity_log')
+      .select('*')
+      .in('record_id', allIds)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    logs = data || [];
+    el._cachedLogs   = logs;
+    el._cachedProjId = projId;
+  }
+
+  // Friendly labels
+  const typeLabel = { tasks: 'Task', projects: 'Project', shipping: 'Shipping' };
+  const fieldLabel = {
+    status:       'Status Changed',
+    fixed_price:  'Price Changed',
+    assignee:     'Assignee Changed',
+    revenue_type: 'Revenue Type Changed',
+  };
+  const fmtAction = (row) => {
+    const fc = row.field_changed || '';
+    if (fc.startsWith('Task Created')) return 'Task Created';
+    if (fc.startsWith('Project Created')) return 'Project Created';
+    return fieldLabel[fc] || fc;
+  };
+  const fmtDetail = (row) => {
+    if (row.old_value && row.new_value) return `${row.old_value} → ${row.new_value}`;
+    if (row.new_value) return row.new_value;
+    return '';
+  };
+  const fmtTime = ts => new Date(ts).toLocaleDateString('en-US', {
+    month:'short', day:'numeric', year:'numeric',
+    hour:'numeric', minute:'2-digit'
+  });
+
+  // Active filter state — store on element to persist during re-renders
+  const activeFilter = el.dataset.filter || 'all';
+
+  const renderList = (filter) => {
+    el.dataset.filter = filter;
+    const filtered = filter === 'all' ? logs : logs.filter(r => r.record_type === filter);
+
+    const tabs = ['all','tasks','projects','shipping'].map(f => {
+      const labels = { all:'All', tasks:'Tasks', projects:'Project', shipping:'Shipping' };
+      const active = filter === f;
+      return `<button onclick="(function(el){el.dataset.filter='${f}';renderActivityPanel('${projId}')})(document.getElementById('activityPanelBody'))"
+        style="padding:5px 14px;border-radius:20px;border:1px solid ${active?'var(--amber)':'var(--border)'};
+        background:${active?'var(--amber)':'transparent'};color:${active?'#fff':'var(--text)'};
+        font-size:12px;font-weight:${active?'700':'400'};cursor:pointer">${labels[f]}</button>`;
+    }).join('');
+
+    const headerHtml = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:10px">
+        <div style="font-size:14px;font-weight:700;color:var(--text)">📋 Recent Activity <span style="font-size:11px;font-weight:400;color:var(--muted)">(last 50)</span></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${tabs}</div>
+      </div>`;
+
+    if (!filtered.length) {
+      el.innerHTML = headerHtml + '<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:28px;margin-bottom:10px">📋</div><div>No activity found.</div></div>';
+      return;
+    }
+
+    const rows = filtered.map(r => {
+      const action = fmtAction(r);
+      const detail = fmtDetail(r);
+      const badge = typeLabel[r.record_type] || r.record_type;
+      const badgeColor = r.record_type === 'tasks' ? 'var(--blue)' : r.record_type === 'shipping' ? 'var(--green)' : 'var(--amber)';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:9px 14px;font-size:11px;color:var(--muted);white-space:nowrap">${fmtTime(r.created_at)}</td>
+        <td style="padding:9px 14px;font-size:12px;font-weight:600;color:var(--text)">${r.employee_name||'—'}</td>
+        <td style="padding:9px 14px">
+          <span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:${badgeColor}22;color:${badgeColor}">${badge}</span>
+        </td>
+        <td style="padding:9px 14px;font-size:12px;color:var(--text)">${r.record_label||'—'}</td>
+        <td style="padding:9px 14px;font-size:12px;color:var(--text)">${action}</td>
+        <td style="padding:9px 14px;font-size:11px;color:var(--muted)">${detail}</td>
+      </tr>`;
+    }).join('');
+
+    el.innerHTML = headerHtml + `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead><tr style="border-bottom:2px solid var(--border)">
+            <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">When</th>
+            <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Who</th>
+            <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Type</th>
+            <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Record</th>
+            <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Action</th>
+            <th style="text-align:left;padding:9px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Detail</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  };
+
+  renderList(activeFilter);
+}
+
 
 
