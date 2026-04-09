@@ -189,6 +189,8 @@ function renderProjectsTable() {
   if (navFilter.status.size > 0 || navFilter.phase.size > 0) {
     filtered = filtered.filter(p => {
       const info = projectInfo[p.id] || {};
+      // Never filter out closed projects via status filter when showClosed is on
+      if (showClosed && (info.status || 'active') === 'closed') return true;
       const statusMatch = navFilter.status.size === 0 || navFilter.status.has(info.status || 'active');
       const phaseMatch  = navFilter.phase.size  === 0 || navFilter.phase.has(info.phase  || '');
       return statusMatch && phaseMatch;
