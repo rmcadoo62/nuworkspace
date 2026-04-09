@@ -1433,31 +1433,55 @@ function hideSchedTooltip() {
 
 // ---- Legend ----
 function renderSchedLegend() {
-  const el = document.getElementById('schedLegend');
-  if (!el) return;
-  const rowsInUse = [...new Set(schedBlocks.map(b => b.rowId || b.cat))];
-  if (rowsInUse.length === 0) {
-    el.innerHTML = '<span style="font-size:11px;color:var(--muted);padding:0 4px">No blocks scheduled yet</span>';
-    return;
-  }
-  el.innerHTML = rowsInUse.map(rid => {
-    const repBlock = schedBlocks.find(b => (b.rowId||b.cat) === rid) || { rowId: rid, cat: rowCat(rid) };
-    const color = resolveBlockColor(repBlock);
-    // Employee rows: rid = 'emp_<uuid>' — look up actual name
-    let lbl;
-    if (rid.startsWith('emp_')) {
-      const empId = rid.slice(4);
-      const emp = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === empId);
-      lbl = emp ? emp.name : 'Employee';
-    } else {
-      lbl = rowLabel(rid);
-    }
-    return `<div style="display:flex;align-items:center;gap:5px;padding:2px 8px;background:var(--surface2);border-radius:5px;border:1px solid var(--border)">
-      <div style="width:8px;height:8px;border-radius:50%;background:${color}"></div>
-      <span style="font-size:11px;">${lbl}</span>
-    </div>`;
-  }).join('');
+  // No-op — legend is now a popup via openSchedLegend()
 }
+
+// ---- Legend popup ----
+window.openSchedLegend = function() {
+  const popup = document.getElementById('schedLegendPopup');
+  const body  = document.getElementById('schedLegendBody');
+  if (!popup || !body) return;
+
+  function swatch(color, label) {
+    return `<div class="sched-legend-item">
+      <div class="sched-legend-swatch" style="background:${color}"></div>
+      <span class="sched-legend-label">${label}</span>
+    </div>`;
+  }
+  function section(title, items) {
+    return `<div class="sched-legend-section">
+      <div class="sched-legend-section-title">${title}</div>
+      <div class="sched-legend-items">${items}</div>
+    </div>`;
+  }
+
+  const overrideItems = [
+    swatch(sc('reschedule'),       'Reschedule'),
+    swatch(sc('tentative'),        'Tentative'),
+    swatch(sc('setup'),            'Setup'),
+    swatch(sc('teardown'),         'Teardown'),
+    swatch(sc('dcas_no_wit_yes'),  'No DCAS / Witness Yes'),
+    swatch(sc('dcas_yes_wit_no'),  'DCAS Yes / No Witness'),
+    swatch(sc('dcas_yes_wit_yes'), 'DCAS Yes / Witness Yes'),
+  ].join('');
+
+  const empItems = [
+    swatch('#43a047', 'Vacation'),
+    swatch('#e91e9e', 'Sick'),
+    swatch('#3a7fd4', 'Working'),
+  ].join('');
+
+  body.innerHTML =
+    section('Status Overrides', overrideItems) +
+    section('Employee Events', empItems);
+
+  popup.classList.add('open');
+};
+
+window.closeSchedLegend = function() {
+  const popup = document.getElementById('schedLegendPopup');
+  if (popup) popup.classList.remove('open');
+};
 
 // ---- Navigation ----
 window.schedNav = function(dir) {
@@ -1479,7 +1503,10 @@ window.setSchedZoom = function(z, btn) {
 
 // ---- Modal ----
 window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) {
-  schedSelectedCat    = preselCat || null;
+  // For new blocks: use preselCat if given, keep existing selection, or default to first room
+  if (!blockId) {
+    schedSelectedCat = preselCat || schedSelectedCat || SCHED_ROWS[0].rowId;
+  }
   schedSelectedProjId = null;
 
   document.getElementById('schedEditId').value = blockId || '';
@@ -1577,16 +1604,23 @@ window.closeSchedModal = function() {
 };
 
 function renderSchedCatList() {
-  const sel = document.getElementById('schedRoomSelect');
-  if (!sel) return;
-  sel.innerHTML = '<option value="">— select room —</option>' +
-    SCHED_ROWS.map(row =>
-      `<option value="${row.rowId}"${row.rowId === schedSelectedCat ? ' selected' : ''}>${row.label}</option>`
-    ).join('');
+  const el = document.getElementById('schedProjList');
+  if (!el) return;
+  el.innerHTML = SCHED_ROWS.map(row => {
+    const color    = getCatColor(row.cat);
+    const selected = row.rowId === schedSelectedCat;
+    return `<div class="sched-proj-opt${selected ? ' selected' : ''}"
+      onmousedown="event.preventDefault();window.selectSchedCat('${row.rowId}')">
+      <div class="sched-proj-opt-dot" style="background:${color}"></div>
+      <span class="sched-proj-opt-name">${row.label}</span>
+      <span class="sched-proj-opt-check">&#x2713;</span>
+    </div>`;
+  }).join('');
 }
 
 window.selectSchedCat = function(cat) {
   schedSelectedCat = cat || null;
+  renderSchedCatList(); // refresh checkmark
 };
 
 // ---- Project picker in modal ----
@@ -1800,7 +1834,6 @@ function _doSaveSchedBlock() {
 
   // Read room selection from dropdown
   if (!_isEmpBlock) {
-    schedSelectedCat = document.getElementById('schedRoomSelect')?.value || null;
   }
   // DCAS override takes precedence over schedFlag if set
   const _dcasOv = document.getElementById('schedDcasOverride')?.value || null;
@@ -1886,6 +1919,7 @@ window.setSchedView = function(v, btn) {
     if (ganttZoom)   ganttZoom.style.display    = 'none';
     if (calView)     calView.style.display      = 'block';
     if (schedZoom !== 'month') { schedZoom = 'month'; schedOffset = 0; }
+    closeSchedLegend();
     renderSchedCalendar();
   } else {
     if (ganttBody)   ganttBody.style.display   = '';
@@ -2068,6 +2102,13 @@ window.addEventListener('resize', () => {
   }
 });
 
+// Expose renderSched and schedView so supabase-client.js _schedRerender() can reach them
+window.renderSched = renderSched;
+Object.defineProperty(window, 'schedView', {
+  get: function() { return schedView; },
+  set: function(v) { schedView = v; },
+});
+
 // Expose realtime mutation handlers so supabase-client.js can update schedBlocks
 // without needing direct access to the IIFE-scoped variable
 window.schedRealtimeInsert = function(row) {
@@ -2098,5 +2139,4 @@ window.schedAddBlock       = function(block) {
 };
 
 })(); // end scheduler IIFE
-
 
