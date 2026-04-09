@@ -1460,8 +1460,9 @@ window.openSchedLegend = function() {
     swatch(sc('tentative'),        'Tentative'),
     swatch(sc('setup'),            'Setup'),
     swatch(sc('teardown'),         'Teardown'),
-    swatch(sc('dcas_no_wit_yes'),  'No DCAS / Witness Yes'),
-    swatch(sc('dcas_yes_wit_no'),  'DCAS Yes / No Witness'),
+    swatch(sc('dcas_no_wit_no'),   'DCAS No / Witness No'),
+    swatch(sc('dcas_no_wit_yes'),  'DCAS No / Witness Yes'),
+    swatch(sc('dcas_yes_wit_no'),  'DCAS Yes / Witness No'),
     swatch(sc('dcas_yes_wit_yes'), 'DCAS Yes / Witness Yes'),
   ].join('');
 
