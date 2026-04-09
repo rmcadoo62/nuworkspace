@@ -2433,14 +2433,14 @@ function renderExpensesSection(projId) {
           onkeydown="if(event.key==='Enter')this.blur()" />
       </div>
       <div class="expense-cell" style="justify-content:flex-end">
-        <input class="expense-amt-input" type="text" inputmode="decimal" value="${e.planned||''}" placeholder="0.00"
+        <input class="expense-amt-input" type="text" inputmode="decimal" value="${e.planned != null && e.planned !== 0 ? parseFloat(e.planned).toFixed(2) : ''}" placeholder="0.00"
           onfocus="this.select()"
           onblur="saveExpenseField('${e._id}','${projId}',\'planned\',this.value)"
           onkeydown="if(event.key==='Enter')this.blur()"
           oninput="this.value=this.value.replace(/[^0-9.]/g,'')" />
       </div>
       <div class="expense-cell" style="justify-content:flex-end">
-        <input class="expense-amt-input" type="text" inputmode="decimal" value="${e.actual||''}" placeholder="0.00"
+        <input class="expense-amt-input" type="text" inputmode="decimal" value="${e.actual != null && e.actual !== 0 ? parseFloat(e.actual).toFixed(2) : ''}" placeholder="0.00"
           style="${(e.actual||0) > (e.planned||0) && (e.planned||0) > 0 ? 'color:var(--red)' : ''}"
           onfocus="this.select()"
           onblur="saveExpenseField('${e._id}','${projId}',\'actual\',this.value)"
@@ -3309,7 +3309,7 @@ function renderExpensesPanel(projId) {
       <td style="padding:8px 12px;text-align:right;white-space:nowrap">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:2px">
           <span style="font-size:11px;color:var(--muted)">$</span>
-          <input class="expense-amt-input" type="number" min="0" step="0.01" value="${e.planned||''}" placeholder="0.00"
+          <input class="expense-amt-input" type="number" min="0" step="0.01" value="${e.planned != null && e.planned !== 0 ? parseFloat(e.planned).toFixed(2) : ''}" placeholder="0.00"
             style="text-align:right;width:90px"
             onfocus="this.select()"
             onblur="saveExpenseField('${e._id}','${projId}','planned',this.value)"
@@ -3319,7 +3319,7 @@ function renderExpensesPanel(projId) {
       <td style="padding:8px 12px;text-align:right;white-space:nowrap">
         <div style="display:flex;align-items:center;justify-content:flex-end;gap:2px">
           <span style="font-size:11px;color:${ovr?'var(--red)':'var(--muted)'}">$</span>
-          <input class="expense-amt-input" type="number" min="0" step="0.01" value="${e.actual||''}" placeholder="0.00"
+          <input class="expense-amt-input" type="number" min="0" step="0.01" value="${e.actual != null && e.actual !== 0 ? parseFloat(e.actual).toFixed(2) : ''}" placeholder="0.00"
             style="text-align:right;width:90px;${ovr?'color:var(--red)':''}"
             onfocus="this.select()"
             onblur="saveExpenseField('${e._id}','${projId}','actual',this.value)"
