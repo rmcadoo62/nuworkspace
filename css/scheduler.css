@@ -111,3 +111,15 @@
 .sched-cal-day.holiday-day{background:rgba(0,210,80,0.10);}
 .sched-cal-day.holiday-day .sched-cal-daynum{color:#00a844;font-weight:700;}
 .sched-cal-holiday-tag{font-size:9.5px;font-weight:700;color:#00a844;padding:1px 5px;background:rgba(0,210,80,0.15);border-radius:3px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+/* ===== SCHEDULER STATS BAR ===== */
+.sched-stats-bar{display:flex;gap:12px;padding:8px 20px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;}
+.sched-stat-bubble{background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 16px;display:flex;flex-direction:column;gap:5px;min-width:220px;}
+.sched-stat-label{font-size:9.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);}
+.sched-stat-nums{display:flex;align-items:baseline;gap:4px;}
+.sched-stat-booked{font-size:20px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1;}
+.sched-stat-sep{font-size:14px;color:var(--muted);}
+.sched-stat-avail{font-size:14px;font-family:'DM Serif Display',serif;color:var(--muted);}
+.sched-stat-unit{font-size:10px;font-weight:500;color:var(--muted);font-family:'DM Sans',sans-serif;margin-left:4px;}
+.sched-stat-pct{font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-left:auto;}
+.sched-stat-track{height:3px;background:var(--border);border-radius:2px;overflow:hidden;}
+.sched-stat-fill{height:100%;border-radius:2px;transition:width .4s ease;}

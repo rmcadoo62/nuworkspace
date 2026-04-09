@@ -901,6 +901,99 @@ function renderSched() {
 
   syncSchedScroll();
   renderSchedLegend();
+  renderSchedStats();
+}
+
+// ---- Equipment utilization stats bar ----
+function renderSchedStats() {
+  const el = document.getElementById('schedStatsBar');
+  if (!el) return;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  // Current week: Mon-Fri
+  const diffToMon = (today.getDay() + 6) % 7;
+  const weekMon = addDays(today, -diffToMon);
+  const weekFri = addDays(weekMon, 4);
+
+  // Current calendar month
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const monthEnd   = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+
+  // Count weekdays between two Date objects (inclusive)
+  function countWeekdays(start, end) {
+    let n = 0;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dw = d.getDay();
+      if (dw !== 0 && dw !== 6) n++;
+    }
+    return n;
+  }
+
+  // Weekdays a block overlaps with a date range
+  function blockDaysInRange(block, rangeStart, rangeEnd) {
+    const bS = parseDate(block.start);
+    const bE = parseDate(block.end);
+    const s  = bS > rangeStart ? bS : rangeStart;
+    const e  = bE < rangeEnd   ? bE : rangeEnd;
+    if (s > e) return 0;
+    return countWeekdays(s, e);
+  }
+
+  // Equipment-only blocks (exclude employee rows)
+  const equipBlocks = schedBlocks.filter(b =>
+    !b.empId && !(b.rowId || '').startsWith('emp_')
+  );
+
+  // Next calendar month
+  const nextMonthStart = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+  const nextMonthEnd   = new Date(today.getFullYear(), today.getMonth() + 2, 0);
+
+  let weekBooked = 0, monthBooked = 0, nextMonthBooked = 0;
+  equipBlocks.forEach(b => {
+    weekBooked      += blockDaysInRange(b, weekMon,       weekFri);
+    monthBooked     += blockDaysInRange(b, monthStart,    monthEnd);
+    nextMonthBooked += blockDaysInRange(b, nextMonthStart, nextMonthEnd);
+  });
+
+  const TECHS          = 7;
+  const weekAvail      = TECHS * 5;
+  const monthAvail     = TECHS * countWeekdays(monthStart,    monthEnd);
+  const nextMonthAvail = TECHS * countWeekdays(nextMonthStart, nextMonthEnd);
+
+  const weekPct      = weekAvail      > 0 ? Math.round(weekBooked      / weekAvail      * 100) : 0;
+  const monthPct     = monthAvail     > 0 ? Math.round(monthBooked     / monthAvail     * 100) : 0;
+  const nextMonthPct = nextMonthAvail > 0 ? Math.round(nextMonthBooked / nextMonthAvail * 100) : 0;
+
+  const monthName     = today.toLocaleString('default', { month: 'long' });
+  const nextMonthName = nextMonthStart.toLocaleString('default', { month: 'long' });
+
+  function pctColor(pct) {
+    if (pct >= 90) return '#e53935';
+    if (pct >= 70) return 'var(--amber)';
+    return 'var(--muted)';
+  }
+
+  function bubble(label, booked, avail, pct) {
+    const clr  = pctColor(pct);
+    const fill = Math.min(pct, 100);
+    return `<div class="sched-stat-bubble">
+      <div class="sched-stat-label">${label}</div>
+      <div class="sched-stat-nums">
+        <span class="sched-stat-booked">${booked}</span>
+        <span class="sched-stat-sep"> / </span>
+        <span class="sched-stat-avail">${avail}</span>
+        <span class="sched-stat-unit">equip-days</span>
+        <span class="sched-stat-pct" style="color:${clr}">${pct}%</span>
+      </div>
+      <div class="sched-stat-track"><div class="sched-stat-fill" style="width:${fill}%;background:${clr}"></div></div>
+    </div>`;
+  }
+
+  el.innerHTML =
+    bubble('This Week',  weekBooked,      weekAvail,      weekPct) +
+    bubble(monthName,    monthBooked,     monthAvail,     monthPct) +
+    bubble(nextMonthName, nextMonthBooked, nextMonthAvail, nextMonthPct);
 }
 
 // ---- Canvas drag-to-create ----
