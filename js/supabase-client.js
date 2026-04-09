@@ -328,6 +328,8 @@ async function loadAllData() {
     });
 
   } catch(e) { console.error('loadAllData', e); }
+  // project_info for ALL projects (open + closed) is loaded above — no need to reload on Show Closed
+  if (typeof closedProjectsLoaded !== 'undefined') closedProjectsLoaded = true;
   showAppLoader(false);
   bootApp();
 }

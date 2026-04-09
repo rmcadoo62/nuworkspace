@@ -602,13 +602,8 @@ function updateNavFilterDot() {
 }
 
 async function toggleShowClosed() {
-  // If turning on and closed not loaded yet, load them first
-  if (!showClosed && !closedProjectsLoaded) {
-    const btn = document.getElementById('showClosedBtn');
-    if (btn) { btn.innerHTML = '⏳ Loading...'; btn.disabled = true; }
-    await loadClosedProjects(null);
-    if (btn) { btn.disabled = false; }
-  }
+  // project_info for all projects (open + closed) is already loaded at startup
+  // tasks for closed projects load individually on demand when clicking into a project
   showClosed = !showClosed;
   // Clear col filters when toggling closed — DOM filter rows change so stale filters cause blank screen
   projColFilters = {};
