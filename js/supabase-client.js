@@ -625,22 +625,18 @@ function setupRealtime() {
     .subscribe();
 
   // ── SCHEDULE_BLOCKS ────────────────────────────────────────
+  // schedBlocks lives inside the scheduler IIFE — use the exposed window handlers
   sb.channel('rt-schedule-blocks')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'schedule_blocks' }, payload => {
-      const blk = schedRowToBlock(payload.new);
-      if (!schedBlocks.find(b => b.id === blk.id)) {
-        schedBlocks.push(blk);
-        _schedRerender();
-      }
+      if (typeof window.schedRealtimeInsert === 'function') window.schedRealtimeInsert(payload.new);
+      _schedRerender();
     })
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'schedule_blocks' }, payload => {
-      const blk = schedRowToBlock(payload.new);
-      const idx = schedBlocks.findIndex(b => b.id === blk.id);
-      if (idx >= 0) schedBlocks[idx] = blk; else schedBlocks.push(blk);
+      if (typeof window.schedRealtimeUpdate === 'function') window.schedRealtimeUpdate(payload.new);
       _schedRerender();
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'schedule_blocks' }, payload => {
-      schedBlocks = schedBlocks.filter(b => b.id !== payload.old.id);
+      if (typeof window.schedRealtimeDelete === 'function') window.schedRealtimeDelete(payload.old);
       _schedRerender();
     })
     .subscribe();

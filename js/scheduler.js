@@ -2068,6 +2068,21 @@ window.addEventListener('resize', () => {
   }
 });
 
+// Expose realtime mutation handlers so supabase-client.js can update schedBlocks
+// without needing direct access to the IIFE-scoped variable
+window.schedRealtimeInsert = function(row) {
+  const blk = schedRowToBlock(row);
+  if (!schedBlocks.find(b => b.id === blk.id)) schedBlocks.push(blk);
+};
+window.schedRealtimeUpdate = function(row) {
+  const blk = schedRowToBlock(row);
+  const idx = schedBlocks.findIndex(b => b.id === blk.id);
+  if (idx >= 0) schedBlocks[idx] = blk; else schedBlocks.push(blk);
+};
+window.schedRealtimeDelete = function(oldRow) {
+  schedBlocks = schedBlocks.filter(b => b.id !== oldRow.id);
+};
+
 // Expose scheduler-settings helpers to global scope
 window.sc                  = sc;
 window.loadSchedSettings   = loadSchedSettings;
