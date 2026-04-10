@@ -331,15 +331,15 @@
           </div>
           <button class="sched-today-btn" onclick="schedGoToday()">Today</button>
           <div class="sched-zoom-group" id="schedGanttZoomGroup">
-            <button class="sched-zoom-btn" id="schedZoom1Week" onclick="setSchedZoom('1week',this)">1 Week</button>
-            <button class="sched-zoom-btn active" id="schedZoomWeek" onclick="setSchedZoom('week',this)">2 Weeks</button>
-            <button class="sched-zoom-btn" id="schedZoomMonth" onclick="setSchedZoom('month',this)">Month</button>
-            <button class="sched-zoom-btn" id="schedZoomQuarter" onclick="setSchedZoom('quarter',this)">Quarter</button>
+            <button class="sched-zoom-btn" id="schedZoom1Week" onclick="setSchedZoom('1week',this)" title="1 Week">1W</button>
+            <button class="sched-zoom-btn active" id="schedZoomWeek" onclick="setSchedZoom('week',this)" title="2 Weeks">2W</button>
+            <button class="sched-zoom-btn" id="schedZoomMonth" onclick="setSchedZoom('month',this)" title="Month">M</button>
+            <button class="sched-zoom-btn" id="schedZoomQuarter" onclick="setSchedZoom('quarter',this)" title="Quarter">Q</button>
           </div>
           <div style="width:1px;height:22px;background:var(--border);flex-shrink:0"></div>
           <div class="sched-zoom-group">
-            <button class="sched-zoom-btn" id="schedViewGantt" onclick="setSchedView('gantt',this)">&#x1F4CA; Gantt</button>
-            <button class="sched-zoom-btn" id="schedViewCal" onclick="setSchedView('calendar',this)">&#x1F4C5; Calendar</button>
+            <button class="sched-zoom-btn" id="schedViewGantt" onclick="setSchedView('gantt',this)" title="Gantt view">&#x1F4CA;</button>
+            <button class="sched-zoom-btn" id="schedViewCal" onclick="setSchedView('calendar',this)" title="Calendar view">&#x1F4C5;</button>
           </div>
           <div style="width:1px;height:22px;background:var(--border);flex-shrink:0"></div>
           <button class="sched-toggle on" id="schedToggleRooms" onclick="toggleSchedSection('rooms',this)" title="Show/hide lab rooms">
@@ -348,11 +348,18 @@
           <button class="sched-toggle on" id="schedToggleEmps" onclick="toggleSchedSection('employees',this)" title="Show/hide employees">
             <span class="sched-toggle-dot"></span> Employees
           </button>
-          <button class="sched-legend-btn" onclick="openSchedLegend()">&#x1F3A8; Legend</button>
+          <button class="sched-icon-btn" onclick="openSchedStats()" title="Utilization">&#x1F4C8;</button>
+          <button class="sched-icon-btn" onclick="openSchedLegend()" title="Color legend">&#x1F3A8;</button>
           <button class="sched-add-btn" onclick="openSchedModal()">+ Schedule Block</button>
         </div>
-        <!-- stats bar -->
-        <div class="sched-stats-bar" id="schedStatsBar"></div>
+        <!-- stats popup -->
+        <div class="sched-stats-popup" id="schedStatsPopup">
+          <div class="sched-legend-popup-hdr">
+            <span class="sched-legend-popup-title">&#x1F4C8; Utilization</span>
+            <button class="sched-legend-popup-close" onclick="closeSchedStats()">&#x2715;</button>
+          </div>
+          <div class="sched-stats-popup-body" id="schedStatsBar"></div>
+        </div>
         <!-- body -->
         <div class="sched-body">
           <div class="sched-sidebar">

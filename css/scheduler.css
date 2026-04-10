@@ -112,21 +112,24 @@
 .sched-cal-day.holiday-day .sched-cal-daynum{color:#00a844;font-weight:700;}
 .sched-cal-holiday-tag{font-size:9.5px;font-weight:700;color:#00a844;padding:1px 5px;background:rgba(0,210,80,0.15);border-radius:3px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 /* ===== SCHEDULER STATS BAR ===== */
-.sched-stats-bar{display:flex;gap:12px;padding:8px 20px;background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;}
-.sched-stat-bubble{background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 16px;display:flex;flex-direction:column;gap:5px;min-width:220px;}
+.sched-icon-btn{padding:5px 9px;border-radius:7px;background:transparent;border:1.5px solid var(--border);color:var(--muted);font-size:14px;cursor:pointer;transition:all var(--transition);line-height:1;}
+.sched-icon-btn:hover{border-color:var(--amber-dim);color:var(--amber);}
+.sched-stats-popup{position:absolute;top:52px;right:20px;width:420px;background:var(--surface);border:1.5px solid var(--border);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,0.45);z-index:200;display:flex;flex-direction:column;opacity:0;pointer-events:none;transform:translateY(-8px);transition:opacity .18s ease,transform .18s ease;}
+.sched-stats-popup.open{opacity:1;pointer-events:all;transform:none;}
+.sched-stats-popup-body{display:flex;gap:10px;padding:12px 16px;flex-wrap:wrap;}
+.sched-stat-bubble{background:var(--surface2);border:1.5px solid var(--border);border-radius:10px;padding:10px 14px;display:flex;flex-direction:column;gap:5px;flex:1;min-width:110px;}
 .sched-stat-label{font-size:9.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);}
-.sched-stat-nums{display:flex;align-items:baseline;gap:4px;}
-.sched-stat-booked{font-size:20px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1;}
-.sched-stat-sep{font-size:14px;color:var(--muted);}
-.sched-stat-avail{font-size:14px;font-family:'DM Serif Display',serif;color:var(--muted);}
-.sched-stat-unit{font-size:10px;font-weight:500;color:var(--muted);font-family:'DM Sans',sans-serif;margin-left:4px;}
+.sched-stat-nums{display:flex;align-items:baseline;gap:3px;flex-wrap:wrap;}
+.sched-stat-booked{font-size:18px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1;}
+.sched-stat-sep{font-size:13px;color:var(--muted);}
+.sched-stat-avail{font-size:13px;font-family:'DM Serif Display',serif;color:var(--muted);}
+.sched-stat-unit{font-size:9px;font-weight:500;color:var(--muted);font-family:'DM Sans',sans-serif;margin-left:3px;}
 .sched-stat-pct{font-size:11px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-left:auto;}
 .sched-stat-track{height:3px;background:var(--border);border-radius:2px;overflow:hidden;}
 .sched-stat-fill{height:100%;border-radius:2px;transition:width .4s ease;}
 
 /* ===== SCHEDULER LEGEND POPUP ===== */
-.sched-legend-btn{padding:5px 13px;border-radius:7px;background:transparent;border:1.5px solid var(--border);color:var(--muted);font-size:12px;font-weight:500;cursor:pointer;transition:all var(--transition);font-family:'DM Sans',sans-serif;}
-.sched-legend-btn:hover{border-color:var(--amber-dim);color:var(--amber);}
+
 .sched-legend-popup{position:absolute;top:60px;right:20px;width:340px;max-height:calc(100vh - 120px);background:var(--surface);border:1.5px solid var(--border);border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,0.45);z-index:200;display:flex;flex-direction:column;opacity:0;pointer-events:none;transform:translateY(-8px);transition:opacity .18s ease,transform .18s ease;}
 .sched-legend-popup.open{opacity:1;pointer-events:all;transform:none;}
 .sched-legend-popup-hdr{display:flex;align-items:center;padding:14px 16px 10px;border-bottom:1px solid var(--border);flex-shrink:0;}

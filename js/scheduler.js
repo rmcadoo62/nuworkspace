@@ -270,8 +270,8 @@ function getEffectiveDayW(zoom, days) {
 }
 
 // Row/bar sizing constants
-const ROW_H_FIXED  = 64;   // 2-week, month, quarter rows
-const BAR_H_FIXED  = 52;
+const ROW_H_FIXED  = 32;   // 2-week, month, quarter rows
+const BAR_H_FIXED  = 24;
 // Hour grid constants live inside renderSched for 1-week view
 
 // ---- Persistence (Supabase) ----
@@ -498,7 +498,7 @@ function renderSched() {
   const rows        = allRows; // includes rooms, divider, employees
   const rangeStartStr = toDateStr(range.start);
   const rangeEndStr   = toDateStr(addDays(range.start, range.days - 1));
-  const totalH      = rows.length * rowH;
+  const totalH      = rows.length * rowH; // used for grid lines; dynamic heights applied after laneMap
 
   // ---- Day header ----
   const hdr = document.getElementById('schedDayHeader');
@@ -600,11 +600,90 @@ function renderSched() {
   const sidebarHead = document.getElementById('schedSidebarHead');
   if (sidebarHead) sidebarHead.style.height = (is1Week || is2Week) ? '60px' : '52px';
 
+  // ---- Lane assignment: detect overlapping blocks on the same row ----
+  // Blocks on the same row whose date (and time in 1-week) ranges overlap get
+  // stacked into sub-lanes so each bubble is individually visible.
+  function blocksOverlap(a, b) {
+    if (a.start > b.end || a.end < b.start) return false;
+    // Same date range — if both have times, check time overlap too
+    if (is1Week && a.startTime && a.endTime && b.startTime && b.endTime) {
+      return a.startTime < b.endTime && a.endTime > b.startTime;
+    }
+    return true;
+  }
+
+  const laneMap = {}; // blockId → { lane, laneCount }
+  {
+    // Group visible blocks by rowId
+    const byRow = {};
+    schedBlocks.forEach(b => {
+      if (b.start > rangeEndStr || b.end < rangeStartStr) return;
+      const rid = b.rowId || b.cat;
+      if (!byRow[rid]) byRow[rid] = [];
+      byRow[rid].push(b);
+    });
+
+    Object.values(byRow).forEach(rowBlocks => {
+      // Sort by start date for greedy lane assignment
+      const sorted = [...rowBlocks].sort((a, b) => a.start.localeCompare(b.start));
+      // lanes[i] = last block assigned to lane i
+      const lanes = [];
+      const assigned = {};
+      sorted.forEach(b => {
+        let placed = false;
+        for (let i = 0; i < lanes.length; i++) {
+          if (!blocksOverlap(lanes[i], b)) {
+            lanes[i] = b;
+            assigned[b.id] = i;
+            placed = true;
+            break;
+          }
+        }
+        if (!placed) {
+          assigned[b.id] = lanes.length;
+          lanes.push(b);
+        }
+      });
+      // Per-block LOCAL laneCount: max lane index among this block + its direct overlaps.
+      // This means non-overlapping blocks in the same row stay full-height while
+      // overlapping groups correctly share the row height.
+      rowBlocks.forEach(b => {
+        const myLane = assigned[b.id] ?? 0;
+        let localMax = myLane;
+        rowBlocks.forEach(other => {
+          if (other.id !== b.id && blocksOverlap(b, other)) {
+            localMax = Math.max(localMax, assigned[other.id] ?? 0);
+          }
+        });
+        laneMap[b.id] = { lane: myLane, laneCount: localMax + 1 };
+      });
+    });
+  }
+
+  // ---- Dynamic row heights based on max lane count per row ----
+  const maxLanesPerRow = {};
+  Object.entries(laneMap).forEach(([blockId, { laneCount }]) => {
+    const block = schedBlocks.find(b => b.id === blockId);
+    if (!block) return;
+    const rid = block.rowId || block.cat;
+    maxLanesPerRow[rid] = Math.max(maxLanesPerRow[rid] || 1, laneCount);
+  });
+  const rowHeights = rows.map(row => {
+    if (row.section === 'divider') return rowH;
+    const lanes = maxLanesPerRow[row.rowId] || 1;
+    return rowH * lanes;
+  });
+  const rowTops = [];
+  let _top = 0;
+  rowHeights.forEach(h => { rowTops.push(_top); _top += h; });
+  const totalHDynamic = _top;
+
   const labelsEl = document.getElementById('schedRowLabels');
-  labelsEl.style.height = totalH + 'px';
-  labelsEl.innerHTML = rows.map(row => {
+  labelsEl.style.height = totalHDynamic + 'px';
+  labelsEl.innerHTML = rows.map((row, ri) => {
+    const rh = rowHeights[ri];
     if (row.section === 'divider') {
-      return `<div class="sched-sidebar-divider" style="height:${rowH}px"><span>${row.label}</span></div>`;
+      return `<div class="sched-sidebar-divider" style="height:${rh}px"><span>${row.label}</span></div>`;
     }
     const isEmp = row.section === 'employee';
     const color = isEmp ? (row.color || '#888') : getCatColor(row.cat);
@@ -612,7 +691,7 @@ function renderSched() {
     const dot = isEmp
       ? `<div style="width:26px;height:26px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0;">${row.initials||''}</div>`
       : `<div class="sched-asset-dot" style="background:${color}"></div>`;
-    return `<div class="sched-asset-row" style="height:${rowH}px" onclick="openSchedModal(null,'${row.rowId}')">
+    return `<div class="sched-asset-row" style="height:${rh}px" onclick="openSchedModal(null,'${row.rowId}')">
       ${dot}
       <div class="sched-asset-name" title="${row.label}">${row.label}</div>
       ${blockCount ? `<div class="sched-asset-badge">${blockCount}</div>` : ''}
@@ -622,7 +701,7 @@ function renderSched() {
   // ---- Canvas ----
   const canvas = document.getElementById('schedCanvas');
   canvas.style.width  = totalW + 'px';
-  canvas.style.height = totalH + 'px';
+  canvas.style.height = totalHDynamic + 'px';
   canvas.innerHTML = '';
 
   // Row backgrounds
@@ -631,14 +710,14 @@ function renderSched() {
       // Section header divider strip
       const div = document.createElement('div');
       div.className = 'sched-section-divider';
-      div.style.cssText = `top:${ri*rowH}px;height:${rowH}px;`;
+      div.style.cssText = `top:${rowTops[ri]}px;height:${rowHeights[ri]}px;`;
       div.innerHTML = `<span>${row.label}</span>`;
       canvas.appendChild(div);
       return;
     }
     const el = document.createElement('div');
     el.className = 'sched-grid-row' + (ri % 2 === 1 ? ' alt' : '');
-    el.style.cssText = `top:${ri*rowH}px;height:${rowH}px`;
+    el.style.cssText = `top:${rowTops[ri]}px;height:${rowHeights[ri]}px`;
     canvas.appendChild(el);
   });
 
@@ -722,65 +801,7 @@ function renderSched() {
     return Math.round(hrs * hourW);
   }
 
-  // ---- Lane assignment: detect overlapping blocks on the same row ----
-  // Blocks on the same row whose date (and time in 1-week) ranges overlap get
-  // stacked into sub-lanes so each bubble is individually visible.
-  function blocksOverlap(a, b) {
-    if (a.start > b.end || a.end < b.start) return false;
-    // Same date range — if both have times, check time overlap too
-    if (is1Week && a.startTime && a.endTime && b.startTime && b.endTime) {
-      return a.startTime < b.endTime && a.endTime > b.startTime;
-    }
-    return true;
-  }
 
-  const laneMap = {}; // blockId → { lane, laneCount }
-  {
-    // Group visible blocks by rowId
-    const byRow = {};
-    schedBlocks.forEach(b => {
-      if (b.start > rangeEndStr || b.end < rangeStartStr) return;
-      const rid = b.rowId || b.cat;
-      if (!byRow[rid]) byRow[rid] = [];
-      byRow[rid].push(b);
-    });
-
-    Object.values(byRow).forEach(rowBlocks => {
-      // Sort by start date for greedy lane assignment
-      const sorted = [...rowBlocks].sort((a, b) => a.start.localeCompare(b.start));
-      // lanes[i] = last block assigned to lane i
-      const lanes = [];
-      const assigned = {};
-      sorted.forEach(b => {
-        let placed = false;
-        for (let i = 0; i < lanes.length; i++) {
-          if (!blocksOverlap(lanes[i], b)) {
-            lanes[i] = b;
-            assigned[b.id] = i;
-            placed = true;
-            break;
-          }
-        }
-        if (!placed) {
-          assigned[b.id] = lanes.length;
-          lanes.push(b);
-        }
-      });
-      // Per-block LOCAL laneCount: max lane index among this block + its direct overlaps.
-      // This means non-overlapping blocks in the same row stay full-height while
-      // overlapping groups correctly share the row height.
-      rowBlocks.forEach(b => {
-        const myLane = assigned[b.id] ?? 0;
-        let localMax = myLane;
-        rowBlocks.forEach(other => {
-          if (other.id !== b.id && blocksOverlap(b, other)) {
-            localMax = Math.max(localMax, assigned[other.id] ?? 0);
-          }
-        });
-        laneMap[b.id] = { lane: myLane, laneCount: localMax + 1 };
-      });
-    });
-  }
 
   // ---- Bars ----
   schedBlocks.forEach(block => {
@@ -883,7 +904,9 @@ function renderSched() {
     bar.dataset.blockId = block.id;
     // Stacked bars get a white outline so adjacent same-color bars are distinguishable
     const stackedOutline = isStacked ? `outline:1.5px solid rgba(255,255,255,0.35);outline-offset:-1px;` : '';
-    bar.style.cssText = `left:${x}px;top:${ri*rowH + thisBarTop}px;width:${w}px;height:${thisBarH}px;background:${color};box-shadow:0 2px 6px ${color}55;border-radius:${isThinBar ? '4px' : '6px'};position:absolute;${stackedOutline}`;
+    const dynRowH = rowHeights[ri] || rowH;
+    const dynBarTop = Math.floor((dynRowH / (laneCount)) * lane) + Math.floor((dynRowH / laneCount - barH) / 2);
+    bar.style.cssText = `left:${x}px;top:${rowTops[ri] + (laneCount === 1 ? Math.floor((dynRowH - barH) / 2) : dynBarTop)}px;width:${w}px;height:${barH}px;background:${color};box-shadow:0 2px 6px ${color}55;border-radius:6px;position:absolute;${stackedOutline}`;
     bar.innerHTML = `
       <div class="sched-bar-handle sched-bar-handle-l" data-dir="left"></div>
       <div class="sched-bar-inner" style="flex:1;min-width:0;overflow:hidden;padding:${isThinBar ? '1px 6px' : '5px 9px'};display:flex;flex-direction:column;justify-content:center;color:#fff;position:relative;">${innerHtml}${laneBadge}</div>
@@ -905,6 +928,19 @@ function renderSched() {
 }
 
 // ---- Equipment utilization stats bar ----
+window.openSchedStats = function() {
+  renderSchedStats();
+  const popup = document.getElementById('schedStatsPopup');
+  if (popup) popup.classList.add('open');
+  // Close legend if open
+  const lp = document.getElementById('schedLegendPopup');
+  if (lp) lp.classList.remove('open');
+};
+window.closeSchedStats = function() {
+  const popup = document.getElementById('schedStatsPopup');
+  if (popup) popup.classList.remove('open');
+};
+
 function renderSchedStats() {
   const el = document.getElementById('schedStatsBar');
   if (!el) return;
@@ -1915,6 +1951,7 @@ window.setSchedView = function(v, btn) {
     if (calView)     calView.style.display      = 'block';
     if (schedZoom !== 'month') { schedZoom = 'month'; schedOffset = 0; }
     closeSchedLegend();
+    closeSchedStats();
     renderSchedCalendar();
   } else {
     if (ganttBody)   ganttBody.style.display   = '';
