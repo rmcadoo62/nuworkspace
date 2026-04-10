@@ -338,14 +338,9 @@
             <button class="sched-zoom-btn" id="schedViewCal" onclick="setSchedView('calendar',this)" title="Calendar view">&#x1F4C5;</button>
           </div>
           <div style="width:1px;height:22px;background:var(--border);flex-shrink:0"></div>
-          <button class="sched-toggle on" id="schedToggleRooms" onclick="toggleSchedSection('rooms',this)" title="Show/hide lab rooms">
-            <span class="sched-toggle-dot"></span> Rooms
-          </button>
-          <button class="sched-toggle on" id="schedToggleEmps" onclick="toggleSchedSection('employees',this)" title="Show/hide employees">
-            <span class="sched-toggle-dot"></span> Employees
-          </button>
           <button class="sched-icon-btn" onclick="openSchedStats()" title="Utilization">&#x1F4C8;</button>
           <button class="sched-icon-btn" onclick="openSchedLegend()" title="Color legend">&#x1F3A8;</button>
+          <button class="sched-icon-btn" onclick="openSchedRoomPicker()" title="Filter rooms">&#x1F3E2;</button>
           <button class="sched-icon-btn" onclick="openSchedEmpPicker()" title="Filter employees">&#x1F465;</button>
           <button class="sched-add-btn" onclick="openSchedModal()">+ Schedule Block</button>
         </div>
@@ -394,6 +389,19 @@
             <button class="sched-zoom-btn" style="flex:1" onclick="schedEmpPickerSelectAll(false)">None</button>
           </div>
           <div id="schedEmpPickerList" style="overflow-y:auto;padding:6px 8px;"></div>
+        </div>
+
+        <!-- room visibility picker popup -->
+        <div class="sched-legend-popup" id="schedRoomPickerPopup" style="min-width:240px;max-height:420px;">
+          <div class="sched-legend-popup-hdr">
+            <span class="sched-legend-popup-title">&#x1F3E2; Filter Rooms</span>
+            <button class="sched-legend-popup-close" onclick="closeSchedRoomPicker()">&#x2715;</button>
+          </div>
+          <div style="display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid var(--border);">
+            <button class="sched-zoom-btn" style="flex:1" onclick="schedRoomPickerSelectAll(true)">All</button>
+            <button class="sched-zoom-btn" style="flex:1" onclick="schedRoomPickerSelectAll(false)">None</button>
+          </div>
+          <div id="schedRoomPickerList" style="overflow-y:auto;padding:6px 8px;"></div>
         </div>
 
         <!-- calendar view -->

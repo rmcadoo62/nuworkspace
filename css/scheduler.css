@@ -147,3 +147,8 @@
 .sched-emp-pill:hover{background:var(--surface);border-color:var(--muted);}
 .sched-emp-pill.active{background:var(--surface);color:var(--text);border-color:var(--border);}
 .sched-emp-pill-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+
+/* ===== ROW RESIZE HANDLE ===== */
+.sched-row-resize-handle{position:absolute;bottom:0;left:0;right:0;height:5px;cursor:ns-resize;z-index:10;}
+.sched-row-resize-handle:hover{background:var(--amber-dim);opacity:0.5;}
+.sched-row-resize-handle:active{background:var(--amber);opacity:0.7;}

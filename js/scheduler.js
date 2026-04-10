@@ -57,8 +57,12 @@ function getCatColor(cat) { return CAT_COLORS[cat] || '#888'; }
 // ---- Scheduler settings (colors + access) ──────────────────
 const SCHED_SETTINGS_KEY = 'nuws_sched_settings_v1';
 const SCHED_EMP_VIS_KEY  = 'nuws_sched_emp_vis_v1';
+const SCHED_ROOM_VIS_KEY = 'nuws_sched_room_vis_v1';
+const SCHED_ROW_H_KEY    = 'nuws_sched_row_h_v1';
 let schedSettings = null;
-let schedEmpVisibility = null; // null = all visible, Set of empIds = only those shown
+let schedEmpVisibility  = null; // null = all visible, Set of empIds shown
+let schedRoomVisibility = null; // null = all visible, Set of rowIds shown
+let schedRowMinHeights  = {};   // rowId -> custom minimum px height
 
 async function loadSchedSettings() {
   try {
@@ -103,6 +107,30 @@ function saveSchedEmpVisibility() {
 function isEmpVisible(empId) {
   if (!empId) return true; // room blocks always visible
   return schedEmpVisibility === null || schedEmpVisibility.has(empId);
+}
+
+function loadSchedRoomVisibility() {
+  try {
+    const raw = localStorage.getItem(SCHED_ROOM_VIS_KEY);
+    schedRoomVisibility = raw ? new Set(JSON.parse(raw)) : null;
+  } catch(e) { schedRoomVisibility = null; }
+}
+function saveSchedRoomVisibility() {
+  if (schedRoomVisibility === null) localStorage.removeItem(SCHED_ROOM_VIS_KEY);
+  else localStorage.setItem(SCHED_ROOM_VIS_KEY, JSON.stringify([...schedRoomVisibility]));
+}
+function isRoomVisible(rowId) {
+  return schedRoomVisibility === null || schedRoomVisibility.has(rowId);
+}
+
+function loadSchedRowHeights() {
+  try {
+    const raw = localStorage.getItem(SCHED_ROW_H_KEY);
+    schedRowMinHeights = raw ? JSON.parse(raw) : {};
+  } catch(e) { schedRowMinHeights = {}; }
+}
+function saveSchedRowHeights() {
+  localStorage.setItem(SCHED_ROW_H_KEY, JSON.stringify(schedRowMinHeights));
 }
 
 async function saveSchedSettings() {
@@ -429,6 +457,65 @@ function buildBlockDisplayLines(block) {
   return lines;
 }
 
+// ---- Expanded bar HTML for tall room rows ----
+function buildExpandedBarHtml(block, availH) {
+  const pi = block.projId ? getProjInfo(block.projId) : null;
+  if (!pi) return null;
+
+  const fmt = t => {
+    if (!t) return '';
+    const [h, m] = t.split(':'); const hr = +h;
+    return (hr % 12 || 12) + (m && m !== '00' ? ':' + m : '') + (hr < 12 ? 'am' : 'pm');
+  };
+  const timeStr = (block.startTime || block.endTime)
+    ? [fmt(block.startTime), fmt(block.endTime)].filter(Boolean).join('\u2013')
+    : '';
+
+  const projName = pi.proj.name || '';
+  const client   = pi.info.client || '';
+  const dcasRaw  = (pi.info.dcas || '').trim().toUpperCase();
+  const witRaw   = (pi.info.customerWitness || '').trim().toUpperCase();
+  const dcasLbl  = dcasRaw === 'YES' || dcasRaw === 'CNF' ? 'DCAS \u2713' : dcasRaw === 'NO' ? 'DCAS \u2717' : '';
+  const witLbl   = witRaw  === 'YES' || witRaw  === 'CNF' ? 'Witness \u2713' : witRaw === 'NO' ? 'Witness \u2717' : '';
+
+  const task = block.taskId
+    ? (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === block.taskId)
+    : null;
+  const taskName = task ? task.name : '';
+
+  const sh = `text-shadow:0 1px 2px rgba(0,0,0,0.3);`;
+  const line = (txt, fs = '10px', fw = '500', op = '0.9') =>
+    txt ? `<div style="font-size:${fs};font-weight:${fw};opacity:${op};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;${sh}">${txt}</div>` : '';
+
+  const wrap = inner =>
+    `<div style="display:flex;flex-direction:column;gap:2px;overflow:hidden;height:100%;justify-content:center;">${inner}</div>`;
+
+  if (availH < 36) {
+    return null; // use default single-line
+  } else if (availH < 60) {
+    return wrap(
+      line(projName, '11px', '700', '1') +
+      line([client, timeStr].filter(Boolean).join('  \u00B7  '), '9.5px', '500', '0.88')
+    );
+  } else if (availH < 85) {
+    const meta = [timeStr, dcasLbl, witLbl].filter(Boolean).join('  \u00B7  ');
+    return wrap(
+      line(projName, '11px', '700', '1') +
+      line(client, '9.5px', '500', '0.88') +
+      line(meta, '9px', '500', '0.82')
+    );
+  } else {
+    const dcasWit = [dcasLbl, witLbl].filter(Boolean).join('  \u00B7  ');
+    return wrap(
+      line(projName, '11.5px', '700', '1') +
+      line(client, '10px', '500', '0.9') +
+      line(timeStr, '9.5px', '500', '0.85') +
+      line(dcasWit, '9px', '500', '0.82') +
+      line(taskName ? '\u2713 ' + taskName : '', '9px', '500', '0.82')
+    );
+  }
+}
+
 // ---- Zoom range ----
 function getSchedRange() {
   const today = new Date(); today.setHours(0,0,0,0);
@@ -472,6 +559,8 @@ window.openSchedulerPanel = async function(el) {
   document.getElementById('panel-scheduler').classList.add('active');
   await loadSchedSettings();
   loadSchedEmpVisibility();
+  loadSchedRoomVisibility();
+  loadSchedRowHeights();
   await schedLoad();
   renderSched();
 };
@@ -690,7 +779,11 @@ function renderSched() {
   const rowHeights = rows.map(row => {
     if (row.section === 'divider') return rowH;
     const lanes = maxLanesPerRow[row.rowId] || 1;
-    return rowH * lanes;
+    const stackH = rowH * lanes;
+    // Custom min height only for room rows, not employee rows
+    const customMin = (row.section === 'room' && schedRowMinHeights[row.rowId])
+      ? schedRowMinHeights[row.rowId] : rowH;
+    return Math.max(stackH, customMin);
   });
   const rowTops = [];
   let _top = 0;
@@ -710,12 +803,62 @@ function renderSched() {
     const dot = isEmp
       ? `<div style="width:26px;height:26px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0;">${row.initials||''}</div>`
       : `<div class="sched-asset-dot" style="background:${color}"></div>`;
-    return `<div class="sched-asset-row" style="height:${rh}px" onclick="openSchedModal(null,'${row.rowId}')">
+    const resizeHandle = (!isEmp)
+      ? `<div class="sched-row-resize-handle" data-row-id="${row.rowId}" title="Drag to resize · Double-click to reset"></div>`
+      : '';
+    return `<div class="sched-asset-row" style="height:${rh}px;position:relative;" onclick="openSchedModal(null,'${row.rowId}')">
       ${dot}
       <div class="sched-asset-name" title="${row.label}">${row.label}</div>
       ${blockCount ? `<div class="sched-asset-badge">${blockCount}</div>` : ''}
+      ${resizeHandle}
     </div>`;
   }).join('');
+
+  // ---- Row resize handles ----
+  labelsEl.querySelectorAll('.sched-row-resize-handle').forEach(handle => {
+    handle.addEventListener('mousedown', function(e) {
+      e.stopPropagation();
+      e.preventDefault();
+      const rowId = this.dataset.rowId;
+      const rowEl = this.parentElement;
+      const startY = e.clientY;
+      const startH = rowEl.offsetHeight;
+
+      const onMove = ev => {
+        const newH = Math.max(ROW_H_FIXED, startH + (ev.clientY - startY));
+        rowEl.style.height = newH + 'px';
+        // Live-update the canvas row background height
+        const canvas = document.getElementById('schedCanvas');
+        const bg = canvas ? canvas.querySelector(`.sched-grid-row[data-row-id="${rowId}"]`) : null;
+        if (bg) bg.style.height = newH + 'px';
+      };
+
+      const onUp = ev => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        const finalH = Math.max(ROW_H_FIXED, startH + (ev.clientY - startY));
+        if (Math.abs(finalH - ROW_H_FIXED) < 2) {
+          delete schedRowMinHeights[rowId]; // snapped back to default
+        } else {
+          schedRowMinHeights[rowId] = finalH;
+        }
+        saveSchedRowHeights();
+        renderSched();
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+
+    // Double-click resets this row to default height
+    handle.addEventListener('dblclick', function(e) {
+      e.stopPropagation();
+      const rowId = this.dataset.rowId;
+      delete schedRowMinHeights[rowId];
+      saveSchedRowHeights();
+      renderSched();
+    });
+  });
 
   // ---- Canvas ----
   const canvas = document.getElementById('schedCanvas');
@@ -737,6 +880,7 @@ function renderSched() {
     const el = document.createElement('div');
     el.className = 'sched-grid-row' + (ri % 2 === 1 ? ' alt' : '');
     el.style.cssText = `top:${rowTops[ri]}px;height:${rowHeights[ri]}px`;
+    el.dataset.rowId = row.rowId;
     canvas.appendChild(el);
   });
 
@@ -925,10 +1069,24 @@ function renderSched() {
     const stackedOutline = isStacked ? `outline:1.5px solid rgba(255,255,255,0.35);outline-offset:-1px;` : '';
     const dynRowH = rowHeights[ri] || rowH;
     const dynBarTop = Math.floor((dynRowH / (laneCount)) * lane) + Math.floor((dynRowH / laneCount - barH) / 2);
-    bar.style.cssText = `left:${x}px;top:${rowTops[ri] + (laneCount === 1 ? Math.floor((dynRowH - barH) / 2) : dynBarTop)}px;width:${w}px;height:${barH}px;background:${color};box-shadow:0 2px 6px ${color}55;border-radius:6px;position:absolute;${stackedOutline}`;
+
+    // Expanded bars: room rows with extra height get taller bars + richer content
+    const isRoomRow = rows[ri] && rows[ri].section === 'room';
+    const expandedBarH = (!isStacked && isRoomRow && dynRowH > barH + 8)
+      ? dynRowH - 8 : barH;
+    const expandedTop = (!isStacked && laneCount === 1)
+      ? rowTops[ri] + Math.floor((dynRowH - expandedBarH) / 2)
+      : rowTops[ri] + (laneCount === 1 ? Math.floor((dynRowH - barH) / 2) : dynBarTop);
+
+    const expandedHtml = (!isStacked && isRoomRow && expandedBarH > barH)
+      ? buildExpandedBarHtml(block, expandedBarH)
+      : null;
+    const finalInnerHtml = expandedHtml || innerHtml;
+
+    bar.style.cssText = `left:${x}px;top:${expandedTop}px;width:${w}px;height:${expandedBarH}px;background:${color};box-shadow:0 2px 6px ${color}55;border-radius:6px;position:absolute;${stackedOutline}`;
     bar.innerHTML = `
       <div class="sched-bar-handle sched-bar-handle-l" data-dir="left"></div>
-      <div class="sched-bar-inner" style="flex:1;min-width:0;overflow:hidden;padding:${isThinBar ? '1px 6px' : '5px 9px'};display:flex;flex-direction:column;justify-content:center;color:#fff;position:relative;">${innerHtml}${laneBadge}</div>
+      <div class="sched-bar-inner" style="flex:1;min-width:0;overflow:hidden;padding:${isThinBar ? '1px 6px' : '5px 9px'};display:flex;flex-direction:column;justify-content:center;color:#fff;position:relative;">${finalInnerHtml}${laneBadge}</div>
       <div class="sched-bar-handle sched-bar-handle-r" data-dir="right"></div>`;
     canvas.appendChild(bar);
 
@@ -2123,7 +2281,7 @@ function getEmpEventColor(eventType) {
 // ---- Compute combined rows (rooms + divider + employees) based on toggles ----
 function getSchedRowsAll() {
   const roomRows = schedShowRooms
-    ? SCHED_ROWS.map(r => ({ ...r, section: 'room' }))
+    ? SCHED_ROWS.filter(r => isRoomVisible(r.rowId)).map(r => ({ ...r, section: 'room' }))
     : [];
   const empRows = schedShowEmps
     ? (typeof employees !== 'undefined' ? employees : [])
@@ -2292,6 +2450,109 @@ window.schedRealtimeUpdate = function(row) {
 };
 window.schedRealtimeDelete = function(oldRow) {
   schedBlocks = schedBlocks.filter(b => b.id !== oldRow.id);
+};
+
+// ---- Room visibility picker ----
+let _roomPickerBusy = false;
+
+window.openSchedRoomPicker = function() {
+  const popup = document.getElementById('schedRoomPickerPopup');
+  const list  = document.getElementById('schedRoomPickerList');
+  if (!popup || !list) return;
+
+  // Close other popups
+  ['schedLegendPopup','schedStatsPopup','schedEmpPickerPopup'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('open');
+  });
+
+  list.innerHTML = SCHED_ROWS.map(r => {
+    const vis   = isRoomVisible(r.rowId);
+    const color = getCatColor(r.cat);
+    return `<button
+      class="sched-emp-pill${vis ? ' active' : ''}"
+      data-row-id="${r.rowId}"
+      style="--emp-color:${color}">
+      <span class="sched-emp-pill-dot" style="background:${vis ? color : 'var(--muted)'}"></span>
+      ${r.label}
+    </button>`;
+  }).join('');
+
+  list.querySelectorAll('.sched-emp-pill').forEach(btn => {
+    btn.addEventListener('click', function() {
+      window.schedRoomToggle(this.dataset.rowId, this);
+    });
+  });
+
+  popup.classList.toggle('open');
+};
+
+window.closeSchedRoomPicker = function() {
+  const popup = document.getElementById('schedRoomPickerPopup');
+  if (popup) popup.classList.remove('open');
+};
+
+window.schedRoomToggle = function(rowId, btn) {
+  if (_roomPickerBusy) return;
+  _roomPickerBusy = true;
+
+  if (schedRoomVisibility === null) {
+    // First hide — build full set of all rowIds
+    schedRoomVisibility = new Set(SCHED_ROWS.map(r => r.rowId));
+  }
+  const nowVisible = schedRoomVisibility.has(rowId)
+    ? (schedRoomVisibility.delete(rowId), false)
+    : (schedRoomVisibility.add(rowId),    true);
+
+  // Reset to null if all rooms are visible again
+  if (schedRoomVisibility.size === SCHED_ROWS.length) schedRoomVisibility = null;
+
+  saveSchedRoomVisibility();
+
+  // Update only this button's visual — no list rebuild
+  if (btn) {
+    const dot   = btn.querySelector('.sched-emp-pill-dot');
+    const row   = SCHED_ROWS.find(r => r.rowId === rowId);
+    const color = row ? getCatColor(row.cat) : '#888';
+    if (nowVisible) {
+      btn.classList.add('active');
+      if (dot) dot.style.background = color;
+    } else {
+      btn.classList.remove('active');
+      if (dot) dot.style.background = 'var(--muted)';
+    }
+  }
+
+  requestAnimationFrame(() => {
+    if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
+    _roomPickerBusy = false;
+  });
+};
+
+window.schedRoomPickerSelectAll = function(allOn) {
+  if (_roomPickerBusy) return;
+  _roomPickerBusy = true;
+  schedRoomVisibility = allOn ? null : new Set();
+  saveSchedRoomVisibility();
+  const list = document.getElementById('schedRoomPickerList');
+  if (list) {
+    list.querySelectorAll('.sched-emp-pill').forEach(btn => {
+      const row   = SCHED_ROWS.find(r => r.rowId === btn.dataset.rowId);
+      const color = row ? getCatColor(row.cat) : '#888';
+      const dot   = btn.querySelector('.sched-emp-pill-dot');
+      if (allOn) {
+        btn.classList.add('active');
+        if (dot) dot.style.background = color;
+      } else {
+        btn.classList.remove('active');
+        if (dot) dot.style.background = 'var(--muted)';
+      }
+    });
+  }
+  requestAnimationFrame(() => {
+    if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
+    _roomPickerBusy = false;
+  });
 };
 
 // Expose scheduler-settings helpers to global scope
