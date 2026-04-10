@@ -1605,23 +1605,16 @@ window.closeSchedModal = function() {
 };
 
 function renderSchedCatList() {
-  const el = document.getElementById('schedProjList');
-  if (!el) return;
-  el.innerHTML = SCHED_ROWS.map(row => {
-    const color    = getCatColor(row.cat);
-    const selected = row.rowId === schedSelectedCat;
-    return `<div class="sched-proj-opt${selected ? ' selected' : ''}"
-      onmousedown="event.preventDefault();window.selectSchedCat('${row.rowId}')">
-      <div class="sched-proj-opt-dot" style="background:${color}"></div>
-      <span class="sched-proj-opt-name">${row.label}</span>
-      <span class="sched-proj-opt-check">&#x2713;</span>
-    </div>`;
-  }).join('');
+  const sel = document.getElementById('schedRoomSelect');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— select room —</option>' +
+    SCHED_ROWS.map(row =>
+      `<option value="${row.rowId}"${row.rowId === schedSelectedCat ? ' selected' : ''}>${row.label}</option>`
+    ).join('');
 }
 
 window.selectSchedCat = function(cat) {
   schedSelectedCat = cat || null;
-  renderSchedCatList(); // refresh checkmark
 };
 
 // ---- Project picker in modal ----
@@ -1835,6 +1828,7 @@ function _doSaveSchedBlock() {
 
   // Read room selection from dropdown
   if (!_isEmpBlock) {
+    schedSelectedCat = document.getElementById('schedRoomSelect')?.value || null;
   }
   // DCAS override takes precedence over schedFlag if set
   const _dcasOv = document.getElementById('schedDcasOverride')?.value || null;
