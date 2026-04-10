@@ -346,6 +346,7 @@
           </button>
           <button class="sched-icon-btn" onclick="openSchedStats()" title="Utilization">&#x1F4C8;</button>
           <button class="sched-icon-btn" onclick="openSchedLegend()" title="Color legend">&#x1F3A8;</button>
+          <button class="sched-icon-btn" onclick="openSchedEmpPicker()" title="Filter employees">&#x1F465;</button>
           <button class="sched-add-btn" onclick="openSchedModal()">+ Schedule Block</button>
         </div>
         <!-- stats popup -->
@@ -380,6 +381,19 @@
             <button class="sched-legend-popup-close" onclick="closeSchedLegend()">&#x2715;</button>
           </div>
           <div class="sched-legend-popup-body" id="schedLegendBody"></div>
+        </div>
+
+        <!-- employee visibility picker popup -->
+        <div class="sched-legend-popup" id="schedEmpPickerPopup" style="min-width:220px;max-height:360px;">
+          <div class="sched-legend-popup-hdr">
+            <span class="sched-legend-popup-title">&#x1F465; Filter Employees</span>
+            <button class="sched-legend-popup-close" onclick="closeSchedEmpPicker()">&#x2715;</button>
+          </div>
+          <div style="display:flex;gap:6px;padding:6px 10px;border-bottom:1px solid var(--border);">
+            <button class="sched-zoom-btn" style="flex:1" onclick="schedEmpPickerSelectAll(true)">All</button>
+            <button class="sched-zoom-btn" style="flex:1" onclick="schedEmpPickerSelectAll(false)">None</button>
+          </div>
+          <div id="schedEmpPickerList" style="overflow-y:auto;padding:6px 8px;"></div>
         </div>
 
         <!-- calendar view -->

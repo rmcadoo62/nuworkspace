@@ -56,7 +56,9 @@ function getCatColor(cat) { return CAT_COLORS[cat] || '#888'; }
 
 // ---- Scheduler settings (colors + access) ──────────────────
 const SCHED_SETTINGS_KEY = 'nuws_sched_settings_v1';
+const SCHED_EMP_VIS_KEY  = 'nuws_sched_emp_vis_v1';
 let schedSettings = null;
+let schedEmpVisibility = null; // null = all visible, Set of empIds = only those shown
 
 async function loadSchedSettings() {
   try {
@@ -85,6 +87,22 @@ async function loadSchedSettings() {
     console.error('loadSchedSettings failed:', e);
     schedSettings = { colors: {}, access: {} };
   }
+}
+
+function loadSchedEmpVisibility() {
+  try {
+    const raw = localStorage.getItem(SCHED_EMP_VIS_KEY);
+    if (raw) { const arr = JSON.parse(raw); schedEmpVisibility = new Set(arr); }
+    else { schedEmpVisibility = null; }
+  } catch(e) { schedEmpVisibility = null; }
+}
+function saveSchedEmpVisibility() {
+  if (schedEmpVisibility === null) localStorage.removeItem(SCHED_EMP_VIS_KEY);
+  else localStorage.setItem(SCHED_EMP_VIS_KEY, JSON.stringify([...schedEmpVisibility]));
+}
+function isEmpVisible(empId) {
+  if (!empId) return true; // room blocks always visible
+  return schedEmpVisibility === null || schedEmpVisibility.has(empId);
 }
 
 async function saveSchedSettings() {
@@ -453,6 +471,7 @@ window.openSchedulerPanel = async function(el) {
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-scheduler').classList.add('active');
   await loadSchedSettings();
+  loadSchedEmpVisibility();
   await schedLoad();
   renderSched();
 };
@@ -1989,7 +2008,8 @@ function renderSchedCalendar() {
     : [];
 
   function blocksForDate(ds) {
-    return schedBlocks.filter(b => b.start <= ds && b.end >= ds)
+    return schedBlocks
+      .filter(b => b.start <= ds && b.end >= ds && isEmpVisible(b.empId || null))
       .sort((a,b) => a.start.localeCompare(b.start));
   }
 
@@ -2107,7 +2127,7 @@ function getSchedRowsAll() {
     : [];
   const empRows = schedShowEmps
     ? (typeof employees !== 'undefined' ? employees : [])
-        .filter(e => e.isActive !== false && e.name)
+        .filter(e => e.isActive !== false && e.name && isEmpVisible(e.id))
         .map(e => ({
           rowId:   'emp_' + e.id,
           cat:     '__emp__',
@@ -2141,7 +2161,125 @@ Object.defineProperty(window, 'schedView', {
   set: function(v) { schedView = v; },
 });
 
-// Expose realtime mutation handlers so supabase-client.js can update schedBlocks
+// ---- Employee visibility picker ----
+let _empPickerBusy = false;
+
+window.openSchedEmpPicker = function() {
+  const popup = document.getElementById('schedEmpPickerPopup');
+  const list  = document.getElementById('schedEmpPickerList');
+  if (!popup || !list) return;
+
+  // Close other popups
+  const lp = document.getElementById('schedLegendPopup');
+  const sp = document.getElementById('schedStatsPopup');
+  if (lp) lp.classList.remove('open');
+  if (sp) sp.classList.remove('open');
+
+  const emps = (typeof employees !== 'undefined' ? employees : [])
+    .filter(e => e.isActive !== false && e.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  // Build pill buttons — NO checkboxes, NO onchange, NO inline handlers
+  list.innerHTML = emps.map(e => {
+    const vis = isEmpVisible(e.id);
+    return `<button
+      class="sched-emp-pill${vis ? ' active' : ''}"
+      data-emp-id="${e.id}"
+      style="--emp-color:${e.color || '#888'}">
+      <span class="sched-emp-pill-dot" style="background:${vis ? (e.color||'#888') : 'var(--muted)'}"></span>
+      ${e.name}
+    </button>`;
+  }).join('');
+
+  // Attach click handlers via addEventListener — safe, no Chrome onchange quirks
+  list.querySelectorAll('.sched-emp-pill').forEach(btn => {
+    btn.addEventListener('click', function() {
+      window.schedEmpToggle(this.dataset.empId, this);
+    });
+  });
+
+  popup.classList.toggle('open');
+};
+
+window.closeSchedEmpPicker = function() {
+  const popup = document.getElementById('schedEmpPickerPopup');
+  if (popup) popup.classList.remove('open');
+};
+
+window.schedEmpToggle = function(empId, btn) {
+  if (_empPickerBusy) return;
+  _empPickerBusy = true;
+
+  // Update state
+  if (schedEmpVisibility === null) {
+    // First hide — build full set from all active employees
+    schedEmpVisibility = new Set(
+      (typeof employees !== 'undefined' ? employees : [])
+        .filter(e => e.isActive !== false && e.name)
+        .map(e => e.id)
+    );
+  }
+  const nowVisible = schedEmpVisibility.has(empId)
+    ? (schedEmpVisibility.delete(empId), false)
+    : (schedEmpVisibility.add(empId),    true);
+
+  // Reset to null (all visible) if everyone is checked again
+  const total = (typeof employees !== 'undefined' ? employees : [])
+    .filter(e => e.isActive !== false && e.name).length;
+  if (schedEmpVisibility.size === total) schedEmpVisibility = null;
+
+  saveSchedEmpVisibility();
+
+  // Update ONLY this button's visual — no innerHTML rebuild
+  if (btn) {
+    const dot = btn.querySelector('.sched-emp-pill-dot');
+    const emp = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === empId);
+    const color = emp ? (emp.color || '#888') : '#888';
+    if (nowVisible) {
+      btn.classList.add('active');
+      if (dot) dot.style.background = color;
+    } else {
+      btn.classList.remove('active');
+      if (dot) dot.style.background = 'var(--muted)';
+    }
+  }
+
+  // Re-render Gantt deferred — breaks any possible sync recursion
+  requestAnimationFrame(() => {
+    if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
+    _empPickerBusy = false;
+  });
+};
+
+window.schedEmpPickerSelectAll = function(allOn) {
+  if (_empPickerBusy) return;
+  _empPickerBusy = true;
+  schedEmpVisibility = allOn ? null : new Set();
+  saveSchedEmpVisibility();
+  // Rebuild picker to reflect all-on/all-off state
+  const list = document.getElementById('schedEmpPickerList');
+  if (list) {
+    list.querySelectorAll('.sched-emp-pill').forEach(btn => {
+      const empId = btn.dataset.empId;
+      const emp = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === empId);
+      const color = emp ? (emp.color || '#888') : '#888';
+      const dot = btn.querySelector('.sched-emp-pill-dot');
+      if (allOn) {
+        btn.classList.add('active');
+        if (dot) dot.style.background = color;
+      } else {
+        btn.classList.remove('active');
+        if (dot) dot.style.background = 'var(--muted)';
+      }
+    });
+  }
+  requestAnimationFrame(() => {
+    if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
+    _empPickerBusy = false;
+  });
+};
+
+
 // without needing direct access to the IIFE-scoped variable
 window.schedRealtimeInsert = function(row) {
   const blk = schedRowToBlock(row);
@@ -2171,4 +2309,3 @@ window.schedAddBlock       = function(block) {
 };
 
 })(); // end scheduler IIFE
-
