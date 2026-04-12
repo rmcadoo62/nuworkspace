@@ -55,6 +55,7 @@ document.addEventListener('DOMContentLoaded', function () {
     { name: 'openImportExpensesPanel',label: 'Import Expenses'     },
     { name: 'openQuotesPanel',        label: 'Quotes'              },
     { name: 'openClosingReport',      label: 'Closing Report'      },
+    { name: 'openCompliancePanel',    label: 'CMMC Compliance'     },
   ];
 
   NAV_FNS.forEach(({ name, label }) => {

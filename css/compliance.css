@@ -1,0 +1,368 @@
+/* ===== COMPLIANCE MODULE ===== */
+/* ===== COMPLIANCE MODULE ===== */
+/* CMMC 2.0 Level 2 — NU Laboratories, Inc. */
+
+/* ── Panel header ── */
+.comp-panel-header {
+  flex-shrink: 0;
+  padding: 20px 32px 0;
+  border-bottom: 1.5px solid var(--border);
+  background: var(--bg);
+}
+.comp-panel-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 21px;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+.comp-panel-sub {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 14px;
+}
+
+/* ── Tab bar ── */
+.comp-tab-bar {
+  display: flex;
+  gap: 2px;
+  padding: 0 32px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  background: var(--bg);
+  border-bottom: 1.5px solid var(--border);
+  scrollbar-width: none;
+}
+.comp-tab-bar::-webkit-scrollbar { display: none; }
+
+.comp-tab {
+  padding: 10px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2.5px solid transparent;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all var(--transition);
+  white-space: nowrap;
+  margin-bottom: -1.5px;
+}
+.comp-tab:hover { color: var(--text); }
+.comp-tab.active {
+  color: var(--amber);
+  border-bottom-color: var(--amber);
+  font-weight: 600;
+}
+
+/* ── Stat pills row ── */
+.comp-stat-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+  align-items: flex-start;
+}
+.comp-stat-pill {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 18px;
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  min-width: 90px;
+}
+.comp-stat-num {
+  font-size: 22px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--text);
+  line-height: 1;
+}
+.comp-stat-lbl {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--muted);
+  text-align: center;
+}
+.comp-stat-green { border-color: rgba(46,158,98,0.35); background: rgba(46,158,98,0.07); }
+.comp-stat-green .comp-stat-num { color: var(--green); }
+.comp-stat-blue  { border-color: rgba(58,127,212,0.35); background: rgba(58,127,212,0.07); }
+.comp-stat-blue  .comp-stat-num { color: var(--blue); }
+.comp-stat-purple{ border-color: rgba(124,92,191,0.35); background: rgba(124,92,191,0.07); }
+.comp-stat-purple .comp-stat-num { color: var(--purple); }
+.comp-stat-red   { border-color: rgba(208,64,64,0.35); background: rgba(208,64,64,0.07); }
+.comp-stat-red   .comp-stat-num { color: var(--red); }
+.comp-stat-amber { border-color: rgba(192,122,26,0.35); background: var(--amber-glow); }
+.comp-stat-amber .comp-stat-num { color: var(--amber); }
+
+/* ── Policy callout banner ── */
+.comp-policy-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(192,122,26,0.06);
+  border: 1px solid rgba(192,122,26,0.25);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  line-height: 1.55;
+  margin-bottom: 20px;
+}
+.comp-policy-icon {
+  font-size: 15px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ── Buttons ── */
+.comp-btn-primary {
+  padding: 7px 16px;
+  background: var(--amber);
+  color: #1a1a2e;
+  border: none;
+  border-radius: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: all var(--transition);
+}
+.comp-btn-primary:hover { background: #d99030; }
+
+.comp-btn-ghost {
+  padding: 7px 14px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: all var(--transition);
+}
+.comp-btn-ghost:hover { border-color: var(--amber-dim); color: var(--amber); }
+
+/* ── Filter buttons ── */
+.comp-filter-btn {
+  padding: 5px 12px;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: all var(--transition);
+}
+.comp-filter-btn:hover { color: var(--text); border-color: var(--surface3); }
+.comp-filter-btn.active {
+  background: var(--amber-glow);
+  border-color: var(--amber-dim);
+  color: var(--amber);
+  font-weight: 600;
+}
+
+/* ── Table ── */
+.comp-tbl-wrap {
+  overflow-x: auto;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.comp-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.comp-tbl thead tr {
+  border-bottom: 1.5px solid var(--border);
+}
+.comp-tbl th {
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  background: var(--surface2);
+}
+.comp-tbl th:first-child { border-radius: 8px 0 0 0; }
+.comp-tbl th:last-child  { border-radius: 0 8px 0 0; }
+.comp-tbl-row {
+  cursor: pointer;
+  transition: background var(--transition);
+  border-bottom: 1px solid var(--border);
+}
+.comp-tbl-row:last-child { border-bottom: none; }
+.comp-tbl-row:hover { background: var(--surface2); }
+.comp-tbl td {
+  padding: 11px 14px;
+  vertical-align: middle;
+  color: var(--text);
+}
+
+/* ── Badges ── */
+.comp-badge {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+.comp-badge-blue   { background: rgba(58,127,212,0.12); color: var(--blue); }
+.comp-badge-purple { background: rgba(124,92,191,0.12); color: var(--purple); }
+.comp-badge-green  { background: rgba(46,158,98,0.12);  color: var(--green); }
+.comp-badge-red    { background: rgba(208,64,64,0.12);  color: var(--red); }
+.comp-badge-amber  { background: var(--amber-glow);     color: var(--amber); }
+
+/* ===== SELF-ASSESSMENT MODULE ===== */
+
+/* Domain block */
+.assess-domain-block {
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 10px;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+/* Domain header row */
+.assess-domain-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--surface2);
+  transition: background var(--transition);
+}
+.assess-domain-header:hover { background: var(--surface3); }
+
+.assess-domain-abbrev {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--amber);
+  background: var(--amber-glow);
+  padding: 3px 8px;
+  border-radius: 5px;
+  min-width: 36px;
+  text-align: center;
+  flex-shrink: 0;
+}
+.assess-domain-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  flex: 1;
+}
+.assess-domain-counts {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.assess-domain-progress { flex-shrink: 0; }
+.assess-domain-chevron {
+  font-size: 11px;
+  color: var(--muted);
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+}
+
+/* Practice table */
+.assess-domain-body {
+  overflow-x: auto;
+}
+.assess-practice-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.assess-practice-table thead tr {
+  border-bottom: 1px solid var(--border);
+}
+.assess-practice-table th {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .9px;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--surface);
+  white-space: nowrap;
+}
+.assess-practice-row {
+  border-bottom: 1px solid var(--border);
+  transition: background var(--transition);
+}
+.assess-practice-row:last-child { border-bottom: none; }
+.assess-practice-row:hover { background: rgba(0,0,0,0.02); }
+.assess-practice-table td {
+  padding: 9px 12px;
+  vertical-align: middle;
+}
+
+/* Status button group */
+.assess-status-group {
+  display: flex;
+  gap: 4px;
+}
+.assess-status-btn {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: 'DM Sans', sans-serif;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.assess-status-btn:hover { border-color: var(--surface3); color: var(--text); }
+
+.assess-met.active     { background: rgba(46,158,98,0.12);  border-color: var(--green);  color: var(--green); }
+.assess-partial.active { background: rgba(192,122,26,0.12); border-color: var(--amber);  color: var(--amber); }
+.assess-notmet.active  { background: rgba(208,64,64,0.12);  border-color: var(--red);    color: var(--red); }
+
+.assess-met:hover     { border-color: var(--green);  color: var(--green); }
+.assess-partial:hover { border-color: var(--amber);  color: var(--amber); }
+.assess-notmet:hover  { border-color: var(--red);    color: var(--red); }
+
+/* Push to POA&M button */
+.assess-poam-btn {
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1.5px solid var(--border);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: var(--muted);
+  font-family: 'DM Sans', sans-serif;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.assess-poam-btn:hover {
+  border-color: var(--amber-dim);
+  color: var(--amber);
+  background: var(--amber-glow);
+}
+.assess-poam-btn.in-poam {
+  border-color: var(--green);
+  color: var(--green);
+  background: rgba(46,158,98,0.08);
+}

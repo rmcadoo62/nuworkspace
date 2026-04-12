@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="css/chatter.css">
   <link rel="stylesheet" href="css/scheduler.css">
   <link rel="stylesheet" href="css/jobpack.css">
+  <link rel="stylesheet" href="css/compliance.css">
 </head>
 <body>
 
@@ -110,6 +111,10 @@
     <div class="nav-label">Reports</div>
     <div class="nav-item" id="navReports" onclick="openReportsPanel(this)"><span class="icon">&#x1F4CA;</span> Reports</div>
     <div class="nav-item" id="navClosingReport" onclick="openClosingReport(this)"><span class="icon">&#x1F4CB;</span> Closing Report</div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-label">Compliance</div>
+    <div class="nav-item" id="navCompliance" onclick="openCompliancePanel(this)"><span class="icon">&#x1F6E1;</span> CMMC 2.0</div>
   </div>
   <div class="nav-section">
     <div class="nav-label">Setup</div>
@@ -754,7 +759,20 @@
 
     </div>
 
+    <!-- COMPLIANCE PANEL -->
+    <div class="view-panel" id="panel-compliance" style="flex-direction:column;overflow:hidden">
+      <div style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;width:100%">
+        <div class="comp-panel-header">
+          <div class="comp-panel-title">&#x1F6E1;&#xFE0F; CMMC 2.0 Level 2 Compliance</div>
+          <div class="comp-panel-sub">NU Laboratories, Inc. &mdash; Owner / IT Administrator</div>
+          <div class="comp-tab-bar" id="compTabBar"></div>
+        </div>
+        <div id="complianceTabContent" style="flex:1;overflow-y:auto;min-height:0"></div>
+      </div>
+    </div>
+
   </div>
+
 </div>
 
 <!-- ===== NEW PROJECT MODAL ===== -->
@@ -1126,6 +1144,7 @@
   <script src="js/nav.js"></script>
   <script src="js/router.js"></script>
   <script src="js/quotes.js"></script>
+  <script src="js/compliance.js"></script>
 
 </div><!-- /appShell -->
 
