@@ -154,7 +154,7 @@ async function fetchHomeWeather() {
   if (_homeWeatherCache) return _homeWeatherCache;
   try {
     // Spotswood NJ coordinates
-    const url = 'https://api.open-meteo.com/v1/forecast?latitude=40.3929&longitude=-74.3957' +
+    const url = 'https://api.open-meteo.com/v1/forecast?latitude=40.6426&longitude=-74.8774' +
       '&current=temperature_2m,weathercode,windspeed_10m,relative_humidity_2m' +
       '&daily=weathercode,temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit' +
       '&wind_speed_unit=mph&timezone=America%2FNew_York&forecast_days=4';
@@ -220,7 +220,7 @@ function renderWeatherCard(data) {
   }).join('');
 
   return `<div class="home-card home-weather-card">
-    <div class="home-card-title">🌡️ Spotswood, NJ</div>
+    <div class="home-card-title">🌡️ Annandale, NJ</div>
     <div class="home-weather-current">
       <div class="home-weather-icon">${weatherIcon(cur.weathercode)}</div>
       <div class="home-weather-info">
