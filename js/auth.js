@@ -24,7 +24,7 @@ function can(capability) {
     manage_employees: mgr, manage_permissions: false, view_billing: mgr,
     edit_project_info: mgr, view_chatter: true, post_chatter: true,
     add_clients: mgr, delete_clients: mgr, add_contacts: mgr, delete_contacts: mgr,
-    view_schedule: true, edit_schedule: true,
+    view_schedule: true, edit_schedule: true, view_cmmc: true,
   };
   return !!(fallbacks[capability]);
 }
@@ -739,6 +739,10 @@ function applyPermissions() {
   // Reports nav
   const navRep = document.getElementById('navReports');
   if (navRep) navRep.style.display = can('view_reports') ? 'flex' : 'none';
+  const navClosing = document.getElementById('navClosingReport');
+  if (navClosing) navClosing.style.display = can('view_reports') ? 'flex' : 'none';
+  const navCmmc = document.getElementById('navCompliance');
+  if (navCmmc) navCmmc.style.display = can('view_cmmc') ? 'flex' : 'none';
 
   // Setup nav — show if user has any admin capability
   const hasAnySetup = can('view_setup') || can('view_audit_log') || can('manage_employees') || can('manage_permissions');

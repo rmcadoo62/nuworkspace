@@ -479,6 +479,7 @@ const CAPABILITY_DEFS = [
   { key: 'post_chatter',       label: 'Post in Chatter',       group: 'Communication' },
   { key: 'view_schedule',      label: 'View Scheduler',        group: 'Scheduler' },
   { key: 'edit_schedule',      label: 'Edit Scheduler',        group: 'Scheduler' },
+  { key: 'view_cmmc',          label: 'View CMMC Compliance',  group: 'Compliance' },
 ];
 
 function openPermissionsPanel() {
