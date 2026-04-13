@@ -17,7 +17,8 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .proj-section-hdr .nav-label{margin:0;padding:0;flex:1;}
 .new-proj-btn{background:transparent;border:1.5px solid var(--border);border-radius:5px;color:var(--muted);width:22px;height:22px;font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all var(--transition);line-height:1;}
 .new-proj-btn:hover{background:var(--amber-glow);border-color:var(--amber-dim);color:var(--amber);}
-.sidebar-footer{margin-top:auto;padding:16px 12px 0;border-top:1px solid var(--border);}
+.sidebar-footer{flex-shrink:0;padding:16px 12px 0;border-top:1px solid var(--border);}
+.sidebar-nav-scroll{flex:1;overflow-y:auto;min-height:0;}
 .team-members{display:flex;flex-wrap:wrap;gap:4px;padding:10px 8px;}
 .avatar{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:600;cursor:pointer;transition:transform var(--transition);border:1.5px solid var(--surface);}
 .avatar:hover{transform:scale(1.15);z-index:1;}
