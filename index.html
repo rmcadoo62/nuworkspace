@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="css/clients.css">
   <link rel="stylesheet" href="css/chatter.css">
   <link rel="stylesheet" href="css/scheduler.css">
+  <link rel="stylesheet" href="css/home.css">
   <link rel="stylesheet" href="css/jobpack.css">
   <link rel="stylesheet" href="css/compliance.css">
 </head>
@@ -93,7 +94,8 @@
   <div class="sidebar-nav-scroll">
   <div class="nav-section">
     <div style="padding:4px 8px 6px;margin-top:16px;"><img src="workspace-logo.png" alt="Workspace" style="max-height:80px;object-fit:contain;" /></div>
-    <div class="nav-item active" id="navDashboard" onclick="openDashboardPanel(this)"><span class="icon">&#x1F3E0;</span> Dashboard</div>
+    <div class="nav-item active" id="navHome" onclick="openHomePanel(this)"><span class="icon">&#x1F3E1;</span> Home</div>
+    <div class="nav-item" id="navDashboard" onclick="openDashboardPanel(this)"><span class="icon">&#x1F4C8;</span> Dashboard</div>
     <div class="nav-item" id="navProjects" onclick="openProjectsTable(this)"><span class="icon">&#x1F4C1;</span> Projects <span class="nav-badge" id="allBadge">0</span></div>
     <div class="nav-item" onclick="openTimesheetPanel(this)"><span class="icon">&#x23F1;</span> Timesheet</div>
     <div class="nav-item" id="navScheduler" onclick="openSchedulerPanel(this)"><span class="icon">&#x1F4C6;</span> Scheduler</div>
@@ -196,6 +198,13 @@
     </div>
 
     <!-- ALL PROJECTS DASHBOARD -->
+    <!-- HOME PANEL -->
+    <div class="view-panel" id="panel-home">
+      <div style="flex:1;overflow-y:auto;">
+        <div id="homeWrap"></div>
+      </div>
+    </div>
+
     <div class="view-panel" id="panel-dashboard">
       <div class="dash-wrap" id="dashWrap"></div>
     </div>
@@ -1142,6 +1151,7 @@
   <script src="js/chatter.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/scheduler.js"></script>
+  <script src="js/home.js"></script>
   <script src="js/jobpack.js"></script>
   <script src="js/nav.js"></script>
   <script src="js/router.js"></script>

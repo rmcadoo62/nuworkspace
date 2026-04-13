@@ -1,0 +1,75 @@
+/* ===== HOME PAGE ===== */
+.home-loading{padding:40px;color:var(--muted);font-size:13px;}
+
+.home-grid{padding:28px 32px;display:flex;flex-direction:column;gap:20px;max-width:1200px;}
+
+/* ---- Announcement ---- */
+.home-ann-empty{display:flex;align-items:center;gap:12px;flex-direction:column;align-items:flex-start;}
+.home-ann-banner{display:flex;align-items:flex-start;gap:14px;padding:16px 20px;background:rgba(192,122,26,0.10);border:1.5px solid var(--amber-dim);border-radius:12px;}
+.home-ann-icon{font-size:24px;flex-shrink:0;margin-top:2px;}
+.home-ann-body{flex:1;min-width:0;}
+.home-ann-message{font-size:15px;font-weight:600;color:var(--text);line-height:1.4;}
+.home-ann-meta{font-size:11px;color:var(--muted);margin-top:4px;}
+.home-ann-actions{display:flex;gap:8px;flex-shrink:0;align-items:flex-start;}
+.home-ann-post-btn{padding:5px 12px;border-radius:6px;background:var(--amber);color:#0e0e0f;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;}
+.home-ann-post-btn:hover{background:#f0b04a;}
+.home-ann-clear-btn{padding:5px 12px;border-radius:6px;background:transparent;color:var(--muted);border:1.5px solid var(--border);font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;}
+.home-ann-clear-btn:hover{color:var(--red);border-color:var(--red);}
+.home-ann-form{display:flex;flex-direction:column;gap:8px;margin-top:10px;width:100%;}
+.home-ann-textarea{background:var(--surface2);border:1.5px solid var(--amber-dim);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:8px 10px;outline:none;resize:vertical;box-shadow:0 0 0 3px var(--amber-glow);}
+.home-ann-form-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.home-ann-label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;}
+.home-ann-date{background:var(--surface2);border:1.5px solid var(--border);border-radius:5px;color:var(--text);font-size:12px;padding:4px 8px;outline:none;color-scheme:light;}
+.home-ann-save-btn{padding:5px 14px;border-radius:6px;background:var(--amber);color:#0e0e0f;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;}
+.home-ann-cancel-btn{padding:5px 12px;border-radius:6px;background:transparent;border:1.5px solid var(--border);color:var(--muted);font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;}
+
+/* ---- Top row ---- */
+.home-top-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
+
+/* ---- Cards ---- */
+.home-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:18px 20px;}
+.home-card-title{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:14px;}
+.home-card-empty{font-size:13px;color:var(--muted);padding:8px 0;}
+
+/* ---- Weather ---- */
+.home-weather-current{display:flex;align-items:center;gap:14px;margin-bottom:16px;}
+.home-weather-icon{font-size:42px;line-height:1;flex-shrink:0;}
+.home-weather-temp{font-family:'DM Serif Display',serif;font-size:36px;color:var(--text);line-height:1;}
+.home-weather-desc{font-size:13px;color:var(--text);margin-top:2px;}
+.home-weather-meta{font-size:11px;color:var(--muted);margin-top:3px;}
+.home-forecast{display:flex;gap:0;border-top:1px solid var(--border);padding-top:12px;}
+.home-forecast-day{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:0 4px;}
+.home-forecast-dow{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);}
+.home-forecast-icon{font-size:20px;}
+.home-forecast-temps{display:flex;gap:5px;font-size:12px;}
+.home-fc-hi{font-weight:700;color:var(--text);}
+.home-fc-lo{color:var(--muted);}
+
+/* ---- Who's Out ---- */
+.home-out-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);}
+.home-out-row:last-child{border-bottom:none;}
+.home-out-av{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;}
+.home-out-name{font-size:13px;font-weight:500;flex:1;}
+.home-out-type{font-size:11px;color:var(--muted);}
+
+/* ---- Holidays ---- */
+.home-hol-row{display:flex;align-items:center;gap:12px;padding:7px 0;border-bottom:1px solid var(--border);}
+.home-hol-row:last-child{border-bottom:none;}
+.home-hol-date{display:flex;flex-direction:column;align-items:center;width:36px;flex-shrink:0;background:var(--surface2);border-radius:6px;padding:4px 2px;}
+.home-hol-mon{font-size:9px;font-weight:700;text-transform:uppercase;color:var(--amber);letter-spacing:.5px;}
+.home-hol-day{font-family:'DM Serif Display',serif;font-size:18px;color:var(--text);line-height:1;}
+.home-hol-dow{font-size:8px;color:var(--muted);text-transform:uppercase;}
+.home-hol-name{font-size:13px;color:var(--text);}
+
+/* ---- Chatter ---- */
+.home-chat-card{display:flex;flex-direction:column;}
+.home-chat-row{display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--border);cursor:pointer;transition:background var(--transition);border-radius:6px;padding:8px 6px;}
+.home-chat-row:last-child{border-bottom:none;}
+.home-chat-row:hover{background:var(--surface2);}
+.home-chat-av{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;margin-top:2px;}
+.home-chat-body{flex:1;min-width:0;}
+.home-chat-header{display:flex;align-items:center;gap:8px;margin-bottom:3px;flex-wrap:wrap;}
+.home-chat-author{font-size:12px;font-weight:700;color:var(--text);}
+.home-chat-proj{font-size:11px;color:var(--amber);background:var(--amber-glow);padding:1px 7px;border-radius:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;}
+.home-chat-ago{font-size:10px;color:var(--muted);margin-left:auto;white-space:nowrap;}
+.home-chat-text{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

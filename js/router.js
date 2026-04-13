@@ -23,6 +23,7 @@ function routerNavigate(hash) {
   _suppressPush = true; // nav functions will try to pushState — suppress during popstate replay
   try {
     switch (panel) {
+      case 'home':        if (typeof openHomePanel        === 'function') openHomePanel();        break;
       case 'dashboard':   if (typeof openDashboardPanel  === 'function') openDashboardPanel();  break;
       case 'projects':    if (typeof openProjectsTable   === 'function') openProjectsTable();   break;
       case 'shipping':    if (typeof openShippingPanel   === 'function') openShippingPanel();   break;
@@ -63,7 +64,7 @@ function routerNavigate(hash) {
       case 'quotes':      if (typeof openQuotesPanel        === 'function') openQuotesPanel();        break;
       case 'closingreport': if (typeof openClosingReport    === 'function') openClosingReport();      break;
       default:
-        if (typeof openProjectsTable === 'function') openProjectsTable();
+        if (typeof openHomePanel === 'function') openHomePanel(document.getElementById('navHome'));
     }
   } finally {
     _suppressPush = false;
@@ -91,6 +92,7 @@ window.addEventListener('popstate', () => {
 function routerHookFunctions() {
   // Simple top-level panels
   const SIMPLE = [
+    ['openHomePanel',           'home'],
     ['openDashboardPanel',      'dashboard'],
     ['openProjectsTable',       'projects'],
     ['openShippingPanel',       'shipping'],
@@ -169,6 +171,7 @@ function initRouter() {
     setTimeout(() => routerNavigate(hash), 800);
   } else {
     // No hash — set default
-    routerPush('projects');
+    routerPush('home');
+    if (typeof openHomePanel === 'function') openHomePanel(document.getElementById('navHome'));
   }
 }

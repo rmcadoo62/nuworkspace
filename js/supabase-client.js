@@ -346,10 +346,8 @@ function bootApp() {
   renderAllViews();
   if (activeProjectId && projects.find(p => p.id === activeProjectId)) {
     selectProjectById(activeProjectId);
-  } else if (can('view_dashboard')) {
-    openDashboardPanel(document.getElementById('navDashboard'));
   } else {
-    openProjectsTable(document.getElementById('navProjects'));
+    openHomePanel(document.getElementById('navHome'));
   }
 }
 
