@@ -110,7 +110,7 @@ async function renderBillingQueue() {
                   </div>
                 </td>
                 <td style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);font-weight:600">${t.fixedPrice ? fmt$(t.fixedPrice) : '—'}</td>
-                <td style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace">${t.due||'—'}</td>
+                <td style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace">${t.completedDate ? new Date(t.completedDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : (t.due||'—')}</td>
                 <td onclick="event.stopPropagation()" style="padding:4px 8px">
                   <input type="text" value="${t.peachtreeInv||''}"
                     placeholder="INV-"
