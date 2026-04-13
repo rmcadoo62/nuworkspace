@@ -149,7 +149,23 @@
       <div class="global-search-results" id="globalSearchResults"></div>
     </div>
 
+    <!-- What's New -->
     <div class="notif-bell-wrap" style="margin-left:auto;position:relative">
+      <button class="notif-bell-btn" id="whatsNewBtn" onclick="toggleWhatsNewPanel()" title="What's New">
+        ✨
+        <span class="notif-bell-badge" id="whatsNewBadge" style="display:none">0</span>
+      </button>
+      <div class="notif-panel" id="whatsNewPanel" style="display:none;width:340px">
+        <div class="notif-panel-header">
+          ✨ What's New
+          <button onclick="markWhatsNewRead()" style="margin-left:auto;background:none;border:none;color:var(--amber);font-size:11px;cursor:pointer;font-family:'DM Sans',sans-serif">Mark all read</button>
+        </div>
+        <div class="notif-list" id="whatsNewList"></div>
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div class="notif-bell-wrap" style="position:relative">
       <button class="notif-bell-btn" id="notifBellBtn" onclick="toggleNotifPanel()" title="Notifications">
         🔔
         <span class="notif-bell-badge" id="notifBellBadge" style="display:none">0</span>

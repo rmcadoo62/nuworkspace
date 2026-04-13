@@ -427,6 +427,7 @@ function setProjColFilter(input) {
   input.style.background  = val.trim() ? 'rgba(192,122,26,0.08)' : '';
   // Apply filter to existing rows without full re-render
   _applyProjColFiltersToDOM();
+  renderSavedFiltersBar();
 }
 
 function _applyProjColFiltersToDOM() {
@@ -585,14 +586,30 @@ function renderSavedFiltersBar() {
   const bar = document.getElementById('savedFiltersBar');
   if (!bar) return;
   const filters = getSavedFilters();
-  if (!filters.length) { bar.style.display = 'none'; return; }
+  const hasColFilters = Object.keys(projColFilters).length > 0;
+
+  if (!filters.length && !hasColFilters) { bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
-  bar.innerHTML = '<span style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;">Saved:</span>' +
-    filters.map(f => `
-      <span class="saved-filter-chip ${activeFilterName===f.name?'active':''}" onclick="applyNamedFilter('${f.name.replace(/'/g,"\\'")}')" title="Apply filter">
-        ${f.name}
-        <span class="sf-del" onclick="event.stopPropagation();deleteNamedFilter('${f.name.replace(/'/g,"\\'")}')">&#x2715;</span>
-      </span>`).join('');
+
+  const colFilterPill = hasColFilters
+    ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 5px 3px 10px;border-radius:12px;font-size:11px;font-weight:600;background:rgba(192,122,26,0.12);color:var(--amber);border:1px solid var(--amber-dim);white-space:nowrap;">
+        &#x1F50D; Column Filters Active
+        <span onclick="clearProjColFilters()" title="Clear column filters" style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:rgba(192,122,26,0.2);color:var(--amber);font-size:11px;line-height:1;font-weight:700;transition:background .15s" onmouseover="this.style.background='rgba(192,122,26,0.4)'" onmouseout="this.style.background='rgba(192,122,26,0.2)'">&#x2715;</span>
+      </span>`
+    : '';
+
+  const savedPart = filters.length
+    ? '<span style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;">Saved:</span>' +
+      filters.map(f => `
+        <span class="saved-filter-chip ${activeFilterName===f.name?'active':''}" onclick="applyNamedFilter('${f.name.replace(/'/g,"\\'")}')" title="Apply filter">
+          ${f.name}
+          <span class="sf-del" onclick="event.stopPropagation();deleteNamedFilter('${f.name.replace(/'/g,"\\'")}')">&#x2715;</span>
+        </span>`).join('')
+    : '';
+
+  bar.innerHTML = (colFilterPill && savedPart)
+    ? colFilterPill + '<span style="width:1px;height:16px;background:var(--border);align-self:center;flex-shrink:0;margin:0 4px"></span>' + savedPart
+    : colFilterPill + savedPart;
 }
 
 function saveNavFilter() { saveNamedFilter(); } // backward compat
