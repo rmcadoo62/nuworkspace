@@ -477,6 +477,8 @@ const CAPABILITY_DEFS = [
   { key: 'manage_permissions', label: 'Manage Permissions',    group: 'Admin' },
   { key: 'view_chatter',       label: 'View Chatter',          group: 'Communication' },
   { key: 'post_chatter',       label: 'Post in Chatter',       group: 'Communication' },
+  { key: 'view_schedule',      label: 'View Scheduler',        group: 'Scheduler' },
+  { key: 'edit_schedule',      label: 'Edit Scheduler',        group: 'Scheduler' },
 ];
 
 function openPermissionsPanel() {

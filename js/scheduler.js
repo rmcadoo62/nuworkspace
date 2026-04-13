@@ -296,6 +296,7 @@ const SCHED_KEY = 'nuws_sched_v2';
 let schedBlocks    = [];   // [{ id, cat, start, end, label?, projId? }]
 let schedZoom      = 'week';
 let schedOffset    = 0;
+let schedReadOnly  = false; // true if user has view_schedule but not edit_schedule
 let schedSelectedCat    = null;
 let schedSelectedProjId = null;
 let schedSelectedTaskId = null;
@@ -414,46 +415,49 @@ function getProjInfo(projId) {
 // Build the display lines shown inside a bar / chip
 function buildBlockDisplayLines(block) {
   const lines = [];
-  // For employee blocks show emp name + event type
-  let lbl;
   const rid = block.rowId || block.cat || '';
-  if (block.empId || block.empEventType) {
-    const emp = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === block.empId);
+  const fmt = t => { if (!t) return ''; const [h,m] = t.split(':'); const hr = +h; return (hr%12||12)+(m&&m!=='00'?':'+m:'')+(hr<12?'am':'pm'); };
+
+  // Employee blocks
+  if (block.empId || block.empEventType || rid.startsWith('emp_')) {
+    const empId   = block.empId || (rid.startsWith('emp_') ? rid.slice(4) : null);
+    const emp     = empId ? (typeof employees !== 'undefined' ? employees : []).find(e => e.id === empId) : null;
     const empName = emp ? emp.name : (block.label || '');
     const evtLbl  = block.empEventType === 'vacation' ? 'Vacation' : block.empEventType === 'sick' ? 'Sick' : 'Work';
-    lbl = block.label || (empName ? empName + ' — ' + evtLbl : evtLbl);
-  } else if (rid.startsWith('emp_')) {
-    // Employee row block without empId set — look up by rowId
-    const empId = rid.slice(4);
-    const emp = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === empId);
-    lbl = block.label || (emp ? emp.name : 'Employee');
-  } else {
-    lbl = block.label || rowLabel(rid);
+    const lbl = block.label || (empName ? empName + ' \u2014 ' + evtLbl : evtLbl);
+    const timeStr = (block.startTime || block.endTime)
+      ? [fmt(block.startTime), fmt(block.endTime)].filter(Boolean).join('\u2013') : '';
+    lines.push(lbl + (timeStr ? '  ' + timeStr : ''));
+    return lines;
   }
-  // Time range on label line if set
-  let timeSuffix = '';
-  if (block.startTime || block.endTime) {
-    const fmt = t => { if (!t) return ''; const [h,m] = t.split(':'); const hr = +h; return (hr%12||12)+':'+(m||'00')+(hr<12?'am':'pm'); };
-    timeSuffix = '  ' + [fmt(block.startTime), fmt(block.endTime)].filter(Boolean).join('\u2013');
-  }
-  lines.push(lbl + timeSuffix);
+
+  // Room blocks — Line 1: proj name · client, Line 2: time · task, Line 3: DCAS · Witness
+  const timeStr = (block.startTime || block.endTime)
+    ? [fmt(block.startTime), fmt(block.endTime)].filter(Boolean).join('\u2013') : '';
+
   if (block.projId) {
     const pi = getProjInfo(block.projId);
     if (pi) {
-      lines.push((pi.proj.emoji||'') + ' ' + pi.proj.name);
-      if (pi.info.client)           lines.push('\uD83C\uDFE2 ' + pi.info.client);
-      if (pi.info.dcas)             lines.push('DCAS: ' + pi.info.dcas);
-      if (pi.info.customerWitness)  lines.push('\uD83D\uDC64 ' + pi.info.customerWitness);
+      // Line 1: project name (contains number) · customer
+      lines.push([pi.proj.name, pi.info.client].filter(Boolean).join('  \u00B7  '));
+      // Line 2: time · task name
+      const task = block.taskId
+        ? (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === block.taskId) : null;
+      const line2 = [timeStr, task ? task.name : ''].filter(Boolean).join('  \u00B7  ');
+      if (line2) lines.push(line2);
+      // Line 3: DCAS · Witness
+      const dcasRaw = (pi.info.dcas||'').trim().toUpperCase();
+      const witRaw  = (pi.info.customerWitness||'').trim().toUpperCase();
+      const dcasLbl = dcasRaw==='YES'||dcasRaw==='CNF' ? 'DCAS \u2713' : dcasRaw==='NO' ? 'DCAS \u2717' : '';
+      const witLbl  = witRaw==='YES' ||witRaw==='CNF'  ? 'Witness \u2713' : witRaw==='NO' ? 'Witness \u2717' : '';
+      const line3 = [dcasLbl, witLbl].filter(Boolean).join('  \u00B7  ');
+      if (line3) lines.push(line3);
+      return lines;
     }
   }
-  if (block.taskId) {
-    const task = (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === block.taskId);
-    if (task) {
-      const STATUS_SHORT = { new:'New', inprogress:'In Prog', prohold:'Pro Hold', accthold:'Acct Hold' };
-      const stLbl = STATUS_SHORT[task.status] || task.status || '';
-      lines.push('\u2713 #' + (task.taskNum||'?') + '  ' + task.name + (stLbl ? '  ['+stLbl+']' : ''));
-    }
-  }
+
+  // Fallback: label or room name + time
+  lines.push((block.label || rowLabel(rid)) + (timeStr ? '  ' + timeStr : ''));
   return lines;
 }
 
@@ -492,26 +496,40 @@ function buildExpandedBarHtml(block, availH) {
 
   if (availH < 36) {
     return null; // use default single-line
+
   } else if (availH < 60) {
+    // Line 1: proj name · customer
+    // Line 2: time · task
+    const line2 = [timeStr, taskName].filter(Boolean).join('  \u00B7  ');
     return wrap(
-      line(projName, '11px', '700', '1') +
-      line([client, timeStr].filter(Boolean).join('  \u00B7  '), '9.5px', '500', '0.88')
+      line([projName, client].filter(Boolean).join('  \u00B7  '), '11px', '700', '1') +
+      line(line2, '9.5px', '500', '0.88')
     );
+
   } else if (availH < 85) {
-    const meta = [timeStr, dcasLbl, witLbl].filter(Boolean).join('  \u00B7  ');
+    // Line 1: proj name · customer
+    // Line 2: time · task
+    // Line 3: DCAS · Witness
+    const line2 = [timeStr, taskName].filter(Boolean).join('  \u00B7  ');
+    const line3 = [dcasLbl, witLbl].filter(Boolean).join('  \u00B7  ');
     return wrap(
-      line(projName, '11px', '700', '1') +
-      line(client, '9.5px', '500', '0.88') +
-      line(meta, '9px', '500', '0.82')
+      line([projName, client].filter(Boolean).join('  \u00B7  '), '11px', '700', '1') +
+      line(line2, '9.5px', '500', '0.88') +
+      line(line3, '9px', '500', '0.82')
     );
+
   } else {
-    const dcasWit = [dcasLbl, witLbl].filter(Boolean).join('  \u00B7  ');
+    // Line 1: proj name
+    // Line 2: customer
+    // Line 3: time · task
+    // Line 4: DCAS · Witness
+    const line3 = [timeStr, taskName].filter(Boolean).join('  \u00B7  ');
+    const line4 = [dcasLbl, witLbl].filter(Boolean).join('  \u00B7  ');
     return wrap(
       line(projName, '11.5px', '700', '1') +
       line(client, '10px', '500', '0.9') +
-      line(timeStr, '9.5px', '500', '0.85') +
-      line(dcasWit, '9px', '500', '0.82') +
-      line(taskName ? '\u2713 ' + taskName : '', '9px', '500', '0.82')
+      line(line3, '9.5px', '500', '0.85') +
+      line(line4, '9px', '500', '0.82')
     );
   }
 }
@@ -561,6 +579,7 @@ window.openSchedulerPanel = async function(el) {
   loadSchedEmpVisibility();
   loadSchedRoomVisibility();
   loadSchedRowHeights();
+  schedReadOnly = (typeof window.schedCanEdit !== 'undefined') ? !window.schedCanEdit : false;
   await schedLoad();
   renderSched();
 };
@@ -803,10 +822,10 @@ function renderSched() {
     const dot = isEmp
       ? `<div style="width:26px;height:26px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0;">${row.initials||''}</div>`
       : `<div class="sched-asset-dot" style="background:${color}"></div>`;
-    const resizeHandle = (!isEmp)
+    const resizeHandle = (!isEmp && !schedReadOnly)
       ? `<div class="sched-row-resize-handle" data-row-id="${row.rowId}" title="Drag to resize · Double-click to reset"></div>`
       : '';
-    return `<div class="sched-asset-row" style="height:${rh}px;position:relative;" onclick="openSchedModal(null,'${row.rowId}')">
+    return `<div class="sched-asset-row" style="height:${rh}px;position:relative;" ${schedReadOnly ? '' : `onclick="openSchedModal(null,'${row.rowId}')"`}>
       ${dot}
       <div class="sched-asset-name" title="${row.label}">${row.label}</div>
       ${blockCount ? `<div class="sched-asset-badge">${blockCount}</div>` : ''}
@@ -900,10 +919,13 @@ function renderSched() {
       el.style.cssText = `left:${di*dayW + Math.floor(dayW/2)}px`;
       canvas.appendChild(el);
     }
-    // Day-start line
+    // Day-start line — darker in 1W/2W so it stands out from hour lines
     const dayLine = document.createElement('div');
     dayLine.className = 'sched-col-line';
-    dayLine.style.cssText = `left:${di*dayW}px`;
+    const dayLineBg = (is1Week || is2Week)
+      ? 'background:rgba(80,80,110,0.55);z-index:2;'
+      : '';
+    dayLine.style.cssText = `left:${di*dayW}px;${dayLineBg}`;
     canvas.appendChild(dayLine);
 
     if (is1Week) {
@@ -1093,15 +1115,19 @@ function renderSched() {
     bar.addEventListener('mouseenter', e => showSchedTooltip(block, e));
     bar.addEventListener('mousemove',  e => moveSchedTooltip(e));
     bar.addEventListener('mouseleave', ()  => hideSchedTooltip());
-    attachBarDrag(bar, block, rows, range, dayW);
+    if (!schedReadOnly) attachBarDrag(bar, block, rows, range, dayW);
   });
 
   // ---- Click-drag to create new block ----
-  attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week, is2Week, rangeStartStr);
+  if (!schedReadOnly) attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week, is2Week, rangeStartStr);
 
   syncSchedScroll();
   renderSchedLegend();
   renderSchedStats();
+
+  // Show/hide the + Schedule Block button based on read-only state
+  const addBtn = document.querySelector('.sched-add-btn');
+  if (addBtn) addBtn.style.display = schedReadOnly ? 'none' : '';
 }
 
 // ---- Equipment utilization stats bar ----
@@ -1578,7 +1604,7 @@ function attachBarDrag(bar, block, rows, range, dayW) {
         if (drag.hasMoved) {
           schedSaveBlock(block).then(() => renderSched());
         } else {
-          openSchedModal(block.id);
+          if (!schedReadOnly) openSchedModal(block.id);
         }
         drag = null;
       }
@@ -1717,6 +1743,7 @@ window.setSchedZoom = function(z, btn) {
 
 // ---- Modal ----
 window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) {
+  if (schedReadOnly) return; // view-only users cannot create or edit blocks
   // For new blocks: use preselCat if given, keep existing selection, or default to first room
   if (!blockId) {
     schedSelectedCat = preselCat || schedSelectedCat || SCHED_ROWS[0].rowId;

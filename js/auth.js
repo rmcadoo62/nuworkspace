@@ -24,6 +24,7 @@ function can(capability) {
     manage_employees: mgr, manage_permissions: false, view_billing: mgr,
     edit_project_info: mgr, view_chatter: true, post_chatter: true,
     add_clients: mgr, delete_clients: mgr, add_contacts: mgr, delete_contacts: mgr,
+    view_schedule: true, edit_schedule: true,
   };
   return !!(fallbacks[capability]);
 }
@@ -771,16 +772,26 @@ function applyPermissions() {
     el.style.display = can('add_tasks') ? '' : 'none';
   });
 
+  // Scheduler nav — hide entirely if view_schedule is off
+  const navSched = document.getElementById('navScheduler');
+  if (navSched) navSched.style.display = can('view_schedule') ? '' : 'none';
+
+  // Expose edit flag so scheduler.js can read it
+  window.schedCanEdit = can('edit_schedule');
+
   applySchedAccessToNav();
 }
 
 function applySchedAccessToNav() {
-  if (!window.loadSchedSettings) return; // scheduler not loaded yet
+  // Legacy per-employee access check (schedSettings.access map)
+  // Now also gated by the role-based view_schedule capability above
+  if (!window.loadSchedSettings) return;
   window.loadSchedSettings();
   const navItem = document.getElementById('navScheduler');
   if (!navItem) return;
   const emp = typeof currentEmployee !== 'undefined' ? currentEmployee : null;
-  if (emp && !window.empHasSchedAccess(emp.id)) {
+  // Hide if either the capability is off OR the legacy per-emp access is off
+  if (!can('view_schedule') || (emp && !window.empHasSchedAccess(emp.id))) {
     navItem.style.display = 'none';
   } else {
     navItem.style.display = '';
