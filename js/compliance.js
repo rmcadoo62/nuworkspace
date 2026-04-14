@@ -63,6 +63,7 @@ async function renderComplianceTab(tab) {
   else if (tab === 'poam') await _renderPoamTab();
   else if (tab === 'assessment') await _renderAssessmentTab();
   else if (tab === 'incidents') await _renderIncidentsTab();
+  else if (tab === 'personnel') await _renderPersonnelTab();
   else _renderComingSoonTab(tab);
 }
 
@@ -2074,6 +2075,556 @@ async function deleteIncidentRecord(id) {
   closeIncidentModal();
   toast('Incident record deleted.');
   await _renderIncidentsTab();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  MODULE 5 — HR / PERSONNEL RECORDS  (PS.L2-3.9.1 / 3.9.2)
+// ════════════════════════════════════════════════════════════════════
+// Two sub-tabs: Screening (10 fields, PS §5.1) + Offboarding (10 fields, PS §5.2)
+// One table: cmmc_personnel_records with record_type = 'screening' | 'offboarding'
+
+let personnelRecords    = [];
+let personnelSubTab     = 'screening';  // 'screening' | 'offboarding'
+let personnelSearchVal  = '';
+let editingPersonnelId  = null;
+let personnelEmployees  = []; // all employees including inactive (for offboarding)
+
+const SEPARATION_TYPES = [
+  'Voluntary Resignation',
+  'Involuntary Termination',
+  'Role Change',
+  'Contract End',
+  'Retirement',
+];
+
+async function _renderPersonnelTab() {
+  const area = document.getElementById('complianceTabContent');
+
+  // Load all employees (active + inactive) for dropdowns
+  if (!personnelEmployees.length) {
+    const { data } = await sb.from('employees')
+      .select('id, name, role, department, is_active, termination_date')
+      .neq('department', 'Ballantine')
+      .order('name');
+    personnelEmployees = (data || []).filter(e => e.name);
+  }
+
+  // Load records
+  const { data, error } = await sb
+    .from('cmmc_personnel_records')
+    .select('*')
+    .order('created_at', { ascending: false });
+  personnelRecords = data || [];
+  if (error) console.error('Personnel load error:', error);
+
+  _renderPersonnelPage();
+}
+
+function _renderPersonnelPage() {
+  const area = document.getElementById('complianceTabContent');
+  if (!area) return;
+
+  const screening   = personnelRecords.filter(r => r.record_type === 'screening');
+  const offboarding = personnelRecords.filter(r => r.record_type === 'offboarding');
+
+  // Active employees that have no screening record
+  const activeEmps = personnelEmployees.filter(e => e.is_active !== false && !e.termination_date);
+  const screenedIds = new Set(screening.map(r => r.employee_id).filter(Boolean));
+  const missingCount = activeEmps.filter(e => !screenedIds.has(e.id)).length;
+
+  area.innerHTML = `
+    <div style="padding:28px 32px">
+
+      <!-- Stats -->
+      <div class="comp-stat-row">
+        <div class="comp-stat-pill comp-stat-green">
+          <div class="comp-stat-num">${screening.length}</div>
+          <div class="comp-stat-lbl">Screening Records</div>
+        </div>
+        <div class="comp-stat-pill comp-stat-blue">
+          <div class="comp-stat-num">${offboarding.length}</div>
+          <div class="comp-stat-lbl">Offboarding Records</div>
+        </div>
+        ${missingCount > 0 ? `<div class="comp-stat-pill comp-stat-amber">
+          <div class="comp-stat-num">${missingCount}</div>
+          <div class="comp-stat-lbl">Missing Screening</div>
+        </div>` : `<div class="comp-stat-pill comp-stat-green">
+          <div class="comp-stat-num">✓</div>
+          <div class="comp-stat-lbl">All Screened</div>
+        </div>`}
+      </div>
+
+      <!-- Policy banner -->
+      <div class="comp-policy-banner">
+        <span class="comp-policy-icon">📌</span>
+        <div>
+          <strong>PS.L2-3.9.1</strong> — Screen all individuals before authorizing CUI access:
+          government-issued ID verification, two professional reference checks, and I-9 completion.
+          <strong>PS.L2-3.9.2</strong> — Same-day access termination on last day of employment:
+          AD disabled, NAS revoked, Duo removed, combination codes changed. Records retained ≥ 3 years.
+        </div>
+      </div>
+
+      <!-- Sub-tab bar -->
+      <div style="display:flex;gap:6px;margin-bottom:16px">
+        <button class="comp-filter-btn${personnelSubTab==='screening'?' active':''}"
+          onclick="personnelSubTab='screening';_renderPersonnelPage()" style="font-size:13px;padding:7px 18px">
+          👤 Pre-Employment Screening
+        </button>
+        <button class="comp-filter-btn${personnelSubTab==='offboarding'?' active':''}"
+          onclick="personnelSubTab='offboarding';_renderPersonnelPage()" style="font-size:13px;padding:7px 18px">
+          🚪 Offboarding / Termination
+        </button>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <input type="text" placeholder="Search…" autocomplete="off"
+            value="${_esc(personnelSearchVal)}"
+            oninput="personnelSearchVal=this.value;_renderPersonnelTable()"
+            style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 12px;outline:none;width:180px;transition:border-color var(--transition)"
+            onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
+          <button onclick="_refreshPersonnelTab()" class="comp-btn-ghost">↺ Refresh</button>
+          <button onclick="openPersonnelModal()" class="comp-btn-primary">
+            + ${personnelSubTab==='screening' ? 'Add Screening' : 'Add Offboarding'}
+          </button>
+        </div>
+      </div>
+
+      <!-- Missing screening alert -->
+      ${personnelSubTab==='screening' && missingCount > 0 ? `
+        <div style="background:rgba(232,162,52,0.07);border:1px solid rgba(232,162,52,0.35);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:var(--amber)">
+          ⚠️ <strong>${missingCount} active employee${missingCount!==1?'s':''}</strong> without a screening record:
+          ${activeEmps.filter(e=>!screenedIds.has(e.id)).map(e=>`<strong>${_esc(e.name)}</strong>`).join(', ')}
+        </div>` : ''}
+
+      <!-- Table -->
+      <div id="personnelTableWrap"></div>
+    </div>
+  `;
+
+  _renderPersonnelTable();
+}
+
+async function _refreshPersonnelTab() {
+  personnelEmployees = [];
+  await _renderPersonnelTab();
+}
+
+function _renderPersonnelTable() {
+  const wrap = document.getElementById('personnelTableWrap');
+  if (!wrap) return;
+
+  const q = personnelSearchVal.toLowerCase();
+  let filtered = personnelRecords.filter(r => r.record_type === personnelSubTab);
+  if (q) filtered = filtered.filter(r =>
+    (r.employee_name||'').toLowerCase().includes(q) ||
+    (r.role_position||'').toLowerCase().includes(q) ||
+    (r.separation_type||'').toLowerCase().includes(q)
+  );
+
+  if (!filtered.length) {
+    wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px">
+      ${q ? 'No records match your search.' :
+        personnelSubTab==='screening'
+          ? 'No screening records yet. Click <strong>+ Add Screening</strong> to log the first one.'
+          : 'No offboarding records yet. Click <strong>+ Add Offboarding</strong> to log the first one.'}
+    </div>`;
+    return;
+  }
+
+  const isScreening = personnelSubTab === 'screening';
+  const rows = filtered.map(r => {
+    if (isScreening) {
+      const signedOff = !!r.screening_signoff_date;
+      const badge = signedOff
+        ? `<span class="comp-badge comp-badge-green">Complete</span>`
+        : `<span class="comp-badge comp-badge-amber">Pending</span>`;
+      return `
+        <tr class="comp-tbl-row" onclick="openPersonnelModal('${r.id}')">
+          <td><strong>${_esc(r.employee_name||'—')}</strong></td>
+          <td style="color:var(--muted);font-size:12px">${_esc(r.role_position||'—')}</td>
+          <td>${_fmtDate(r.hire_start_date)}</td>
+          <td style="font-size:12px">${r.id_type ? _esc(r.id_type) : '—'}</td>
+          <td>${r.i9_completed_date ? '✓ ' + _fmtDate(r.i9_completed_date) : '<span style="color:var(--muted)">—</span>'}</td>
+          <td>${_fmtDate(r.cui_access_granted_date)}</td>
+          <td>${badge}</td>
+        </tr>`;
+    } else {
+      const allDone = r.offboarding_signoff_date;
+      const badge = allDone
+        ? `<span class="comp-badge comp-badge-green">Complete</span>`
+        : `<span class="comp-badge comp-badge-amber">In Progress</span>`;
+      return `
+        <tr class="comp-tbl-row" onclick="openPersonnelModal('${r.id}')">
+          <td><strong>${_esc(r.employee_name||'—')}</strong></td>
+          <td style="font-size:12px">${_esc(r.separation_type||'—')}</td>
+          <td>${_fmtDate(r.last_day_cui_access)}</td>
+          <td>${r.ad_disabled_date ? '✓' : '<span style="color:var(--red)">✗</span>'}</td>
+          <td>${r.nas_revoked_date ? '✓' : '<span style="color:var(--red)">✗</span>'}</td>
+          <td>${r.duo_removed_date ? '✓' : '<span style="color:var(--red)">✗</span>'}</td>
+          <td>${r.combo_changed_date ? '✓' : '<span style="color:var(--red)">✗</span>'}</td>
+          <td>${badge}</td>
+        </tr>`;
+    }
+  }).join('');
+
+  const screeningHeaders = `<th>Employee</th><th>Role</th><th>Start Date</th><th>ID Type</th><th>I-9</th><th>CUI Access Granted</th><th>Status</th>`;
+  const offboardingHeaders = `<th>Employee</th><th>Separation Type</th><th>Last CUI Day</th><th>AD Disabled</th><th>NAS Revoked</th><th>Duo Removed</th><th>Codes Changed</th><th>Status</th>`;
+
+  wrap.innerHTML = `
+    <div class="comp-tbl-wrap">
+      <table class="comp-tbl">
+        <thead><tr>${isScreening ? screeningHeaders : offboardingHeaders}</tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">
+      ${filtered.length} record${filtered.length!==1?'s':''} — Click any row to view / edit
+    </div>
+  `;
+}
+
+// ── Personnel Modal ──────────────────────────────────────────────────
+function openPersonnelModal(id) {
+  editingPersonnelId = id || null;
+  const rec = id ? personnelRecords.find(r => r.id === id) : null;
+  const isNew = !id;
+  const type = rec ? rec.record_type : personnelSubTab;
+
+  // Employee dropdowns
+  const activeEmps   = personnelEmployees.filter(e => e.is_active !== false && !e.termination_date);
+  const allEmps      = personnelEmployees;
+  const empList      = type === 'screening' ? activeEmps : allEmps;
+  const empOptions   = empList.map(e =>
+    `<option value="${e.id}" data-name="${_esc(e.name)}"
+      ${rec?.employee_id === e.id ? 'selected' : ''}>${_esc(e.name)}${e.role ? ' — ' + e.role : ''}</option>`
+  ).join('');
+
+  const sepOptions = SEPARATION_TYPES.map(s =>
+    `<option value="${s}" ${rec?.separation_type===s?'selected':''}>${s}</option>`
+  ).join('');
+
+  const backdropId = 'personnelModalBackdrop';
+  const existing = document.getElementById(backdropId);
+  if (existing) existing.remove();
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = backdropId;
+  backdrop.onclick = e => { if(e.target===backdrop) closePersonnelModal(); };
+
+  const bodyHtml = type === 'screening'
+    ? _screeningModalBody(rec, empOptions)
+    : _offboardingModalBody(rec, empOptions, sepOptions);
+
+  backdrop.innerHTML = `
+    <div class="modal" style="width:680px;max-height:92vh">
+      <div class="modal-header">
+        <div class="modal-title">
+          ${type==='screening' ? '👤 Pre-Employment Screening Record' : '🚪 Offboarding Record'}
+        </div>
+        <button class="modal-close" onclick="closePersonnelModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" style="gap:14px">${bodyHtml}</div>
+      <div class="modal-footer">
+        ${id ? `<button class="btn btn-ghost" style="margin-right:auto;color:var(--red)" onclick="deletePersonnelRecord('${id}')">🗑 Delete</button>` : ''}
+        <button class="btn btn-ghost" onclick="closePersonnelModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="savePersonnelRecord('${type}')">
+          ${isNew ? 'Create Record' : 'Save Changes'}
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+function _screeningModalBody(rec, empOptions) {
+  return `
+    <!-- Employee + Role -->
+    <div class="field-row">
+      <div class="field">
+        <label class="field-label">Employee <span style="color:var(--red)">*</span></label>
+        <select class="f-select" id="psEmpSelect" onchange="_psEmpChange(this)">
+          <option value="">— Select Employee —</option>${empOptions}
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Role / Position <span style="color:var(--red)">*</span></label>
+        <input class="f-input" id="psRole" type="text" placeholder="e.g. Test Technician"
+          value="${_esc(rec?.role_position||'')}"/>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">Hire / Start Date</label>
+      <input class="f-input" id="psHireDate" type="date" style="color-scheme:light"
+        value="${rec?.hire_start_date||''}"/>
+    </div>
+
+    <div class="modal-div"></div>
+    <div style="font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">
+      Government-Issued ID Verification
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label class="field-label">ID Type &amp; Issuing Authority</label>
+        <input class="f-input" id="psIdType" type="text"
+          placeholder="e.g. Driver's License — State of NJ"
+          value="${_esc(rec?.id_type||'')}"/>
+      </div>
+      <div class="field">
+        <label class="field-label">ID Expiration Date</label>
+        <input class="f-input" id="psIdExpiry" type="date" style="color-scheme:light"
+          value="${rec?.id_expiry_date||''}"/>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">ID Verified By &amp; Date</label>
+      <input class="f-input" id="psIdVerifiedBy" type="text"
+        placeholder="Owner / IT Administrator — date verified"
+        value="${_esc(rec?.id_verified_by||'')}"/>
+    </div>
+
+    <div class="modal-div"></div>
+    <div style="font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">
+      Professional Reference Checks (minimum 2 required)
+    </div>
+    <div class="field">
+      <label class="field-label">Reference 1</label>
+      <textarea class="f-textarea" id="psRef1" rows="2"
+        placeholder="Name, title, organization, contact method, date contacted, summary of conversation.">${_esc(rec?.reference1||'')}</textarea>
+    </div>
+    <div class="field">
+      <label class="field-label">Reference 2</label>
+      <textarea class="f-textarea" id="psRef2" rows="2"
+        placeholder="Name, title, organization, contact method, date contacted, summary of conversation.">${_esc(rec?.reference2||'')}</textarea>
+    </div>
+
+    <div class="modal-div"></div>
+    <div style="font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">
+      Completion &amp; Sign-Off
+    </div>
+    <div class="field-row">
+      <div class="field">
+        <label class="field-label">I-9 Completed Date</label>
+        <input class="f-input" id="psI9Date" type="date" style="color-scheme:light"
+          value="${rec?.i9_completed_date||''}"/>
+      </div>
+      <div class="field">
+        <label class="field-label">Screening Sign-Off Date</label>
+        <input class="f-input" id="psSignoffDate" type="date" style="color-scheme:light"
+          value="${rec?.screening_signoff_date||''}"/>
+      </div>
+      <div class="field">
+        <label class="field-label">CUI Access Granted Date</label>
+        <input class="f-input" id="psCuiDate" type="date" style="color-scheme:light"
+          value="${rec?.cui_access_granted_date||''}"/>
+      </div>
+    </div>
+    <div class="comp-policy-banner" style="margin-top:4px">
+      <span class="comp-policy-icon">ℹ</span>
+      <div style="font-size:11.5px">
+        All screening steps must be complete and signed off before creating the AD account or
+        granting any CUI system access. No exceptions per PS.L2-3.9.1.
+      </div>
+    </div>
+  `;
+}
+
+function _offboardingModalBody(rec, empOptions, sepOptions) {
+  const ck = (field, id) => `
+    <div class="field-row" style="align-items:center;gap:16px">
+      <div class="field" style="flex:1.5">
+        <label class="field-label">${field}</label>
+        <input class="f-input" id="${id}" type="date" style="color-scheme:light"
+          value="${rec?.[id.replace('ob','').replace(/([A-Z])/g,'_$1').toLowerCase().replace(/^_/,'')] || rec?.[id] || ''}"/>
+      </div>
+    </div>`;
+
+  return `
+    <!-- Employee + Separation Type -->
+    <div class="field-row">
+      <div class="field">
+        <label class="field-label">Employee <span style="color:var(--red)">*</span></label>
+        <select class="f-select" id="psEmpSelect" onchange="_psEmpChange(this)">
+          <option value="">— Select Employee —</option>${empOptions}
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label">Separation Type <span style="color:var(--red)">*</span></label>
+        <select class="f-select" id="obSepType">
+          <option value="">— Select —</option>${sepOptions}
+        </select>
+      </div>
+    </div>
+    <div class="field">
+      <label class="field-label">Last Day of CUI Access <span style="color:var(--red)">*</span></label>
+      <input class="f-input" id="obLastDay" type="date" style="color-scheme:light"
+        value="${rec?.last_day_cui_access||''}"/>
+    </div>
+
+    <div class="modal-div"></div>
+    <div style="font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">
+      Same-Day Checklist — must be completed by end of last day
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="field">
+        <label class="field-label">AD Account Disabled</label>
+        <input class="f-input" id="obAdDate" type="date" style="color-scheme:light"
+          value="${rec?.ad_disabled_date||''}"/>
+      </div>
+      <div class="field">
+        <label class="field-label">NAS Access Revoked</label>
+        <input class="f-input" id="obNasDate" type="date" style="color-scheme:light"
+          value="${rec?.nas_revoked_date||''}"/>
+      </div>
+      <div class="field">
+        <label class="field-label">Duo MFA Enrollment Removed</label>
+        <input class="f-input" id="obDuoDate" type="date" style="color-scheme:light"
+          value="${rec?.duo_removed_date||''}"/>
+      </div>
+      <div class="field">
+        <label class="field-label">Combination Codes Changed</label>
+        <input class="f-input" id="obComboDate" type="date" style="color-scheme:light"
+          value="${rec?.combo_changed_date||''}"/>
+      </div>
+      <div class="field">
+        <label class="field-label">CUI Access Inventory Updated</label>
+        <input class="f-input" id="obInventoryDate" type="date" style="color-scheme:light"
+          value="${rec?.inventory_updated_date||''}"/>
+      </div>
+      <div class="field">
+        <label class="field-label">Assets Retrieved</label>
+        <input class="f-input" id="obAssetsDate" type="date" style="color-scheme:light"
+          value="${rec?.assets_retrieved_date||''}"/>
+      </div>
+    </div>
+
+    <div class="field">
+      <label class="field-label">Assets Retrieved — Description</label>
+      <input class="f-input" id="obAssetsDesc" type="text"
+        placeholder="e.g. Laptop WS-02, key fob, access card"
+        value="${_esc(rec?.assets_description||'')}"/>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label class="field-label">Offboarding Sign-Off Date</label>
+        <input class="f-input" id="obSignoffDate" type="date" style="color-scheme:light"
+          value="${rec?.offboarding_signoff_date||''}"/>
+      </div>
+      <div class="field">
+        <label class="field-label">Signed Off By</label>
+        <input class="f-input" id="obSignoffBy" type="text"
+          placeholder="Owner / IT Administrator"
+          value="${_esc(rec?.signoff_by||'Owner / IT Administrator')}"/>
+      </div>
+    </div>
+
+    <div class="comp-policy-banner" style="margin-top:4px">
+      <span class="comp-policy-icon">⚠</span>
+      <div style="font-size:11.5px">
+        <strong>Same-Day Rule</strong> — No grace period. All checklist items must be completed
+        on or before the employee's last day of employment. Applies equally to voluntary resignations,
+        terminations, retirements, and contract expirations. (PS.L2-3.9.2)
+      </div>
+    </div>
+  `;
+}
+
+function _psEmpChange(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  const name = opt?.dataset?.name || '';
+  // Auto-fill role if empty
+  const roleInput = document.getElementById('psRole');
+  if (roleInput && !roleInput.value && opt?.text) {
+    const rolePart = opt.text.split(' — ')[1] || '';
+    if (rolePart) roleInput.value = rolePart;
+  }
+}
+
+function closePersonnelModal() {
+  const backdrop = document.getElementById('personnelModalBackdrop');
+  if (!backdrop) return;
+  backdrop.classList.remove('open');
+  setTimeout(() => backdrop.remove(), 280);
+  editingPersonnelId = null;
+}
+
+async function savePersonnelRecord(type) {
+  const empSel  = document.getElementById('psEmpSelect');
+  const empId   = empSel?.value || null;
+  const empOpt  = empSel?.options[empSel.selectedIndex];
+  const empName = empId ? (empOpt?.dataset?.name || empOpt?.text?.split(' —')[0] || '') : '';
+
+  if (!empName) { alert('Please select an employee.'); return; }
+
+  let payload = {
+    record_type:  type,
+    employee_id:  empId || null,
+    employee_name: empName,
+    updated_at:   new Date().toISOString(),
+  };
+
+  if (type === 'screening') {
+    const role     = (document.getElementById('psRole')?.value||'').trim();
+    if (!role) { alert('Please enter the role / position.'); return; }
+    payload = { ...payload,
+      role_position:          role,
+      hire_start_date:        document.getElementById('psHireDate')?.value || null,
+      id_type:                (document.getElementById('psIdType')?.value||'').trim() || null,
+      id_expiry_date:         document.getElementById('psIdExpiry')?.value || null,
+      id_verified_by:         (document.getElementById('psIdVerifiedBy')?.value||'').trim() || null,
+      reference1:             (document.getElementById('psRef1')?.value||'').trim() || null,
+      reference2:             (document.getElementById('psRef2')?.value||'').trim() || null,
+      i9_completed_date:      document.getElementById('psI9Date')?.value || null,
+      screening_signoff_date: document.getElementById('psSignoffDate')?.value || null,
+      cui_access_granted_date:document.getElementById('psCuiDate')?.value || null,
+    };
+  } else {
+    const lastDay = document.getElementById('obLastDay')?.value;
+    const sepType = document.getElementById('obSepType')?.value;
+    if (!lastDay) { alert('Please enter the last day of CUI access.'); return; }
+    if (!sepType) { alert('Please select a separation type.'); return; }
+    payload = { ...payload,
+      separation_type:         sepType,
+      last_day_cui_access:     lastDay,
+      ad_disabled_date:        document.getElementById('obAdDate')?.value || null,
+      nas_revoked_date:        document.getElementById('obNasDate')?.value || null,
+      duo_removed_date:        document.getElementById('obDuoDate')?.value || null,
+      combo_changed_date:      document.getElementById('obComboDate')?.value || null,
+      inventory_updated_date:  document.getElementById('obInventoryDate')?.value || null,
+      assets_retrieved_date:   document.getElementById('obAssetsDate')?.value || null,
+      assets_description:      (document.getElementById('obAssetsDesc')?.value||'').trim() || null,
+      offboarding_signoff_date:document.getElementById('obSignoffDate')?.value || null,
+      signoff_by:              (document.getElementById('obSignoffBy')?.value||'').trim() || null,
+    };
+  }
+
+  let err;
+  if (editingPersonnelId) {
+    const res = await sb.from('cmmc_personnel_records').update(payload).eq('id', editingPersonnelId);
+    err = res.error;
+  } else {
+    const res = await sb.from('cmmc_personnel_records').insert({ ...payload, created_at: new Date().toISOString() });
+    err = res.error;
+  }
+
+  if (err) { alert('Save failed: ' + err.message); return; }
+  closePersonnelModal();
+  toast('👤 Personnel record saved.');
+  personnelEmployees = [];
+  await _renderPersonnelTab();
+}
+
+async function deletePersonnelRecord(id) {
+  if (!confirm('Delete this personnel record? This cannot be undone.')) return;
+  const { error } = await sb.from('cmmc_personnel_records').delete().eq('id', id);
+  if (error) { alert('Delete failed: ' + error.message); return; }
+  closePersonnelModal();
+  toast('Personnel record deleted.');
+  personnelEmployees = [];
+  await _renderPersonnelTab();
 }
 
 // ════════════════════════════════════════════════════════════════════

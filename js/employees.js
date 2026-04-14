@@ -21,7 +21,7 @@ function openEmployeesPanel(el) {
   document.getElementById('topbarName').textContent = 'Employees';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-employees').classList.add('active');
-  renderEmployeesPanel('');
+  _loadCmmcScreenedIds().then(() => renderEmployeesPanel(''));
 }
 
 let empDetailOpen = null;
@@ -242,6 +242,18 @@ function getTimeOffUsed(empId, year, annivStart, annivEnd) {
 // ── Employee panel ───────────────────────────────────────────────────────────
 
 let showInactiveEmployees = false;
+let cmmcScreenedIds = new Set(); // employee_ids with a completed screening record
+
+async function _loadCmmcScreenedIds() {
+  try {
+    const { data } = await sb.from('cmmc_personnel_records')
+      .select('employee_id')
+      .eq('record_type', 'screening');
+    cmmcScreenedIds = new Set((data || []).map(r => r.employee_id).filter(Boolean));
+  } catch(e) {
+    cmmcScreenedIds = new Set();
+  }
+}
 
 function toggleInactiveEmployees() {
   showInactiveEmployees = !showInactiveEmployees;
@@ -281,15 +293,21 @@ function renderEmployeesPanel(search) {
           ${filtered.map(e => {
             const isInactive = e.isActive === false || !!e.terminationDate;
             const termLabel = e.terminationDate ? 'Terminated ' + new Date(e.terminationDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Inactive';
+            const hasScreening = cmmcScreenedIds.has(e.id);
+            const shieldBadge = isInactive ? '' :
+              hasScreening
+                ? `<span title="CMMC screening record on file" style="font-size:13px;line-height:1;flex-shrink:0">🛡️</span>`
+                : `<span title="No CMMC screening record — click to add" style="font-size:12px;flex-shrink:0;opacity:0.5;cursor:pointer" onclick="event.stopPropagation();openCompliancePanel(null);complianceSwitchTab('personnel')">⚠️</span>`;
             return `
             <div onclick="showEmpProfile('${e.id}')" id="emplistrow-${e.id}"
               style="display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .12s;opacity:${isInactive?'0.55':'1'};${empDetailOpen===e.id?'background:var(--surface2);border-left:3px solid var(--amber);':'border-left:3px solid transparent;'}"
               onmouseover="if('${e.id}'!==empDetailOpen)this.style.background='var(--surface2)'" onmouseout="if('${e.id}'!==empDetailOpen)this.style.background=''">
               <div style="width:34px;height:34px;border-radius:50%;background:${e.color};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${e.initials}</div>
-              <div style="overflow:hidden">
+              <div style="overflow:hidden;flex:1">
                 <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.name}</div>
                 <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${isInactive ? '<span style="color:var(--red);font-weight:600">'+termLabel+'</span>' : e.role+(e.dept?' · '+e.dept:'')}</div>
               </div>
+              ${shieldBadge}
             </div>`;}).join('')}
         </div>
       </div>
@@ -667,6 +685,24 @@ function showEmpProfile(empId, annivOffset) {
         <button onclick="deleteEmployee('${empId}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--red);cursor:pointer">✕ Remove</button>
       </div>` : ''}
     </div>
+
+    <!-- CMMC Screening status banner (active employees only) -->
+    ${!isInactive ? (() => {
+      const screened = cmmcScreenedIds.has(empId);
+      return screened
+        ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(46,158,98,0.07);border:1px solid rgba(46,158,98,0.3);border-radius:8px;margin-bottom:18px;font-size:12.5px">
+            <span style="font-size:16px">🛡️</span>
+            <div style="flex:1;color:var(--green);font-weight:600">CMMC Pre-Employment Screening on file</div>
+            <button onclick="openCompliancePanel(null);complianceSwitchTab('personnel')"
+              style="background:transparent;border:1px solid rgba(46,158,98,0.4);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--green);cursor:pointer">View Record</button>
+          </div>`
+        : `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(232,162,52,0.07);border:1px solid rgba(232,162,52,0.35);border-radius:8px;margin-bottom:18px;font-size:12.5px">
+            <span style="font-size:16px">⚠️</span>
+            <div style="flex:1;color:var(--amber);font-weight:600">No CMMC Pre-Employment Screening record found</div>
+            <button onclick="openCompliancePanel(null);complianceSwitchTab('personnel')"
+              style="background:var(--amber);border:none;border-radius:6px;padding:4px 10px;font-size:11px;color:#000;font-weight:600;cursor:pointer">+ Add Screening</button>
+          </div>`;
+    })() : ''}
 
     <!-- Info cards row -->
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:24px">
