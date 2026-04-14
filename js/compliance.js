@@ -64,6 +64,9 @@ async function renderComplianceTab(tab) {
   else if (tab === 'assessment') await _renderAssessmentTab();
   else if (tab === 'incidents') await _renderIncidentsTab();
   else if (tab === 'personnel') await _renderPersonnelTab();
+  else if (tab === 'maintenance') await _renderMaintenanceTab();
+  else if (tab === 'mediadisposal') await _renderMediaDisposalTab();
+  else if (tab === 'changelog') await _renderChangeLogTab();
   else _renderComingSoonTab(tab);
 }
 
@@ -2625,6 +2628,992 @@ async function deletePersonnelRecord(id) {
   toast('Personnel record deleted.');
   personnelEmployees = [];
   await _renderPersonnelTab();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  MODULE 6 — MAINTENANCE RECORDS  (MA.L2-3.7.1 – 3.7.6)
+// ════════════════════════════════════════════════════════════════════
+// 13 fields per MA Policy §3. MA-YYYY-### IDs.
+// Covers routine IT maintenance AND contractor visits.
+// Contractor-specific fields only shown when type = 'Contractor Visit'.
+
+let maintenanceRecords   = [];
+let maintenanceTypeFilter = 'all';
+let maintenanceSearchVal  = '';
+let editingMaintenanceId  = null;
+
+const MA_TYPES = [
+  'Routine Patching',
+  'Hardware Service',
+  'Configuration Change',
+  'Firmware Update',
+  'Contractor Visit',
+  'Equipment Removal',
+  'Other',
+];
+
+async function _renderMaintenanceTab() {
+  const area = document.getElementById('complianceTabContent');
+  const { data, error } = await sb
+    .from('cmmc_maintenance_records')
+    .select('*')
+    .order('maintenance_date', { ascending: false });
+  maintenanceRecords = data || [];
+  if (error) console.error('Maintenance load error:', error);
+
+  const contractorCount = maintenanceRecords.filter(r => r.maintenance_type === 'Contractor Visit').length;
+  const incompleteCount = maintenanceRecords.filter(r => r.completion_status === 'Incomplete - Requires Follow-Up').length;
+
+  area.innerHTML = `
+    <div style="padding:28px 32px">
+      <div class="comp-stat-row">
+        <div class="comp-stat-pill">
+          <div class="comp-stat-num">${maintenanceRecords.length}</div>
+          <div class="comp-stat-lbl">Total Records</div>
+        </div>
+        <div class="comp-stat-pill comp-stat-purple">
+          <div class="comp-stat-num">${contractorCount}</div>
+          <div class="comp-stat-lbl">Contractor Visits</div>
+        </div>
+        ${incompleteCount ? `<div class="comp-stat-pill comp-stat-amber">
+          <div class="comp-stat-num">${incompleteCount}</div>
+          <div class="comp-stat-lbl">Needs Follow-Up</div>
+        </div>` : ''}
+      </div>
+
+      <div class="comp-policy-banner">
+        <span class="comp-policy-icon">📌</span>
+        <div>
+          <strong>MA.L2-3.7.1 – 3.7.6</strong> — All maintenance on CUI systems performed by
+          Owner / IT Administrator. Outside contractors supervised at all times and never left
+          unattended in CUI areas. Contractor media scanned with WithSecure EPP before use.
+          Records retained ≥ 3 years.
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+        <input type="text" placeholder="Search by ID, system, description…" autocomplete="off"
+          value="${_esc(maintenanceSearchVal)}"
+          oninput="maintenanceSearchVal=this.value;_renderMaintenanceTable()"
+          style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 12px;outline:none;width:240px;transition:border-color var(--transition)"
+          onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${['all','Routine Patching','Contractor Visit','Equipment Removal'].map(s => `
+            <button class="comp-filter-btn${maintenanceTypeFilter===s?' active':''}"
+              onclick="maintenanceTypeFilter='${s}';_renderMaintenanceTable()">
+              ${s==='all'?'All':s}
+            </button>`).join('')}
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button onclick="_refreshMaintenanceTab()" class="comp-btn-ghost">↺ Refresh</button>
+          <button onclick="openMaintenanceModal()" class="comp-btn-primary">+ New Record</button>
+        </div>
+      </div>
+      <div id="maintenanceTableWrap"></div>
+    </div>`;
+
+  _renderMaintenanceTable();
+}
+
+async function _refreshMaintenanceTab() { await _renderMaintenanceTab(); }
+
+function _renderMaintenanceTable() {
+  const wrap = document.getElementById('maintenanceTableWrap');
+  if (!wrap) return;
+  const q = maintenanceSearchVal.toLowerCase();
+  let filtered = maintenanceRecords;
+  if (maintenanceTypeFilter !== 'all') filtered = filtered.filter(r => r.maintenance_type === maintenanceTypeFilter);
+  if (q) filtered = filtered.filter(r =>
+    (r.maintenance_id||'').toLowerCase().includes(q) ||
+    (r.systems_affected||'').toLowerCase().includes(q) ||
+    (r.scope_of_work||'').toLowerCase().includes(q) ||
+    (r.performed_by||'').toLowerCase().includes(q)
+  );
+
+  if (!filtered.length) {
+    wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px">
+      ${q || maintenanceTypeFilter!=='all' ? 'No records match your filter.' : 'No maintenance records yet. Click <strong>+ New Record</strong> to log the first one.'}
+    </div>`;
+    return;
+  }
+
+  const statusBadge = s => s === 'Completed'
+    ? `<span class="comp-badge comp-badge-green">Completed</span>`
+    : `<span class="comp-badge comp-badge-amber">Follow-Up</span>`;
+
+  const rows = filtered.map(r => `
+    <tr class="comp-tbl-row" onclick="openMaintenanceModal('${r.id}')">
+      <td><span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">${_esc(r.maintenance_id||'—')}</span></td>
+      <td>${_fmtDate(r.maintenance_date)}</td>
+      <td><span class="comp-badge comp-badge-blue" style="font-size:10px">${_esc(r.maintenance_type||'—')}</span></td>
+      <td style="font-size:12px;color:var(--muted)">${_esc((r.systems_affected||'').substring(0,40))}${(r.systems_affected||'').length>40?'…':''}</td>
+      <td style="font-size:12px">${_esc(r.performed_by||'—')}</td>
+      <td>${statusBadge(r.completion_status)}</td>
+      <td style="font-size:12px;color:var(--muted)">${_esc(r.logged_by||'—')}</td>
+    </tr>`).join('');
+
+  wrap.innerHTML = `
+    <div class="comp-tbl-wrap">
+      <table class="comp-tbl">
+        <thead><tr>
+          <th>ID</th><th>Date</th><th>Type</th><th>Systems Affected</th>
+          <th>Performed By</th><th>Status</th><th>Logged By</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">
+      ${filtered.length} record${filtered.length!==1?'s':''} — Click any row to view / edit
+    </div>`;
+}
+
+function openMaintenanceModal(id) {
+  editingMaintenanceId = id || null;
+  const rec = id ? maintenanceRecords.find(r => r.id === id) : null;
+  const isNew = !id;
+
+  const _nextMaId = () => {
+    const year = new Date().getFullYear();
+    const nums = maintenanceRecords.map(r => { const m=(r.maintenance_id||'').match(/(\d+)$/); return m?parseInt(m[1]):0; }).filter(Boolean);
+    const next = nums.length ? Math.max(...nums)+1 : 1;
+    return `MA-${year}-${String(next).padStart(3,'0')}`;
+  };
+
+  const typeOpts = MA_TYPES.map(t =>
+    `<option value="${t}" ${(rec?.maintenance_type||'Routine Patching')===t?'selected':''}>${t}</option>`
+  ).join('');
+
+  const isContractor = rec?.maintenance_type === 'Contractor Visit';
+
+  const backdropId = 'maintenanceModalBackdrop';
+  document.getElementById(backdropId)?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = backdropId;
+  backdrop.onclick = e => { if(e.target===backdrop) closeMaintenanceModal(); };
+
+  backdrop.innerHTML = `
+    <div class="modal" style="width:680px;max-height:92vh">
+      <div class="modal-header">
+        <div class="modal-title">${rec ? `🔧 ${rec.maintenance_id}` : '🔧 New Maintenance Record'}</div>
+        <button class="modal-close" onclick="closeMaintenanceModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" style="gap:14px">
+
+        <div class="field-row">
+          <div class="field" style="flex:0 0 170px">
+            <label class="field-label">Maintenance ID <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="maId" type="text" value="${_esc(rec?.maintenance_id||_nextMaId())}"
+              style="font-family:'JetBrains Mono',monospace;font-size:13px"/>
+          </div>
+          <div class="field">
+            <label class="field-label">Date <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="maDate" type="date" style="color-scheme:light"
+              value="${rec?.maintenance_date||new Date().toISOString().split('T')[0]}"/>
+          </div>
+          <div class="field">
+            <label class="field-label">Type <span style="color:var(--red)">*</span></label>
+            <select class="f-select" id="maType" onchange="_maTypeChange(this)">${typeOpts}</select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Systems Affected <span style="color:var(--red)">*</span></label>
+          <input class="f-input" id="maSystems" type="text"
+            placeholder="e.g. All CUI workstations, Synology NAS, hardware firewall"
+            value="${_esc(rec?.systems_affected||'')}"/>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Performed By <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="maPerformedBy" type="text"
+              placeholder="Owner / IT Administrator or contractor name + company"
+              value="${_esc(rec?.performed_by||'Owner / IT Administrator')}"/>
+          </div>
+          <div class="field" id="maSupervisedByField" style="${isContractor?'':'display:none'}">
+            <label class="field-label">Supervised By</label>
+            <input class="f-input" id="maSupervisedBy" type="text"
+              placeholder="Owner / IT Administrator"
+              value="${_esc(rec?.supervised_by||'Owner / IT Administrator')}"/>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Scope of Work <span style="color:var(--red)">*</span></label>
+          <textarea class="f-textarea" id="maScopeOfWork" rows="3"
+            placeholder="Description of what maintenance was performed.">${_esc(rec?.scope_of_work||'')}</textarea>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Tools Used</label>
+            <input class="f-input" id="maTools" type="text"
+              placeholder="e.g. WithSecure Elements Software Updater, Windows Update"
+              value="${_esc(rec?.tools_used||'')}"/>
+          </div>
+          <div class="field" id="maMediaScanField">
+            <label class="field-label">Removable Media Scan</label>
+            <select class="f-select" id="maMediaScan">
+              <option value="">N/A — No removable media used</option>
+              <option value="Completed" ${rec?.media_scan==='Completed'?'selected':''}>✓ WithSecure EPP scan completed before use</option>
+              <option value="Not Required" ${rec?.media_scan==='Not Required'?'selected':''}>Not Required</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Equipment Removal section -->
+        <div id="maEquipmentSection" style="${rec?.equipment_removed?'':'display:none'}">
+          <div class="modal-div"></div>
+          <div style="font-size:10.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">
+            Equipment Removal (Off-Site)
+          </div>
+          <div class="field">
+            <label class="field-label">Equipment Removed — Details</label>
+            <textarea class="f-textarea" id="maEquipmentRemoved" rows="2"
+              placeholder="Device description, sanitization method (encryption confirmed / media destroyed), vendor receiving the equipment.">${_esc(rec?.equipment_removed||'')}</textarea>
+          </div>
+        </div>
+        <div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;color:var(--muted)">
+            <input type="checkbox" id="maShowEquipment"
+              ${rec?.equipment_removed?'checked':''}
+              onchange="document.getElementById('maEquipmentSection').style.display=this.checked?'':'none'"
+              style="cursor:pointer"/>
+            Equipment was removed off-site for maintenance
+          </label>
+        </div>
+
+        <div class="modal-div"></div>
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Completion Status <span style="color:var(--red)">*</span></label>
+            <select class="f-select" id="maStatus" onchange="_maStatusChange(this)">
+              <option value="Completed" ${(!rec||rec.completion_status==='Completed')?'selected':''}>Completed</option>
+              <option value="Incomplete - Requires Follow-Up" ${rec?.completion_status==='Incomplete - Requires Follow-Up'?'selected':''}>Incomplete — Requires Follow-Up</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="field-label">Logged By <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="maLoggedBy" type="text"
+              placeholder="Owner / IT Administrator"
+              value="${_esc(rec?.logged_by||'Owner / IT Administrator')}"/>
+          </div>
+        </div>
+        <div class="field" id="maFollowUpField" style="${rec?.completion_status==='Incomplete - Requires Follow-Up'?'':'display:none'}">
+          <label class="field-label">Follow-Up Required — Details</label>
+          <textarea class="f-textarea" id="maFollowUp" rows="2"
+            placeholder="Description of outstanding items and target resolution date.">${_esc(rec?.follow_up_required||'')}</textarea>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        ${id?`<button class="btn btn-ghost" style="margin-right:auto;color:var(--red)" onclick="deleteMaintenanceRecord('${id}')">🗑 Delete</button>`:''}
+        <button class="btn btn-ghost" onclick="closeMaintenanceModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveMaintenanceRecord()">${isNew?'Create Record':'Save Changes'}</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+function _maTypeChange(sel) {
+  const isContractor = sel.value === 'Contractor Visit';
+  const supField = document.getElementById('maSupervisedByField');
+  if (supField) supField.style.display = isContractor ? '' : 'none';
+}
+function _maStatusChange(sel) {
+  const f = document.getElementById('maFollowUpField');
+  if (f) f.style.display = sel.value === 'Incomplete - Requires Follow-Up' ? '' : 'none';
+}
+
+function closeMaintenanceModal() {
+  const b = document.getElementById('maintenanceModalBackdrop');
+  if (!b) return;
+  b.classList.remove('open');
+  setTimeout(() => b.remove(), 280);
+  editingMaintenanceId = null;
+}
+
+async function saveMaintenanceRecord() {
+  const maId       = (document.getElementById('maId')?.value||'').trim();
+  const maDate     = document.getElementById('maDate')?.value;
+  const maType     = document.getElementById('maType')?.value;
+  const systems    = (document.getElementById('maSystems')?.value||'').trim();
+  const performedBy= (document.getElementById('maPerformedBy')?.value||'').trim();
+  const scope      = (document.getElementById('maScopeOfWork')?.value||'').trim();
+  const loggedBy   = (document.getElementById('maLoggedBy')?.value||'').trim();
+  const status     = document.getElementById('maStatus')?.value;
+
+  if (!maId)       { alert('Please enter a Maintenance ID.'); return; }
+  if (!maDate)     { alert('Please enter the date.'); return; }
+  if (!systems)    { alert('Please enter systems affected.'); return; }
+  if (!performedBy){ alert('Please enter who performed the maintenance.'); return; }
+  if (!scope)      { alert('Please enter the scope of work.'); return; }
+  if (!loggedBy)   { alert('Please enter who logged this record.'); return; }
+
+  const showEquip = document.getElementById('maShowEquipment')?.checked;
+
+  const payload = {
+    maintenance_id:    maId,
+    maintenance_date:  maDate,
+    maintenance_type:  maType,
+    systems_affected:  systems,
+    performed_by:      performedBy,
+    supervised_by:     (document.getElementById('maSupervisedBy')?.value||'').trim() || null,
+    scope_of_work:     scope,
+    tools_used:        (document.getElementById('maTools')?.value||'').trim() || null,
+    media_scan:        document.getElementById('maMediaScan')?.value || null,
+    equipment_removed: showEquip ? (document.getElementById('maEquipmentRemoved')?.value||'').trim()||null : null,
+    completion_status: status,
+    follow_up_required:status==='Incomplete - Requires Follow-Up' ? (document.getElementById('maFollowUp')?.value||'').trim()||null : null,
+    logged_by:         loggedBy,
+    updated_at:        new Date().toISOString(),
+  };
+
+  let err;
+  if (editingMaintenanceId) {
+    const res = await sb.from('cmmc_maintenance_records').update(payload).eq('id', editingMaintenanceId);
+    err = res.error;
+  } else {
+    const res = await sb.from('cmmc_maintenance_records').insert({...payload, created_at: new Date().toISOString()});
+    err = res.error;
+  }
+  if (err) { alert('Save failed: ' + err.message); return; }
+  closeMaintenanceModal();
+  toast('🔧 Maintenance record saved.');
+  await _renderMaintenanceTab();
+}
+
+async function deleteMaintenanceRecord(id) {
+  if (!confirm('Delete this maintenance record? This cannot be undone.')) return;
+  const { error } = await sb.from('cmmc_maintenance_records').delete().eq('id', id);
+  if (error) { alert('Delete failed: ' + error.message); return; }
+  closeMaintenanceModal();
+  toast('Maintenance record deleted.');
+  await _renderMaintenanceTab();
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  MODULE 7 — MEDIA DISPOSAL RECORDS  (MP.L2-3.8.3)
+// ════════════════════════════════════════════════════════════════════
+// 9 fields per MP Policy §5. MD-YYYY-### IDs.
+// Covers digital (HDD, SSD, USB, NAS Drive) and paper CUI destruction.
+
+let mediaDisposalRecords  = [];
+let mediaDisposalSearchVal = '';
+let editingMediaDisposalId = null;
+
+const MD_MEDIA_TYPES = ['Paper', 'HDD', 'SSD', 'USB / Removable Media', 'NAS Drive', 'Other'];
+const MD_METHODS = [
+  'Shredding',
+  'Multi-pass wipe (DoD 5220.22-M)',
+  'Secure Erase (manufacturer)',
+  'Physical destruction',
+  'Full format overwrite',
+  'Other',
+];
+
+async function _renderMediaDisposalTab() {
+  const area = document.getElementById('complianceTabContent');
+  const { data, error } = await sb
+    .from('cmmc_media_disposal')
+    .select('*')
+    .order('disposal_date', { ascending: false });
+  mediaDisposalRecords = data || [];
+  if (error) console.error('Media disposal load error:', error);
+
+  const digitalCount = mediaDisposalRecords.filter(r => r.media_type !== 'Paper').length;
+  const paperCount   = mediaDisposalRecords.filter(r => r.media_type === 'Paper').length;
+
+  area.innerHTML = `
+    <div style="padding:28px 32px">
+      <div class="comp-stat-row">
+        <div class="comp-stat-pill">
+          <div class="comp-stat-num">${mediaDisposalRecords.length}</div>
+          <div class="comp-stat-lbl">Total Records</div>
+        </div>
+        <div class="comp-stat-pill comp-stat-blue">
+          <div class="comp-stat-num">${digitalCount}</div>
+          <div class="comp-stat-lbl">Digital Media</div>
+        </div>
+        <div class="comp-stat-pill comp-stat-purple">
+          <div class="comp-stat-num">${paperCount}</div>
+          <div class="comp-stat-lbl">Paper CUI</div>
+        </div>
+      </div>
+
+      <div class="comp-policy-banner">
+        <span class="comp-policy-icon">📌</span>
+        <div>
+          <strong>MP.L2-3.8.3</strong> — Sanitize or destroy all CUI media before disposal or reuse.
+          HDD/SSD: multi-pass wipe (DoD 5220.22-M) or physical destruction. Paper: cross-cut or
+          micro-cut shredding. NAS drives at end of life: physical destruction only. Records
+          retained ≥ 3 years.
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+        <input type="text" placeholder="Search by ID, device, method…" autocomplete="off"
+          value="${_esc(mediaDisposalSearchVal)}"
+          oninput="mediaDisposalSearchVal=this.value;_renderMediaDisposalTable()"
+          style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 12px;outline:none;width:240px;transition:border-color var(--transition)"
+          onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button onclick="_refreshMediaDisposalTab()" class="comp-btn-ghost">↺ Refresh</button>
+          <button onclick="openMediaDisposalModal()" class="comp-btn-primary">+ New Record</button>
+        </div>
+      </div>
+      <div id="mediaDisposalTableWrap"></div>
+    </div>`;
+
+  _renderMediaDisposalTable();
+}
+
+async function _refreshMediaDisposalTab() { await _renderMediaDisposalTab(); }
+
+function _renderMediaDisposalTable() {
+  const wrap = document.getElementById('mediaDisposalTableWrap');
+  if (!wrap) return;
+  const q = mediaDisposalSearchVal.toLowerCase();
+  let filtered = mediaDisposalRecords;
+  if (q) filtered = filtered.filter(r =>
+    (r.disposal_id||'').toLowerCase().includes(q) ||
+    (r.device_description||'').toLowerCase().includes(q) ||
+    (r.sanitization_method||'').toLowerCase().includes(q) ||
+    (r.performed_by||'').toLowerCase().includes(q)
+  );
+
+  if (!filtered.length) {
+    wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px">
+      ${q ? 'No records match your search.' : 'No media disposal records yet. Click <strong>+ New Record</strong> to log the first one.'}
+    </div>`;
+    return;
+  }
+
+  const verifiedBadge = v => v
+    ? `<span class="comp-badge comp-badge-green">✓ Verified</span>`
+    : `<span class="comp-badge comp-badge-amber">Pending</span>`;
+
+  const rows = filtered.map(r => `
+    <tr class="comp-tbl-row" onclick="openMediaDisposalModal('${r.id}')">
+      <td><span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">${_esc(r.disposal_id||'—')}</span></td>
+      <td>${_fmtDate(r.disposal_date)}</td>
+      <td><span class="comp-badge comp-badge-blue" style="font-size:10px">${_esc(r.media_type||'—')}</span></td>
+      <td style="font-size:12px;max-width:200px">${_esc((r.device_description||'').substring(0,50))}${(r.device_description||'').length>50?'…':''}</td>
+      <td style="font-size:12px;color:var(--muted)">${_esc(r.sanitization_method||'—')}</td>
+      <td>${verifiedBadge(r.method_verified)}</td>
+      <td style="font-size:12px;color:var(--muted)">${_esc(r.performed_by||'—')}</td>
+    </tr>`).join('');
+
+  wrap.innerHTML = `
+    <div class="comp-tbl-wrap">
+      <table class="comp-tbl">
+        <thead><tr>
+          <th>ID</th><th>Date</th><th>Media Type</th><th>Device Description</th>
+          <th>Method</th><th>Verified</th><th>Performed By</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">
+      ${filtered.length} record${filtered.length!==1?'s':''} — Click any row to view / edit
+    </div>`;
+}
+
+function openMediaDisposalModal(id) {
+  editingMediaDisposalId = id || null;
+  const rec = id ? mediaDisposalRecords.find(r => r.id === id) : null;
+  const isNew = !id;
+
+  const _nextMdId = () => {
+    const year = new Date().getFullYear();
+    const nums = mediaDisposalRecords.map(r => { const m=(r.disposal_id||'').match(/(\d+)$/); return m?parseInt(m[1]):0; }).filter(Boolean);
+    const next = nums.length ? Math.max(...nums)+1 : 1;
+    return `MD-${year}-${String(next).padStart(3,'0')}`;
+  };
+
+  const mediaOpts = MD_MEDIA_TYPES.map(t => `<option value="${t}" ${(rec?.media_type||'')===t?'selected':''}>${t}</option>`).join('');
+  const methodOpts = MD_METHODS.map(m => `<option value="${m}" ${(rec?.sanitization_method||'')===m?'selected':''}>${m}</option>`).join('');
+
+  const backdropId = 'mediaDisposalModalBackdrop';
+  document.getElementById(backdropId)?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = backdropId;
+  backdrop.onclick = e => { if(e.target===backdrop) closeMediaDisposalModal(); };
+
+  backdrop.innerHTML = `
+    <div class="modal" style="width:620px;max-height:92vh">
+      <div class="modal-header">
+        <div class="modal-title">${rec ? `🗑️ ${rec.disposal_id}` : '🗑️ New Media Disposal Record'}</div>
+        <button class="modal-close" onclick="closeMediaDisposalModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" style="gap:14px">
+
+        <div class="field-row">
+          <div class="field" style="flex:0 0 160px">
+            <label class="field-label">Disposal ID <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="mdId" type="text" value="${_esc(rec?.disposal_id||_nextMdId())}"
+              style="font-family:'JetBrains Mono',monospace;font-size:13px"/>
+          </div>
+          <div class="field">
+            <label class="field-label">Date <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="mdDate" type="date" style="color-scheme:light"
+              value="${rec?.disposal_date||new Date().toISOString().split('T')[0]}"/>
+          </div>
+          <div class="field">
+            <label class="field-label">Media Type <span style="color:var(--red)">*</span></label>
+            <select class="f-select" id="mdMediaType">${mediaOpts}</select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Device Description <span style="color:var(--red)">*</span></label>
+          <input class="f-input" id="mdDeviceDesc" type="text"
+            placeholder="Make, model, serial number (for drives) or description (for paper batch)"
+            value="${_esc(rec?.device_description||'')}"/>
+        </div>
+
+        <div class="field">
+          <label class="field-label">CUI Content</label>
+          <input class="f-input" id="mdCuiContent" type="text"
+            placeholder="Brief description of the CUI content that was on the media"
+            value="${_esc(rec?.cui_content||'')}"/>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Sanitization Method <span style="color:var(--red)">*</span></label>
+            <select class="f-select" id="mdMethod">${methodOpts}</select>
+          </div>
+          <div class="field" style="flex:0 0 160px">
+            <label class="field-label">Method Verified</label>
+            <select class="f-select" id="mdVerified">
+              <option value="true" ${rec?.method_verified?'selected':''}>✓ Yes — Verified</option>
+              <option value="false" ${rec && !rec.method_verified?'selected':''}>Pending verification</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Performed By <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="mdPerformedBy" type="text"
+              placeholder="Owner / IT Administrator"
+              value="${_esc(rec?.performed_by||'Owner / IT Administrator')}"/>
+          </div>
+          <div class="field">
+            <label class="field-label">Disposal Destination</label>
+            <input class="f-input" id="mdDestination" type="text"
+              placeholder="e.g. Recycling, trash, certified e-waste vendor"
+              value="${_esc(rec?.disposal_destination||'')}"/>
+          </div>
+        </div>
+
+        <div class="comp-policy-banner" style="margin-top:4px">
+          <span class="comp-policy-icon">ℹ</span>
+          <div style="font-size:11.5px">
+            Drives that cannot be reliably wiped must be physically destroyed before disposal.
+            NAS drives at end of life are always physically destroyed — never wiped and reused externally.
+            Paper CUI is shredded using cross-cut or micro-cut shredder. (MP Policy §4)
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        ${id?`<button class="btn btn-ghost" style="margin-right:auto;color:var(--red)" onclick="deleteMediaDisposalRecord('${id}')">🗑 Delete</button>`:''}
+        <button class="btn btn-ghost" onclick="closeMediaDisposalModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveMediaDisposalRecord()">${isNew?'Create Record':'Save Changes'}</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+function closeMediaDisposalModal() {
+  const b = document.getElementById('mediaDisposalModalBackdrop');
+  if (!b) return;
+  b.classList.remove('open');
+  setTimeout(() => b.remove(), 280);
+  editingMediaDisposalId = null;
+}
+
+async function saveMediaDisposalRecord() {
+  const mdId      = (document.getElementById('mdId')?.value||'').trim();
+  const mdDate    = document.getElementById('mdDate')?.value;
+  const mediaType = document.getElementById('mdMediaType')?.value;
+  const deviceDesc= (document.getElementById('mdDeviceDesc')?.value||'').trim();
+  const method    = document.getElementById('mdMethod')?.value;
+  const performedBy=(document.getElementById('mdPerformedBy')?.value||'').trim();
+
+  if (!mdId)       { alert('Please enter a Disposal ID.'); return; }
+  if (!mdDate)     { alert('Please enter the date.'); return; }
+  if (!mediaType)  { alert('Please select a media type.'); return; }
+  if (!deviceDesc) { alert('Please enter a device description.'); return; }
+  if (!method)     { alert('Please select a sanitization method.'); return; }
+  if (!performedBy){ alert('Please enter who performed the disposal.'); return; }
+
+  const payload = {
+    disposal_id:          mdId,
+    disposal_date:        mdDate,
+    media_type:           mediaType,
+    device_description:   deviceDesc,
+    cui_content:          (document.getElementById('mdCuiContent')?.value||'').trim()||null,
+    sanitization_method:  method,
+    method_verified:      document.getElementById('mdVerified')?.value === 'true',
+    performed_by:         performedBy,
+    disposal_destination: (document.getElementById('mdDestination')?.value||'').trim()||null,
+    updated_at:           new Date().toISOString(),
+  };
+
+  let err;
+  if (editingMediaDisposalId) {
+    const res = await sb.from('cmmc_media_disposal').update(payload).eq('id', editingMediaDisposalId);
+    err = res.error;
+  } else {
+    const res = await sb.from('cmmc_media_disposal').insert({...payload, created_at: new Date().toISOString()});
+    err = res.error;
+  }
+  if (err) { alert('Save failed: ' + err.message); return; }
+  closeMediaDisposalModal();
+  toast('🗑️ Media disposal record saved.');
+  await _renderMediaDisposalTab();
+}
+
+async function deleteMediaDisposalRecord(id) {
+  if (!confirm('Delete this media disposal record? This cannot be undone.')) return;
+  const { error } = await sb.from('cmmc_media_disposal').delete().eq('id', id);
+  if (error) { alert('Delete failed: ' + error.message); return; }
+  closeMediaDisposalModal();
+  toast('Media disposal record deleted.');
+  await _renderMediaDisposalTab();
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+//  MODULE 8 — CUI SYSTEM CHANGE LOG  (CM.L2-3.4.3 / 3.4.4)
+// ════════════════════════════════════════════════════════════════════
+// 10 fields per CM Policy §4. CHG-YYYY-### IDs.
+// Tracks all significant configuration changes to CUI systems.
+
+let changeLogRecords   = [];
+let changeLogSearchVal  = '';
+let changeLogTypeFilter = 'all';
+let editingChangeLogId  = null;
+
+const CHG_TYPES = [
+  'Software Installation',
+  'Software Removal',
+  'Group Policy Change',
+  'Firewall Rule Change',
+  'NAS Configuration',
+  'Hardware Addition',
+  'Hardware Removal',
+  'Other',
+];
+
+const CHG_IMPACT = ['Neutral', 'Reduces Risk', 'Introduces Risk — Mitigated'];
+
+async function _renderChangeLogTab() {
+  const area = document.getElementById('complianceTabContent');
+  const { data, error } = await sb
+    .from('cmmc_change_log')
+    .select('*')
+    .order('change_date', { ascending: false });
+  changeLogRecords = data || [];
+  if (error) console.error('Change log load error:', error);
+
+  const riskCount    = changeLogRecords.filter(r => r.security_impact === 'Introduces Risk — Mitigated').length;
+  const baselineCount= changeLogRecords.filter(r => r.baseline_updated).length;
+
+  area.innerHTML = `
+    <div style="padding:28px 32px">
+      <div class="comp-stat-row">
+        <div class="comp-stat-pill">
+          <div class="comp-stat-num">${changeLogRecords.length}</div>
+          <div class="comp-stat-lbl">Total Changes</div>
+        </div>
+        <div class="comp-stat-pill comp-stat-green">
+          <div class="comp-stat-num">${baselineCount}</div>
+          <div class="comp-stat-lbl">Baseline Updated</div>
+        </div>
+        ${riskCount ? `<div class="comp-stat-pill comp-stat-amber">
+          <div class="comp-stat-num">${riskCount}</div>
+          <div class="comp-stat-lbl">Risk Introduced</div>
+        </div>` : ''}
+      </div>
+
+      <div class="comp-policy-banner">
+        <span class="comp-policy-icon">📌</span>
+        <div>
+          <strong>CM.L2-3.4.3 &amp; 3.4.4</strong> — All significant CUI system configuration changes
+          must be logged before or immediately after implementation. Security impact assessed before
+          implementing any change. Changes introducing new risk must document compensating controls.
+          Baseline configuration updated after every change. Records retained ≥ 3 years.
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+        <input type="text" placeholder="Search by ID, system, description…" autocomplete="off"
+          value="${_esc(changeLogSearchVal)}"
+          oninput="changeLogSearchVal=this.value;_renderChangeLogTable()"
+          style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 12px;outline:none;width:240px;transition:border-color var(--transition)"
+          onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${['all',...CHG_TYPES.slice(0,4)].map(s => `
+            <button class="comp-filter-btn${changeLogTypeFilter===s?' active':''}"
+              onclick="changeLogTypeFilter='${s}';_renderChangeLogTable()">
+              ${s==='all'?'All':s}
+            </button>`).join('')}
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button onclick="_refreshChangeLogTab()" class="comp-btn-ghost">↺ Refresh</button>
+          <button onclick="openChangeLogModal()" class="comp-btn-primary">+ Log Change</button>
+        </div>
+      </div>
+      <div id="changeLogTableWrap"></div>
+    </div>`;
+
+  _renderChangeLogTable();
+}
+
+async function _refreshChangeLogTab() { await _renderChangeLogTab(); }
+
+function _renderChangeLogTable() {
+  const wrap = document.getElementById('changeLogTableWrap');
+  if (!wrap) return;
+  const q = changeLogSearchVal.toLowerCase();
+  let filtered = changeLogRecords;
+  if (changeLogTypeFilter !== 'all') filtered = filtered.filter(r => r.change_type === changeLogTypeFilter);
+  if (q) filtered = filtered.filter(r =>
+    (r.change_id||'').toLowerCase().includes(q) ||
+    (r.system_affected||'').toLowerCase().includes(q) ||
+    (r.description_of_change||'').toLowerCase().includes(q) ||
+    (r.implemented_by||'').toLowerCase().includes(q)
+  );
+
+  if (!filtered.length) {
+    wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px">
+      ${q || changeLogTypeFilter!=='all' ? 'No records match your filter.' : 'No change log entries yet. Click <strong>+ Log Change</strong> to add the first one.'}
+    </div>`;
+    return;
+  }
+
+  const impactBadge = s => {
+    if (s === 'Introduces Risk — Mitigated') return `<span class="comp-badge comp-badge-amber">⚠ Risk</span>`;
+    if (s === 'Reduces Risk') return `<span class="comp-badge comp-badge-green">↓ Risk</span>`;
+    return `<span class="comp-badge" style="background:var(--surface2);color:var(--muted)">Neutral</span>`;
+  };
+
+  const rows = filtered.map(r => `
+    <tr class="comp-tbl-row" onclick="openChangeLogModal('${r.id}')">
+      <td><span style="font-family:'JetBrains Mono',monospace;font-size:11.5px">${_esc(r.change_id||'—')}</span></td>
+      <td>${_fmtDate(r.change_date)}</td>
+      <td style="font-size:12px">${_esc(r.change_type||'—')}</td>
+      <td style="font-size:12px;color:var(--muted)">${_esc(r.system_affected||'—')}</td>
+      <td style="font-size:12px;max-width:220px">${_esc((r.description_of_change||'').substring(0,60))}${(r.description_of_change||'').length>60?'…':''}</td>
+      <td>${impactBadge(r.security_impact)}</td>
+      <td style="text-align:center">${r.baseline_updated ? '✓' : '<span style="color:var(--muted)">—</span>'}</td>
+    </tr>`).join('');
+
+  wrap.innerHTML = `
+    <div class="comp-tbl-wrap">
+      <table class="comp-tbl">
+        <thead><tr>
+          <th>Change ID</th><th>Date</th><th>Type</th><th>System</th>
+          <th>Description</th><th>Security Impact</th><th>Baseline Updated</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">
+      ${filtered.length} entr${filtered.length!==1?'ies':'y'} — Click any row to view / edit
+    </div>`;
+}
+
+function openChangeLogModal(id) {
+  editingChangeLogId = id || null;
+  const rec = id ? changeLogRecords.find(r => r.id === id) : null;
+  const isNew = !id;
+
+  const _nextChgId = () => {
+    const year = new Date().getFullYear();
+    const nums = changeLogRecords.map(r => { const m=(r.change_id||'').match(/(\d+)$/); return m?parseInt(m[1]):0; }).filter(Boolean);
+    const next = nums.length ? Math.max(...nums)+1 : 1;
+    return `CHG-${year}-${String(next).padStart(3,'0')}`;
+  };
+
+  const typeOpts   = CHG_TYPES.map(t => `<option value="${t}" ${(rec?.change_type||'Software Installation')===t?'selected':''}>${t}</option>`).join('');
+  const impactOpts = CHG_IMPACT.map(i => `<option value="${i}" ${(rec?.security_impact||'Neutral')===i?'selected':''}>${i}</option>`).join('');
+
+  const backdropId = 'changeLogModalBackdrop';
+  document.getElementById(backdropId)?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = backdropId;
+  backdrop.onclick = e => { if(e.target===backdrop) closeChangeLogModal(); };
+
+  backdrop.innerHTML = `
+    <div class="modal" style="width:660px;max-height:92vh">
+      <div class="modal-header">
+        <div class="modal-title">${rec ? `📝 ${rec.change_id}` : '📝 Log Configuration Change'}</div>
+        <button class="modal-close" onclick="closeChangeLogModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" style="gap:14px">
+
+        <div class="field-row">
+          <div class="field" style="flex:0 0 170px">
+            <label class="field-label">Change ID <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="chgId" type="text" value="${_esc(rec?.change_id||_nextChgId())}"
+              style="font-family:'JetBrains Mono',monospace;font-size:13px"/>
+          </div>
+          <div class="field">
+            <label class="field-label">Date <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="chgDate" type="date" style="color-scheme:light"
+              value="${rec?.change_date||new Date().toISOString().split('T')[0]}"/>
+          </div>
+          <div class="field">
+            <label class="field-label">Change Type <span style="color:var(--red)">*</span></label>
+            <select class="f-select" id="chgType">${typeOpts}</select>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">System Affected <span style="color:var(--red)">*</span></label>
+          <input class="f-input" id="chgSystem" type="text"
+            placeholder="e.g. All CUI workstations, Synology NAS, hardware firewall, Group Policy"
+            value="${_esc(rec?.system_affected||'')}"/>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Description of Change <span style="color:var(--red)">*</span></label>
+          <textarea class="f-textarea" id="chgDescription" rows="3"
+            placeholder="Clear description of what was changed and what the previous configuration was.">${_esc(rec?.description_of_change||'')}</textarea>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Reason for Change <span style="color:var(--red)">*</span></label>
+          <textarea class="f-textarea" id="chgReason" rows="2"
+            placeholder="Business or security justification for the change.">${_esc(rec?.reason_for_change||'')}</textarea>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Security Impact <span style="color:var(--red)">*</span></label>
+            <select class="f-select" id="chgImpact" onchange="_chgImpactChange(this)">${impactOpts}</select>
+          </div>
+          <div class="field" style="flex:0 0 160px">
+            <label class="field-label">Baseline Updated</label>
+            <select class="f-select" id="chgBaselineUpdated">
+              <option value="true" ${rec?.baseline_updated?'selected':''}>✓ Yes — Baseline updated</option>
+              <option value="false" ${rec && !rec.baseline_updated?'selected':''}>No — Not yet updated</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="field" id="chgMitigationField" style="${rec?.security_impact==='Introduces Risk — Mitigated'?'':'display:none'}">
+          <label class="field-label">Compensating Controls / Mitigation</label>
+          <textarea class="f-textarea" id="chgMitigation" rows="2"
+            placeholder="Describe the compensating controls applied to mitigate the introduced risk.">${_esc(rec?.mitigation_notes||'')}</textarea>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Implemented By <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="chgImplementedBy" type="text"
+              placeholder="Owner / IT Administrator"
+              value="${_esc(rec?.implemented_by||'Owner / IT Administrator')}"/>
+          </div>
+          <div class="field">
+            <label class="field-label">Sign-Off Confirmation</label>
+            <input class="f-input" id="chgSignoff" type="text"
+              placeholder="Confirmed change implemented as documented"
+              value="${_esc(rec?.signoff||'')}"/>
+          </div>
+        </div>
+
+      </div>
+      <div class="modal-footer">
+        ${id?`<button class="btn btn-ghost" style="margin-right:auto;color:var(--red)" onclick="deleteChangeLogRecord('${id}')">🗑 Delete</button>`:''}
+        <button class="btn btn-ghost" onclick="closeChangeLogModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveChangeLogRecord()">${isNew?'Log Change':'Save Changes'}</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+function _chgImpactChange(sel) {
+  const f = document.getElementById('chgMitigationField');
+  if (f) f.style.display = sel.value === 'Introduces Risk — Mitigated' ? '' : 'none';
+}
+
+function closeChangeLogModal() {
+  const b = document.getElementById('changeLogModalBackdrop');
+  if (!b) return;
+  b.classList.remove('open');
+  setTimeout(() => b.remove(), 280);
+  editingChangeLogId = null;
+}
+
+async function saveChangeLogRecord() {
+  const chgId    = (document.getElementById('chgId')?.value||'').trim();
+  const chgDate  = document.getElementById('chgDate')?.value;
+  const chgType  = document.getElementById('chgType')?.value;
+  const system   = (document.getElementById('chgSystem')?.value||'').trim();
+  const desc     = (document.getElementById('chgDescription')?.value||'').trim();
+  const reason   = (document.getElementById('chgReason')?.value||'').trim();
+  const impact   = document.getElementById('chgImpact')?.value;
+  const implBy   = (document.getElementById('chgImplementedBy')?.value||'').trim();
+
+  if (!chgId)  { alert('Please enter a Change ID.'); return; }
+  if (!chgDate){ alert('Please enter the date.'); return; }
+  if (!system) { alert('Please enter the system affected.'); return; }
+  if (!desc)   { alert('Please enter a description of the change.'); return; }
+  if (!reason) { alert('Please enter the reason for the change.'); return; }
+  if (!implBy) { alert('Please enter who implemented the change.'); return; }
+
+  const payload = {
+    change_id:            chgId,
+    change_date:          chgDate,
+    change_type:          chgType,
+    system_affected:      system,
+    description_of_change:desc,
+    reason_for_change:    reason,
+    security_impact:      impact,
+    baseline_updated:     document.getElementById('chgBaselineUpdated')?.value === 'true',
+    mitigation_notes:     impact==='Introduces Risk — Mitigated' ? (document.getElementById('chgMitigation')?.value||'').trim()||null : null,
+    implemented_by:       implBy,
+    signoff:              (document.getElementById('chgSignoff')?.value||'').trim()||null,
+    updated_at:           new Date().toISOString(),
+  };
+
+  let err;
+  if (editingChangeLogId) {
+    const res = await sb.from('cmmc_change_log').update(payload).eq('id', editingChangeLogId);
+    err = res.error;
+  } else {
+    const res = await sb.from('cmmc_change_log').insert({...payload, created_at: new Date().toISOString()});
+    err = res.error;
+  }
+  if (err) { alert('Save failed: ' + err.message); return; }
+  closeChangeLogModal();
+  toast('📝 Change log entry saved.');
+  await _renderChangeLogTab();
+}
+
+async function deleteChangeLogRecord(id) {
+  if (!confirm('Delete this change log entry? This cannot be undone.')) return;
+  const { error } = await sb.from('cmmc_change_log').delete().eq('id', id);
+  if (error) { alert('Delete failed: ' + error.message); return; }
+  closeChangeLogModal();
+  toast('Change log entry deleted.');
+  await _renderChangeLogTab();
 }
 
 // ════════════════════════════════════════════════════════════════════
