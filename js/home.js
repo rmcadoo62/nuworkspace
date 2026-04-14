@@ -2,6 +2,7 @@
 
 let _homeWeatherCache = null;
 let _homeAnnouncementId = null; // currently displayed announcement being edited
+let _homeRefreshTimer = null; // 15-minute chatter refresh
 
 // ---- Open Home Panel ----
 function openHomePanel(navEl) {
@@ -12,6 +13,12 @@ function openHomePanel(navEl) {
   document.getElementById('topbarName').textContent = 'Home';
   activeProjectId = null;
   renderHomePage();
+  // Start 15-minute refresh timer
+  if (_homeRefreshTimer) clearInterval(_homeRefreshTimer);
+  _homeRefreshTimer = setInterval(() => {
+    const panel = document.getElementById('panel-home');
+    if (panel && panel.classList.contains('active')) refreshHomeChatter();
+  }, 15 * 60 * 1000);
 }
 window.openHomePanel = openHomePanel;
 
@@ -28,7 +35,7 @@ async function renderHomePage() {
   ]);
 
   const holidays  = getUpcomingHolidays(3);
-  const chatter   = getRecentChatter(8);
+  const chatter   = await fetchRecentChatter(8);
   const canPost   = currentEmployee && (currentEmployee.isOwner || isManager());
 
   const now = new Date();
@@ -314,15 +321,29 @@ function renderHolidaysCard(holidays) {
 }
 
 // ---- Recent Chatter ----
-function getRecentChatter(limit) {
-  if (typeof chatterStore === 'undefined') return [];
-  const all = [];
-  Object.entries(chatterStore).forEach(([projId, msgs]) => {
-    msgs.forEach(m => all.push({ ...m, projId }));
-  });
-  return all
-    .sort((a, b) => new Date(b.ts) - new Date(a.ts))
-    .slice(0, limit);
+async function fetchRecentChatter(limit) {
+  if (!sb) return [];
+  try {
+    const { data } = await sb.from('chatter')
+      .select('id, proj_id, author_id, author_name, author_initials, author_color, text, created_at')
+      .order('created_at', { ascending: false })
+      .limit(limit);
+    return (data || []).map(r => ({
+      id:             r.id,
+      projId:         r.proj_id,
+      authorName:     r.author_name,
+      authorInitials: r.author_initials,
+      authorColor:    r.author_color,
+      text:           r.text,
+      ts:             r.created_at,
+    }));
+  } catch(e) { console.error('fetchRecentChatter:', e); return []; }
+}
+
+async function refreshHomeChatter() {
+  const chatter = await fetchRecentChatter(8);
+  const card = document.querySelector('.home-chat-card');
+  if (card) card.outerHTML = renderChatterCard(chatter);
 }
 
 function renderChatterCard(msgs) {
