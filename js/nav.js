@@ -7,6 +7,10 @@
 // To add a new entry: add an object to the TOP of this array, then deploy.
 // date: 'YYYY-MM-DD', tag: category label, text: description
 const WHATS_NEW = [
+  { date: '2026-04-14', tag: 'Permissions', text: 'Project tab visibility is now role-controlled — Hours, Expenses, Invoicing, and Shipping tabs can be hidden per role. Restricted tabs simply disappear for users without access.' },
+  { date: '2026-04-14', tag: 'Permissions', text: 'Clients and Quotes (Vibrato) sidebar nav items are now role-gated. Users without access won\'t see them at all.' },
+  { date: '2026-04-14', tag: 'Permissions', text: 'Edit Tasks permission now fully locks the task list — the status dropdown, assignee, and all inline fields are completely read-only for restricted users.' },
+  { date: '2026-04-14', tag: 'Permissions', text: 'New permission defaults: Hours and Shipping are open to all roles. Expenses, Invoicing, Clients, and Quotes default to managers only. All adjustable in Setup → Permissions.' },
   { date: '2026-04-14', tag: 'Home',  text: 'Added todays date to Home Page.' },
   { date: '2026-04-13', tag: 'Projects',  text: 'Column filter clear pill — when you type in the 🔍 filter rows a clear button now appears in the filter bar to reset all column filters at once.' },
   { date: '2026-04-10', tag: 'Scheduler', text: 'Scheduler block colors and employee access settings now save to Supabase so all users share the same configuration.' },
@@ -45,10 +49,10 @@ function renderWhatsNewList() {
   if (!list) return;
   const last = _wnGetLastRead();
   const TAG_COLORS = {
-    'Projects':      '#5b9cf6', 'Scheduler':  '#a78bfa', 'Compliance': '#4caf7d',
+    'Permissions':   '#f472b6', 'Projects':      '#5b9cf6', 'Scheduler':  '#a78bfa', 'Compliance': '#4caf7d',
     'Notifications': '#e8a234', 'Job Pack':   '#fb923c', 'Chatter':    '#f472b6',
     'Shipping':      '#94a3b8', 'Quotes':     '#4caf7d', 'Employees':  '#e8a234',
-    'Reports':       '#5b9cf6', 'Timesheets': '#a78bfa',
+    'Reports':       '#5b9cf6', 'Timesheets': '#a78bfa', 'Home': '#5b9cf6',
   };
   if (!WHATS_NEW.length) {
     list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--muted);font-size:13px">No updates yet.</div>';
