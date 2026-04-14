@@ -1,5 +1,6 @@
 /* ===== HOME PAGE ===== */
 .home-loading{padding:40px;color:var(--muted);font-size:13px;}
+.home-date-header{font-family:'DM Serif Display',serif;font-size:28px;color:var(--text);padding:4px 0 4px;}
 
 .home-grid{padding:28px 32px;display:flex;flex-direction:column;gap:20px;max-width:1200px;}
 

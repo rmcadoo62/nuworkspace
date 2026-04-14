@@ -31,8 +31,13 @@ async function renderHomePage() {
   const chatter   = getRecentChatter(8);
   const canPost   = currentEmployee && (currentEmployee.isOwner || isManager());
 
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
   wrap.innerHTML = `
     <div class="home-grid">
+
+      <div class="home-date-header">${dateStr}</div>
 
       ${renderAnnouncementSection(announcement, canPost)}
 

@@ -7,6 +7,7 @@
 // To add a new entry: add an object to the TOP of this array, then deploy.
 // date: 'YYYY-MM-DD', tag: category label, text: description
 const WHATS_NEW = [
+  { date: '2026-04-14', tag: 'Home',  text: 'Added todays date to Home Page.' },
   { date: '2026-04-13', tag: 'Projects',  text: 'Column filter clear pill — when you type in the 🔍 filter rows a clear button now appears in the filter bar to reset all column filters at once.' },
   { date: '2026-04-10', tag: 'Scheduler', text: 'Scheduler block colors and employee access settings now save to Supabase so all users share the same configuration.' },
   { date: '2026-04-09', tag: 'Compliance', text: 'New CMMC 2.0 compliance tracking module added to the sidebar.' },
