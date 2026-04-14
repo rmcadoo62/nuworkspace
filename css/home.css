@@ -33,11 +33,17 @@
 .home-card-empty{font-size:13px;color:var(--muted);padding:8px 0;}
 
 /* ---- Weather ---- */
-.home-weather-current{display:flex;align-items:center;gap:14px;margin-bottom:16px;}
-.home-weather-icon{font-size:42px;line-height:1;flex-shrink:0;}
-.home-weather-temp{font-family:'DM Serif Display',serif;font-size:36px;color:var(--text);line-height:1;}
-.home-weather-desc{font-size:13px;color:var(--text);margin-top:2px;}
-.home-weather-meta{font-size:11px;color:var(--muted);margin-top:3px;}
+.home-weather-hero{display:flex;align-items:center;gap:16px;margin-bottom:14px;}
+.home-weather-hero-icon{font-size:52px;line-height:1;flex-shrink:0;}
+.home-weather-hero-info{flex:1;}
+.home-weather-location{font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:2px;}
+.home-weather-temp{font-family:'DM Serif Display',serif;font-size:42px;color:var(--text);line-height:1;}
+.home-weather-unit{font-size:20px;color:var(--muted);}
+.home-weather-desc{font-size:13px;color:var(--text);margin-top:3px;font-weight:500;}
+.home-weather-feels{font-size:11px;color:var(--muted);margin-top:2px;}
+.home-weather-stats{display:flex;gap:6px;margin-bottom:14px;flex-wrap:nowrap;}
+.home-weather-stat{font-size:10.5px;color:var(--muted);display:flex;align-items:center;gap:3px;background:var(--surface2);padding:3px 7px;border-radius:20px;white-space:nowrap;}
+.home-weather-stat span{font-weight:700;color:var(--text);}
 .home-forecast{display:flex;gap:0;border-top:1px solid var(--border);padding-top:12px;}
 .home-forecast-day{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:0 4px;}
 .home-forecast-dow{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);}
@@ -45,6 +51,7 @@
 .home-forecast-temps{display:flex;gap:5px;font-size:12px;}
 .home-fc-hi{font-weight:700;color:var(--text);}
 .home-fc-lo{color:var(--muted);}
+.home-fc-rain{font-size:10px;color:#3a7fd4;}
 
 /* ---- Who's Out ---- */
 .home-out-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--border);}

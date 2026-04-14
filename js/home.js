@@ -167,8 +167,8 @@ async function fetchHomeWeather() {
   try {
     // Spotswood NJ coordinates
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=40.6426&longitude=-74.8774' +
-      '&current=temperature_2m,weathercode,windspeed_10m,relative_humidity_2m' +
-      '&daily=weathercode,temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit' +
+      '&current=temperature_2m,apparent_temperature,weathercode,windspeed_10m,relative_humidity_2m' +
+      '&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit' +
       '&wind_speed_unit=mph&timezone=America%2FNew_York&forecast_days=4';
     const res  = await fetch(url);
     const data = await res.json();
@@ -218,9 +218,12 @@ function renderWeatherCard(data) {
   const DOW  = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
   const forecastHtml = days.time.slice(1, 4).map((dateStr, i) => {
-    const d   = new Date(dateStr + 'T00:00:00');
-    const dow = DOW[d.getDay()];
+    const d    = new Date(dateStr + 'T00:00:00');
+    const dow  = DOW[d.getDay()];
     const code = days.weathercode[i + 1];
+    const rain = days.precipitation_probability_max[i + 1];
+    const rainHtml = rain > 0
+      ? `<div class="home-fc-rain">💧${rain}%</div>` : '';
     return `<div class="home-forecast-day">
       <div class="home-forecast-dow">${dow}</div>
       <div class="home-forecast-icon">${weatherIcon(code)}</div>
@@ -228,18 +231,29 @@ function renderWeatherCard(data) {
         <span class="home-fc-hi">${Math.round(days.temperature_2m_max[i+1])}°</span>
         <span class="home-fc-lo">${Math.round(days.temperature_2m_min[i+1])}°</span>
       </div>
+      ${rainHtml}
     </div>`;
   }).join('');
 
+  const feelsLike = Math.round(cur.apparent_temperature);
+  const temp      = Math.round(cur.temperature_2m);
+  const feelsHtml = feelsLike !== temp
+    ? `<div class="home-weather-feels">Feels like ${feelsLike}°F</div>` : '';
+
   return `<div class="home-card home-weather-card">
-    <div class="home-card-title">🌡️ Annandale, NJ</div>
-    <div class="home-weather-current">
-      <div class="home-weather-icon">${weatherIcon(cur.weathercode)}</div>
-      <div class="home-weather-info">
-        <div class="home-weather-temp">${Math.round(cur.temperature_2m)}°F</div>
+    <div class="home-weather-hero">
+      <div class="home-weather-hero-icon">${weatherIcon(cur.weathercode)}</div>
+      <div class="home-weather-hero-info">
+        <div class="home-weather-location">📍 Annandale, NJ</div>
+        <div class="home-weather-temp">${temp}°<span class="home-weather-unit">F</span></div>
         <div class="home-weather-desc">${weatherDesc(cur.weathercode)}</div>
-        <div class="home-weather-meta">Humidity ${cur.relative_humidity_2m}% · Wind ${Math.round(cur.windspeed_10m)} mph</div>
+        ${feelsHtml}
       </div>
+    </div>
+    <div class="home-weather-stats">
+      <div class="home-weather-stat">💧 <span>${cur.relative_humidity_2m}%</span> Humidity</div>
+      <div class="home-weather-stat">💨 <span>${Math.round(cur.windspeed_10m)} mph</span> Wind</div>
+      <div class="home-weather-stat">🌧️ <span>${days.precipitation_probability_max[0] || 0}%</span> Rain today</div>
     </div>
     <div class="home-forecast">${forecastHtml}</div>
   </div>`;
