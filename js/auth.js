@@ -25,6 +25,8 @@ function can(capability) {
     edit_project_info: mgr, view_chatter: true, post_chatter: true,
     add_clients: mgr, delete_clients: mgr, add_contacts: mgr, delete_contacts: mgr,
     view_schedule: true, edit_schedule: true, view_cmmc: true,
+    view_hours: true, view_expenses: mgr, view_invoicing: mgr,
+    view_proj_shipping: true, view_clients: mgr, view_quotes: mgr,
   };
   return !!(fallbacks[capability]);
 }
@@ -782,6 +784,26 @@ function applyPermissions() {
 
   // Expose edit flag so scheduler.js can read it
   window.schedCanEdit = can('edit_schedule');
+
+  // Project sub-tabs — hide restricted tabs from the tab bar
+  const projTabCaps = {
+    'sub-hours':    'view_hours',
+    'sub-expenses': 'view_expenses',
+    'sub-invoicing':'view_invoicing',
+    'sub-shipping': 'view_proj_shipping',
+  };
+  Object.entries(projTabCaps).forEach(([sub, cap]) => {
+    const tab = document.querySelector(`.proj-tab[data-sub="${sub}"]`);
+    if (tab) tab.style.display = can(cap) ? '' : 'none';
+  });
+
+  // Clients nav
+  const navClients = document.getElementById('navClients');
+  if (navClients) navClients.style.display = can('view_clients') ? 'flex' : 'none';
+
+  // Quotes (Vibrato) nav
+  const navQuotes = document.getElementById('navQuotes');
+  if (navQuotes) navQuotes.style.display = can('view_quotes') ? 'flex' : 'none';
 
   applySchedAccessToNav();
 }

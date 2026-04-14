@@ -2820,6 +2820,14 @@ function openTaskModalForProject(projId) {
 // ===== PROJECT STICKY HEADER =====
 // ===== PROJECT STICKY HEADER =====
 function switchProjTab(subId) {
+  // Capability guard — silently block if user lacks access
+  const projTabCaps = {
+    'sub-hours':    'view_hours',
+    'sub-expenses': 'view_expenses',
+    'sub-invoicing':'view_invoicing',
+    'sub-shipping': 'view_proj_shipping',
+  };
+  if (projTabCaps[subId] && typeof can === 'function' && !can(projTabCaps[subId])) return;
   document.querySelectorAll('.proj-sub').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.proj-tab').forEach(t => t.classList.remove('active'));
   const sub = document.getElementById(subId);

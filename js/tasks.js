@@ -390,6 +390,7 @@ function renderTasksPanel(projId) {
     const parentSec = t.sectionId ? sections.find(s => s._id === t.sectionId) : null;
     if (parentSec && parentSec.collapsed) return '';
 
+    const canEditTask = typeof can === 'function' ? can('edit_tasks') : true;
     const empM = employees.find(e => e.initials === t.assign) || {color:'#555'};
     const statusOpts = ['new','inprogress','prohold','accthold','complete','cancelled','billed'].map(s => {
         const labels = {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed'};
@@ -411,34 +412,34 @@ function renderTasksPanel(projId) {
         <div class="itt-drag-handle" onclick="event.stopPropagation()">⠿</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);padding-left:2px">${t.taskNum||''}</div>
         <div onclick="event.stopPropagation()">
-          <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%">${salesOpts}</select>
+          <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%" ${canEditTask ? '' : 'disabled'}>${salesOpts}</select>
         </div>
-        <div class="itt-name ${t.done?'done':''} itt-cell-edit" onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()">${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red)">NC</span>':''}</div>
+        <div class="${canEditTask ? 'itt-name '+( t.done?'done':'')+' itt-cell-edit' : 'itt-name '+(t.done?'done':'')}" ${canEditTask ? `onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()"` : ''}>${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red)">NC</span>':''}</div>
         <div onclick="event.stopPropagation()">
           <select class="status-pill-select" style="color:#000;background:${(t.status||'new')==='new'?'#fff':statusColor(t.status||'new')+('80')};border-color:${(t.status||'new')==='new'?'#bbb':statusColor(t.status||'new')+('99')}"
-            onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'">${statusOpts}</select>
+            onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'" ${canEditTask ? '' : 'disabled'}>${statusOpts}</select>
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#000;cursor:text">${t.quoteNum||'—'}</div>
-        <div class="itt-cell-edit" onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);cursor:text">${t.poNumber||'—'}</div>
-        <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled' ? 'var(--red)' : 'var(--green)'};font-weight:700;cursor:text">
+        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#000;${canEditTask?'cursor:text':''}">${t.quoteNum||'—'}</div>
+        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);${canEditTask?'cursor:text':''}"> ${t.poNumber||'—'}</div>
+        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled' ? 'var(--red)' : 'var(--green)'};font-weight:700;${canEditTask?'cursor:text':''}">
           ${t.fixedPrice ? (t.status==='cancelled' ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})) : '—'}
         </div>
         <div style="font-size:12px;color:#000">${fmtShortDate(t.createdAt)}</div>
         <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${hColor}">
           <div style="display:flex;flex-direction:column;line-height:1.2">${loggedH > 0 ? loggedH.toFixed(1)+'h' : '—'}${budgetH > 0 ? '<span style="color:var(--muted);font-size:9px">/'+budgetH+'h</span>' : ''}</div>
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditBudgetHours('${t._id}','${projId}');event.stopPropagation()" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);font-weight:700;cursor:text">
+        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditBudgetHours('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);font-weight:700;${canEditTask?'cursor:text':''}">
           ${budgetH > 0 ? budgetH+'h' : '—'}
         </div>
         <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px;overflow:hidden;min-width:0">
           <div class="itt-av" style="background:${empM.color}" id="av_${t._id}">${t.assign||'?'}</div>
-          <select class="inline-edit-select" style="font-size:10px;padding:2px 0;border:none;background:transparent;color:var(--muted);width:0;flex:1;min-width:0" onchange="inlineSave('${t._id}','${projId}','assign',this.value);document.getElementById('av_${t._id}').style.background=(employees.find(e=>e.initials===this.value)||{color:'#555'}).color;document.getElementById('av_${t._id}').textContent=this.value||'?'">
+          <select class="inline-edit-select" style="font-size:10px;padding:2px 0;border:none;background:transparent;color:var(--muted);width:0;flex:1;min-width:0" onchange="inlineSave('${t._id}','${projId}','assign',this.value);document.getElementById('av_${t._id}').style.background=(employees.find(e=>e.initials===this.value)||{color:'#555'}).color;document.getElementById('av_${t._id}').textContent=this.value||'?'" ${canEditTask ? '' : 'disabled'}>
             <option value="">—</option>
             ${employees.filter(e=>e.isActive!==false && e.dept!=='Ballantine').map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
           </select>
         </div>
-        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()" style="font-size:12px;color:var(--muted);font-weight:700;cursor:text">${fmtShortDate(t.taskStartDate)}</div>
-        <div class="itt-cell-edit" onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()" style="font-size:12px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};font-weight:700;cursor:text">${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
+        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()"`:''}  style="font-size:12px;color:var(--muted);font-weight:700;${canEditTask?'cursor:text':''}">${fmtShortDate(t.taskStartDate)}</div>
+        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()"`:''}  style="font-size:12px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};font-weight:700;${canEditTask?'cursor:text':''}">${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
         <div class="itt-row-actions">
           ${can('edit_tasks') ? '<button class="itt-row-action-btn" onclick="openEditTaskModal(\''+t._id+'\');event.stopPropagation()">&#x270E;</button>' : ''}
         </div>
@@ -599,6 +600,7 @@ function renderHoursPanel(projId) {
 
 
 function inlineEditBudgetHours(taskId, projId) {
+  if (typeof can === 'function' && !can('edit_tasks')) return;
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
@@ -617,6 +619,7 @@ function inlineEditBudgetHours(taskId, projId) {
 }
 
 function inlineEditTaskDate(taskId, projId, field) {
+  if (typeof can === 'function' && !can('edit_tasks')) return;
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
@@ -657,6 +660,7 @@ function tpToggleDone(taskId, projId) {
 // ===== INLINE TASK EDITING =====
 // ===== INLINE TASK EDITING =====
 async function inlineSave(taskId, projId, field, value) {
+  if (typeof can === 'function' && !can('edit_tasks')) return;
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
 
@@ -753,6 +757,7 @@ async function inlineSave(taskId, projId, field, value) {
 }
 
 function inlineEditName(taskId, projId) {
+  if (typeof can === 'function' && !can('edit_tasks')) return;
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
@@ -776,6 +781,7 @@ function inlineEditName(taskId, projId) {
 
 
 async function inlineEditQuoteNum(taskId, projId) {
+  if (typeof can === 'function' && !can('edit_tasks')) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
   const t = taskStore.find(x => x._id === taskId);
@@ -804,6 +810,7 @@ async function inlineEditQuoteNum(taskId, projId) {
 }
 
 function inlineEditPoNum(taskId, projId) {
+  if (typeof can === 'function' && !can('edit_tasks')) return;
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
@@ -821,6 +828,7 @@ function inlineEditPoNum(taskId, projId) {
 }
 
 function inlineEditPrice(taskId, projId) {
+  if (typeof can === 'function' && !can('edit_tasks')) return;
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
@@ -1250,6 +1258,7 @@ async function toggleSection(sectionId, projId) {
 }
 
 function startEditSectionName(sectionId, projId) {
+  if (typeof can === 'function' && !can('edit_tasks')) return;
   const s = sectionStore.find(x => x._id === sectionId);
   if (!s) return;
   const nameEl = document.querySelector(`.itt-section-header[data-section-id="${sectionId}"] .itt-section-name`);
