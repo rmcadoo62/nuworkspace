@@ -624,16 +624,56 @@ function inlineEditTaskDate(taskId, projId, field) {
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
-  const fieldIdx = {taskStartDate:13, completedDate:14};
+  const fieldIdx = { taskStartDate: 13, completedDate: 14, billedDate: 14 };
   const cell = [...row.children][fieldIdx[field]];
   if (!cell) return;
   const orig = t[field] || '';
-  cell.innerHTML = `<input class="inline-edit-input" type="date" value="${orig}" style="color-scheme:dark;width:110px" />`;
-  const inp = cell.querySelector('input');
+
+  // Remove any existing floating date picker
+  document.getElementById('_floatingDatePicker')?.remove();
+
+  // Build a fixed-position overlay input anchored to the cell
+  const rect = cell.getBoundingClientRect();
+  const wrap = document.createElement('div');
+  wrap.id = '_floatingDatePicker';
+  wrap.style.cssText = `
+    position:fixed;
+    top:${rect.bottom + 4}px;
+    left:${rect.left}px;
+    z-index:99999;
+    background:var(--surface);
+    border:1.5px solid var(--amber-dim);
+    border-radius:8px;
+    padding:6px 10px;
+    box-shadow:0 6px 24px rgba(0,0,0,0.3);
+  `;
+
+  const inp = document.createElement('input');
+  inp.type = 'date';
+  inp.value = orig;
+  inp.style.cssText = 'color-scheme:dark;font-family:"DM Sans",sans-serif;font-size:13px;border:none;background:transparent;color:var(--text);outline:none;width:140px;';
+  wrap.appendChild(inp);
+  document.body.appendChild(wrap);
   inp.focus();
-  const commit = () => { inlineSave(taskId, projId, field, inp.value); };
-  inp.addEventListener('blur', commit);
-  inp.addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();inp.blur();} if(e.key==='Escape'){renderTasksPanel(projId);} });
+  inp.showPicker?.();
+
+  const commit = () => {
+    inlineSave(taskId, projId, field, inp.value);
+    wrap.remove();
+  };
+  const dismiss = () => wrap.remove();
+
+  inp.addEventListener('blur', () => setTimeout(commit, 100));
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  { e.preventDefault(); inp.blur(); }
+    if (e.key === 'Escape') { e.preventDefault(); dismiss(); renderTasksPanel(projId); }
+  });
+
+  // Close if user clicks outside
+  const outsideClick = e => {
+    if (!wrap.contains(e.target)) { wrap.remove(); document.removeEventListener('mousedown', outsideClick); }
+  };
+  setTimeout(() => document.addEventListener('mousedown', outsideClick), 50);
 }
 
 function setTasksPanelFilter(filter, projId) {
