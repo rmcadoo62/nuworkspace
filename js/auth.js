@@ -797,6 +797,13 @@ function applyPermissions() {
     if (tab) tab.style.display = can(cap) ? '' : 'none';
   });
 
+  // Reports tabs — Billing Queue, Timesheets, Employees restricted to Owner/Manager
+  const restrictedReportTabs = ['tab-billing', 'tab-timesheets', 'tab-employees'];
+  restrictedReportTabs.forEach(tabId => {
+    const tab = document.querySelector(`.reports-tab[data-tab="${tabId}"]`);
+    if (tab) tab.style.display = can('view_billing') ? '' : 'none';
+  });
+
   // Clients nav
   const navClients = document.getElementById('navClients');
   if (navClients) navClients.style.display = can('view_clients') ? 'flex' : 'none';
