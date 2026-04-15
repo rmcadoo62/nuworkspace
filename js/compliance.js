@@ -38,6 +38,7 @@ function _renderComplianceTabBar() {
     { id: 'mediadisposal',icon: '🗑️', label: 'Media Disposal'},
     { id: 'changelog',    icon: '📝', label: 'Change Log'   },
     { id: 'assessment',   icon: '✅', label: 'Self-Assessment'},
+    { id: 'documents',    icon: '📂', label: 'SSP Documents' },
   ];
   bar.innerHTML = tabs.map(t => `
     <button class="comp-tab${complianceTab === t.id ? ' active' : ''}"
@@ -67,6 +68,7 @@ async function renderComplianceTab(tab) {
   else if (tab === 'maintenance') await _renderMaintenanceTab();
   else if (tab === 'mediadisposal') await _renderMediaDisposalTab();
   else if (tab === 'changelog') await _renderChangeLogTab();
+  else if (tab === 'documents') await _renderDocumentsTab();
   else _renderComingSoonTab(tab);
 }
 
@@ -3614,6 +3616,555 @@ async function deleteChangeLogRecord(id) {
   closeChangeLogModal();
   toast('Change log entry deleted.');
   await _renderChangeLogTab();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  MODULE 9 — SSP DOCUMENTS  (CA.L2-3.12.4)
+// ════════════════════════════════════════════════════════════════════
+// Supabase Storage bucket: cmmc-documents
+// Metadata table: cmmc_documents
+// Supports: upload, download, version history, categorization
+// Categories: SSP Policy | Training Material | Assessment Evidence | Other
+
+let docRecords       = [];
+let docCategoryFilter = 'all';
+let docSearchVal      = '';
+
+const DOC_CATEGORIES = [
+  'SSP Policy',
+  'Training Material',
+  'Assessment Evidence',
+  'Other',
+];
+
+// Domain labels for SSP policies — used to auto-categorize by filename
+const DOC_DOMAIN_MAP = {
+  'AC': 'Access Control',
+  'AT': 'Awareness & Training',
+  'AU': 'Audit & Accountability',
+  'CA': 'Security Assessment',
+  'CM': 'Configuration Management',
+  'IA': 'Identification & Authentication',
+  'IR': 'Incident Response',
+  'MA': 'Maintenance',
+  'MP': 'Media Protection',
+  'MFA': 'Identification & Authentication',
+  'PE': 'Physical Protection',
+  'PS': 'Personnel Security',
+  'RA': 'Risk Assessment',
+  'SC': 'System & Communications Protection',
+  'SI': 'System & Information Integrity',
+};
+
+async function _renderDocumentsTab() {
+  const area = document.getElementById('complianceTabContent');
+
+  // Load document metadata
+  const { data, error } = await sb
+    .from('cmmc_documents')
+    .select('*')
+    .order('uploaded_at', { ascending: false });
+  docRecords = data || [];
+  if (error) console.error('Documents load error:', error);
+
+  const sspCount      = docRecords.filter(r => r.category === 'SSP Policy').length;
+  const trainingCount = docRecords.filter(r => r.category === 'Training Material').length;
+  const latestVersions = _getLatestVersions();
+
+  area.innerHTML = `
+    <div style="padding:28px 32px">
+
+      <div class="comp-stat-row">
+        <div class="comp-stat-pill comp-stat-blue">
+          <div class="comp-stat-num">${latestVersions.filter(r=>r.category==='SSP Policy').length}</div>
+          <div class="comp-stat-lbl">SSP Policies</div>
+        </div>
+        <div class="comp-stat-pill comp-stat-purple">
+          <div class="comp-stat-num">${latestVersions.filter(r=>r.category==='Training Material').length}</div>
+          <div class="comp-stat-lbl">Training Docs</div>
+        </div>
+        <div class="comp-stat-pill comp-stat-green">
+          <div class="comp-stat-num">${latestVersions.filter(r=>r.category==='Assessment Evidence').length}</div>
+          <div class="comp-stat-lbl">Assessment Evidence</div>
+        </div>
+        <div class="comp-stat-pill">
+          <div class="comp-stat-num">${docRecords.length}</div>
+          <div class="comp-stat-lbl">Total (all versions)</div>
+        </div>
+      </div>
+
+      <div class="comp-policy-banner">
+        <span class="comp-policy-icon">📌</span>
+        <div>
+          <strong>CA.L2-3.12.4</strong> — The System Security Plan (SSP) consisting of all 14 domain
+          policy documents is maintained here and stored securely on the Synology NAS.
+          Reviewed and updated annually each Q4. Updated off-cycle whenever a significant
+          change occurs to the CUI environment. Previous versions are retained for audit purposes.
+        </div>
+      </div>
+
+      <!-- Toolbar -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+        <input type="text" placeholder="Search documents…" autocomplete="off"
+          value="${_esc(docSearchVal)}"
+          oninput="docSearchVal=this.value;_renderDocumentsList()"
+          style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 12px;outline:none;width:220px;transition:border-color var(--transition)"
+          onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${['all',...DOC_CATEGORIES].map(c => `
+            <button class="comp-filter-btn${docCategoryFilter===c?' active':''}"
+              onclick="docCategoryFilter='${c}';_renderDocumentsList()">
+              ${c==='all'?'All':c}
+            </button>`).join('')}
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button onclick="_refreshDocumentsTab()" class="comp-btn-ghost">↺ Refresh</button>
+          <button onclick="openDocUploadModal()" class="comp-btn-primary">⬆ Upload Document</button>
+        </div>
+      </div>
+
+      <!-- Document list -->
+      <div id="documentsListWrap"></div>
+    </div>
+  `;
+
+  _renderDocumentsList();
+}
+
+async function _refreshDocumentsTab() { await _renderDocumentsTab(); }
+
+// Get only the latest version of each document (by doc_name)
+function _getLatestVersions() {
+  const latest = {};
+  docRecords.forEach(r => {
+    if (!latest[r.doc_name] || r.version_number > latest[r.doc_name].version_number) {
+      latest[r.doc_name] = r;
+    }
+  });
+  return Object.values(latest);
+}
+
+function _renderDocumentsList() {
+  const wrap = document.getElementById('documentsListWrap');
+  if (!wrap) return;
+
+  const q = docSearchVal.toLowerCase();
+  let latest = _getLatestVersions();
+
+  if (docCategoryFilter !== 'all') latest = latest.filter(r => r.category === docCategoryFilter);
+  if (q) latest = latest.filter(r =>
+    (r.doc_name||'').toLowerCase().includes(q) ||
+    (r.description||'').toLowerCase().includes(q) ||
+    (r.domain||'').toLowerCase().includes(q)
+  );
+
+  // Group by category
+  const grouped = {};
+  DOC_CATEGORIES.forEach(c => { grouped[c] = []; });
+  grouped['Other'] = grouped['Other'] || [];
+  latest.forEach(r => { (grouped[r.category] || grouped['Other']).push(r); });
+
+  if (!latest.length) {
+    wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px">
+      ${q || docCategoryFilter!=='all'
+        ? 'No documents match your filter.'
+        : `<div>
+            <div style="font-size:32px;margin-bottom:12px">📂</div>
+            <div style="font-size:15px;color:var(--text);margin-bottom:8px">No documents uploaded yet</div>
+            <div style="font-size:13px;color:var(--muted);max-width:440px;margin:0 auto;line-height:1.6">
+              Upload your 14 SSP policy documents and security awareness training presentation
+              to maintain them as part of your CMMC compliance record.
+            </div>
+          </div>`}
+    </div>`;
+    return;
+  }
+
+  const catIcons = { 'SSP Policy':'📄', 'Training Material':'📊', 'Assessment Evidence':'✅', 'Other':'📎' };
+  const catColors = { 'SSP Policy': 'var(--blue)', 'Training Material': 'var(--purple)', 'Assessment Evidence': 'var(--green)', 'Other': 'var(--muted)' };
+
+  let html = '';
+  DOC_CATEGORIES.forEach(cat => {
+    const docs = grouped[cat];
+    if (!docs || !docs.length) return;
+
+    html += `
+      <div style="margin-bottom:24px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:15px">${catIcons[cat]}</span>
+          <span style="font-size:13px;font-weight:700;color:${catColors[cat]};text-transform:uppercase;letter-spacing:.8px">${cat}</span>
+          <span style="font-size:11px;color:var(--muted);background:var(--surface2);padding:2px 8px;border-radius:10px">${docs.length}</span>
+        </div>
+        <div style="display:grid;gap:8px">
+          ${docs.map(r => _docCard(r)).join('')}
+        </div>
+      </div>`;
+  });
+
+  wrap.innerHTML = html;
+}
+
+function _docCard(r) {
+  const ext = (r.filename||'').split('.').pop().toLowerCase();
+  const extIcon = ext === 'pdf' ? '🔴' : ext === 'docx' || ext === 'doc' ? '🔵' : ext === 'pptx' || ext === 'ppt' ? '🟠' : '📄';
+  const uploadDate = r.uploaded_at ? new Date(r.uploaded_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+  const fileSize = r.file_size_bytes ? _fmtFileSize(r.file_size_bytes) : '';
+
+  // Count versions
+  const versionCount = docRecords.filter(d => d.doc_name === r.doc_name).length;
+
+  return `
+    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;transition:border-color var(--transition)"
+      onmouseover="this.style.borderColor='var(--amber-dim)'" onmouseout="this.style.borderColor='var(--border)'">
+      <div style="font-size:22px;flex-shrink:0">${extIcon}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(r.doc_name)}</div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
+          ${r.domain ? `<span style="color:var(--amber);font-weight:600">${_esc(r.domain)}</span> · ` : ''}
+          v${r.version_number} · ${uploadDate}${fileSize ? ' · ' + fileSize : ''}
+          ${r.change_notes ? ` · <em>${_esc(r.change_notes)}</em>` : ''}
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        ${versionCount > 1 ? `
+          <button onclick="openDocVersionsModal('${_esc(r.doc_name)}')"
+            style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+            onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+            🕓 ${versionCount} versions
+          </button>` : ''}
+        <button onclick="downloadDoc('${r.id}','${_esc(r.storage_path)}','${_esc(r.filename)}')"
+          style="padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+          onmouseover="this.style.borderColor='var(--blue)';this.style.color='var(--blue)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+          ⬇ Download
+        </button>
+        <button onclick="openDocUploadModal('${r.doc_name}','${r.category}','${_esc(r.domain||'')}')"
+          style="padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+          onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+          ↑ New Version
+        </button>
+      </div>
+    </div>`;
+}
+
+function _fmtFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(0) + ' KB';
+  return (bytes/(1024*1024)).toFixed(1) + ' MB';
+}
+
+// ── Upload Modal ──────────────────────────────────────────────────
+function openDocUploadModal(existingDocName, existingCategory, existingDomain) {
+  const isNewVersion = !!existingDocName;
+
+  // Next version number
+  const currentVersions = existingDocName
+    ? docRecords.filter(r => r.doc_name === existingDocName)
+    : [];
+  const nextVersion = currentVersions.length
+    ? Math.max(...currentVersions.map(r => r.version_number||1)) + 1
+    : 1;
+
+  const catOpts = DOC_CATEGORIES.map(c =>
+    `<option value="${c}" ${(existingCategory||'SSP Policy')===c?'selected':''}>${c}</option>`
+  ).join('');
+
+  const domainOpts = ['',...Object.entries(DOC_DOMAIN_MAP).map(([k,v]) => `${k} — ${v}`)].map(d =>
+    `<option value="${d}" ${(existingDomain||'')===d?'selected':''}>${d||'— None —'}</option>`
+  ).join('');
+
+  const backdropId = 'docUploadModalBackdrop';
+  document.getElementById(backdropId)?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = backdropId;
+  backdrop.onclick = e => { if(e.target===backdrop) closeDocUploadModal(); };
+
+  backdrop.innerHTML = `
+    <div class="modal" style="width:580px">
+      <div class="modal-header">
+        <div class="modal-title">
+          ${isNewVersion ? `↑ Upload New Version — ${_esc(existingDocName)}` : '⬆ Upload Document'}
+        </div>
+        <button class="modal-close" onclick="closeDocUploadModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" style="gap:14px">
+
+        <div class="field">
+          <label class="field-label">Select File <span style="color:var(--red)">*</span></label>
+          <input type="file" id="docFileInput"
+            accept=".docx,.doc,.pdf,.pptx,.ppt,.xlsx,.xls,.txt"
+            onchange="_docFileSelected(this)"
+            style="background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;padding:8px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;width:100%;cursor:pointer"/>
+          <div id="docFileFeedback" style="font-size:11.5px;color:var(--muted);margin-top:4px"></div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Document Name <span style="color:var(--red)">*</span></label>
+          <input class="f-input" id="docName" type="text"
+            placeholder="e.g. CMMC 2.0 Level 2 — Access Control Policy"
+            value="${_esc(existingDocName||'')}"/>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Category <span style="color:var(--red)">*</span></label>
+            <select class="f-select" id="docCategory">${catOpts}</select>
+          </div>
+          <div class="field">
+            <label class="field-label">SSP Domain</label>
+            <select class="f-select" id="docDomain">${domainOpts}</select>
+          </div>
+        </div>
+
+        <div class="field-row">
+          <div class="field" style="flex:0 0 100px">
+            <label class="field-label">Version</label>
+            <input class="f-input" id="docVersion" type="number" min="1" step="1"
+              value="${nextVersion}"
+              style="font-family:'JetBrains Mono',monospace"/>
+          </div>
+          <div class="field">
+            <label class="field-label">${isNewVersion ? 'Change Notes' : 'Description'}</label>
+            <input class="f-input" id="docChangeNotes" type="text"
+              placeholder="${isNewVersion ? 'What changed in this version?' : 'Brief description of this document'}"
+              value=""/>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Reviewed By</label>
+          <input class="f-input" id="docReviewedBy" type="text"
+            placeholder="Owner / IT Administrator"
+            value="Owner / IT Administrator"/>
+        </div>
+
+        ${isNewVersion ? `<div class="comp-policy-banner" style="margin-top:4px">
+          <span class="comp-policy-icon">ℹ</span>
+          <div style="font-size:11.5px">
+            Previous versions are retained and accessible via the 🕓 versions history button.
+            The new version will become the current document shown in the main list.
+          </div>
+        </div>` : ''}
+
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeDocUploadModal()">Cancel</button>
+        <button class="btn btn-primary" id="docUploadBtn" onclick="saveDocUpload()">
+          ${isNewVersion ? '↑ Upload New Version' : '⬆ Upload Document'}
+        </button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+function _docFileSelected(input) {
+  const file = input.files[0];
+  const fb = document.getElementById('docFileFeedback');
+  if (!file || !fb) return;
+  fb.textContent = `${file.name} · ${_fmtFileSize(file.size)}`;
+
+  // Auto-fill document name from filename if empty
+  const nameInput = document.getElementById('docName');
+  if (nameInput && !nameInput.value) {
+    // Convert CMMC_Level2_AC_Policy.docx → CMMC 2.0 Level 2 — AC Policy
+    let name = file.name.replace(/\.[^.]+$/, ''); // remove extension
+    name = name.replace(/_/g, ' ');
+    nameInput.value = name;
+  }
+
+  // Auto-detect domain from filename
+  const domainSelect = document.getElementById('docDomain');
+  const catSelect = document.getElementById('docCategory');
+  if (domainSelect && catSelect) {
+    const fname = file.name.toUpperCase();
+    for (const [key, val] of Object.entries(DOC_DOMAIN_MAP)) {
+      if (fname.includes(`_${key}_`) || fname.includes(`_${key}.`)) {
+        const opt = [...domainSelect.options].find(o => o.value.startsWith(key + ' —'));
+        if (opt) domainSelect.value = opt.value;
+        catSelect.value = 'SSP Policy';
+        break;
+      }
+    }
+    // Detect training files
+    if (fname.includes('TRAINING') || fname.includes('AWARENESS') || file.name.toLowerCase().endsWith('.pptx')) {
+      catSelect.value = 'Training Material';
+      domainSelect.value = '';
+    }
+  }
+}
+
+function closeDocUploadModal() {
+  const b = document.getElementById('docUploadModalBackdrop');
+  if (!b) return;
+  b.classList.remove('open');
+  setTimeout(() => b.remove(), 280);
+}
+
+async function saveDocUpload() {
+  const fileInput  = document.getElementById('docFileInput');
+  const file       = fileInput?.files[0];
+  const docName    = (document.getElementById('docName')?.value||'').trim();
+  const category   = document.getElementById('docCategory')?.value;
+  const domain     = document.getElementById('docDomain')?.value || null;
+  const version    = parseInt(document.getElementById('docVersion')?.value||'1');
+  const changeNotes= (document.getElementById('docChangeNotes')?.value||'').trim();
+  const reviewedBy = (document.getElementById('docReviewedBy')?.value||'').trim();
+
+  if (!file)    { alert('Please select a file to upload.'); return; }
+  if (!docName) { alert('Please enter a document name.'); return; }
+
+  const btn = document.getElementById('docUploadBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Uploading…'; }
+
+  try {
+    // Upload to Supabase Storage
+    const timestamp = Date.now();
+    const safeName  = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `${category.replace(/\s+/g,'-').toLowerCase()}/${timestamp}_v${version}_${safeName}`;
+
+    const { data: uploadData, error: uploadError } = await sb.storage
+      .from('cmmc-documents')
+      .upload(storagePath, file, { upsert: false });
+
+    if (uploadError) throw uploadError;
+
+    // Save metadata to DB
+    const { error: dbError } = await sb.from('cmmc_documents').insert({
+      doc_name:        docName,
+      filename:        file.name,
+      category:        category,
+      domain:          domain || null,
+      version_number:  version,
+      change_notes:    changeNotes || null,
+      reviewed_by:     reviewedBy || null,
+      file_size_bytes: file.size,
+      storage_path:    storagePath,
+      uploaded_at:     new Date().toISOString(),
+      created_at:      new Date().toISOString(),
+    });
+
+    if (dbError) throw dbError;
+
+    closeDocUploadModal();
+    toast('📂 Document uploaded successfully.');
+    await _renderDocumentsTab();
+
+  } catch(err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Upload Document'; }
+    alert('Upload failed: ' + (err.message || err));
+  }
+}
+
+// ── Download ──────────────────────────────────────────────────────
+async function downloadDoc(id, storagePath, filename) {
+  try {
+    const { data, error } = await sb.storage
+      .from('cmmc-documents')
+      .download(storagePath);
+    if (error) throw error;
+
+    const url = URL.createObjectURL(data);
+    const a   = document.createElement('a');
+    a.href    = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch(err) {
+    alert('Download failed: ' + err.message);
+  }
+}
+
+// ── Version History Modal ─────────────────────────────────────────
+function openDocVersionsModal(docName) {
+  const versions = docRecords
+    .filter(r => r.doc_name === docName)
+    .sort((a,b) => b.version_number - a.version_number);
+
+  const backdropId = 'docVersionsModalBackdrop';
+  document.getElementById(backdropId)?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = backdropId;
+  backdrop.onclick = e => { if(e.target===backdrop) closeDocVersionsModal(); };
+
+  const rows = versions.map((r, idx) => {
+    const date = r.uploaded_at ? new Date(r.uploaded_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
+    const isCurrent = idx === 0;
+    return `
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:10px 14px">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600">v${r.version_number}</span>
+          ${isCurrent ? `<span class="comp-badge comp-badge-green" style="margin-left:8px;font-size:10px">Current</span>` : ''}
+        </td>
+        <td style="padding:10px 14px;font-size:12.5px;color:var(--muted)">${date}</td>
+        <td style="padding:10px 14px;font-size:12.5px;color:var(--muted)">${_esc(r.reviewed_by||'—')}</td>
+        <td style="padding:10px 14px;font-size:12px;color:var(--muted);font-style:italic">${_esc(r.change_notes||'—')}</td>
+        <td style="padding:10px 14px;font-size:12px;color:var(--muted)">${_fmtFileSize(r.file_size_bytes||0)}</td>
+        <td style="padding:10px 14px;text-align:right">
+          <button onclick="downloadDoc('${r.id}','${_esc(r.storage_path)}','${_esc(r.filename)}')"
+            style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+            onmouseover="this.style.borderColor='var(--blue)';this.style.color='var(--blue)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">⬇</button>
+          ${!isCurrent ? `<button onclick="deleteDocVersion('${r.id}','${_esc(r.storage_path)}')"
+            style="margin-left:4px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+            onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">🗑</button>` : ''}
+        </td>
+      </tr>`;
+  }).join('');
+
+  backdrop.innerHTML = `
+    <div class="modal" style="width:700px">
+      <div class="modal-header">
+        <div class="modal-title">🕓 Version History — ${_esc(docName)}</div>
+        <button class="modal-close" onclick="closeDocVersionsModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" style="padding:0;gap:0">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--surface2);border-bottom:1.5px solid var(--border)">
+              <th style="padding:10px 14px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Version</th>
+              <th style="padding:10px 14px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Uploaded</th>
+              <th style="padding:10px 14px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Reviewed By</th>
+              <th style="padding:10px 14px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Change Notes</th>
+              <th style="padding:10px 14px;text-align:left;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Size</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeDocVersionsModal()">Close</button>
+        <button class="btn btn-primary" onclick="closeDocVersionsModal();openDocUploadModal('${_esc(docName)}')">↑ Upload New Version</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+function closeDocVersionsModal() {
+  const b = document.getElementById('docVersionsModalBackdrop');
+  if (!b) return;
+  b.classList.remove('open');
+  setTimeout(() => b.remove(), 280);
+}
+
+async function deleteDocVersion(id, storagePath) {
+  if (!confirm('Delete this version? The file will be permanently removed from storage. This cannot be undone.')) return;
+  // Delete from storage
+  await sb.storage.from('cmmc-documents').remove([storagePath]);
+  // Delete metadata
+  await sb.from('cmmc_documents').delete().eq('id', id);
+  toast('Version deleted.');
+  closeDocVersionsModal();
+  await _renderDocumentsTab();
 }
 
 // ════════════════════════════════════════════════════════════════════
