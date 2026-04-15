@@ -294,7 +294,8 @@ function renderEmployeesPanel(search) {
             const isInactive = e.isActive === false || !!e.terminationDate;
             const termLabel = e.terminationDate ? 'Terminated ' + new Date(e.terminationDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Inactive';
             const hasScreening = cmmcScreenedIds.has(e.id);
-            const shieldBadge = isInactive ? '' :
+            const isBallantine = (e.dept || '').toLowerCase() === 'ballantine';
+            const shieldBadge = isInactive || isBallantine ? '' :
               hasScreening
                 ? `<span title="CMMC screening record on file" style="font-size:13px;line-height:1;flex-shrink:0">🛡️</span>`
                 : `<span title="No CMMC screening record — click to add" style="font-size:12px;flex-shrink:0;opacity:0.5;cursor:pointer" onclick="event.stopPropagation();openCompliancePanel(null);complianceSwitchTab('personnel')">⚠️</span>`;
@@ -687,8 +688,8 @@ function showEmpProfile(empId, annivOffset) {
       </div>` : ''}
     </div>
 
-    <!-- CMMC Screening status banner (active employees only) -->
-    ${!isInactive ? (() => {
+    <!-- CMMC Screening status banner (active, non-Ballantine employees only) -->
+    ${!isInactive && (emp.dept||'').toLowerCase() !== 'ballantine' ? (() => {
       const screened = cmmcScreenedIds.has(empId);
       return screened
         ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(46,158,98,0.07);border:1px solid rgba(46,158,98,0.3);border-radius:8px;margin-bottom:18px;font-size:12.5px">
