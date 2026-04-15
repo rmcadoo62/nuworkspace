@@ -113,6 +113,12 @@ function renderDashboard() {
   const _thisMonthLabel = _now.toLocaleDateString('en-US', {month:'long', year:'numeric'});
   const _monthNames     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
+  // ── Preserve booking-report view state across full re-renders ─────────────
+  const _savedBkView  = window._bkCurrentView  || 'year';
+  const _savedBkMonth = (window._bkCurrentMonth != null) ? window._bkCurrentMonth : _curMonth;
+  // _savedBkSort is NOT captured here — build fns read window._bkMonthSort directly
+  //   so that setBkMonthSort() toggling works without a full re-render
+
   // Build yearly booking data per month per category
   const _yearBookings  = {}; // { mo: { cat: amount } }
   const _yearReversals = {}; // { mo: { cat: amount } }
@@ -211,74 +217,175 @@ function renderDashboard() {
     </table></div>`;
   }
 
-  // Build month summary (bookings / reversals / net per cat)
+  // Build month summary (bookings / reversals / net) — By Category or By Job
   function buildMonthDetail(mo) {
-    const cats = [...new Set([...Object.keys(_yearBookings[mo]||{}), ...Object.keys(_yearReversals[mo]||{})])].sort();
-    if (!cats.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No bookings in ${_monthNames[mo]} ${_curYear}.</div>`;
-    let totBook = 0, totRev = 0;
-    const rows = cats.map((cat,ci) => {
-      const book = _yearBookings[mo]?.[cat]  || 0;
-      const rev  = _yearReversals[mo]?.[cat] || 0;
-      const net  = book - rev;
-      totBook += book; totRev += rev;
+    const sort = window._bkMonthSort || 'category';
+
+    // ── By Category (default) ────────────────────────────────────────────
+    if (sort === 'category') {
+      const cats = [...new Set([...Object.keys(_yearBookings[mo]||{}), ...Object.keys(_yearReversals[mo]||{})])].sort();
+      if (!cats.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No bookings in ${_monthNames[mo]} ${_curYear}.</div>`;
+      let totBook = 0, totRev = 0;
+      const rows = cats.map((cat,ci) => {
+        const book = _yearBookings[mo]?.[cat]  || 0;
+        const rev  = _yearReversals[mo]?.[cat] || 0;
+        const net  = book - rev;
+        totBook += book; totRev += rev;
+        return `<tr style="border-bottom:0.5px solid var(--border);${ci%2===1?'background:var(--surface2)':''}">
+          <td style="padding:6px 10px;font-weight:600;color:var(--amber)">Cat ${cat}</td>
+          <td style="text-align:right;padding:6px 10px">${fmtBook(book)}</td>
+          <td style="text-align:right;padding:6px 10px">${fmtRev(rev)}</td>
+          <td style="text-align:right;padding:6px 10px">${fmtNetCell(net)}</td>
+        </tr>`;
+      }).join('');
+      return `<table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="border-bottom:2px solid var(--border)">
+          <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat</th>
+          <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--green)">Bookings</th>
+          <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--red)">Reversals</th>
+          <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text)">Net</th>
+        </tr></thead><tbody>${rows}
+        <tr style="border-top:2px solid var(--border)">
+          <td style="padding:7px 10px;font-weight:700;background:var(--surface2)">Total</td>
+          <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtBook(totBook)}</td>
+          <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtRev(totRev)}</td>
+          <td style="text-align:right;padding:7px 10px;font-weight:700;background:var(--surface2)">${fmtNetCell(totBook-totRev)}</td>
+        </tr></tbody>
+      </table>`;
+    }
+
+    // ── By Job ────────────────────────────────────────────────────────────
+    const moKey = _curYear + '-' + String(mo+1).padStart(2,'0');
+    const cancelledInMo = new Set(taskStore.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
+    const bookedTasks = taskStore.filter(t =>
+      ((t.createdAt||'').slice(0,7) === moKey && t.status !== 'cancelled') || cancelledInMo.has(t._id)
+    );
+    if (!bookedTasks.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No bookings in ${_monthNames[mo]} ${_curYear}.</div>`;
+    const byProj = {};
+    bookedTasks.forEach(t => {
+      if (!byProj[t.proj]) byProj[t.proj] = { proj: projects.find(x => x.id === t.proj), book: 0, rev: 0 };
+      if (cancelledInMo.has(t._id)) byProj[t.proj].rev += (t.fixedPrice||0);
+      else                           byProj[t.proj].book += (t.fixedPrice||0);
+    });
+    const projRows = Object.values(byProj).sort((a,b) =>
+      ((a.proj?.name||'').localeCompare(b.proj?.name||'', undefined, {numeric:true}))
+    );
+    let totBook2 = 0, totRev2 = 0;
+    const rows2 = projRows.map((r,ci) => {
+      const net = r.book - r.rev;
+      totBook2 += r.book; totRev2 += r.rev;
       return `<tr style="border-bottom:0.5px solid var(--border);${ci%2===1?'background:var(--surface2)':''}">
-        <td style="padding:6px 10px;font-weight:600;color:var(--amber)">Cat ${cat}</td>
-        <td style="text-align:right;padding:6px 10px">${fmtBook(book)}</td>
-        <td style="text-align:right;padding:6px 10px">${fmtRev(rev)}</td>
+        <td style="padding:6px 10px;font-weight:600;color:var(--text)">${r.proj ? (r.proj.emoji ? r.proj.emoji+' ' : '')+r.proj.name : 'Unknown'}</td>
+        <td style="text-align:right;padding:6px 10px">${fmtBook(r.book)}</td>
+        <td style="text-align:right;padding:6px 10px">${fmtRev(r.rev)}</td>
         <td style="text-align:right;padding:6px 10px">${fmtNetCell(net)}</td>
       </tr>`;
     }).join('');
     return `<table style="width:100%;border-collapse:collapse;font-size:12px">
       <thead><tr style="border-bottom:2px solid var(--border)">
-        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat</th>
+        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Job</th>
         <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--green)">Bookings</th>
         <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--red)">Reversals</th>
         <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text)">Net</th>
-      </tr></thead><tbody>${rows}
+      </tr></thead><tbody>${rows2}
       <tr style="border-top:2px solid var(--border)">
         <td style="padding:7px 10px;font-weight:700;background:var(--surface2)">Total</td>
-        <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtBook(totBook)}</td>
-        <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtRev(totRev)}</td>
-        <td style="text-align:right;padding:7px 10px;font-weight:700;background:var(--surface2)">${fmtNetCell(totBook-totRev)}</td>
+        <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtBook(totBook2)}</td>
+        <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtRev(totRev2)}</td>
+        <td style="text-align:right;padding:7px 10px;font-weight:700;background:var(--surface2)">${fmtNetCell(totBook2-totRev2)}</td>
       </tr></tbody>
     </table>`;
   }
 
-  // Build month task detail drill-down
+  // Build month task detail drill-down — By Category or By Job
   function buildMonthTaskDetail(mo) {
+    const sort = window._bkMonthSort || 'category';
     const moKey = _curYear + '-' + String(mo+1).padStart(2,'0');
     const cancelledMo = new Set(taskStore.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
     const tasks = [
       ...taskStore.filter(t => (t.createdAt||'').slice(0,7) === moKey && t.status !== 'cancelled'),
       ...taskStore.filter(t => cancelledMo.has(t._id)),
     ].sort((a,b) => {
+      if (sort === 'job') {
+        const pA = (projects.find(p=>p.id===a.proj)||{}).name||'';
+        const pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
+        return pA.localeCompare(pB, undefined, {numeric:true});
+      }
       const catA = a.salesCat||'Uncategorized', catB = b.salesCat||'Uncategorized';
       if (catA !== catB) return catA.localeCompare(catB);
       return ((projects.find(p=>p.id===a.proj)||{}).name||'').localeCompare((projects.find(p=>p.id===b.proj)||{}).name||'');
     });
     if (!tasks.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No tasks for ${_monthNames[mo]} ${_curYear}.</div>`;
     const statusColors = {new:'var(--muted)',inprogress:'var(--green)',complete:'var(--blue)',billed:'#c084fc',cancelled:'var(--red)',prohold:'var(--amber)',accthold:'var(--red)'};
-    const byCat = {};
-    tasks.forEach(t => { const cat=t.salesCat||'Uncategorized'; if(!byCat[cat])byCat[cat]=[]; byCat[cat].push(t); });
+
+    // ── By Category ───────────────────────────────────────────────────────
+    if (sort === 'category') {
+      const byCat = {};
+      tasks.forEach(t => { const cat=t.salesCat||'Uncategorized'; if(!byCat[cat])byCat[cat]=[]; byCat[cat].push(t); });
+      return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">'+
+        '<thead><tr style="border-bottom:2px solid var(--border)">'+
+        '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat / Task</th>'+
+        '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Project</th>'+
+        '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Status</th>'+
+        '<th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Price</th>'+
+        '</tr></thead><tbody>'+
+        Object.keys(byCat).sort().map(cat => {
+          const catTasks = byCat[cat];
+          const catNet = catTasks.reduce((s,t) => s + (cancelledMo.has(t._id) ? -(t.fixedPrice||0) : (t.fixedPrice||0)), 0);
+          const catColor = catNet < 0 ? 'var(--red)' : 'var(--amber)';
+          const catDisplay = catNet < 0
+            ? '($'+Math.abs(catNet).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
+            : '$'+catNet.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+          return '<tr style="background:var(--surface2);border-bottom:0.5px solid var(--border)">'+
+            '<td colspan="3" style="padding:7px 10px;font-weight:700;color:var(--amber)">Cat '+cat+'</td>'+
+            '<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+catColor+'">'+catDisplay+'</td></tr>'+
+            catTasks.map(t => {
+              const p = projects.find(x=>x.id===t.proj);
+              const isRev = cancelledMo.has(t._id);
+              const pColor = isRev ? 'var(--red)' : 'var(--green)';
+              const pDisplay = t.fixedPrice > 0
+                ? (isRev ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))
+                : '—';
+              return '<tr style="border-bottom:0.5px solid var(--border)">'+
+                '<td style="padding:5px 10px 5px 22px;color:'+(isRev?'var(--muted)':'var(--text)')+';font-size:11px">'+
+                  (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+t.name+
+                '</td>'+
+                '<td style="padding:5px 10px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
+                '<td style="padding:5px 10px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
+                '<td style="padding:5px 10px;text-align:right;font-family:monospace;color:'+pColor+';font-size:11px">'+pDisplay+'</td>'+
+              '</tr>';
+            }).join('');
+        }).join('')+
+        '</tbody></table>';
+    }
+
+    // ── By Job ────────────────────────────────────────────────────────────
+    const byProj = {};
+    tasks.forEach(t => {
+      if (!byProj[t.proj]) byProj[t.proj] = { proj: projects.find(x=>x.id===t.proj), tasks: [] };
+      byProj[t.proj].tasks.push(t);
+    });
+    const projList = Object.values(byProj).sort((a,b) =>
+      ((a.proj?.name||'').localeCompare(b.proj?.name||'', undefined, {numeric:true}))
+    );
     return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">'+
       '<thead><tr style="border-bottom:2px solid var(--border)">'+
-      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat / Task</th>'+
-      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Project</th>'+
+      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Job / Task</th>'+
+      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat</th>'+
       '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Status</th>'+
       '<th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Price</th>'+
       '</tr></thead><tbody>'+
-      Object.keys(byCat).sort().map(cat => {
-        const catTasks = byCat[cat];
-        const catNet = catTasks.reduce((s,t) => s + (cancelledMo.has(t._id) ? -(t.fixedPrice||0) : (t.fixedPrice||0)), 0);
-        const catColor = catNet < 0 ? 'var(--red)' : 'var(--amber)';
-        const catDisplay = catNet < 0
-          ? '($'+Math.abs(catNet).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
-          : '$'+catNet.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+      projList.map(({proj, tasks: ptasks}) => {
+        const projNet = ptasks.reduce((s,t) => s + (cancelledMo.has(t._id) ? -(t.fixedPrice||0) : (t.fixedPrice||0)), 0);
+        const projColor = projNet < 0 ? 'var(--red)' : 'var(--green)';
+        const projDisplay = projNet < 0
+          ? '($'+Math.abs(projNet).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
+          : '$'+projNet.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        const projLabel = proj ? (proj.emoji ? proj.emoji+' ' : '')+proj.name : 'Unknown';
         return '<tr style="background:var(--surface2);border-bottom:0.5px solid var(--border)">'+
-          '<td colspan="3" style="padding:7px 10px;font-weight:700;color:var(--amber)">Cat '+cat+'</td>'+
-          '<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+catColor+'">'+catDisplay+'</td></tr>'+
-          catTasks.map(t => {
-            const p = projects.find(x=>x.id===t.proj);
+          '<td colspan="3" style="padding:7px 10px;font-weight:700;color:var(--text)">'+projLabel+'</td>'+
+          '<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+projColor+'">'+projDisplay+'</td></tr>'+
+          ptasks.map(t => {
             const isRev = cancelledMo.has(t._id);
             const pColor = isRev ? 'var(--red)' : 'var(--green)';
             const pDisplay = t.fixedPrice > 0
@@ -288,7 +395,7 @@ function renderDashboard() {
               '<td style="padding:5px 10px 5px 22px;color:'+(isRev?'var(--muted)':'var(--text)')+';font-size:11px">'+
                 (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+t.name+
               '</td>'+
-              '<td style="padding:5px 10px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
+              '<td style="padding:5px 10px;color:var(--amber);font-weight:600;font-size:11px">'+(t.salesCat||'—')+'</td>'+
               '<td style="padding:5px 10px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
               '<td style="padding:5px 10px;text-align:right;font-family:monospace;color:'+pColor+';font-size:11px">'+pDisplay+'</td>'+
             '</tr>';
@@ -568,8 +675,15 @@ function renderDashboard() {
         </div>
         <div id="bkYearWrap">${buildYearGrid()}</div>
         <div id="bkMonthWrap" style="display:none">
-          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px" id="bkMonthTabs">
-            ${_monthNames.slice(0,_curMonth+1).map((m,mi)=>`<button id="bkTab_${mi}" onclick="setBkMonth(${mi})" style="font-size:11px;padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:${mi===_curMonth?'var(--surface2)':'transparent'};color:${mi===_curMonth?'var(--text)':'var(--muted)'};cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:${mi===_curMonth?'600':'400'}">${m}</button>`).join('')}
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap" id="bkMonthTabs">
+              ${_monthNames.slice(0,_curMonth+1).map((m,mi)=>`<button id="bkTab_${mi}" onclick="setBkMonth(${mi})" style="font-size:11px;padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:${mi===_curMonth?'var(--surface2)':'transparent'};color:${mi===_curMonth?'var(--text)':'var(--muted)'};cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:${mi===_curMonth?'600':'400'}">${m}</button>`).join('')}
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+              <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Sort:</span>
+              <button id="bkSortBtn_category" onclick="setBkMonthSort('category')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Category</button>
+              <button id="bkSortBtn_job"      onclick="setBkMonthSort('job')"      style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Job</button>
+            </div>
           </div>
           <div id="bkMonthSummary">${buildMonthDetail(_curMonth)}</div>
           <div id="bkMonthDetail" style="display:none">${buildMonthTaskDetail(_curMonth)}</div>
@@ -586,6 +700,20 @@ function renderDashboard() {
   setTimeout(() => {
     const canv = document.getElementById('billedByMonthChart');
     if (!canv || typeof Chart === 'undefined') return;
+
+    // ── Restore booking-report view / month / sort state ─────────────────
+    setBkView(_savedBkView);
+    if (_savedBkView === 'month') {
+      setBkMonth(_savedBkMonth);
+    }
+    const _restoredSort = window._bkMonthSort || 'category';
+    document.querySelectorAll('[id^="bkSortBtn_"]').forEach(btn => {
+      const active = btn.id === 'bkSortBtn_' + _restoredSort;
+      btn.style.background  = active ? 'var(--amber-glow)' : 'transparent';
+      btn.style.color       = active ? 'var(--amber)' : 'var(--muted)';
+      btn.style.borderColor = active ? 'var(--amber-dim)' : 'var(--border)';
+    });
+
     // Destroy existing chart instance if any
     const existing = Chart.getChart(canv);
     if (existing) existing.destroy();
@@ -1011,6 +1139,7 @@ function setBacklogView(view) {
 }
 
 function setBkView(view) {
+  window._bkCurrentView = view;
   const yearWrap  = document.getElementById('bkYearWrap');
   const monthWrap = document.getElementById('bkMonthWrap');
   const btnYear   = document.getElementById('bkBtnYear');
@@ -1028,6 +1157,7 @@ function setBkView(view) {
 }
 
 function setBkMonth(mo) {
+  window._bkCurrentMonth = mo;
   document.querySelectorAll('[id^="bkTab_"]').forEach(btn => {
     const active = btn.id === 'bkTab_' + mo;
     btn.style.background  = active ? 'var(--surface2)' : 'transparent';
@@ -1056,6 +1186,23 @@ function setBkMonthSubview(sub) {
   btnD.style.background  = !isSummary ? 'var(--amber-glow)' : 'transparent';
   btnD.style.color       = !isSummary ? 'var(--amber)' : 'var(--muted)';
   btnD.style.borderColor = !isSummary ? 'var(--amber-dim)' : 'var(--border)';
+}
+
+function setBkMonthSort(sort) {
+  window._bkMonthSort = sort;
+  // Update sort button highlights
+  document.querySelectorAll('[id^="bkSortBtn_"]').forEach(btn => {
+    const active = btn.id === 'bkSortBtn_' + sort;
+    btn.style.background  = active ? 'var(--amber-glow)' : 'transparent';
+    btn.style.color       = active ? 'var(--amber)' : 'var(--muted)';
+    btn.style.borderColor = active ? 'var(--amber-dim)' : 'var(--border)';
+  });
+  // Re-render both sub-panels with new sort
+  const mo = (window._bkCurrentMonth != null) ? window._bkCurrentMonth : new Date().getMonth();
+  if (window._bkBuildMonthDetail && window._bkBuildMonthTaskDetail) {
+    document.getElementById('bkMonthSummary').innerHTML = window._bkBuildMonthDetail(mo);
+    document.getElementById('bkMonthDetail').innerHTML  = window._bkBuildMonthTaskDetail(mo);
+  }
 }
 
 
