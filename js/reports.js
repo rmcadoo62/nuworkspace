@@ -248,14 +248,22 @@ function openReportsPanel(navEl) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('panel-reports').classList.add('active');
   if (navEl) navEl.classList.add('active');
-  // Default to billing queue tab
   document.querySelectorAll('.reports-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.reports-tab-panel').forEach(t => t.classList.remove('active'));
-  const billingTab = document.querySelector('[data-tab="tab-billing"]');
-  const billingPanel = document.getElementById('tab-billing');
-  if (billingTab) billingTab.classList.add('active');
-  if (billingPanel) billingPanel.classList.add('active');
-  renderBillingQueue();
+  // Default: billing queue for Owner/Manager, stale projects for everyone else
+  if (typeof can === 'function' && can('view_billing')) {
+    const billingTab = document.querySelector('[data-tab="tab-billing"]');
+    const billingPanel = document.getElementById('tab-billing');
+    if (billingTab) billingTab.classList.add('active');
+    if (billingPanel) billingPanel.classList.add('active');
+    renderBillingQueue();
+  } else {
+    const staleTab = document.querySelector('[data-tab="tab-stale"]');
+    const stalePanel = document.getElementById('tab-stale');
+    if (staleTab) staleTab.classList.add('active');
+    if (stalePanel) stalePanel.classList.add('active');
+    renderStaleProjects();
+  }
 }
 
 function switchReportsTab(el) {
@@ -859,28 +867,32 @@ async function renderStaleProjects() {
         }
       });
 
-      // Also check task activity_log entries (record_id is task id, not proj id)
-      // Get tasks for open projects and their last log entry
-      const taskIds = taskStore.filter(t => projIds.includes(t.proj)).map(t => t._id);
+      // Also check task activity_log entries — batch in chunks of 100 to avoid URL-too-long
+      const projIdSet = new Set(projIds);
+      const taskIds = taskStore.filter(t => projIdSet.has(t.proj)).map(t => t._id);
       if (taskIds.length > 0) {
-        const { data: taskLogRows } = await sb.from('activity_log')
-          .select('record_id, created_at, field_changed, new_value, employee_name')
-          .in('record_id', taskIds)
-          .order('created_at', { ascending: false })
-          .limit(3000);
+        const CHUNK = 100;
+        for (let i = 0; i < taskIds.length; i += CHUNK) {
+          const chunk = taskIds.slice(i, i + CHUNK);
+          const { data: taskLogRows } = await sb.from('activity_log')
+            .select('record_id, created_at, field_changed, new_value, employee_name')
+            .in('record_id', chunk)
+            .order('created_at', { ascending: false })
+            .limit(500);
 
-        (taskLogRows || []).forEach(r => {
-          const task = taskStore.find(t => t._id === r.record_id);
-          if (!task) return;
-          const projId = task.proj;
-          if (!lastActivity[projId] || r.created_at > lastActivity[projId].date) {
-            lastActivity[projId] = {
-              date: r.created_at,
-              desc: (r.employee_name || 'Unknown') + ' updated task "' + task.name.slice(0, 40) + '"',
-              type: 'task'
-            };
-          }
-        });
+          (taskLogRows || []).forEach(r => {
+            const task = taskStore.find(t => t._id === r.record_id);
+            if (!task) return;
+            const projId = task.proj;
+            if (!lastActivity[projId] || r.created_at > lastActivity[projId].date) {
+              lastActivity[projId] = {
+                date: r.created_at,
+                desc: (r.employee_name || 'Unknown') + ' updated task "' + task.name.slice(0, 40) + '"',
+                type: 'task'
+              };
+            }
+          });
+        }
       }
 
       // Also check chatter
