@@ -819,10 +819,16 @@ async function renderStaleProjects() {
 
   el.innerHTML = '<div style="color:var(--muted);padding:40px;text-align:center">&#x23F3; Loading activity data...</div>';
 
-  // Open (non-closed) projects only
+  // Read N-job filter toggle state
+  const hideNJobs = el.dataset.hideNJobs !== 'false'; // default: true (hidden)
+  el.dataset.hideNJobs = String(hideNJobs);
+
+  // Open (non-closed) projects only, optionally excluding N-jobs
   const openProjects = projects.filter(p => {
     const st = (projectInfo[p.id] || {}).status;
-    return st !== 'closed';
+    if (st === 'closed') return false;
+    if (hideNJobs && /^N\d/i.test(p.name)) return false;
+    return true;
   });
 
   const cutoff = new Date();
@@ -941,7 +947,7 @@ async function renderStaleProjects() {
       const stColor = statusColors[st] || '#888';
       const stLabel = statusLabels[st] || st;
       const ageBg = r.age >= 120 ? 'var(--red)' : r.age >= 90 ? '#e8a234' : r.age >= 60 ? '#5b9cf6' : 'var(--muted)';
-      rows += '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="staleOpenProject(\"' + r.p.id + '\")">' +
+      rows += '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="staleOpenProject(\'' + r.p.id + '\')">' +
         '<td style="padding:11px 14px">' +
           '<div style="font-size:13px;font-weight:600;color:var(--text)">' + (r.p.emoji ? r.p.emoji + ' ' : '') + r.p.name + '</div>' +
           '<div style="font-size:11px;color:var(--muted);margin-top:2px">' + (r.info.clientName || r.info.client || '') + '</div>' +
@@ -970,11 +976,14 @@ async function renderStaleProjects() {
           '<div style="font-family:DM Serif Display,serif;font-size:22px;color:var(--text)">&#x1F4A4; Stale Projects</div>' +
           '<div style="font-size:12px;color:var(--muted);margin-top:2px">Open projects with no recorded activity in the selected period</div>' +
         '</div>' +
-        '<div style="display:flex;align-items:center;gap:8px">' +
+        '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
           '<span style="font-size:12px;color:var(--muted)">No activity for:</span>' +
           '<select onchange="staleSetDays(this.value)" style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:DM Sans,sans-serif;font-size:13px;padding:5px 10px;outline:none;cursor:pointer">' +
             dayOptions +
           '</select>' +
+          '<button onclick="staleToggleNJobs()" style="background:' + (hideNJobs ? 'rgba(91,156,246,0.15)' : 'var(--surface2)') + ';border:1.5px solid ' + (hideNJobs ? 'var(--blue)' : 'var(--border)') + ';border-radius:6px;color:' + (hideNJobs ? 'var(--blue)' : 'var(--muted)') + ';font-family:DM Sans,sans-serif;font-size:12px;padding:5px 12px;cursor:pointer;font-weight:600">' +
+            (hideNJobs ? '&#x1F6AB; N-Jobs Hidden' : '&#x1F441; Show N-Jobs') +
+          '</button>' +
           '<span style="font-size:12px;color:var(--muted);font-family:JetBrains Mono,monospace">' + staleRows.length + ' project' + (staleRows.length !== 1 ? 's' : '') + '</span>' +
         '</div>' +
       '</div>' +
@@ -994,11 +1003,19 @@ async function renderStaleProjects() {
     '</div>';
 }
 
-function staleOpenProject(id){selectProject(id);var n=document.getElementById('navProjects');if(n)n.click();}
+function staleOpenProject(id){var n=document.getElementById('navProjects');if(n)n.click();setTimeout(function(){selectProject(id);},50);}
 
 function staleSetDays(val) {
   const el = document.getElementById('tab-stale');
   if (el) { el.dataset.days = val; renderStaleProjects(); }
+}
+
+function staleToggleNJobs() {
+  const el = document.getElementById('tab-stale');
+  if (!el) return;
+  const current = el.dataset.hideNJobs !== 'false';
+  el.dataset.hideNJobs = String(!current);
+  renderStaleProjects();
 }
 
 
