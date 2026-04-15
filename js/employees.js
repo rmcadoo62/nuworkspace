@@ -337,6 +337,7 @@ function showEmpProfile(empId, annivOffset) {
   const emp = employees.find(e => e.id === empId);
   if (!emp) return;
 
+  const isInactive = emp.isActive === false || !!emp.terminationDate;
   const year = new Date().getFullYear() + annivOffset;
   // Calculate anniversary year window from hire date, shifted by annivOffset
   const _annivRange = (() => {
