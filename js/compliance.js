@@ -3825,7 +3825,7 @@ function _docCard(r) {
           ${r.change_notes ? ` · <em>${_esc(r.change_notes)}</em>` : ''}
         </div>
       </div>
-      <div style="display:flex;gap:6px;flex-shrink:0">
+      <div style="display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap">
         ${versionCount > 1 ? `
           <button onclick="openDocVersionsModal('${_esc(r.doc_name)}')"
             style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
@@ -3839,11 +3839,23 @@ function _docCard(r) {
           onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
           ⬇ Download
         </button>
+        <button onclick="openDocEditModal('${r.id}','${_esc(r.doc_name)}','${r.category}','${_esc(r.domain||'')}','${_esc(r.change_notes||'')}')"
+          style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+          onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+          ✎ Edit
+        </button>
         <button onclick="openDocUploadModal('${r.doc_name}','${r.category}','${_esc(r.domain||'')}')"
-          style="padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+          style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
           onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
           onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
           ↑ New Version
+        </button>
+        <button onclick="deleteDocRecord('${r.id}','${_esc(r.storage_path)}','${_esc(r.doc_name)}')"
+          style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+          onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+          🗑
         </button>
       </div>
     </div>`;
@@ -3853,6 +3865,129 @@ function _fmtFileSize(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024*1024) return (bytes/1024).toFixed(0) + ' KB';
   return (bytes/(1024*1024)).toFixed(1) + ' MB';
+}
+
+// ── Edit Modal (rename / re-categorize, no file re-upload) ────────
+function openDocEditModal(id, docName, category, domain, changeNotes) {
+  const catOpts = DOC_CATEGORIES.map(c =>
+    `<option value="${c}" ${category===c?'selected':''}>${c}</option>`
+  ).join('');
+  const domainOpts = ['',...Object.entries(DOC_DOMAIN_MAP).map(([k,v]) => `${k} — ${v}`)].map(d =>
+    `<option value="${d}" ${domain===d?'selected':''}>${d||'— None —'}</option>`
+  ).join('');
+
+  const backdropId = 'docEditModalBackdrop';
+  document.getElementById(backdropId)?.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = backdropId;
+  backdrop.onclick = e => { if(e.target===backdrop) closeDocEditModal(); };
+
+  backdrop.innerHTML = `
+    <div class="modal" style="width:520px">
+      <div class="modal-header">
+        <div class="modal-title">✎ Edit Document Details</div>
+        <button class="modal-close" onclick="closeDocEditModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" style="gap:14px">
+        <div class="comp-policy-banner" style="margin-bottom:0">
+          <span class="comp-policy-icon">ℹ</span>
+          <div style="font-size:11.5px">
+            This edits the document name, category, domain, and notes — it does not replace the file.
+            To replace the file, use ↑ New Version instead.
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Document Name <span style="color:var(--red)">*</span></label>
+          <input class="f-input" id="editDocName" type="text" value="${_esc(docName)}"/>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <label class="field-label">Category</label>
+            <select class="f-select" id="editDocCategory">${catOpts}</select>
+          </div>
+          <div class="field">
+            <label class="field-label">SSP Domain</label>
+            <select class="f-select" id="editDocDomain">${domainOpts}</select>
+          </div>
+        </div>
+        <div class="field">
+          <label class="field-label">Notes / Description</label>
+          <input class="f-input" id="editDocNotes" type="text"
+            placeholder="Optional notes about this document"
+            value="${_esc(changeNotes)}"/>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeDocEditModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveDocEdit('${id}')">Save Changes</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+function closeDocEditModal() {
+  const b = document.getElementById('docEditModalBackdrop');
+  if (!b) return;
+  b.classList.remove('open');
+  setTimeout(() => b.remove(), 280);
+}
+
+async function saveDocEdit(id) {
+  const newName     = (document.getElementById('editDocName')?.value||'').trim();
+  const newCategory = document.getElementById('editDocCategory')?.value;
+  const newDomain   = document.getElementById('editDocDomain')?.value || null;
+  const newNotes    = (document.getElementById('editDocNotes')?.value||'').trim();
+
+  if (!newName) { alert('Please enter a document name.'); return; }
+
+  const oldDoc = docRecords.find(r => r.id === id);
+
+  // If renaming, update ALL versions that share the same doc_name
+  if (oldDoc && oldDoc.doc_name !== newName) {
+    await sb.from('cmmc_documents')
+      .update({ doc_name: newName })
+      .eq('doc_name', oldDoc.doc_name);
+  }
+
+  // Update this specific record's other fields
+  const { error } = await sb.from('cmmc_documents').update({
+    doc_name:     newName,
+    category:     newCategory,
+    domain:       newDomain,
+    change_notes: newNotes || null,
+  }).eq('id', id);
+
+  if (error) { alert('Save failed: ' + error.message); return; }
+  closeDocEditModal();
+  toast('✎ Document updated.');
+  await _renderDocumentsTab();
+}
+
+// ── Delete current document (all versions) ────────────────────────
+async function deleteDocRecord(id, storagePath, docName) {
+  const versionCount = docRecords.filter(r => r.doc_name === docName).length;
+  const msg = versionCount > 1
+    ? `Delete "${docName}" and all ${versionCount} versions? Files will be permanently removed from storage. This cannot be undone.`
+    : `Delete "${docName}"? The file will be permanently removed from storage. This cannot be undone.`;
+
+  if (!confirm(msg)) return;
+
+  // Get all versions to delete from storage
+  const allVersions = docRecords.filter(r => r.doc_name === docName);
+  const paths = allVersions.map(r => r.storage_path);
+
+  // Delete all files from storage
+  if (paths.length) {
+    await sb.storage.from('cmmc-documents').remove(paths);
+  }
+  // Delete all metadata rows
+  await sb.from('cmmc_documents').delete().eq('doc_name', docName);
+
+  toast('Document deleted.');
+  await _renderDocumentsTab();
 }
 
 // ── Upload Modal ──────────────────────────────────────────────────
