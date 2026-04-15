@@ -242,6 +242,7 @@ function getTimeOffUsed(empId, year, annivStart, annivEnd) {
 // ── Employee panel ───────────────────────────────────────────────────────────
 
 let showInactiveEmployees = false;
+let empDeptFilter = 'all'; // 'all' | 'nulabs' | 'ballantine'
 let cmmcScreenedIds = new Set(); // employee_ids with a completed screening record
 
 async function _loadCmmcScreenedIds() {
@@ -260,20 +261,30 @@ function toggleInactiveEmployees() {
   renderEmployeesPanel(document.getElementById('empSearch')?.value || '');
 }
 
+function setEmpDeptFilter(dept) {
+  empDeptFilter = dept;
+  renderEmployeesPanel(document.getElementById('empSearch')?.value || '');
+}
+
 function renderEmployeesPanel(search) {
   const q = (search || '').toLowerCase();
   const filtered = employees.filter(e => {
     const _empInactive = e.isActive === false || !!e.terminationDate;
     if (!showInactiveEmployees && _empInactive) return false;
+    if (empDeptFilter === 'ballantine' && (e.dept || '').toLowerCase() !== 'ballantine') return false;
+    if (empDeptFilter === 'nulabs' && (e.dept || '').toLowerCase() === 'ballantine') return false;
     return e.name.toLowerCase().includes(q) ||
       e.role.toLowerCase().includes(q) ||
-      e.dept.toLowerCase().includes(q);
+      (e.dept || '').toLowerCase().includes(q);
   }).sort((a, b) => {
     const lastA = a.name.trim().split(' ').slice(-1)[0].toLowerCase();
     const lastB = b.name.trim().split(' ').slice(-1)[0].toLowerCase();
     return lastA.localeCompare(lastB);
   });
   const inactiveCount = employees.filter(e => e.isActive === false || !!e.terminationDate).length;
+  const deptBtn = (label, val) => `<button onclick="setEmpDeptFilter('${val}')"
+    style="flex:1;padding:4px 6px;font-size:10px;font-weight:600;border-radius:6px;cursor:pointer;border:1px solid var(--border);
+    background:${empDeptFilter===val?'var(--amber)':'var(--surface2)'};color:${empDeptFilter===val?'#000':'var(--muted)'};transition:background .15s">${label}</button>`;
   const body = document.getElementById('empPanelBody');
   body.innerHTML = `
     <div style="display:flex;height:100%;gap:0;overflow:hidden">
@@ -281,8 +292,13 @@ function renderEmployeesPanel(search) {
       <div style="width:260px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;background:var(--surface)">
         <div style="padding:16px 14px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
           <input style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none"
-            placeholder="Search…" value="${q}" oninput="renderEmployeesPanel(this.value)" />
+            placeholder="Search…" value="${q}" oninput="renderEmployeesPanel(this.value)" id="empSearch" />
           <button onclick="openEmployeeModal(null)" style="background:var(--amber);border:none;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;color:#000;cursor:pointer;white-space:nowrap">+ Add</button>
+        </div>
+        <div style="padding:6px 14px;border-bottom:1px solid var(--border);display:flex;gap:4px">
+          ${deptBtn('All', 'all')}
+          ${deptBtn('NU Labs', 'nulabs')}
+          ${deptBtn('Ballantine', 'ballantine')}
         </div>
         ${inactiveCount > 0 ? `<div style="padding:6px 14px;border-bottom:1px solid var(--border)">
           <button onclick="toggleInactiveEmployees()" style="width:100%;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--muted);cursor:pointer;text-align:left">

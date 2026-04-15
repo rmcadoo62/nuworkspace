@@ -277,41 +277,40 @@ function switchReportsTab(el) {
   if (el.dataset.tab === 'tab-stale') renderStaleProjects();
 }
 
-function renderTimesheetsReport(filterEmp, filterStatus) {
+function renderTimesheetsReport(filterDept, filterStatus) {
   const el = document.getElementById('tab-timesheets');
   if (!el) return;
 
-  const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+  const selDept   = filterDept   || el.dataset.filterDept   || 'nulabs';
+  const selStatus = filterStatus || el.dataset.filterStatus || '';
+  el.dataset.filterDept   = selDept;
+  el.dataset.filterStatus = selStatus;
 
-  // Build list of all week statuses
+  const isBallantine = selDept === 'ballantine';
+
+  // Build eligible employees based on selected department
+  const EXCLUDED_NAMES = ['Russ McAdoo', 'Jordan McAdoo'];
+  const eligibleEmps = isBallantine
+    ? employees.filter(e => (e.dept || '').toLowerCase() === 'ballantine' && e.isActive !== false)
+    : employees.filter(e =>
+        !EXCLUDED_NAMES.includes(e.name) &&
+        (e.dept || '').toLowerCase() !== 'ballantine' &&
+        e.isActive !== false
+      );
+  const eligibleEmpIds = new Set(eligibleEmps.map(e => e.id));
+
+  // Build list of all week statuses for eligible employees
   let entries = Object.values(tsWeekStatuses).map(ws => {
     const emp = employees.find(e => e.id === ws.employeeId) || {};
-    // Calculate total hours for this week
     const storeKey = ws.employeeId + '|' + ws.weekKey;
     let totalHrs = 0;
     (tsData[storeKey] || []).forEach(r => Object.values(r.hours||{}).forEach(h => totalHrs += (parseFloat(h)||0)));
     const ohStore = tsData['oh_' + storeKey] || {};
     OVERHEAD_CATS.forEach(cat => Object.values(ohStore[cat]||{}).forEach(h => totalHrs += (parseFloat(h)||0)));
     return { ...ws, empName: emp.name||'—', empColor: emp.color||'#555', empInitials: emp.initials||'?', totalHrs };
-  });
+  }).filter(ws => eligibleEmpIds.has(ws.employeeId));
 
-  // Excluded employees by name or department
-  const EXCLUDED_EMP_NAMES = ['Russ McAdoo', 'Jordan McAdoo'];
-  const EXCLUDED_EMP_DEPT  = 'Ballantine';
-
-  // Eligible active employees for timesheet audit (strip exclusions)
-  const eligibleEmps = employees.filter(e =>
-    !EXCLUDED_EMP_NAMES.includes(e.name) &&
-    (e.dept || '').toLowerCase() !== EXCLUDED_EMP_DEPT.toLowerCase() &&
-    e.isActive !== false
-  );
-  const eligibleEmpIds = new Set(eligibleEmps.map(e => e.id));
-
-  // Remove excluded employees from existing entries
-  entries = entries.filter(ws => eligibleEmpIds.has(ws.employeeId));
-
-  // For every week that already has at least one submission, add a
-  // "not_submitted" placeholder for any eligible employee who is missing.
+  // Add "not_submitted" placeholder for any eligible employee missing from a week
   const allWeekKeys = [...new Set(entries.map(e => e.weekKey))];
   allWeekKeys.forEach(wk => {
     const submittedIds = new Set(entries.filter(e => e.weekKey === wk).map(e => e.employeeId));
@@ -333,46 +332,35 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
     });
   });
 
-  // Sort newest week first, then by employee name
   entries.sort((a,b) => b.weekKey.localeCompare(a.weekKey) || a.empName.localeCompare(b.empName));
 
-  // Filter
-  const selEmp    = filterEmp    || el.dataset.filterEmp    || '';
-  const selStatus = filterStatus || el.dataset.filterStatus || '';
-  el.dataset.filterEmp    = selEmp;
-  el.dataset.filterStatus = selStatus;
-  const filtered = entries.filter(e =>
-    (!selEmp    || e.employeeId === selEmp) &&
-    (!selStatus || e.status === selStatus)
-  );
-
-  const uniqueEmps = eligibleEmps
-    .map(e => ({ id: e.id, name: e.name }))
-    .sort((a,b) => a.name.localeCompare(b.name));
+  const filtered = entries.filter(e => !selStatus || e.status === selStatus);
 
   const statusBadge = s => ({
     not_submitted: '<span style="background:rgba(224,92,92,0.12);color:#e05c5c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">⚠ Not Submitted</span>',
-    submitted: '<span style="background:rgba(232,162,52,0.15);color:#e8a234;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">⏳ Pending</span>',
-    approved:  '<span style="background:rgba(76,175,125,0.15);color:#4caf7d;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✓ Approved</span>',
-    rejected:  '<span style="background:rgba(224,92,92,0.15);color:#e05c5c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✗ Rejected</span>',
+    submitted:     '<span style="background:rgba(232,162,52,0.15);color:#e8a234;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">⏳ Pending</span>',
+    approved:      '<span style="background:rgba(76,175,125,0.15);color:#4caf7d;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✓ Approved</span>',
+    rejected:      '<span style="background:rgba(224,92,92,0.15);color:#e05c5c;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:600">✗ Rejected</span>',
   }[s] || '<span style="color:var(--muted);font-size:10px">Draft</span>');
 
-  const fmtWeek = wk => { const sat = new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+6); return sat.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); };
+  const deptBtn = (label, val) =>
+    `<button onclick="renderTimesheetsReport('${val}','${selStatus}')"
+      style="padding:6px 16px;font-size:12px;font-weight:600;border-radius:8px;cursor:pointer;border:1px solid var(--border);
+      background:${selDept===val?'var(--amber)':'var(--surface2)'};color:${selDept===val?'#000':'var(--muted)'};transition:background .15s">${label}</button>`;
 
   el.innerHTML = `
     <div style="max-width:1100px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">
         <div>
           <div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--text)">&#x1F4C5; Timesheet History</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px">${entries.filter(e=>e.status!=='not_submitted').length} submission${entries.filter(e=>e.status!=='not_submitted').length!==1?'s':''} · ${entries.filter(e=>e.status==='not_submitted').length} not submitted · ${uniqueEmps.length} employee${uniqueEmps.length!==1?'s':''}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${entries.filter(e=>e.status!=='not_submitted').length} submission${entries.filter(e=>e.status!=='not_submitted').length!==1?'s':''} · ${entries.filter(e=>e.status==='not_submitted').length} not submitted · ${eligibleEmps.length} employee${eligibleEmps.length!==1?'s':''}</div>
         </div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <select onchange="renderTimesheetsReport(this.value, '${selStatus}')"
-            style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif">
-            <option value="">All Employees</option>
-            ${uniqueEmps.map(e => `<option value="${e.id}" ${selEmp===e.id?'selected':''}>${e.name}</option>`).join('')}
-          </select>
-          <select onchange="renderTimesheetsReport('${selEmp}', this.value)"
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <div style="display:flex;gap:4px">
+            ${deptBtn('NU Labs', 'nulabs')}
+            ${deptBtn('Ballantine', 'ballantine')}
+          </div>
+          <select onchange="renderTimesheetsReport('${selDept}', this.value)"
             style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif">
             <option value="">All Statuses</option>
             <option value="submitted"     ${selStatus==='submitted'    ?'selected':''}>Pending</option>
@@ -384,20 +372,16 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
       </div>
 
       ${filtered.length === 0 ? `<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">📭</div><div>No timesheets match the selected filters.</div></div>` : (() => {
-        // Group by week, then deduplicate employee entries within each week
         const weekMap = {};
         filtered.forEach(ws => {
           if (!weekMap[ws.weekKey]) weekMap[ws.weekKey] = [];
-          // Deduplicate: keep only one entry per employee per week (latest status)
           const existing = weekMap[ws.weekKey].find(e => e.employeeId === ws.employeeId);
           if (!existing) {
             weekMap[ws.weekKey].push(ws);
           } else {
-            // Keep the most recent/relevant status: approved > submitted > rejected > draft
             const priority = {approved:3, submitted:2, rejected:1};
             if ((priority[ws.status]||0) > (priority[existing.status]||0)) {
-              const idx = weekMap[ws.weekKey].indexOf(existing);
-              weekMap[ws.weekKey][idx] = ws;
+              weekMap[ws.weekKey][weekMap[ws.weekKey].indexOf(existing)] = ws;
             }
           }
         });
@@ -412,18 +396,17 @@ function renderTimesheetsReport(filterEmp, filterStatus) {
         sortedWeeks.forEach(wk => {
           const rows = weekMap[wk].sort((a,b) => a.empName.localeCompare(b.empName));
           const weekTotal = rows.reduce((s,r) => s + r.totalHrs, 0);
-          // Week subtotal header row
           const sat = new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+6);
           const weekLabel = sat.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+          const printFn = isBallantine ? `printBallantinePayrollWeek('${wk}')` : `printPayrollWeek('${wk}')`;
           html += '<tr style="background:var(--surface2);border-top:2px solid var(--border)">' +
             '<td colspan="3" style="padding:7px 12px;font-size:11px;font-weight:700;color:var(--text);letter-spacing:.3px">Week ending ' + weekLabel + '</td>' +
             '<td style="padding:7px 12px;text-align:right;font-family:JetBrains Mono,monospace;font-size:12px;font-weight:700;color:var(--amber)">' + weekTotal.toFixed(1) + 'h</td>' +
-            '<td colspan="2" style="padding:7px 12px;text-align:right"><button onclick="printPayrollWeek(\'' + wk + '\')" style="background:var(--blue);color:#fff;border:none;border-radius:6px;padding:4px 14px;font-size:11px;font-weight:600;cursor:pointer">&#x1F5A8; Print Payroll</button></td></tr>';
+            '<td colspan="2" style="padding:7px 12px;text-align:right"><button onclick="' + printFn + '" style="background:var(--blue);color:#fff;border:none;border-radius:6px;padding:4px 14px;font-size:11px;font-weight:600;cursor:pointer">&#x1F5A8; Print Payroll</button></td></tr>';
           rows.forEach(ws => {
-            const rowStyle = 'border-bottom:1px solid var(--border);transition:background .12s';
             const hrsColor = ws.totalHrs > 0 ? 'var(--text)' : 'var(--muted)';
             const noteText = ws.rejectionNote ? '&#x2717; '+ws.rejectionNote : ws.approvedBy ? '&#x2713; Approved' : '&mdash;';
-            html += '<tr style="' + rowStyle + '" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'\'">'+
+            html += '<tr style="border-bottom:1px solid var(--border);transition:background .12s" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'\'">'+
               '<td style="padding:9px 12px 9px 24px"><div style="display:flex;align-items:center;gap:8px">'+
               '<div style="width:26px;height:26px;border-radius:50%;background:' + ws.empColor + ';display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;flex-shrink:0">' + ws.empInitials + '</div>'+
               '<span style="font-size:13px;font-weight:500">' + ws.empName + '</span></div></td>'+
@@ -537,6 +520,96 @@ function printPayrollWeek(weekKey) {
   win.document.close();
 }
 window.printPayrollWeek = printPayrollWeek;
+
+// ── Ballantine Payroll Print Summary ────────────────────────────────────────
+function printBallantinePayrollWeek(weekKey) {
+  const balEmps = employees.filter(e =>
+    (e.dept || '').toLowerCase() === 'ballantine' &&
+    e.isActive !== false
+  );
+
+  const sat = new Date(weekKey + 'T00:00:00'); sat.setDate(sat.getDate() + 6);
+  const weekLabel = sat.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+
+  function getEmpHours(emp) {
+    const storeKey = emp.id + '|' + weekKey;
+    const ohStore  = tsData['oh_' + storeKey] || {};
+    const ohCat = cat => Object.values(ohStore[cat] || {}).reduce((s, h) => s + (parseFloat(h) || 0), 0);
+    const genOh   = ohCat('General Overhead') + ohCat('Sales Support');
+    const sick    = ohCat('Sick') + ohCat('Sick Time');
+    const vac     = ohCat('Vacation Time');
+    const pt      = ohCat('Personal Time');
+    const holiday = ohCat('Holiday');
+    const snow    = ohCat('Snow Day');
+    const total   = genOh + sick + vac + pt + holiday + snow;
+    return { genOh, sick, vac, pt, holiday, snow, total };
+  }
+
+  const submittedIds = new Set(
+    Object.values(tsWeekStatuses)
+      .filter(ws => ws.weekKey === weekKey)
+      .map(ws => ws.employeeId)
+  );
+  const empsToShow = balEmps
+    .filter(e => { const h = getEmpHours(e); return h.total > 0 || submittedIds.has(e.id); })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const fmtH = h => h > 0 ? h.toFixed(1) : '—';
+  const empData = empsToShow.map(e => ({ emp: e, hrs: getEmpHours(e) }));
+
+  const catRows = [
+    { label: 'Overhead Total', key: 'genOh'   },
+    { label: 'Sick Total',     key: 'sick'    },
+    { label: 'Vacation Total', key: 'vac'     },
+    { label: 'PT Total',       key: 'pt'      },
+    { label: 'Holiday Total',  key: 'holiday' },
+    { label: 'Snow Day Total', key: 'snow'    },
+  ];
+
+  const tableHTML = '<table>' +
+    '<thead><tr><th class="lc">Category</th>' +
+    empsToShow.map(e => {
+      const parts = e.name.split(' ');
+      const first = parts[0];
+      const last  = parts.slice(1).join(' ');
+      return '<th>' + first + (last ? '<br><span style="font-weight:400;font-size:9px">' + last + '</span>' : '') + '</th>';
+    }).join('') +
+    '</tr></thead><tbody>' +
+    catRows.map(r =>
+      '<tr><td class="lc">' + r.label + '</td>' +
+      empData.map(d => '<td>' + fmtH(d.hrs[r.key]) + '</td>').join('') +
+      '</tr>'
+    ).join('') +
+    '<tr class="div-row"><td colspan="' + (empsToShow.length + 1) + '"></td></tr>' +
+    '<tr class="tot"><td class="lc">Weekly Sum</td>' +
+    empData.map(d => '<td>' + fmtH(d.hrs.total) + '</td>').join('') +
+    '</tr></tbody></table>';
+
+  const win = window.open('', '_blank', 'width=1000,height=650');
+  win.document.write('<!DOCTYPE html><html><head><title>Ballantine Payroll Summary — Week Ending ' + weekLabel + '</title>' +
+    '<style>' +
+    '* { box-sizing:border-box; margin:0; padding:0; }' +
+    'body { font-family:Arial,sans-serif; font-size:11px; color:#111; padding:24px; }' +
+    'h2 { font-size:15px; margin-bottom:4px; }' +
+    '.sub { font-size:11px; color:#555; margin-bottom:18px; }' +
+    'table { border-collapse:collapse; width:100%; }' +
+    'th,td { border:1px solid #ccc; padding:5px 8px; text-align:center; }' +
+    'th { background:#f0f0f0; font-weight:700; font-size:10px; }' +
+    'th.lc,td.lc { text-align:left; font-weight:600; background:#fafafa; min-width:110px; }' +
+    'tr:nth-child(even) td { background:#f9f9f9; }' +
+    'tr:nth-child(even) td.lc { background:#f4f4f4; }' +
+    '.tot td { font-weight:700; background:#dbeafe !important; border-top:2px solid #333; }' +
+    '.div-row td { border:none; padding:3px; background:transparent !important; }' +
+    '@media print { body { padding:12px; } }' +
+    '</style></head><body>' +
+    '<h2>Ballantine Payroll Summary</h2>' +
+    '<div class="sub">Week Ending: <strong>' + weekLabel + '</strong> &nbsp;|&nbsp; ' + empsToShow.length + ' employee' + (empsToShow.length !== 1 ? 's' : '') + ' &nbsp;|&nbsp; Printed: ' + new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) + '</div>' +
+    tableHTML +
+    '<scr' + 'ipt>window.onload=()=>{window.print();}</scr' + 'ipt>' +
+    '</body></html>');
+  win.document.close();
+}
+window.printBallantinePayrollWeek = printBallantinePayrollWeek;
 
 // ── Overview Report ──────────────────────────────────────────────────────
 function renderReportsOverview() {
