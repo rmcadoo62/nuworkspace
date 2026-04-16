@@ -25,6 +25,7 @@
   <link rel="stylesheet" href="css/home.css">
   <link rel="stylesheet" href="css/jobpack.css">
   <link rel="stylesheet" href="css/compliance.css">
+  <link rel="stylesheet" href="css/feedback.css">
 </head>
 <body>
 
@@ -122,6 +123,7 @@
   <div class="nav-section">
     <div class="nav-label">Setup</div>
     <div class="nav-item" id="navSetup" onclick="openSetupPanel(this)"><span class="icon">&#x2699;</span> Setup</div>
+    <div class="nav-item" id="navIssueTracker" style="display:none" onclick="openIssueTrackerPanel(this)"><span class="icon">&#x1F41B;</span> Issue Tracker <span class="nav-badge" id="issuesBadge" style="display:none">0</span></div>
   </div>
 
   </div><!-- /sidebar-nav-scroll -->
@@ -149,8 +151,15 @@
       <div class="global-search-results" id="globalSearchResults"></div>
     </div>
 
-    <!-- What's New -->
+    <!-- Bug Report -->
     <div class="notif-bell-wrap" style="margin-left:auto;position:relative">
+      <button class="notif-bell-btn" id="bugReportBtn" onclick="openBugReportModal()" title="Report Bug or Request Feature">
+        🐛
+      </button>
+    </div>
+
+    <!-- What's New -->
+    <div class="notif-bell-wrap" style="position:relative">
       <button class="notif-bell-btn" id="whatsNewBtn" onclick="toggleWhatsNewPanel()" title="What's New">
         ✨
         <span class="notif-bell-badge" id="whatsNewBadge" style="display:none">0</span>
@@ -798,6 +807,33 @@
       </div>
     </div>
 
+    <!-- ISSUE TRACKER PANEL -->
+    <div class="view-panel" id="panel-issue-tracker" style="flex-direction:column;overflow:hidden">
+      <div style="flex:1;overflow-y:auto;padding:24px 32px;min-height:0;width:100%">
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px;flex-wrap:wrap">
+          <div>
+            <div style="font-size:20px;font-family:'DM Serif Display',serif;color:var(--text)">🐛 Issue Tracker</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:2px" id="issueTrackerSub">Bug reports and feature requests</div>
+          </div>
+          <div style="margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <div class="filter-tabs" id="issueFilterTabs">
+              <button class="filter-tab active" onclick="setIssueFilter('all', this)">All</button>
+              <button class="filter-tab" onclick="setIssueFilter('new', this)">New</button>
+              <button class="filter-tab" onclick="setIssueFilter('bug', this)">Bugs</button>
+              <button class="filter-tab" onclick="setIssueFilter('feature', this)">Features</button>
+              <button class="filter-tab" onclick="setIssueFilter('open', this)">Open</button>
+              <button class="filter-tab" onclick="setIssueFilter('done', this)">Done</button>
+            </div>
+            <button onclick="refreshIssueTracker()"
+              style="padding:6px 14px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s"
+              onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'"
+              onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">&#x21BB; Refresh</button>
+          </div>
+        </div>
+        <div id="issueTrackerTable"></div>
+      </div>
+    </div>
+
   </div>
 
 </div>
@@ -1173,6 +1209,7 @@
   <script src="js/router.js"></script>
   <script src="js/quotes.js"></script>
   <script src="js/compliance.js"></script>
+  <script src="js/feedback.js"></script>
 
 </div><!-- /appShell -->
 
@@ -1472,6 +1509,80 @@
         <button class="btn btn-ghost" id="articleDeleteBtn" style="margin-right:auto;display:none;color:var(--red)" onclick="deleteArticle()">&#x1F5D1; Delete</button>
         <button class="btn btn-ghost" onclick="closeArticleModal()">Cancel</button>
         <button class="btn btn-primary" onclick="saveArticle()">Save</button>
+      </div>
+    </div>
+  </div>
+  <!-- BUG REPORT MODAL -->
+  <div class="modal-backdrop" id="bugReportModal" onclick="if(event.target===this)closeBugReportModal()">
+    <div class="modal" style="width:520px">
+      <div class="modal-header">
+        <div class="modal-title">🐛 Report Bug or Request Feature</div>
+        <button class="modal-close" onclick="closeBugReportModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        <div class="field" style="margin-bottom:16px">
+          <label class="field-label">Type <span style="color:var(--red)">*</span></label>
+          <div style="display:flex;gap:12px;margin-top:6px">
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+              <input type="radio" name="feedbackType" value="bug" checked onchange="updateBugReportType()" style="cursor:pointer">
+              🐛 Bug Report
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+              <input type="radio" name="feedbackType" value="feature" onchange="updateBugReportType()" style="cursor:pointer">
+              💡 Feature Request
+            </label>
+          </div>
+        </div>
+        
+        <div class="field" style="margin-bottom:16px">
+          <label class="field-label">Priority <span style="color:var(--red)">*</span></label>
+          <select class="f-input" id="bugReportPriority" style="cursor:pointer">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+            <option value="blocker">🚨 Blocker</option>
+          </select>
+        </div>
+        
+        <div class="field" style="margin-bottom:16px">
+          <label class="field-label">Title <span style="color:var(--red)">*</span></label>
+          <input class="f-input" id="bugReportTitle" type="text" placeholder="Brief summary of the issue or request" autocomplete="off" />
+        </div>
+        
+        <div class="field" style="margin-bottom:16px">
+          <label class="field-label">Description <span style="color:var(--red)">*</span></label>
+          <textarea class="f-input" id="bugReportDescription" 
+            placeholder="Detailed description. For bugs: What happened vs what you expected. For features: What you'd like to see and why it would be helpful."
+            rows="5" style="resize:vertical;font-family:'DM Sans',sans-serif"></textarea>
+        </div>
+        
+        <div class="field">
+          <label class="field-label">Current Page</label>
+          <input class="f-input" id="bugReportPage" type="text" readonly 
+            style="background:var(--surface3);color:var(--muted);cursor:not-allowed"
+            placeholder="Auto-detected" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeBugReportModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitBugReport()">Submit Report</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ISSUE DETAIL MODAL -->
+  <div class="modal-backdrop" id="issueDetailModal" onclick="if(event.target===this)closeIssueDetailModal()">
+    <div class="modal" style="width:600px;max-height:80vh">
+      <div class="modal-header">
+        <div class="modal-title" id="issueDetailTitle">Issue Details</div>
+        <button class="modal-close" onclick="closeIssueDetailModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body" id="issueDetailBody">
+        <!-- Dynamic content -->
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeIssueDetailModal()">Close</button>
+        <button class="btn btn-primary" onclick="saveIssueChanges()" id="saveIssueBtn" style="display:none">Save Changes</button>
       </div>
     </div>
   </div>

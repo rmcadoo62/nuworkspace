@@ -270,7 +270,7 @@ function renderNotifPanel() {
   list.innerHTML = notifStore.map(n => {
     const proj = projects.find(p => p.id === n.projId);
     const timeStr = new Date(n.ts).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-    const displayPreview = (n.preview || '').replace(/\|\|empId:[a-f0-9-]+$/, '');
+    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|issueTracker)$/, '');
     return '<div class="notif-item' + (n.read ? '' : ' unread') + '" onclick="notifClick(\x27' + n.id + '\x27,\x27' + (n.projId||'') + '\x27)">' +
       '<div class="notif-item-avatar" style="background:' + (n.fromColor||'#888') + ';color:#fff">' + (n.fromInitials||'?') + '</div>' +
       '<div class="notif-item-body">' +
@@ -300,6 +300,13 @@ function notifClick(notifId, projId) {
       if (typeof openEmployeesPanel === 'function') openEmployeesPanel(null);
       setTimeout(() => { if (typeof showEmpProfile === 'function') showEmpProfile(requestingEmpId); }, 250);
     }
+    return;
+  }
+
+  // Check for issue tracker notification — preview ends with ||issueTracker
+  if (preview.endsWith('||issueTracker')) {
+    const navItem = document.getElementById('navIssueTracker');
+    if (typeof openIssueTrackerPanel === 'function') openIssueTrackerPanel(navItem);
     return;
   }
 

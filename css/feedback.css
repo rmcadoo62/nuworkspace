@@ -1,0 +1,147 @@
+/* ===== ISSUE TRACKER STYLES ===== */
+
+/* Panel layout note:
+   Do NOT set display, flex, flex-direction, width, or height on
+   #panel-issue-tracker here — those would override base.css's
+   .view-panel { display:none } rule (ID beats class specificity)
+   and cause the panel to show on every page. The .view-panel and
+   .view-panel.active rules in base.css handle visibility.
+   flex-direction and overflow are set inline on the element in
+   index.html so they only apply once the panel is active. */
+
+#panel-issue-tracker.active > div {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.filter-tabs {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.filter-tab {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+
+.filter-tab:hover {
+  border-color: var(--amber-dim);
+  color: var(--amber);
+}
+
+.filter-tab.active {
+  background: var(--amber);
+  border-color: var(--amber);
+  color: #fff;
+}
+
+.filter-tab.active:hover {
+  background: var(--amber-bright);
+  border-color: var(--amber-bright);
+}
+
+/* Table styles for issue tracker */
+.table-header {
+  font-family: 'DM Sans', sans-serif;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.table-row {
+  font-family: 'DM Sans', sans-serif;
+  align-items: center;
+}
+
+.table-row:last-child {
+  border-bottom: none;
+}
+
+/* Priority and status pills */
+.status-pill,
+.priority-pill {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 12px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+/* Bug report modal enhancements */
+#bugReportModal textarea {
+  min-height: 100px;
+}
+
+#bugReportModal .modal-body {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+/* Issue detail modal */
+#issueDetailModal .modal {
+  max-width: 90vw;
+  max-height: 85vh;
+}
+
+#issueDetailModal .modal-body {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+/* Field row for side-by-side fields */
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 640px) {
+  .field-row {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  
+  .filter-tabs {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  
+  .table-header,
+  .table-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  
+  .table-header > div:not(:first-child),
+  .table-row > div:not(:first-child) {
+    display: none;
+  }
+}
+
+/* Bug report button styling consistency with other topbar buttons */
+#bugReportBtn {
+  font-size: 16px;
+}
+
+#bugReportBtn:hover {
+  background: rgba(251, 146, 60, 0.1);
+}
+
+/* Navigation badge for issues */
+#issuesBadge {
+  background: var(--red);
+}

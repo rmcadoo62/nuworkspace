@@ -1,7 +1,156 @@
+// ===== BUG REPORT MODAL FUNCTIONS - DEFINED IMMEDIATELY =====
+(function() {
+  function openBugReportModal() {
+    const modal = document.getElementById('bugReportModal');
+    if (!modal) return;
+    
+    // Auto-detect current page
+    const pageInput = document.getElementById('bugReportPage');
+    if (pageInput) {
+      const hash = window.location.hash || '#home';
+      const pageMap = {
+        '#home': 'Home',
+        '#projects': 'Projects Table', 
+        '#dashboard': 'Dashboard',
+        '#timesheet': 'Timesheet',
+        '#scheduler': 'Scheduler',
+        '#clients': 'Clients',
+        '#shipping': 'Shipping & Receiving',
+        '#reports': 'Reports',
+        '#quotes': 'Quotes',
+        '#setup': 'Setup',
+        '#compliance': 'CMMC Compliance'
+      };
+      pageInput.value = pageMap[hash] || hash.replace('#', '').replace('-', ' ');
+    }
+    
+    // Clear form
+    const titleInput = document.getElementById('bugReportTitle');
+    const descInput = document.getElementById('bugReportDescription');
+    const prioritySelect = document.getElementById('bugReportPriority');
+    if (titleInput) titleInput.value = '';
+    if (descInput) descInput.value = '';
+    if (prioritySelect) prioritySelect.value = 'medium';
+    
+    // Reset to bug type
+    const bugRadio = document.querySelector('input[name="feedbackType"][value="bug"]');
+    if (bugRadio) {
+      bugRadio.checked = true;
+      updateBugReportType();
+    }
+    
+    // Use the same pattern as other modals - add 'open' class
+    modal.classList.add('open');
+    if (titleInput) setTimeout(() => titleInput.focus(), 100);
+  }
+
+  function closeBugReportModal() {
+    const modal = document.getElementById('bugReportModal');
+    if (modal) modal.classList.remove('open');
+  }
+
+  function updateBugReportType() {
+    const typeRadio = document.querySelector('input[name="feedbackType"]:checked');
+    const prioritySelect = document.getElementById('bugReportPriority');
+    if (!typeRadio || !prioritySelect) return;
+    
+    // Update priority options based on type
+    if (typeRadio.value === 'feature') {
+      prioritySelect.innerHTML = `
+        <option value="nice-to-have">Nice to have</option>
+        <option value="would-help" selected>Would help</option>
+        <option value="important">Important</option>
+      `;
+    } else {
+      prioritySelect.innerHTML = `
+        <option value="low">Low</option>
+        <option value="medium" selected>Medium</option>
+        <option value="high">High</option>
+        <option value="blocker">🚨 Blocker</option>
+      `;
+    }
+  }
+
+  async function submitBugReport() {
+    const typeRadio = document.querySelector('input[name="feedbackType"]:checked');
+    const titleInput = document.getElementById('bugReportTitle');
+    const descInput = document.getElementById('bugReportDescription');
+    const prioritySelect = document.getElementById('bugReportPriority');
+    const pageInput = document.getElementById('bugReportPage');
+    
+    if (!typeRadio || !titleInput || !descInput || !prioritySelect || !currentEmployee) return;
+    
+    const title = titleInput.value.trim();
+    const description = descInput.value.trim();
+    
+    if (!title || !description) {
+      alert('Please fill in both title and description.');
+      return;
+    }
+    
+    try {
+      // Submit to database
+      const { data, error } = await sb.from('feedback_submissions').insert([{
+        submitter_id: currentEmployee.id,
+        submitter_name: currentEmployee.name,
+        submitter_email: currentEmployee.email,
+        type: typeRadio.value,
+        priority: prioritySelect.value,
+        title: title,
+        description: description,
+        page_context: pageInput ? pageInput.value : null,
+        user_agent: navigator.userAgent
+      }]).select();
+      
+      if (error) throw error;
+      
+      // Send notification to Russ
+      if (data && data[0]) {
+        const submission = data[0];
+        const typeEmoji = submission.type === 'bug' ? '🐛' : '💡';
+        const priorityLabel = submission.priority.charAt(0).toUpperCase() + submission.priority.slice(1).replace('-', ' ');
+        
+        // Find Russ's user_id
+        const russEmp = employees.find(emp => emp.email === 'rmcadoo@nulabs.com');
+        if (russEmp) {
+          await sb.from('chatter_notifs').insert([{
+            employee_id: russEmp.id,
+            msg_id: null,
+            from_name: currentEmployee.name,
+            from_color: currentEmployee.color || '#5b9cf6',
+            from_initials: currentEmployee.initials,
+            preview: `${typeEmoji} ${submission.type === 'bug' ? 'Bug Report' : 'Feature Request'}: ${title}||issueTracker`,
+            is_read: false
+          }]);
+        }
+      }
+      
+      closeBugReportModal();
+      
+      const typeLabel = typeRadio.value === 'bug' ? 'Bug report' : 'Feature request';
+      alert(`${typeLabel} submitted successfully! Russ will review it and follow up.`);
+      
+    } catch (e) {
+      console.error('Failed to submit feedback:', e);
+      alert('Failed to submit report. Please try again.');
+    }
+  }
+
+  // Make functions available globally immediately
+  window.openBugReportModal = openBugReportModal;
+  window.closeBugReportModal = closeBugReportModal;
+  window.updateBugReportType = updateBugReportType;
+  window.submitBugReport = submitBugReport;
+})();
+
 // ===== IN-APP NAVIGATION HISTORY =====
 // ===== IN-APP NAVIGATION HISTORY =====
 // Tracks navigation so the ← Back button can replay the previous screen.
 // Wraps each nav function after all scripts have loaded — no other files need changing.
+
+// ===== BUG REPORT MODAL FUNCTIONS =====
+// Explicitly add to window object
+// (Functions now defined above)
 
 // ===== WHAT'S NEW RELEASE NOTES =====
 // To add a new entry: add an object to the TOP of this array, then deploy.
@@ -169,6 +318,7 @@ document.addEventListener('DOMContentLoaded', function () {
     { name: 'openQuotesPanel',        label: 'Quotes'              },
     { name: 'openClosingReport',      label: 'Closing Report'      },
     { name: 'openCompliancePanel',    label: 'CMMC Compliance'     },
+    { name: 'openIssueTrackerPanel', label: 'Issue Tracker'       },
   ];
 
   NAV_FNS.forEach(({ name, label }) => {
