@@ -141,7 +141,27 @@ async function chatterPost() {
   // Collect @mentioned employee ids
   const mentionedNames = [...text.matchAll(/@([\w][\w ]*?)(?=\s|$)/g)].map(m => m[1].toLowerCase());
   const mentionedIds = employees.filter(e => mentionedNames.some(n => e.name?.toLowerCase().startsWith(n))).map(e => e.id);
-  const allNotifyIds = [...new Set([...mentionedIds, ...chatterNotifySelected])];
+  let allNotifyIds = [...new Set([...mentionedIds, ...chatterNotifySelected])];
+  
+  // If this is a reply, also notify the original chatter author
+  if (chatterReplyTo && chatterReplyTo.id) {
+    try {
+      const { data: originalMsg } = await sb.from('chatter')
+        .select('author_id')
+        .eq('id', chatterReplyTo.id)
+        .single();
+      
+      if (originalMsg && originalMsg.author_id && originalMsg.author_id !== currentUser?.id) {
+        // Find the employee record for the original author
+        const originalAuthorEmp = employees.find(e => e.userId === originalMsg.author_id);
+        if (originalAuthorEmp && !allNotifyIds.includes(originalAuthorEmp.id)) {
+          allNotifyIds.push(originalAuthorEmp.id);
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching original chatter author:', error);
+    }
+  }
   const msg = {
     proj_id: activeProjectId,
     author_id: currentUser?.id || null,
