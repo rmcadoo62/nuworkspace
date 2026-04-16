@@ -204,9 +204,21 @@ function openArticleModal(articleId, projId) {
   const clientSearch = document.getElementById('articleClientSearch');
   const clientIdInp  = document.getElementById('articleClientId');
   if (clientSearch && clientIdInp) {
-    const existingClient = a ? clientStore.find(c => c.id === a.clientId) : null;
-    clientSearch.value = existingClient ? existingClient.name : (a ? a.clientName || '' : '');
-    clientIdInp.value  = a ? (a.clientId || '') : '';
+    if (a) {
+      // Editing existing article — use its saved client
+      const existingClient = clientStore.find(c => c.id === a.clientId);
+      clientSearch.value = existingClient ? existingClient.name : (a.clientName || '');
+      clientIdInp.value  = a.clientId || '';
+    } else if (projId) {
+      // New article from within a project — auto-fill the project's client
+      const info = projectInfo[projId] || {};
+      const projClient = info.clientId ? clientStore.find(c => c.id === info.clientId) : null;
+      clientSearch.value = projClient ? projClient.name : (info.client || '');
+      clientIdInp.value  = info.clientId || '';
+    } else {
+      clientSearch.value = '';
+      clientIdInp.value  = '';
+    }
   }
 
   document.getElementById('articleModal').classList.add('open');
