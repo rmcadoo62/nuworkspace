@@ -276,9 +276,9 @@ function openIssueDetail(issueId) {
     </div>
 
     <div class="field" style="margin-bottom:20px">
-      <label class="field-label">Admin Notes (private)</label>
-      <textarea class="f-input" id="issueAdminNotes" placeholder="Internal notes, investigation details, etc."
-        onchange="markIssueChanged()" rows="3" style="resize:vertical;font-family:'DM Sans',sans-serif">${esc(issue.admin_notes || '')}</textarea>
+      <label class="field-label">Reply to submitter (optional)</label>
+      <textarea class="f-input" id="issueAdminNotes" placeholder="Leave blank to save status/priority without notifying. Any text here sends as a notification to the submitter when you Save."
+        onchange="markIssueChanged()" rows="5" style="resize:vertical;font-family:'DM Sans',sans-serif">${esc(issue.admin_notes || '')}</textarea>
     </div>
 
     <div class="field" id="shipNoteField" style="display:none;margin-bottom:20px">
@@ -347,6 +347,10 @@ async function saveIssueChanges() {
   const wasCompleted = selectedIssue.status === 'done';
   const nowCompleted = newStatus === 'done';
 
+  // Reply field changed vs stored value (empty string and null both count as "no previous reply")
+  const prevNotes = (selectedIssue.admin_notes || '').trim();
+  const replyChanged = newNotes && newNotes !== prevNotes;
+
   try {
     const updateData = {
       status: newStatus,
@@ -373,7 +377,7 @@ async function saveIssueChanges() {
       });
     }
 
-    // Notify submitter if resolved
+    // Notify submitter if status just flipped to Done (resolution notification)
     if (nowCompleted && !wasCompleted && selectedIssue.submitter_id) {
       const typeEmoji = selectedIssue.type === 'bug' ? '🐛' : '💡';
       const actionText = selectedIssue.type === 'bug' ? 'fixed' : 'completed';
@@ -384,8 +388,25 @@ async function saveIssueChanges() {
         from_name: 'System',
         from_color: '#10b981',
         from_initials: '✓',
-        preview: `${typeEmoji} Your ${selectedIssue.type} report "${selectedIssue.title}" has been ${actionText}`,
-        route_info: null,
+        preview: `${typeEmoji} Your ${selectedIssue.type} report "${selectedIssue.title}" has been ${actionText}||issueTracker`,
+        is_read: false
+      }]);
+    }
+
+    // Notify submitter if the reply text changed (and we didn't already send the resolution notif above for this save)
+    if (replyChanged && selectedIssue.submitter_id && !(nowCompleted && !wasCompleted)) {
+      const typeEmoji = selectedIssue.type === 'bug' ? '🐛' : '💡';
+      const russEmp = (typeof employees !== 'undefined')
+        ? employees.find(e => e.email === 'rmcadoo@nulabs.com')
+        : null;
+
+      await sb.from('chatter_notifs').insert([{
+        employee_id: selectedIssue.submitter_id,
+        msg_id: null,
+        from_name: russEmp ? russEmp.name : 'Russ McAdoo',
+        from_color: russEmp?.color || '#fb923c',
+        from_initials: russEmp?.initials || 'RM',
+        preview: `${typeEmoji} Reply on "${selectedIssue.title}": ${newNotes.slice(0, 60)}${newNotes.length > 60 ? '…' : ''}||issueTracker`,
         is_read: false
       }]);
     }

@@ -90,6 +90,12 @@
   overflow-y: auto;
 }
 
+/* Issue detail modal — override .f-input's fixed 40px height for textareas */
+#issueDetailModal textarea.f-input {
+  min-height: 100px;
+  height: auto;
+}
+
 /* Issue detail modal */
 #issueDetailModal .modal {
   max-width: 90vw;
