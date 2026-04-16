@@ -262,6 +262,13 @@ function renderProjectsTable() {
       const getHrs = (p) => (projectInfo[p.id]||{}).actualHours || 0;
       return (projSortDir==='asc'?1:-1) * (getHrs(a) - getHrs(b));
     }
+    else if (projSortCol === 'inHouse') {
+      const hasInHouse = (p) => (typeof articleStore !== 'undefined' && Array.isArray(articleStore))
+        ? articleStore.some(x => x.projId === p.id && x.receivedDate && !x.shippedDate)
+        : false;
+      // true sorts above false in asc; below in desc
+      return (projSortDir==='asc'?1:-1) * ((hasInHouse(b) ? 1 : 0) - (hasInHouse(a) ? 1 : 0));
+    }
     else { va = a.name||''; vb = b.name||''; }
     const cmp = va.localeCompare(vb, undefined, {numeric: true});
     return projSortDir === 'asc' ? cmp : -cmp;
@@ -471,7 +478,7 @@ function renderProjectsTable() {
   // Build sort key for a column header (for showing the sort arrow)
   const colSortKey = (c) => {
     // Most col keys are also the sort col key; 'desc' and 'article' aren't sortable today
-    if (c.key === 'desc' || c.key === 'article' || c.key === 'inHouse') return null;
+    if (c.key === 'desc' || c.key === 'article') return null;
     return c.key;
   };
 
