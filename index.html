@@ -248,6 +248,12 @@
             <!-- Stat bubbles inline -->
             <div id="projStatBubbles" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex:1;margin:0 16px"></div>
             <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+              <div class="proj-views-wrap" style="position:relative">
+                <button class="nav-filter-btn" id="projViewsBtn" onclick="toggleProjViewsDropdown(event)" title="Saved Views" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s">
+                  &#x1F441;&#xFE0F; View: <span id="projViewsLabel">Default</span> <span style="font-size:9px;margin-left:2px">&#x25BC;</span>
+                </button>
+                <div id="projViewsDropdown" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);min-width:200px;z-index:9000;overflow:hidden"></div>
+              </div>
               <button class="nav-filter-btn" id="navFilterBtn" onclick="toggleNavFilter()" title="Filter" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">
                 &#x25BC; Filter <span id="navFilterDot" style="display:none" class="nav-filter-active-dot"></span>
               </button>
@@ -282,6 +288,7 @@
               <input type="text" id="filterSaveName" placeholder="Filter name…" style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 10px;outline:none;width:160px;transition:border-color var(--transition);" onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
               <button class="nav-filter-save" onclick="saveNamedFilter()" style="padding:6px 14px">&#x2713; Save Filter</button>
               <button class="nav-filter-clear" onclick="clearNavFilter()" style="padding:6px 12px">Clear</button>
+              <button onclick="resetProjectsToDefault()" style="padding:6px 12px;background:transparent;border:1px solid var(--border);border-radius:7px;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:500;cursor:pointer;transition:all .15s" onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'" title="Reset columns, filters, and sort to defaults">&#x21BA; Reset to Default</button>
             </div>
             <div style="padding-top:12px;border-top:1px solid var(--border);margin-top:4px">
               <div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Optional Columns</div>

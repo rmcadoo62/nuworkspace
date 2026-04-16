@@ -32,21 +32,89 @@ function openDashboardPanel(el) {
 
 // ===== COLUMN VISIBILITY =====
 // ===== COLUMN VISIBILITY =====
+// Columns are split into LOCKED (always visible, fixed position) and OPTIONAL (toggleable, reorderable).
+// Locked: Project (name), Status, Company (client) — these render first, in that order, always.
+// Optional columns render in user-saved order (projColOrder in localStorage), or DEFAULT_COL_ORDER if not set.
+//
+// Each optional column def has:
+//   key       — stable identifier used in localStorage, sort, filter
+//   label     — display name in the chip + header
+//   ptc       — short tag used by the resizer CSS var (--ptc-<ptc>)
+//   default   — whether visible by default for users who have never toggled
+//   width     — initial column width (before resizing)
+//   colorRule — optional fn(value, info) => {bg, color} | null — applied to cell when visible
 const PROJ_COL_DEFS = [
-  { key: 'pm',            label: 'PM',                    ptc: 'pm',       default: false, width: '110px' },
-  { key: 'tentativeTest', label: 'Tent. Test Date',   ptc: 'tenttest', default: false, width: '120px' },
-  { key: 'testcomplete',  label: 'Test Comp. Date',    ptc: 'testcomp', default: false, width: '120px' },
-  { key: 'dcas',          label: 'DCAS',                  ptc: 'dcas',     default: true,  width: '80px'  },
-  { key: 'witness',       label: 'Cust. Witness',      ptc: 'witness',  default: false, width: '130px' },
-  { key: 'tpApproval',    label: 'TP Approval',           ptc: 'tpappr',   default: false, width: '100px' },
-  { key: 'dpas',          label: 'DPAS',                  ptc: 'dpas',     default: false, width: '70px'  },
-  { key: 'noforn',        label: 'NOFORN',                ptc: 'noforn',   default: false, width: '80px'  },
-  { key: 'creditHold',    label: 'Credit Hold',           ptc: 'credit',   default: false, width: '90px'  },
-  { key: 'needPo',        label: 'Need PO',       ptc: 'needpo',   default: false, width: '110px' },
-  { key: 'contact',       label: 'Contact',        ptc: 'contact',  default: false, width: '130px' },
+  // Previously "core" columns — now optional, default ON (existing users see no change)
+  { key: 'po',            label: 'PO',                   ptc: 'po',       default: true,  width: '90px'  },
+  { key: 'quote',         label: 'Quote',                ptc: 'quote',    default: true,  width: '90px'  },
+  { key: 'desc',          label: 'Description',          ptc: 'desc',     default: true,  width: '180px' },
+  { key: 'article',       label: 'Test Article Desc.',   ptc: 'article',  default: true,  width: '180px' },
+  { key: 'expected',      label: 'Expected Rev.',        ptc: 'exp',      default: true,  width: '100px' },
+  { key: 'billed',        label: 'Billed Rev.',          ptc: 'billed',   default: true,  width: '100px' },
+  { key: 'hours',         label: 'Act. Hours',           ptc: 'hours',    default: true,  width: '90px'  },
+  { key: 'remaining',     label: 'Remaining Rev.',       ptc: 'remain',   default: true,  width: '110px' },
+  // Previously optional columns — unchanged defaults
+  { key: 'pm',            label: 'PM',                   ptc: 'pm',       default: false, width: '110px' },
+  { key: 'tentativeTest', label: 'Tent. Test Date',      ptc: 'tenttest', default: false, width: '120px' },
+  { key: 'testcomplete',  label: 'Test Comp. Date',      ptc: 'testcomp', default: false, width: '120px' },
+  { key: 'dcas',          label: 'DCAS',                 ptc: 'dcas',     default: true,  width: '80px',
+    colorRule: ynCnfColor },
+  { key: 'witness',       label: 'Cust. Witness',        ptc: 'witness',  default: false, width: '130px',
+    colorRule: ynCnfColor },
+  { key: 'tpApproval',    label: 'TP Approval',          ptc: 'tpappr',   default: false, width: '100px',
+    colorRule: ynCnfColor },
+  { key: 'dpas',          label: 'DPAS',                 ptc: 'dpas',     default: false, width: '70px'  },
+  { key: 'noforn',        label: 'NOFORN',               ptc: 'noforn',   default: false, width: '80px'  },
+  { key: 'creditHold',    label: 'Credit Hold',          ptc: 'credit',   default: false, width: '90px'  },
+  { key: 'needPo',        label: 'Need PO',              ptc: 'needpo',   default: false, width: '110px' },
+  { key: 'contact',       label: 'Contact',              ptc: 'contact',  default: false, width: '130px' },
+  // New column
+  { key: 'inHouse',       label: 'Article In-House',     ptc: 'inhouse',  default: false, width: '110px',
+    colorRule: inHouseColor },
 ];
+
+// Color rule helpers — return {bg, color} or null
+// Palette: green = yes/CNF (confirmed), red = no. Matches existing status/phase tinting style.
+function ynCnfColor(v) {
+  const s = (v || '').toString().trim().toLowerCase();
+  if (!s || s === '—') return null;
+  if (s === 'yes' || s === 'y' || s === 'cnf' || s === 'confirmed') {
+    return { bg: 'rgba(46,158,98,0.15)', color: '#2e9e62' };
+  }
+  if (s === 'no' || s === 'n') {
+    return { bg: 'rgba(208,64,64,0.12)', color: '#d04040' };
+  }
+  return null;
+}
+function inHouseColor(v) {
+  if (v === true) return { bg: 'rgba(46,158,98,0.15)', color: '#2e9e62' };
+  return null;
+}
+
+// Default order = order as declared in PROJ_COL_DEFS above
+const DEFAULT_COL_ORDER = PROJ_COL_DEFS.map(c => c.key);
+
 function getProjCols() { try { return JSON.parse(localStorage.getItem('projColVis') || '{}'); } catch { return {}; } }
 function setProjCols(vis) { try { localStorage.setItem('projColVis', JSON.stringify(vis)); } catch {} }
+function getProjColOrder() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('projColOrder') || 'null');
+    if (!Array.isArray(saved)) return [...DEFAULT_COL_ORDER];
+    // Preserve saved order; append any new keys that didn't exist when user saved
+    const merged = saved.filter(k => DEFAULT_COL_ORDER.includes(k));
+    DEFAULT_COL_ORDER.forEach(k => { if (!merged.includes(k)) merged.push(k); });
+    return merged;
+  } catch { return [...DEFAULT_COL_ORDER]; }
+}
+function setProjColOrder(order) {
+  try { localStorage.setItem('projColOrder', JSON.stringify(order)); } catch {}
+}
+// Returns PROJ_COL_DEFS sorted by the user's saved order
+function getOrderedProjColDefs() {
+  const order = getProjColOrder();
+  const byKey = Object.fromEntries(PROJ_COL_DEFS.map(c => [c.key, c]));
+  return order.map(k => byKey[k]).filter(Boolean);
+}
 function isProjColVisible(key) {
   const vis = getProjCols();
   const def = PROJ_COL_DEFS.find(c => c.key === key);
@@ -59,10 +127,68 @@ function toggleProjCol(key) {
 function buildColToggleChips() {
   const wrap = document.getElementById('colToggleChips');
   if (!wrap) return;
-  wrap.innerHTML = PROJ_COL_DEFS.map(c => {
+  const defs = getOrderedProjColDefs();
+  wrap.innerHTML = defs.map(c => {
     const on = isProjColVisible(c.key);
-    return `<span onclick="toggleProjCol('${c.key}')" style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600;cursor:pointer;user-select:none;background:${on?'var(--amber-glow)':'var(--surface2)'};color:${on?'var(--amber)':'var(--muted)'};border:1px solid ${on?'var(--amber-dim)':'var(--border)'};transition:all .15s">${on?'✓':'+'} ${c.label}</span>`;
+    // Drag handle (⋮⋮) + chip. Whole chip is draggable; click toggles visibility (but not when dragging).
+    return `<span class="proj-col-chip" draggable="true" data-col-key="${c.key}"
+      ondragstart="projColDragStart(event)" ondragover="projColDragOver(event)"
+      ondrop="projColDrop(event)" ondragend="projColDragEnd(event)" ondragleave="projColDragLeave(event)"
+      onclick="projColChipClick(event,'${c.key}')"
+      style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px 3px 6px;border-radius:12px;font-size:11px;font-weight:600;cursor:grab;user-select:none;background:${on?'var(--amber-glow)':'var(--surface2)'};color:${on?'var(--amber)':'var(--muted)'};border:1px solid ${on?'var(--amber-dim)':'var(--border)'};transition:all .15s">
+      <span class="proj-col-chip-drag" style="cursor:grab;opacity:.5;font-size:10px;line-height:1;padding:0 1px" title="Drag to reorder">⋮⋮</span>
+      <span>${on?'✓':'+'} ${c.label}</span>
+    </span>`;
   }).join('');
+}
+
+// ===== COLUMN CHIP DRAG/DROP =====
+let _projColDragKey = null;
+let _projColDragMoved = false;
+function projColDragStart(ev) {
+  const chip = ev.currentTarget;
+  _projColDragKey = chip.dataset.colKey;
+  _projColDragMoved = false;
+  chip.style.opacity = '0.4';
+  try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', _projColDragKey); } catch {}
+}
+function projColDragOver(ev) {
+  ev.preventDefault();
+  if (!_projColDragKey) return;
+  try { ev.dataTransfer.dropEffect = 'move'; } catch {}
+  const chip = ev.currentTarget;
+  if (chip.dataset.colKey === _projColDragKey) return;
+  chip.style.boxShadow = 'inset 2px 0 0 var(--amber)';
+  _projColDragMoved = true;
+}
+function projColDragLeave(ev) {
+  ev.currentTarget.style.boxShadow = '';
+}
+function projColDrop(ev) {
+  ev.preventDefault();
+  const targetKey = ev.currentTarget.dataset.colKey;
+  ev.currentTarget.style.boxShadow = '';
+  if (!_projColDragKey || _projColDragKey === targetKey) return;
+  const order = getProjColOrder();
+  const fromIdx = order.indexOf(_projColDragKey);
+  const toIdx   = order.indexOf(targetKey);
+  if (fromIdx < 0 || toIdx < 0) return;
+  order.splice(fromIdx, 1);
+  order.splice(toIdx, 0, _projColDragKey);
+  setProjColOrder(order);
+  _projColDragMoved = true;
+  buildColToggleChips();
+  renderProjectsTable();
+}
+function projColDragEnd(ev) {
+  document.querySelectorAll('.proj-col-chip').forEach(c => { c.style.opacity=''; c.style.boxShadow=''; });
+  // Delay clearing so chip click handler sees _projColDragMoved=true and suppresses toggle
+  setTimeout(() => { _projColDragKey = null; _projColDragMoved = false; }, 50);
+}
+// Click-to-toggle handler that suppresses toggle right after a drag
+function projColChipClick(ev, key) {
+  if (_projColDragMoved) { ev.preventDefault(); ev.stopPropagation(); return; }
+  toggleProjCol(key);
 }
 
 function renderProjectsTable() {
@@ -219,36 +345,111 @@ function renderProjectsTable() {
     return;
   }
 
+  // Helpers available to both row building and header building
+  const fmtMoney = n => n > 0 ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
+  const truncate = (s, n=40) => s && s.length > n ? s.slice(0,n)+'…' : (s||'—');
+  const fmtDate  = d => d ? new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}) : '—';
+
+  // The visible optional columns, in user-saved order
+  const visibleOptCols = getOrderedProjColDefs().filter(c => isProjColVisible(c.key));
+
+  // Build a single optional cell for a given project + column
+  // Returns HTML string for a <td> (with any color-rule styling applied)
+  function buildOptCell(c, p, info) {
+    let val = '—';
+    let rawValue = null;      // value passed to colorRule
+    let baseStyle = '';       // inline style before color rule (font, alignment, truncation)
+
+    if (c.key === 'po') {
+      val = info.po || '—';
+      baseStyle = `font-family:'JetBrains Mono',monospace;font-size:11px`;
+      rawValue = info.po;
+    } else if (c.key === 'quote') {
+      val = info.quoteNumber || '—';
+      baseStyle = `font-family:'JetBrains Mono',monospace;font-size:11px`;
+      rawValue = info.quoteNumber;
+    } else if (c.key === 'desc') {
+      const raw = p.desc || info.desc || '';
+      val = truncate(raw);
+      baseStyle = `font-size:12px;color:var(--muted);max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`;
+      return `<td style="${baseStyle}" title="${raw.replace(/"/g,'&quot;')}">${val}</td>`;
+    } else if (c.key === 'article') {
+      const raw = info.testArticleDesc || '';
+      val = truncate(raw);
+      baseStyle = `font-size:12px;color:var(--muted);max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`;
+      return `<td style="${baseStyle}" title="${raw.replace(/"/g,'&quot;')}">${val}</td>`;
+    } else if (c.key === 'expected') {
+      const expected  = info.expectedRevenue || 0;
+      return `<td class="projtbl-amount" style="color:var(--green)">${fmtMoney(expected)}</td>`;
+    } else if (c.key === 'billed') {
+      const billed = info.billedRevenue || 0;
+      return `<td class="projtbl-amount" style="color:var(--blue)">${fmtMoney(billed)}</td>`;
+    } else if (c.key === 'hours') {
+      const actualHours = info.actualHours || 0;
+      return `<td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--blue)">${actualHours>0?actualHours.toFixed(1)+'h':'—'}</td>`;
+    } else if (c.key === 'remaining') {
+      const expected  = info.expectedRevenue || 0;
+      const billed    = info.billedRevenue   || 0;
+      const remaining = expected - billed;
+      return `<td class="projtbl-amount" style="color:${remaining<0?'var(--red)':'var(--amber)'}">${expected>0?fmtMoney(remaining):'—'}</td>`;
+    } else if (c.key === 'pm') {
+      val = info.pm || '—';
+      rawValue = info.pm;
+    } else if (c.key === 'tentativeTest') {
+      val = `<span style="font-size:11px;font-family:'JetBrains Mono',monospace">${fmtDate(info.tentativeTestDate)}</span>`;
+    } else if (c.key === 'testcomplete') {
+      val = `<span style="font-size:11px;font-family:'JetBrains Mono',monospace">${fmtDate(info.testcompleteDate)}</span>`;
+    } else if (c.key === 'dcas') {
+      val = `<span style="font-size:11px">${info.dcas||'—'}</span>`;
+      rawValue = info.dcas;
+    } else if (c.key === 'witness') {
+      val = `<span style="font-size:11px">${truncate(info.customerWitness,30)}</span>`;
+      rawValue = info.customerWitness;
+    } else if (c.key === 'tpApproval') {
+      val = `<span style="font-size:11px">${info.tpApproval||'—'}</span>`;
+      rawValue = info.tpApproval;
+    } else if (c.key === 'dpas') {
+      val = `<span style="font-size:11px;color:var(--muted)">${info.dpas||'—'}</span>`;
+    } else if (c.key === 'noforn') {
+      val = `<span style="font-size:11px;color:var(--muted)">${info.noforn||'—'}</span>`;
+    } else if (c.key === 'creditHold') {
+      val = info.creditHold
+        ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:rgba(208,64,64,0.15);color:var(--red)">YES</span>`
+        : `<span style="color:var(--muted);font-size:11px">—</span>`;
+    } else if (c.key === 'needPo') {
+      val = info.needUpdatedPo
+        ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:rgba(232,162,52,0.15);color:var(--amber)">YES</span>`
+        : `<span style="color:var(--muted);font-size:11px">—</span>`;
+    } else if (c.key === 'contact') {
+      val = `<span style="font-size:11px;color:var(--muted)">${truncate(info.clientContact,25)}</span>`;
+    } else if (c.key === 'inHouse') {
+      // Derived: any article for this project that was received and not yet shipped
+      const hasInHouse = (typeof articleStore !== 'undefined' && Array.isArray(articleStore))
+        ? articleStore.some(a => a.projId === p.id && a.receivedDate && !a.shippedDate)
+        : false;
+      rawValue = hasInHouse;
+      val = hasInHouse
+        ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px">YES</span>`
+        : `<span style="color:var(--muted);font-size:11px">—</span>`;
+    }
+
+    // Apply color rule if defined (cell-level background tint)
+    let cellStyle = baseStyle;
+    if (typeof c.colorRule === 'function') {
+      const rule = c.colorRule(rawValue, info);
+      if (rule && rule.bg) {
+        cellStyle = (cellStyle ? cellStyle + ';' : '') + `background:${rule.bg}`;
+        if (rule.color) cellStyle += `;color:${rule.color}`;
+      }
+    }
+    return `<td${cellStyle?` style="${cellStyle}"`:''}>${val}</td>`;
+  }
+
   const rows = filtered.map(p => {
     const info  = projectInfo[p.id] || {};
     const st    = STATUS_META[info.status] || STATUS_META['active'];
-    // Revenue calcs — use stored values from project_info (no need to scan taskStore)
-    const expected  = info.expectedRevenue || 0;
-    const billed    = info.billedRevenue   || 0;
-    const remaining = expected - billed;
 
-    // Actual hours — use stored value from project_info (covers full history)
-    const actualHours = info.actualHours || 0;
-
-    const fmtMoney = n => n > 0 ? '$'+n.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—';
-    const truncate = (s, n=40) => s && s.length > n ? s.slice(0,n)+'…' : (s||'—');
-    const fmtDate  = d => d ? new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'2-digit'}) : '—';
-
-    const optCells = PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c => {
-      let val = '—';
-      if (c.key === 'pm')            val = info.pm || '—';
-      if (c.key === 'tentativeTest') val = `<span style="font-size:11px;font-family:'JetBrains Mono',monospace">${fmtDate(info.tentativeTestDate)}</span>`;
-      if (c.key === 'testcomplete')  val = `<span style="font-size:11px;font-family:'JetBrains Mono',monospace">${fmtDate(info.testcompleteDate)}</span>`;
-      if (c.key === 'dcas')          val = `<span style="font-size:11px;color:var(--muted)">${info.dcas||'—'}</span>`;
-      if (c.key === 'witness')       val = `<span style="font-size:11px;color:var(--muted)">${truncate(info.customerWitness,30)}</span>`;
-      if (c.key === 'tpApproval')    val = `<span style="font-size:11px;color:var(--muted)">${info.tpApproval||'—'}</span>`;
-      if (c.key === 'dpas')          val = `<span style="font-size:11px;color:var(--muted)">${info.dpas||'—'}</span>`;
-      if (c.key === 'noforn')        val = `<span style="font-size:11px;color:var(--muted)">${info.noforn||'—'}</span>`;
-      if (c.key === 'creditHold')    val = info.creditHold ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:rgba(208,64,64,0.15);color:var(--red)">YES</span>` : `<span style="color:var(--muted);font-size:11px">—</span>`;
-      if (c.key === 'needPo')        val = info.needUpdatedPo ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:rgba(232,162,52,0.15);color:var(--amber)">YES</span>` : `<span style="color:var(--muted);font-size:11px">—</span>`;
-      if (c.key === 'contact')       val = `<span style="font-size:11px;color:var(--muted)">${truncate(info.clientContact,25)}</span>`;
-      return `<td>${val}</td>`;
-    }).join('');
+    const optCells = visibleOptCols.map(c => buildOptCell(c, p, info)).join('');
 
     return `<tr data-proj-id="${p.id}" onclick="navToProject('${p.id}')">
       <td>
@@ -263,17 +464,16 @@ function renderProjectsTable() {
         </span>
       </td>
       <td style="font-size:12px">${info.client||'—'}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${info.po||'—'}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:11px">${info.quoteNumber||'—'}</td>
-      <td style="font-size:12px;color:var(--muted);max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${(p.desc||info.desc||'').replace(/"/g,'&quot;')}">${truncate(p.desc||info.desc)}</td>
-      <td style="font-size:12px;color:var(--muted);max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${(info.testArticleDesc||'').replace(/"/g,'&quot;')}">${truncate(info.testArticleDesc)}</td>
       ${optCells}
-      <td class="projtbl-amount" style="color:var(--green)">${fmtMoney(expected)}</td>
-      <td class="projtbl-amount" style="color:var(--blue)">${fmtMoney(billed)}</td>
-      <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--blue)">${actualHours>0?actualHours.toFixed(1)+'h':'—'}</td>
-      <td class="projtbl-amount" style="color:${remaining<0?'var(--red)':'var(--amber)'}">${expected>0?fmtMoney(remaining):'—'}</td>
     </tr>`;
   }).join('');
+
+  // Build sort key for a column header (for showing the sort arrow)
+  const colSortKey = (c) => {
+    // Most col keys are also the sort col key; 'desc' and 'article' aren't sortable today
+    if (c.key === 'desc' || c.key === 'article' || c.key === 'inHouse') return null;
+    return c.key;
+  };
 
   container.innerHTML = `
     <table class="projtbl-table" id="projtblTable" style="min-width:1200px;table-layout:fixed">
@@ -281,45 +481,31 @@ function renderProjectsTable() {
         <col style="width:var(--ptc-name,220px)">
         <col style="width:var(--ptc-status,130px)">
         <col style="width:var(--ptc-client,160px)">
-        <col style="width:var(--ptc-po,90px)">
-        <col style="width:var(--ptc-quote,90px)">
-        <col style="width:var(--ptc-desc,180px)">
-        <col style="width:var(--ptc-article,180px)">
-        ${PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c => `<col style="width:var(--ptc-${c.ptc},${c.width})">`).join('')}
-        <col style="width:var(--ptc-exp,100px)">
-        <col style="width:var(--ptc-billed,100px)">
-        <col style="width:var(--ptc-hours,90px)">
-        <col style="width:var(--ptc-remain,110px)">
+        ${visibleOptCols.map(c => `<col style="width:var(--ptc-${c.ptc},${c.width})">`).join('')}
       </colgroup>
       <thead>
         <tr>
           <th class="sortable" style="position:relative" onclick="setProjSort('name')">Project <span class="sort-icon ${projSortCol==='name'?'active':''}">${projSortCol==='name'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="name"></span></th>
           <th class="sortable" style="position:relative" onclick="setProjSort('status')">Status <span class="sort-icon ${projSortCol==='status'?'active':''}">${projSortCol==='status'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="status"></span></th>
           <th class="sortable" style="position:relative" onclick="setProjSort('client')">Company <span class="sort-icon ${projSortCol==='client'?'active':''}">${projSortCol==='client'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="client"></span></th>
-          <th class="sortable" style="position:relative" onclick="setProjSort('po')">PO <span class="sort-icon ${projSortCol==='po'?'active':''}">${projSortCol==='po'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="po"></span></th>
-          <th class="sortable" style="position:relative" onclick="setProjSort('quote')">Quote <span class="sort-icon ${projSortCol==='quote'?'active':''}">${projSortCol==='quote'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="quote"></span></th>
-          <th style="position:relative">Description<span class="itt-resizer" data-ptc="desc"></span></th>
-          <th style="position:relative">Test Article Desc.<span class="itt-resizer" data-ptc="article"></span></th>
-          ${PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c =>
-            `<th class="sortable" style="position:relative" onclick="setProjSort('${c.key}')">${c.label} <span class="sort-icon ${projSortCol===c.key?'active':''}">${projSortCol===c.key?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="${c.ptc}"></span></th>`
-          ).join('')}
-          <th class="sortable" style="position:relative" onclick="setProjSort('expected')">Expected Rev. <span class="sort-icon ${projSortCol==='expected'?'active':''}">${projSortCol==='expected'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="exp"></span></th>
-          <th class="sortable" style="position:relative" onclick="setProjSort('billed')">Billed Rev. <span class="sort-icon ${projSortCol==='billed'?'active':''}">${projSortCol==='billed'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="billed"></span></th>
-          <th class="sortable" style="position:relative" onclick="setProjSort('hours')">Act. Hours <span class="sort-icon ${projSortCol==='hours'?'active':''}">${projSortCol==='hours'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="hours"></span></th>
-          <th class="sortable" style="position:relative" onclick="setProjSort('remaining')">Remaining Rev. <span class="sort-icon ${projSortCol==='remaining'?'active':''}">${projSortCol==='remaining'?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="remain"></span></th>
+          ${visibleOptCols.map(c => {
+            const sk = colSortKey(c);
+            if (!sk) {
+              return `<th style="position:relative">${c.label}<span class="itt-resizer" data-ptc="${c.ptc}"></span></th>`;
+            }
+            return `<th class="sortable" style="position:relative" onclick="setProjSort('${sk}')">${c.label} <span class="sort-icon ${projSortCol===sk?'active':''}">${projSortCol===sk?(projSortDir==='asc'?'▲':'▼'):'⇅'}</span><span class="itt-resizer" data-ptc="${c.ptc}"></span></th>`;
+          }).join('')}
         </tr>
-      <tr id="projColFilterRow" class="proj-col-filter-row">
+        <tr id="projColFilterRow" class="proj-col-filter-row">
           <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="name" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
           <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="status" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
           <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="client" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
-          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="po" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
-          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="quote" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
-          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="desc" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
-          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="article" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
-          ${PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).map(c =>
-            '<th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="'+c.key+'" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>'
-          ).join('')}
-          <th></th><th></th><th></th><th></th>
+          ${visibleOptCols.map(c => {
+            // Columns that don't make sense to filter get an empty cell
+            const unfilterable = new Set(['expected','billed','hours','remaining','inHouse','creditHold','needPo','dpas','noforn','testcomplete','tentativeTest']);
+            if (unfilterable.has(c.key)) return '<th></th>';
+            return '<th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="'+c.key+'" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>';
+          }).join('')}
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -406,6 +592,7 @@ function setSavedFilters(filters) {
     if (inp && navFilter.namePattern) inp.value = navFilter.namePattern;
     updateNavFilterDot();
     renderSavedFiltersBar();
+    updateProjViewsLabel();
   });
 })();
 
@@ -516,6 +703,7 @@ function toggleNavFilterChip(group, value, el) {
   updateNavFilterDot();
   if (document.getElementById('panel-projects')?.classList.contains('active')) renderProjectsTable();
   document.getElementById('allBadge').textContent = projects.length;
+  updateProjViewsLabel();
 }
 
 function clearNavFilter() {
@@ -530,6 +718,7 @@ function clearNavFilter() {
   updateNavFilterDot();
   persistFilterState();
   renderProjectsTable();
+  updateProjViewsLabel();
   toast('Filter cleared');
 }
 
@@ -540,7 +729,7 @@ function saveNamedFilter() {
   const namePattern = document.getElementById('filterNamePattern')?.value.trim() || '';
   navFilter.namePattern = namePattern;
   const filters = getSavedFilters().filter(f => f.name !== name); // overwrite if exists
-  filters.push({ name, status: [...navFilter.status], phase: [...navFilter.phase], namePattern, colVis: getProjCols() });
+  filters.push({ name, status: [...navFilter.status], phase: [...navFilter.phase], namePattern, colVis: getProjCols(), colOrder: getProjColOrder() });
   setSavedFilters(filters);
   activeFilterName = name;
   if (nameInp) nameInp.value = '';
@@ -550,6 +739,7 @@ function saveNamedFilter() {
   document.getElementById('navFilterBtn').classList.remove('active');
   updateNavFilterDot();
   renderProjectsTable();
+  updateProjViewsLabel();
   toast('✓ Filter "' + name + '" saved');
 }
 
@@ -561,6 +751,7 @@ function applyNamedFilter(name) {
   navFilter.phase  = new Set(f.phase  || []);
   navFilter.namePattern = f.namePattern || '';
   if (f.colVis) setProjCols(f.colVis);
+  if (f.colOrder) setProjColOrder(f.colOrder);
   activeFilterName = name;
   buildNavFilterChips();
   buildColToggleChips();
@@ -569,6 +760,7 @@ function applyNamedFilter(name) {
   persistFilterState();
   updateNavFilterDot();
   renderSavedFiltersBar();
+  updateProjViewsLabel();
   renderProjectsTable();
   // Close filter panel if open
   document.getElementById('navFilterPanel').classList.remove('open');
@@ -580,6 +772,143 @@ function deleteNamedFilter(name) {
   setSavedFilters(filters);
   if (activeFilterName === name) { activeFilterName = null; persistFilterState(); }
   renderSavedFiltersBar();
+  updateProjViewsLabel();
+  renderProjViewsDropdown();
+}
+
+// ===== RESET TO DEFAULT =====
+// Clears column visibility overrides, column order, per-column filters, nav filter,
+// sort, and active-filter marker. Restores factory defaults from PROJ_COL_DEFS.
+function resetProjectsToDefault() {
+  if (!confirm('Reset columns, order, filters, and sort back to defaults? Your saved filters will not be deleted.')) return;
+  try {
+    localStorage.removeItem('projColVis');
+    localStorage.removeItem('projColOrder');
+  } catch {}
+  projColFilters = {};
+  navFilter.status.clear();
+  navFilter.phase.clear();
+  navFilter.namePattern = '';
+  projSortCol = 'name';
+  projSortDir = 'asc';
+  activeFilterName = null;
+  persistFilterState();
+  // Clear UI inputs
+  const nameInp = document.getElementById('filterNamePattern');
+  if (nameInp) nameInp.value = '';
+  document.querySelectorAll('.proj-col-filter-input').forEach(i => {
+    i.value = ''; i.style.borderColor = ''; i.style.background = '';
+  });
+  buildNavFilterChips();
+  buildColToggleChips();
+  updateNavFilterDot();
+  renderSavedFiltersBar();
+  updateProjViewsLabel();
+  renderProjectsTable();
+  toast('↺ Reset to default');
+}
+
+// ===== VIEWS DROPDOWN =====
+function toggleProjViewsDropdown(ev) {
+  if (ev) { ev.stopPropagation(); }
+  const dd = document.getElementById('projViewsDropdown');
+  if (!dd) return;
+  const open = dd.style.display === 'block';
+  if (open) { dd.style.display = 'none'; return; }
+  renderProjViewsDropdown();
+  dd.style.display = 'block';
+  // Close on outside click (one-shot)
+  setTimeout(() => {
+    const handler = (e) => {
+      if (!dd.contains(e.target) && e.target.id !== 'projViewsBtn') {
+        dd.style.display = 'none';
+        document.removeEventListener('click', handler);
+      }
+    };
+    document.addEventListener('click', handler);
+  }, 0);
+}
+
+function renderProjViewsDropdown() {
+  const dd = document.getElementById('projViewsDropdown');
+  if (!dd) return;
+  const filters = getSavedFilters();
+  const activeName = activeFilterName;
+  const rowStyle = 'padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12.5px;transition:background .1s;';
+  const defaultRow = `<div style="${rowStyle}background:${!activeName?'var(--amber-glow)':'transparent'};color:${!activeName?'var(--amber)':'var(--text)'}"
+    onmouseover="if(this.style.background==='transparent')this.style.background='var(--surface2)'"
+    onmouseout="this.style.background='${!activeName?'var(--amber-glow)':'transparent'}'"
+    onclick="selectProjView('')"
+    title="The default view — all defaults, no saved filter active">
+    <span style="font-size:11px;width:14px;text-align:center">${!activeName?'✓':''}</span>
+    <span style="font-weight:500">Default</span>
+  </div>`;
+  const filterRows = filters.map(f => {
+    const isActive = activeName === f.name;
+    const safeName = f.name.replace(/'/g, "\\'");
+    return `<div style="${rowStyle}background:${isActive?'var(--amber-glow)':'transparent'};color:${isActive?'var(--amber)':'var(--text)'}"
+      onmouseover="if(this.style.background==='transparent')this.style.background='var(--surface2)'"
+      onmouseout="this.style.background='${isActive?'var(--amber-glow)':'transparent'}'"
+      onclick="selectProjView('${safeName}')">
+      <span style="font-size:11px;width:14px;text-align:center">${isActive?'✓':''}</span>
+      <span style="flex:1;font-weight:500">${f.name}</span>
+      <span onclick="event.stopPropagation();deleteProjView('${safeName}')" title="Delete this view" style="color:var(--muted);font-size:11px;padding:2px 5px;border-radius:3px;transition:all .1s" onmouseover="this.style.background='rgba(208,64,64,0.15)';this.style.color='var(--red)'" onmouseout="this.style.background='transparent';this.style.color='var(--muted)'">&#x2715;</span>
+    </div>`;
+  }).join('');
+  const separator = filters.length ? `<div style="height:1px;background:var(--border);margin:2px 0"></div>` : '';
+  const manageHint = filters.length
+    ? ''
+    : `<div style="padding:10px 12px;font-size:11px;color:var(--muted);font-style:italic;">No saved views yet. Set up columns/filters and click "✓ Save Filter" in the filter drawer.</div>`;
+  dd.innerHTML = defaultRow + separator + filterRows + manageHint;
+}
+
+function selectProjView(name) {
+  const dd = document.getElementById('projViewsDropdown');
+  if (dd) dd.style.display = 'none';
+  if (!name) {
+    // "Default" chosen — same as reset, but skip the confirm prompt
+    try {
+      localStorage.removeItem('projColVis');
+      localStorage.removeItem('projColOrder');
+    } catch {}
+    projColFilters = {};
+    navFilter.status.clear();
+    navFilter.phase.clear();
+    navFilter.namePattern = '';
+    projSortCol = 'name';
+    projSortDir = 'asc';
+    activeFilterName = null;
+    persistFilterState();
+    const nameInp = document.getElementById('filterNamePattern');
+    if (nameInp) nameInp.value = '';
+    document.querySelectorAll('.proj-col-filter-input').forEach(i => {
+      i.value = ''; i.style.borderColor = ''; i.style.background = '';
+    });
+    buildNavFilterChips();
+    buildColToggleChips();
+    updateNavFilterDot();
+    renderSavedFiltersBar();
+    updateProjViewsLabel();
+    renderProjectsTable();
+    toast('✓ Default view');
+    return;
+  }
+  applyNamedFilter(name);
+  updateProjViewsLabel();
+}
+
+function deleteProjView(name) {
+  if (!confirm('Delete saved view "' + name + '"? Your current columns and filters will stay as they are.')) return;
+  deleteNamedFilter(name); // already handles activeFilterName reset + refresh
+  renderProjViewsDropdown();
+  updateProjViewsLabel();
+  toast('View "' + name + '" deleted');
+}
+
+function updateProjViewsLabel() {
+  const lbl = document.getElementById('projViewsLabel');
+  if (!lbl) return;
+  lbl.textContent = activeFilterName || 'Default';
 }
 
 function renderSavedFiltersBar() {
