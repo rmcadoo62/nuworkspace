@@ -371,7 +371,7 @@ function renderChatterCard(msgs) {
     const projName = proj ? proj.name : 'Unknown Project';
     const ago  = timeAgo(m.ts);
     const text = (m.text || '').slice(0, 120) + ((m.text||'').length > 120 ? '…' : '');
-    return `<div class="home-chat-row" onclick="selectProjectById('${m.projId}')">
+    return `<div class="home-chat-row" onclick="openProjectChatter('${m.projId}')">
       <div class="home-chat-av" style="background:${m.authorColor||'#888'}">${m.authorInitials||'?'}</div>
       <div class="home-chat-body">
         <div class="home-chat-header">
@@ -389,6 +389,19 @@ function renderChatterCard(msgs) {
     ${items || '<div class="home-card-empty">No recent messages</div>'}
   </div>`;
 }
+
+// Open a project and jump straight to its Chatter tab (not the default Info tab).
+// Uses the same pattern as the notification-click handler in chatter.js.
+window.openProjectChatter = function(projId) {
+  if (typeof selectProjectById === 'function') {
+    selectProjectById(projId);
+  } else if (typeof selectProject === 'function') {
+    selectProject(projId, null);
+  }
+  setTimeout(() => {
+    if (typeof switchProjTab === 'function') switchProjTab('sub-chatter');
+  }, 200);
+};
 
 // ---- My Submissions ----
 async function fetchMySubmissions() {
