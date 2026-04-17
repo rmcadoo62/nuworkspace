@@ -174,6 +174,7 @@ function resolveBlockColor(block) {
   // Employee event colors take priority
   if (block.empEventType === 'vacation') return '#43a047';
   if (block.empEventType === 'sick')     return '#e91e9e';
+  if (block.empEventType === 'ooo')      return '#64748b';
   if (block.flag === 'reschedule') return sc('reschedule');
   if (block.flag === 'tentative')  return sc('tentative');
   if (block.flag === 'dcas_no_wit_no')  return sc('dcas_no_wit_no');
@@ -218,6 +219,7 @@ function resolveBlockColorInfo(block) {
 
   if (block.empEventType === 'vacation') return { label: 'Vacation',    color: '#43a047', source: 'auto' };
   if (block.empEventType === 'sick')     return { label: 'Sick',        color: '#e91e9e', source: 'auto' };
+  if (block.empEventType === 'ooo')      return { label: 'Out of Office', color: '#64748b', source: 'auto' };
   if (block.flag === 'reschedule')       return { label: 'Reschedule',  color: sc('reschedule'), source: 'flag' };
   if (block.flag === 'tentative')        return { label: 'Tentative',   color: sc('tentative'),  source: 'flag' };
   const DCAS_FLAG_LABELS = {
@@ -423,7 +425,7 @@ function buildBlockDisplayLines(block) {
     const empId   = block.empId || (rid.startsWith('emp_') ? rid.slice(4) : null);
     const emp     = empId ? (typeof employees !== 'undefined' ? employees : []).find(e => e.id === empId) : null;
     const empName = emp ? emp.name : (block.label || '');
-    const evtLbl  = block.empEventType === 'vacation' ? 'Vacation' : block.empEventType === 'sick' ? 'Sick' : 'Work';
+    const evtLbl  = block.empEventType === 'vacation' ? 'Vacation' : block.empEventType === 'sick' ? 'Sick' : block.empEventType === 'ooo' ? 'Out of Office' : 'Work';
     const lbl = block.label || (empName ? empName + ' \u2014 ' + evtLbl : evtLbl);
     const timeStr = (block.startTime || block.endTime)
       ? [fmt(block.startTime), fmt(block.endTime)].filter(Boolean).join('\u2013') : '';
@@ -1709,6 +1711,7 @@ window.openSchedLegend = function() {
     swatch('#43a047', 'Vacation'),
     swatch('#e91e9e', 'Sick'),
     swatch('#3a7fd4', 'Working'),
+    swatch('#64748b', 'Out of Office'),
   ].join('');
 
   body.innerHTML =
@@ -2076,7 +2079,7 @@ function _doSaveSchedBlock() {
 
   if (!_isEmpBlock && !schedSelectedCat) { alert('Please select a lab room / asset.'); return; }
   if (_isEmpBlock && !_empId)            { alert('Please select an employee.'); return; }
-  if (_isEmpBlock && !_empEvtType)       { alert('Please select Vacation, Sick, or Working.'); return; }
+  if (_isEmpBlock && !_empEvtType)       { alert('Please select Vacation, Sick, Working, or Out of Office.'); return; }
 
   const s = document.getElementById('schedStartDate').value;
   const e = document.getElementById('schedEndDate').value;
@@ -2227,7 +2230,7 @@ function renderSchedCalendar() {
       const emp   = blk.empId ? (typeof employees!=='undefined'?employees:[]).find(e=>e.id===blk.empId) : null;
       let parts = [];
       if (blk.empId) {
-        const evtLbl = blk.empEventType==='vacation'?'Vacation':blk.empEventType==='sick'?'Sick':'Work';
+        const evtLbl = blk.empEventType==='vacation'?'Vacation':blk.empEventType==='sick'?'Sick':blk.empEventType==='ooo'?'Out of Office':'Work';
         parts = [(emp ? emp.name.split(' ').pop() : '') + ':' + evtLbl];
         if (blk.label) parts.push(blk.label);
       } else {
@@ -2302,6 +2305,7 @@ window.schedEmpPickerChanged = function() {
 function getEmpEventColor(eventType) {
   if (eventType === 'vacation') return '#43a047';   // green
   if (eventType === 'sick')     return '#e91e9e';   // magenta
+  if (eventType === 'ooo')      return '#64748b';   // slate gray — out of office
   return '#3a7fd4';                                  // working — blue
 }
 
