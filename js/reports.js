@@ -277,7 +277,7 @@ function switchReportsTab(el) {
   if (el.dataset.tab === 'tab-stale') renderStaleProjects();
 }
 
-function renderTimesheetsReport(filterDept, filterStatus) {
+async function renderTimesheetsReport(filterDept, filterStatus) {
   const el = document.getElementById('tab-timesheets');
   if (!el) return;
 
@@ -299,19 +299,78 @@ function renderTimesheetsReport(filterDept, filterStatus) {
       );
   const eligibleEmpIds = new Set(eligibleEmps.map(e => e.id));
 
+  // ── Live refresh from Supabase ────────────────────────────────────────
+  // Refresh timesheet_weeks (statuses) AND rebuild tsData for the current
+  // and previous week from timesheet_entries. This is needed because:
+  //   (1) tsData is bulk-loaded once at app startup, so any hours entered
+  //       by other employees AFTER this browser session began are in the
+  //       DB but not in memory. Without refresh, those employees show 0h
+  //       even though their entries exist in timesheet_entries.
+  //   (2) A timesheet_weeks row is only created on Submit/Approve — never
+  //       on autosave/draft. So an employee with a draft never appears in
+  //       tsWeekStatuses, but they still have timesheet_entries rows.
+  //   (3) Other users' submissions that landed after this page loaded are
+  //       missing from tsWeekStatuses until we re-fetch timesheet_weeks.
+  try {
+    if (sb && typeof loadTsStatuses === 'function') await loadTsStatuses();
+    if (sb) {
+      const weeksToRefresh = [getWeekKey(0), getWeekKey(-1)];
+      for (const wk of weeksToRefresh) {
+        const { data: rows } = await sb.from('timesheet_entries')
+          .select('*')
+          .eq('week_start', wk);
+        if (!rows) continue;
+        // Clear tsData slots for every employee that has any row this
+        // week BEFORE repopulating — prevents duplicate rows from piling
+        // up across repeated renders (we push into tsData[storeKey]).
+        const touched = new Set(rows.map(r => r.employee_id));
+        touched.forEach(empId => {
+          const storeKey = empId + '|' + wk;
+          tsData[storeKey] = [];
+          tsData['oh_' + storeKey] = {};
+        });
+        rows.forEach(r => {
+          const storeKey = r.employee_id + '|' + wk;
+          const ohKey = 'oh_' + storeKey;
+          if (r.is_overhead && r.overhead_cat) {
+            if (!tsData[ohKey]) tsData[ohKey] = {};
+            tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+          } else {
+            if (!tsData[storeKey]) tsData[storeKey] = [];
+            tsData[storeKey].push({
+              _id: r.id, projId: r.project_id || '', taskName: r.task_name || '',
+              taskId: r.task_id || null,
+              isOverhead: r.is_overhead || false, overheadCat: r.overhead_cat || '',
+              hours: JSON.parse(r.hours_json || '{}'),
+            });
+          }
+        });
+      }
+    }
+  } catch (e) { console.warn('renderTimesheetsReport: live refresh failed:', e); }
+
+  // Sum hours for an employee+week from tsData (projects + overhead).
+  // Used for BOTH submitted rows and the "not submitted" placeholders so
+  // draft hours show up in the report before submission.
+  const sumTsHours = (empId, weekKey) => {
+    const storeKey = empId + '|' + weekKey;
+    let total = 0;
+    (tsData[storeKey] || []).forEach(r => Object.values(r.hours || {}).forEach(h => total += (parseFloat(h) || 0)));
+    const ohStore = tsData['oh_' + storeKey] || {};
+    OVERHEAD_CATS.forEach(cat => Object.values(ohStore[cat] || {}).forEach(h => total += (parseFloat(h) || 0)));
+    return total;
+  };
+
   // Build list of all week statuses for eligible employees
   let entries = Object.values(tsWeekStatuses).map(ws => {
     const emp = employees.find(e => e.id === ws.employeeId) || {};
-    const storeKey = ws.employeeId + '|' + ws.weekKey;
-    let totalHrs = 0;
-    (tsData[storeKey] || []).forEach(r => Object.values(r.hours||{}).forEach(h => totalHrs += (parseFloat(h)||0)));
-    const ohStore = tsData['oh_' + storeKey] || {};
-    OVERHEAD_CATS.forEach(cat => Object.values(ohStore[cat]||{}).forEach(h => totalHrs += (parseFloat(h)||0)));
-    return { ...ws, empName: emp.name||'—', empColor: emp.color||'#555', empInitials: emp.initials||'?', totalHrs };
+    return { ...ws, empName: emp.name || '—', empColor: emp.color || '#555', empInitials: emp.initials || '?', totalHrs: sumTsHours(ws.employeeId, ws.weekKey) };
   }).filter(ws => eligibleEmpIds.has(ws.employeeId));
 
-  // Add "not_submitted" placeholder for any eligible employee missing from a week
-  const allWeekKeys = [...new Set(entries.map(e => e.weekKey))];
+  // Add "not_submitted" placeholder for any eligible employee missing from a week.
+  // Always seed the current week so placeholders appear even before ANY
+  // employee has submitted — otherwise the latest week is invisible.
+  const allWeekKeys = [...new Set([...entries.map(e => e.weekKey), getWeekKey(0)])];
   allWeekKeys.forEach(wk => {
     const submittedIds = new Set(entries.filter(e => e.weekKey === wk).map(e => e.employeeId));
     eligibleEmps.forEach(emp => {
@@ -323,7 +382,7 @@ function renderTimesheetsReport(filterDept, filterStatus) {
           empName:       emp.name    || '—',
           empColor:      emp.color   || '#555',
           empInitials:   emp.initials|| '?',
-          totalHrs:      0,
+          totalHrs:      sumTsHours(emp.id, wk),
           submittedAt:   null,
           approvedBy:    null,
           rejectionNote: null,
