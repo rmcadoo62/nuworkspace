@@ -347,7 +347,11 @@ function chatterKeydown(e) {
     if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); if (items[chatterMentionSel]) items[chatterMentionSel].click(); return; }
     if (e.key === 'Escape') { chatterCloseMention(); return; }
   }
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); chatterPost(); }
+  // Cmd+Enter (Mac) or Ctrl+Enter (Win) posts; plain Enter inserts a line
+  // break (default contenteditable behavior). The Post button is always
+  // available for mouse users. renderChatter() already converts \n → <br>
+  // for display (see line ~79), so captured newlines render correctly.
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); chatterPost(); }
 }
 function chatterInputHandler(e) {
   const input = document.getElementById('chatterInput');
