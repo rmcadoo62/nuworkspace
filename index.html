@@ -1244,7 +1244,6 @@
             <option value="vacation">Vacation</option>
             <option value="sick">Sick</option>
             <option value="work">Working</option>
-            <option value="ooo">Out of Office</option>
           </select>
         </div>
       </div>
@@ -1466,6 +1465,14 @@
           <label class="field-label">Article Description <span style="color:var(--red)">*</span></label>
           <input class="f-input" id="articleDesc" type="text" placeholder="e.g. Valve Assembly, Unit 1" autocomplete="off" />
         </div>
+        <div class="field">
+          <label class="field-label">Status <span style="color:var(--red)">*</span></label>
+          <select class="f-input" id="articleStatus" style="cursor:pointer">
+            <option value="in_house">📦 In House — received, actively on a job</option>
+            <option value="in_storage">🗃 In Storage — received, not on an active job</option>
+            <option value="shipped">🚚 Shipped — left the building</option>
+          </select>
+        </div>
         <div class="field" id="articleClientField">
           <label class="field-label">Client</label>
           <div style="position:relative">
@@ -1493,7 +1500,7 @@
         <div class="field-row">
           <div class="field">
             <label class="field-label">Date Shipped</label>
-            <input class="f-input" id="articleShippedDate" type="date" style="color-scheme:dark" />
+            <input class="f-input" id="articleShippedDate" type="date" style="color-scheme:dark" onchange="articleShippedDateChanged()" />
           </div>
           <div class="field">
             <label class="field-label">Carrier</label>
