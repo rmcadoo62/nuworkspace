@@ -28,10 +28,11 @@ async function renderHomePage() {
   if (!wrap) return;
   wrap.innerHTML = '<div class="home-loading">Loading...</div>';
 
-  const [weather, announcement, whosOut] = await Promise.all([
+  const [weather, announcement, whosOut, mySubmissions] = await Promise.all([
     fetchHomeWeather(),
     fetchAnnouncement(),
     getWhosOut(),
+    fetchMySubmissions(),
   ]);
 
   const holidays  = getUpcomingHolidays(3);
@@ -55,6 +56,8 @@ async function renderHomePage() {
       </div>
 
       ${renderChatterCard(chatter)}
+
+      ${renderMySubmissionsCard(mySubmissions)}
 
     </div>
   `;
@@ -386,6 +389,92 @@ function renderChatterCard(msgs) {
     ${items || '<div class="home-card-empty">No recent messages</div>'}
   </div>`;
 }
+
+// ---- My Submissions ----
+async function fetchMySubmissions() {
+  if (!sb || !currentEmployee) return [];
+  try {
+    const { data, error } = await sb.from('feedback_submissions')
+      .select('*')
+      .eq('submitter_id', currentEmployee.id)
+      .not('status', 'in', '("done","wont_fix","duplicate")')
+      .order('submitted_at', { ascending: false });
+    if (error) { console.error('fetchMySubmissions:', error); return []; }
+    return data || [];
+  } catch(e) { console.error('fetchMySubmissions:', e); return []; }
+}
+
+function renderMySubmissionsCard(subs) {
+  // Hide the card entirely when there are no open submissions
+  if (!subs || !subs.length) return '';
+
+  const statusColors = {
+    'new': '#3b82f6',
+    'acknowledged': '#8b5cf6',
+    'in_progress': '#f59e0b',
+  };
+  const statusLabels = {
+    'new': 'New',
+    'acknowledged': 'Acknowledged',
+    'in_progress': 'In Progress',
+  };
+
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+  const items = subs.map(s => {
+    const typeEmoji = s.type === 'bug' ? '🐛' : '💡';
+    const color = statusColors[s.status] || '#6b7280';
+    const label = statusLabels[s.status] || s.status;
+    const submitted = new Date(s.submitted_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const submittedFull = new Date(s.submitted_at).toLocaleString('en-US', {
+      year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit'
+    });
+    const hasReply = s.admin_notes && s.admin_notes.trim();
+    const replyIndicator = hasReply
+      ? '<span class="home-sub-reply-tag">↩ Replied</span>'
+      : '';
+
+    const replyHtml = hasReply
+      ? `<div class="home-sub-reply">
+          <div class="home-sub-reply-label">Reply from Russ</div>
+          <div class="home-sub-reply-text">${esc(s.admin_notes)}</div>
+         </div>`
+      : '';
+
+    return `<div class="home-sub-row" id="sub-row-${s.id}" onclick="toggleSubmissionRow('${s.id}')">
+      <div class="home-sub-head">
+        <div class="home-sub-type">${typeEmoji}</div>
+        <div class="home-sub-title">${esc(s.title)}</div>
+        <div class="home-sub-status" style="background:${color}22;color:${color}">${label}</div>
+        ${replyIndicator}
+        <div class="home-sub-date">${submitted}</div>
+        <div class="home-sub-chevron">▸</div>
+      </div>
+      <div class="home-sub-details">
+        <div class="home-sub-meta">Submitted ${submittedFull}${s.page_context ? ` &middot; From ${esc(s.page_context)}` : ''}</div>
+        <div class="home-sub-desc-label">Your description</div>
+        <div class="home-sub-desc">${esc(s.description)}</div>
+        ${replyHtml}
+      </div>
+    </div>`;
+  }).join('');
+
+  const count = subs.length;
+  const subtitle = count === 1 ? '1 open submission' : `${count} open submissions`;
+
+  return `<div class="home-card home-sub-card">
+    <div class="home-card-title">🐛 Your Open Submissions <span class="home-sub-subtitle">${subtitle}</span></div>
+    ${items}
+  </div>`;
+}
+
+window.toggleSubmissionRow = function(id) {
+  const row = document.getElementById('sub-row-' + id);
+  if (row) row.classList.toggle('expanded');
+};
+
 
 function timeAgo(ts) {
   const diff = Math.floor((Date.now() - new Date(ts)) / 1000);
