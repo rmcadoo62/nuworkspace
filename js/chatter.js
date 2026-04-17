@@ -305,8 +305,16 @@ function notifClick(notifId, projId) {
 
   // Check for issue tracker notification — preview ends with ||issueTracker
   if (preview.endsWith('||issueTracker')) {
-    const navItem = document.getElementById('navIssueTracker');
-    if (typeof openIssueTrackerPanel === 'function') openIssueTrackerPanel(navItem);
+    // Admins go to the Issue Tracker panel; everyone else goes to Home where
+    // their "Your Open Submissions" card will show the reply.
+    const isAdmin = currentUser && currentUser.email === 'rmcadoo@nulabs.com';
+    if (isAdmin) {
+      const navItem = document.getElementById('navIssueTracker');
+      if (typeof openIssueTrackerPanel === 'function') openIssueTrackerPanel(navItem);
+    } else {
+      const navItem = document.getElementById('navHome');
+      if (typeof openHomePanel === 'function') openHomePanel(navItem);
+    }
     return;
   }
 
