@@ -1181,19 +1181,82 @@ function clearAiHistory() {
 function buildAiContext() {
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
   const openProjects = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed');
+  const openProjIds  = new Set(openProjects.map(p => p.id));
+
+  // ----- Project summary (open projects) -----
   const projSummary = openProjects.map(p => {
     const info = projectInfo[p.id] || {};
     const tasks = taskStore.filter(t => t.proj === p.id);
     const done   = tasks.filter(t => ['complete','billed','cancelled'].includes(t.status)).length;
     const billed = tasks.filter(t => t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0);
-    const ready  = tasks.filter(t => t.status==='complete').reduce((s,t)=>s+(t.fixedPrice||0),0);
+    const ready  = tasks.filter(t => t.status==='complete' && t.revenueType!=='nocharge').reduce((s,t)=>s+(t.fixedPrice||0),0);
     return {
-      n:p.name, st:info.status||'unknown', ph:(info.phase||'').slice(0,30),
-      pm:(info.pm||'').slice(0,20), cl:(info.clientName||info.client||'').slice(0,30),
+      n:p.name, st:info.status||'unknown', ph:(info.phase||'').slice(0,40),
+      pm:(info.pm||'').slice(0,20), cl:(info.clientName||info.client||'').slice(0,40),
       tt:tasks.length, td:done, to:tasks.filter(t=>t.overdue&&!t.done).length,
       br:Math.round(billed), rb:Math.round(ready), ch:info.creditHold||false,
     };
   });
+
+  // ----- Task-level detail for open projects -----
+  // Build a quick project-id -> {name,status} lookup so each task carries its project context.
+  const projMap = {};
+  openProjects.forEach(p => {
+    const info = projectInfo[p.id] || {};
+    projMap[p.id] = { n: p.name, st: info.status || 'unknown' };
+  });
+
+  const allOpenTasks = taskStore.filter(t => openProjIds.has(t.proj));
+  const MAX_TASKS = 1200; // guardrail against context bloat
+  const taskSubset = allOpenTasks.slice(0, MAX_TASKS);
+  const tasksTruncated = allOpenTasks.length > MAX_TASKS;
+
+  const openTasks = taskSubset.map(t => {
+    const pm = projMap[t.proj] || { n:'', st:'' };
+    return {
+      p:  (pm.n||'').slice(0,40),          // project name
+      pst: pm.st,                           // project status (jobprep/active/pending/etc.)
+      n:  (t.name||'').slice(0,60),        // task name
+      st: t.status || 'new',               // task status (new/inprogress/complete/billed/cancelled)
+      cat:(t.salesCat||'') + '',           // sales category (e.g., '42')
+      rt: t.revenueType || 'fixed',        // revenue type (fixed/nocharge)
+      pr: Math.round(t.fixedPrice||0),     // fixed price $
+      as: t.assign || '',                  // assignee initials
+      od: (t.overdue && !t.done) ? 1 : 0,  // overdue flag
+    };
+  });
+
+  // ----- Aggregates by sales category (from current taskStore) -----
+  const aggCat = (filterFn) => {
+    const out = {};
+    taskStore.filter(filterFn).forEach(t => {
+      const c = (t.salesCat || '').toString().trim() || 'Uncategorized';
+      if (!out[c]) out[c] = { count:0, amount:0 };
+      out[c].count++;
+      out[c].amount += (t.fixedPrice || 0);
+    });
+    // round amounts
+    Object.values(out).forEach(v => v.amount = Math.round(v.amount));
+    return out;
+  };
+  const billedByCat = aggCat(t => t.status === 'billed');
+  const readyByCat  = aggCat(t => t.status === 'complete' && t.revenueType !== 'nocharge');
+
+  // Billed-by-category within jobprep projects specifically (common question)
+  const jobprepProjIds = new Set(openProjects.filter(p => (projectInfo[p.id]||{}).status === 'jobprep').map(p => p.id));
+  const billedByCatJobprep = aggCat(t => t.status === 'billed' && jobprepProjIds.has(t.proj));
+
+  // ----- Historical billed by category (monthly billing table) -----
+  const histBilledByCat = {};
+  if (window.billedCatData) {
+    Object.values(window.billedCatData).forEach(monthObj => {
+      Object.entries(monthObj || {}).forEach(([cat, amt]) => {
+        histBilledByCat[cat] = Math.round((histBilledByCat[cat] || 0) + (parseFloat(amt) || 0));
+      });
+    });
+  }
+
+  // ----- Employee workload -----
   const empWorkload = employees.map(e => {
     const mt = taskStore.filter(t => t.assign===e.initials);
     return { n:e.name, d:e.dept||'',
@@ -1201,17 +1264,74 @@ function buildAiContext() {
       o:mt.filter(t=>t.overdue&&!t.done).length,
       c:mt.filter(t=>['complete','billed'].includes(t.status)).length };
   });
+
+  // ----- Project-status distribution (helps AI answer "how many jobprep projects" etc.) -----
+  const projStatusCounts = {};
+  openProjects.forEach(p => {
+    const s = (projectInfo[p.id]||{}).status || 'unknown';
+    projStatusCounts[s] = (projStatusCounts[s] || 0) + 1;
+  });
+
   const totalBilled = taskStore.filter(t=>t.status==='billed').reduce((s,t)=>s+(t.fixedPrice||0),0);
   const totalReady  = taskStore.filter(t=>t.status==='complete'&&t.revenueType!=='nocharge').reduce((s,t)=>s+(t.fixedPrice||0),0);
   const today = new Date().toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
-  return "You are a business intelligence assistant for NU Labs, a testing laboratory.\n" +
-    "Today: " + today + "\n" +
-    "REVENUE: Billed=" + fmt$(totalBilled) + " | Ready-to-bill=" + fmt$(totalReady) + "\n\n" +
-    "OPEN PROJECTS (" + openProjects.length + ") fields: n=name,st=status,ph=phase,pm=PM,cl=client,tt=totalTasks,td=done,to=overdue,br=billedRevenue,rb=readyToBill,ch=creditHold\n" +
-    JSON.stringify(projSummary) + "\n\n" +
-    "EMPLOYEES (" + employees.length + ") fields: n=name,d=dept,a=active,o=overdue,c=completed\n" +
-    JSON.stringify(empWorkload) + "\n\n" +
-    "Answer concisely. Use markdown tables. Be specific with numbers.";
+
+  return [
+    "You are a business intelligence assistant for NU Labs, a testing laboratory.",
+    "Today: " + today,
+    "",
+    "=== ENUMS (do not invent other values) ===",
+    "Project status: jobprep, pending, pendretest, active, onhold, complete, testcomplete, closed",
+    "Task status:    new, inprogress, complete, billed, cancelled",
+    "Revenue type:   fixed (billable), nocharge (not billable)",
+    "Definitions:",
+    "  'Billed'        = task.st === 'billed'",
+    "  'Ready-to-bill' = task.st === 'complete' AND task.rt !== 'nocharge'",
+    "  'Overdue'       = task.od === 1",
+    "  'Sales category'/'category N' = task.cat field (free-text code, e.g. '42')",
+    "  Closed projects are excluded from every dataset below.",
+    "",
+    "=== REVENUE TOTALS (current taskStore, open projects only) ===",
+    "Billed:        " + fmt$(totalBilled),
+    "Ready-to-bill: " + fmt$(totalReady),
+    "",
+    "=== PROJECT STATUS COUNTS (open projects) ===",
+    JSON.stringify(projStatusCounts),
+    "",
+    "=== BILLED REVENUE BY SALES CATEGORY (task.st='billed') ===",
+    "fields: { category: { count: #, amount: $ } }",
+    JSON.stringify(billedByCat),
+    "",
+    "=== BILLED REVENUE BY SALES CATEGORY — JOBPREP PROJECTS ONLY ===",
+    JSON.stringify(billedByCatJobprep),
+    "",
+    "=== READY-TO-BILL BY SALES CATEGORY (st='complete', rt!='nocharge') ===",
+    JSON.stringify(readyByCat),
+    "",
+    "=== HISTORICAL BILLED REVENUE BY CATEGORY (monthly billing table, cumulative all-time) ===",
+    JSON.stringify(histBilledByCat),
+    "",
+    "=== OPEN PROJECTS (" + openProjects.length + ") ===",
+    "fields: n=name, st=projectStatus, ph=phase, pm=PM, cl=client, tt=totalTasks, td=done, to=overdue, br=billedRevenue$, rb=readyToBill$, ch=creditHold",
+    JSON.stringify(projSummary),
+    "",
+    "=== OPEN-PROJECT TASKS (" + openTasks.length + " of " + allOpenTasks.length + (tasksTruncated ? ", TRUNCATED" : "") + ") ===",
+    "fields: p=projectName, pst=projectStatus, n=taskName, st=taskStatus, cat=salesCategory, rt=revenueType, pr=fixedPrice$, as=assignee, od=overdue(0/1)",
+    JSON.stringify(openTasks),
+    (tasksTruncated ? "\nNOTE: Task list was truncated at " + MAX_TASKS + " of " + allOpenTasks.length + " tasks to fit context. The category aggregates above include ALL tasks, not just the truncated list — prefer those for totals." : ""),
+    "",
+    "=== EMPLOYEES (" + employees.length + ") ===",
+    "fields: n=name, d=dept, a=active, o=overdue, c=completed",
+    JSON.stringify(empWorkload),
+    "",
+    "=== ANSWERING RULES ===",
+    "1. Use the data above. Do NOT say you lack visibility when the relevant data is present — if you have to look, look in the tasks array and compute.",
+    "2. For 'projects with billed revenue in category X', filter OPEN-PROJECT TASKS where cat===X AND st==='billed', then group by project name and sum pr.",
+    "3. For 'jobprep projects…', filter by pst==='jobprep' (use the task's pst field, not the project status string).",
+    "4. When a category does not appear in the data, say so explicitly with zero — do not hedge.",
+    "5. Use markdown tables for multi-row answers. Keep numbers to whole dollars unless the user asks for cents.",
+    "6. If a question genuinely cannot be answered from the data above (e.g., needs data from timesheets, shipping, or closed projects), say exactly what is missing and stop — do not speculate."
+  ].join("\n");
 }
 
 async function runAiReport() {
