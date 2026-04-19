@@ -150,13 +150,17 @@ function openSetupPanel(el) {
     </div>`;
 
   const tiles = [];
+  // Line 1: Employees, Permissions
   if (can('manage_employees')) tiles.push(tile('&#x1F465;','Employees','Manage team members, roles, and access.',"openEmployeesPanel(document.getElementById('navSetup'))"));
   if (can('manage_permissions')) tiles.push(tile('&#x1F510;','Permissions','Configure role-based access and user permissions.',"openPermissionsPanel()"));
+  // Line 2: Scheduler Settings, Templates  
+  if (can('manage_permissions')) tiles.push(tile('&#x1F4C5;','Scheduler Settings','Configure block colors and employee scheduler access.',"openSchedSettingsPanel()"));
+  if (can('manage_templates')) tiles.push(tile('&#x1F4CB;','Templates','Manage onboarding checklists, compliance evidence, and content templates.',"openTemplatesPanel(document.getElementById('navSetup'))"));
+  // Line 3: Audit Log, Approvals
   if (can('view_audit_log')) tiles.push(tile('&#x1F4DD;','Audit Log','View recent changes and configure tracked fields.',"openAuditLogPanel(document.getElementById('navSetup'))"));
   if (can('view_setup') || isManager()) tiles.push(tile('&#x2705;','Approvals','Review and approve pending timesheet submissions.',"openApprovalsPanel(document.getElementById('navSetup'))"));
-  if (can('manage_templates')) tiles.push(tile('&#x1F4CB;','Templates','Manage onboarding checklists, compliance evidence, and content templates.',"openTemplatesPanel(document.getElementById('navSetup'))"));
+  // Line 4: Merge Duplicate Clients
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F9F9;','Merge Duplicate Clients','Find and merge client records with similar names.',"openMergeClientsPanel(document.getElementById('navSetup'))"));
-  if (can('manage_permissions')) tiles.push(tile('&#x1F4C5;','Scheduler Settings','Configure block colors and employee scheduler access.',"openSchedSettingsPanel()"));
 
   const grid = document.getElementById('setupTilesGrid');
   if (grid) grid.innerHTML = tiles.join('') || '<div style="color:var(--muted);font-size:13px">No setup options available for your role.</div>';
@@ -177,6 +181,147 @@ function openPermissionsPanel() {
 
 // ===== TEMPLATES PANEL =====
 // ===== TEMPLATES PANEL =====
+
+// Template categories and items (will be moved to DB)
+const TEMPLATE_CATEGORIES = [
+  { name: 'HR Templates', description: 'Employee onboarding and offboarding checklists', icon: '👥' },
+  { name: 'Compliance Templates', description: 'CMMC evidence strings and policy templates', icon: '🛡️' },
+  { name: 'Other Templates', description: 'Email templates, forms, and content', icon: '📄' }
+];
+
+const TEMPLATE_SEED_DATA = [
+  // NU Labs Onboarding
+  { category: 'HR Templates', key: 'credentials', label: 'Credentials Created (AD + Email)', instructions: 'In Active Directory Users and Computers, create a new user account with proper OU placement and group memberships. In Google Workspace Admin, create the user account and assign appropriate licenses. Verify account creation and send welcome email with temporary credentials.', notes_enabled: false, track: 'nulabs', type: 'onboarding' },
+  { category: 'HR Templates', key: 'computer', label: 'Computer Added to Domain', instructions: 'Join the assigned workstation to the company domain using appropriate naming conventions. Install required software packages and configure security policies. Verify network connectivity and proper domain authentication.', notes_enabled: false, track: 'nulabs', type: 'onboarding' },
+  { category: 'HR Templates', key: 'access_badge', label: 'Access Badge Issued', instructions: 'Create and program a new access badge with appropriate building and area permissions. Test badge functionality at all required access points. Document badge number and access levels in security records.', notes_enabled: false, track: 'nulabs', type: 'onboarding' },
+  { category: 'HR Templates', key: 'workstation', label: 'Workstation Assignment', instructions: 'Assign and configure workstation with user profile and necessary software. Ensure proper ergonomic setup and peripherals. Verify all required applications are installed and functioning properly.', notes_enabled: false, track: 'nulabs', type: 'onboarding' },
+  { category: 'HR Templates', key: 'business_cards', label: 'Business Cards Ordered', instructions: 'Order business cards with correct title, contact information, and company branding. Coordinate with design team for approval if needed. Provide cards to employee upon arrival.', notes_enabled: true, track: 'nulabs', type: 'onboarding' },
+  { category: 'HR Templates', key: 'handbook', label: 'Employee Handbook Reviewed', instructions: 'Provide the employee with a copy of the current NU Laboratories Employee Handbook. Review key sections together. Have the employee sign the acknowledgment page confirming they received and reviewed the handbook. Retain the signed copy and note the handbook version in the notes field.', notes_enabled: true, track: 'nulabs', type: 'onboarding' },
+  
+  // Ballantine Onboarding (subset)
+  { category: 'HR Templates', key: 'credentials_ball', label: 'Credentials Created', instructions: 'Create user accounts as needed for Ballantine operations. Configure access permissions appropriate for role and responsibilities.', notes_enabled: false, track: 'ballantine', type: 'onboarding' },
+  { category: 'HR Templates', key: 'handbook_ball', label: 'Handbook Reviewed', instructions: 'Provide employee handbook and review relevant policies. Obtain signed acknowledgment of receipt and understanding.', notes_enabled: true, track: 'ballantine', type: 'onboarding' }
+];
+
+let templateCategories = [];
+let templates = [];
+let templatesInitialized = false;
+
+async function initializeTemplates() {
+  if (!sb || templatesInitialized) return;
+  
+  try {
+    // Load existing data (tables should exist by now)
+    await loadTemplateData();
+    
+    // Seed if categories are empty
+    if (templateCategories.length === 0) {
+      await seedTemplateData();
+      await loadTemplateData();
+    }
+    
+    templatesInitialized = true;
+  } catch (e) {
+    console.error('Template initialization failed:', e);
+    // Show user-friendly message
+    const body = document.getElementById('templatesBody');
+    if (body) {
+      body.innerHTML = `
+        <div style="margin-bottom:24px;">
+          <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);margin-bottom:6px">📋 Templates</div>
+          <div style="font-size:13px;color:var(--muted);">Database tables need to be created.</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;">
+          <div style="color:var(--red);margin-bottom:12px;font-weight:600;">⚠ Setup Required</div>
+          <div style="font-size:13px;color:var(--text);margin-bottom:12px;">Run these SQL commands in Supabase SQL Editor:</div>
+          <pre style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:11px;color:var(--text);overflow-x:auto;white-space:pre-wrap;">-- Template Categories
+CREATE TABLE IF NOT EXISTS template_categories (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  description TEXT,
+  icon TEXT,
+  sort_order INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Templates  
+CREATE TABLE IF NOT EXISTS templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  category_id UUID REFERENCES template_categories(id) ON DELETE CASCADE,
+  key TEXT NOT NULL,
+  label TEXT NOT NULL,
+  instructions TEXT,
+  notes_enabled BOOLEAN DEFAULT false,
+  track TEXT, -- 'nulabs', 'ballantine', or NULL
+  type TEXT, -- 'onboarding', 'offboarding', 'evidence'
+  sort_order INTEGER DEFAULT 0,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- RLS Policies (adjust as needed)
+ALTER TABLE template_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE templates ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "template_categories_select" ON template_categories FOR SELECT USING (true);
+CREATE POLICY "template_categories_all" ON template_categories FOR ALL USING (auth.uid() IS NOT NULL);
+CREATE POLICY "templates_select" ON templates FOR SELECT USING (true);  
+CREATE POLICY "templates_all" ON templates FOR ALL USING (auth.uid() IS NOT NULL);</pre>
+          <button onclick="location.reload()" style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:8px 16px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;margin-top:12px;">
+            Refresh After Running SQL
+          </button>
+        </div>
+      `;
+    }
+  }
+}
+
+async function loadTemplateData() {
+  const [categoriesRes, templatesRes] = await Promise.all([
+    sb.from('template_categories').select('*').order('sort_order'),
+    sb.from('templates').select('*').order('sort_order')
+  ]);
+  
+  templateCategories = categoriesRes.data || [];
+  templates = templatesRes.data || [];
+}
+
+async function seedTemplateData() {
+  // Insert categories
+  const categoryInserts = TEMPLATE_CATEGORIES.map((cat, idx) => ({
+    name: cat.name,
+    description: cat.description,
+    icon: cat.icon,
+    sort_order: idx
+  }));
+  
+  const { data: insertedCategories } = await sb.from('template_categories')
+    .insert(categoryInserts)
+    .select();
+    
+  // Create category lookup
+  const categoryLookup = {};
+  insertedCategories.forEach(cat => {
+    categoryLookup[cat.name] = cat.id;
+  });
+  
+  // Insert templates
+  const templateInserts = TEMPLATE_SEED_DATA.map((tmpl, idx) => ({
+    category_id: categoryLookup[tmpl.category],
+    key: tmpl.key,
+    label: tmpl.label,
+    instructions: tmpl.instructions,
+    notes_enabled: tmpl.notes_enabled,
+    track: tmpl.track,
+    type: tmpl.type,
+    sort_order: idx,
+    is_active: true
+  }));
+  
+  await sb.from('templates').insert(templateInserts);
+}
+
 function openTemplatesPanel(el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
@@ -184,7 +329,15 @@ function openTemplatesPanel(el) {
   document.getElementById('topbarName').textContent = 'Templates';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-templates').classList.add('active');
-  renderTemplatesPanel();
+  
+  // Initialize templates on first load
+  if (!templatesInitialized) {
+    const body = document.getElementById('templatesBody');
+    if (body) body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);">Loading templates...</div>';
+    initializeTemplates().then(() => renderTemplatesPanel());
+  } else {
+    renderTemplatesPanel();
+  }
 }
 
 function renderTemplatesPanel() {
@@ -198,40 +351,35 @@ function renderTemplatesPanel() {
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;">
-      <!-- HR Templates -->
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
-        <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
-          <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">👥 HR Templates</div>
-          <div style="font-size:12px;color:var(--muted);">Employee onboarding and offboarding checklists</div>
-        </div>
-        <div style="padding:16px 20px;">
-          <div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">Coming soon...</div>
-        </div>
-      </div>
-
-      <!-- Compliance Templates -->
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
-        <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
-          <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">🛡️ Compliance Templates</div>
-          <div style="font-size:12px;color:var(--muted);">CMMC evidence strings and policy templates</div>
-        </div>
-        <div style="padding:16px 20px;">
-          <div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">Coming soon...</div>
-        </div>
-      </div>
-
-      <!-- Other Templates -->
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
-        <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
-          <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">📄 Other Templates</div>
-          <div style="font-size:12px;color:var(--muted);">Email templates, forms, and content</div>
-        </div>
-        <div style="padding:16px 20px;">
-          <div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">Coming soon...</div>
-        </div>
-      </div>
+      ${templateCategories.map(category => {
+        const categoryTemplates = templates.filter(t => t.category_id === category.id);
+        return `
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+          <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+            <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">${category.icon} ${category.name}</div>
+            <div style="font-size:12px;color:var(--muted);">${category.description}</div>
+          </div>
+          <div style="padding:16px 20px;">
+            ${categoryTemplates.length > 0 
+              ? `<div style="font-size:13px;color:var(--text);margin-bottom:8px;">${categoryTemplates.length} template${categoryTemplates.length !== 1 ? 's' : ''}</div>
+                 <button onclick="editCategoryTemplates('${category.id}')" 
+                   style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                   Edit Templates
+                 </button>`
+              : `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">No templates yet</div>`
+            }
+          </div>
+        </div>`;
+      }).join('')}
     </div>
   `;
+}
+
+function editCategoryTemplates(categoryId) {
+  // TODO: Open template editing modal/panel
+  const category = templateCategories.find(c => c.id === categoryId);
+  const categoryTemplates = templates.filter(t => t.category_id === categoryId);
+  alert(`Edit ${category.name} - ${categoryTemplates.length} templates (TODO: Build editing UI)`);
 }
 
 
