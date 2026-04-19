@@ -154,7 +154,7 @@ function openSetupPanel(el) {
   if (can('manage_permissions')) tiles.push(tile('&#x1F510;','Permissions','Configure role-based access and user permissions.',"openPermissionsPanel()"));
   if (can('view_audit_log')) tiles.push(tile('&#x1F4DD;','Audit Log','View recent changes and configure tracked fields.',"openAuditLogPanel(document.getElementById('navSetup'))"));
   if (can('view_setup') || isManager()) tiles.push(tile('&#x2705;','Approvals','Review and approve pending timesheet submissions.',"openApprovalsPanel(document.getElementById('navSetup'))"));
-  if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F4E5;','Import Salesforce','Import accounts and contacts from a Salesforce CSV export.',"openSfImportPanel(document.getElementById('navSetup'))"));
+  if (can('manage_templates')) tiles.push(tile('&#x1F4CB;','Templates','Manage onboarding checklists, compliance evidence, and content templates.',"openTemplatesPanel(document.getElementById('navSetup'))"));
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F9F9;','Merge Duplicate Clients','Find and merge client records with similar names.',"openMergeClientsPanel(document.getElementById('navSetup'))"));
   if (can('manage_permissions')) tiles.push(tile('&#x1F4C5;','Scheduler Settings','Configure block colors and employee scheduler access.',"openSchedSettingsPanel()"));
 
@@ -172,6 +172,66 @@ function openPermissionsPanel() {
   document.getElementById('topbarName').textContent = 'Permissions';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-permissions').classList.add('active');
+}
+
+
+// ===== TEMPLATES PANEL =====
+// ===== TEMPLATES PANEL =====
+function openTemplatesPanel(el) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
+  activeProjectId = null;
+  document.getElementById('topbarName').textContent = 'Templates';
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-templates').classList.add('active');
+  renderTemplatesPanel();
+}
+
+function renderTemplatesPanel() {
+  const body = document.getElementById('templatesBody');
+  if (!body) return;
+
+  body.innerHTML = `
+    <div style="margin-bottom:24px;">
+      <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);margin-bottom:6px">📋 Templates</div>
+      <div style="font-size:13px;color:var(--muted);">Manage onboarding checklists, compliance evidence strings, and content templates.</div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;">
+      <!-- HR Templates -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+        <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+          <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">👥 HR Templates</div>
+          <div style="font-size:12px;color:var(--muted);">Employee onboarding and offboarding checklists</div>
+        </div>
+        <div style="padding:16px 20px;">
+          <div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">Coming soon...</div>
+        </div>
+      </div>
+
+      <!-- Compliance Templates -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+        <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+          <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">🛡️ Compliance Templates</div>
+          <div style="font-size:12px;color:var(--muted);">CMMC evidence strings and policy templates</div>
+        </div>
+        <div style="padding:16px 20px;">
+          <div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">Coming soon...</div>
+        </div>
+      </div>
+
+      <!-- Other Templates -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+        <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+          <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">📄 Other Templates</div>
+          <div style="font-size:12px;color:var(--muted);">Email templates, forms, and content</div>
+        </div>
+        <div style="padding:16px 20px;">
+          <div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">Coming soon...</div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 
@@ -481,6 +541,7 @@ const CAPABILITY_DEFS = [
   { key: 'view_setup',         label: 'View Setup',            group: 'Admin' },
   { key: 'manage_employees',   label: 'Manage Employees',      group: 'Admin' },
   { key: 'manage_permissions', label: 'Manage Permissions',    group: 'Admin' },
+  { key: 'manage_templates',   label: 'Manage Templates',      group: 'Admin' },
   { key: 'view_chatter',       label: 'View Chatter',          group: 'Communication' },
   { key: 'post_chatter',       label: 'Post in Chatter',       group: 'Communication' },
   { key: 'view_schedule',      label: 'View Scheduler',        group: 'Scheduler' },
