@@ -50,4 +50,31 @@
 .pm-clear{padding:8px 14px;border-top:1px solid var(--border);font-size:11.5px;color:var(--muted);cursor:pointer;transition:color var(--transition);}
 .pm-clear:hover{color:var(--red);}
 
+/* ===== EMPLOYEE PROFILE TAB BAR FIX ===== */
+/* Fix transparency issue for employee detail tabs (Profile | Onboarding | Offboarding) */
+/* Targets the inline-styled div from line 694 in employees.js */
+#empProfilePane div[style*="position:sticky"][style*="border-bottom"] {
+  background: var(--bg) !important;
+  backdrop-filter: blur(10px) !important;
+  position: sticky !important;
+  top: 0 !important;
+  z-index: 15 !important;
+  padding-top: 0 !important;
+  margin-top: -24px !important;
+  padding-bottom: 0 !important;
+}
+
+/* Also ensure the tab buttons themselves are properly styled */
+#empProfilePane div[style*="position:sticky"] button {
+  background: transparent !important;
+  border: none !important;
+  font-family: 'DM Sans', sans-serif !important;
+  transition: all var(--transition) !important;
+}
+
+#empProfilePane div[style*="position:sticky"] button:hover {
+  background: rgba(232, 162, 52, 0.08) !important;
+  color: var(--amber) !important;
+}
+
 

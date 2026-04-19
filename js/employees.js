@@ -1032,152 +1032,38 @@ function switchEmpTab(empId, tab) {
   showEmpProfile(empId);
 }
 
-// ── Checklist definitions ─────────────────────────────────────────
+// ── Load checklist items from database templates ─────────────────────────────────────────
 
-const ONBOARDING_NULABS = [
-  {
-    key: 'credentials',
-    label: 'Initial Credentials Issued',
-    notes: true,
-    notesLabel: 'Note (e.g. confirmed issued, user prompted to change)',
-    instructions: `Create AD account in Active Directory Users and Computers. Set temporary password and check "User must change password at next logon." Create matching email account in Google Workspace using the work email address. Provide credentials to employee securely on their first day in person — do not send via email or text.`,
-  },
-  {
-    key: 'computer',
-    label: 'Computer Assigned & Added to Server',
-    notes: true,
-    notesLabel: 'Computer name / asset tag',
-    instructions: `Record the computer name and asset tag. On the workstation go to System Properties → Computer Name → Change → select Domain and enter the NU Laboratories domain name. Restart when prompted. Verify the computer appears in Active Directory Users and Computers under the Computers OU.`,
-  },
-  {
-    key: 'nuworkspace',
-    label: 'NUWorkspace Account Created & Permissions Set',
-    notes: false,
-    instructions: `Add the employee record in NUWorkspace Setup → Employees. Set permission level, hire date, and role. Then go to your Supabase project → Authentication → Users → Invite User and enter their work email address. They will receive an invite email to set their password. Once they log in verify their profile loads correctly and permissions are appropriate.`,
-  },
-  {
-    key: 'office',
-    label: 'Office Suite Installed',
-    notes: false,
-    instructions: `Log into the Microsoft 365 Admin Center (admin.microsoft.com). Assign a Microsoft 365 license to the employee's work email. On the employee's workstation go to portal.office.com, sign in with the work email, and download/install Microsoft 365. Activate with the work account credentials.`,
-  },
-  {
-    key: 'zac',
-    label: 'ZAC Phone Software Installed',
-    notes: true,
-    notesLabel: 'Employee extension number',
-    instructions: `Download ZAC from https://www.zultys.com/zac/ and install on the employee's workstation. Configure with the employee's extension number and credentials. Log into the Zultys Administration panel and add the employee as a user, assign their extension, and configure voicemail. Test by placing a test call.`,
-  },
-  {
-    key: 'alarm',
-    label: 'Added to Alarm System',
-    notes: true,
-    notesLabel: 'Alarm code assigned',
-    instructions: `Enter alarm panel admin mode using the master code. Add a new user code for the employee. Assign a unique code that is not shared with any other employee. Test the code to confirm it arms and disarms the system correctly. Provide the code to the employee verbally — do not write it down or send electronically.`,
-  },
-  {
-    key: 'duo',
-    label: 'Duo MFA Installed on Computer',
-    notes: false,
-    instructions: `Log into the Duo Admin Panel (admin.duosecurity.com). Go to Users → Add User. Enter the employee's name and work email. Click Send Enrollment Email. The employee will receive an email to enroll their device. Verify the enrollment is complete and the employee can successfully authenticate before granting CUI system access.`,
-  },
-  {
-    key: 'blumira',
-    label: 'Blumira SIEM Agent Installed',
-    notes: false,
-    instructions: `Log into the Blumira dashboard. Navigate to Sensors → Deploy Agent. Select Windows as the platform and download the installer. Run the installer on the employee's workstation. Once installed confirm the agent appears as active in the Blumira dashboard under the Sensors or Devices section.`,
-  },
-  {
-    key: 'withsecure',
-    label: 'WithSecure EPP Installed',
-    notes: false,
-    instructions: `Log into WithSecure Elements Security Center (elements.withsecure.com). Go to Devices → Add Device. Download the Windows endpoint protection installer. Run the installer on the employee's workstation. Confirm the device appears in the Elements Security Center console as protected and showing green status.`,
-  },
-  {
-    key: 'bitlocker',
-    label: 'BitLocker Enabled',
-    notes: false,
-    instructions: `Open Group Policy Management on the AD server and verify the BitLocker GPO is linked to the OU containing the employee's workstation. On the workstation run gpupdate /force in an elevated command prompt. Then go to Control Panel → BitLocker Drive Encryption and confirm encryption is in progress or active. This may take several hours to complete on first encryption.`,
-  },
-  {
-    key: 'vpn',
-    label: 'Added to VPN',
-    notes: false,
-    instructions: `Log into the UniFi Network dashboard. Go to Settings → Teleport & VPN → VPN Server. Add a new user with the employee's credentials. Download the OpenVPN client configuration file. Provide the employee with the VPN client config file and instructions for installing the OpenVPN client. Test the connection by having the employee connect remotely.`,
-  },
-  {
-    key: 'handbook',
-    label: 'Employee Handbook Signed',
-    notes: true,
-    notesLabel: 'Handbook version / edition',
-    instructions: `Provide the employee with a copy of the current NU Laboratories Employee Handbook. Review key sections together including the disciplinary policy, CUI handling requirements, and acceptable use policy. Have the employee sign the acknowledgment page confirming they received and reviewed the handbook. Retain the signed copy and note the handbook version in the notes field.`,
-  },
-];
-
-const ONBOARDING_BALLANTINE = [
-  {
-    key: 'credentials',
-    label: 'Initial Credentials Issued',
-    notes: true,
-    notesLabel: 'Note (e.g. confirmed issued, user prompted to change)',
-    instructions: `Create AD account in Active Directory Users and Computers. Set temporary password and check "User must change password at next logon." Create matching email account in Google Workspace. Provide credentials to employee securely on their first day in person.`,
-  },
-  {
-    key: 'email',
-    label: 'Email Setup',
-    notes: false,
-    instructions: `Log into Google Workspace Admin (admin.google.com). Create a new user account with the employee's work email address. Set a temporary password. Confirm the employee can log in and access email. Set up email signature and configure any needed distribution lists.`,
-  },
-  {
-    key: 'office',
-    label: 'Office Suite Installed',
-    notes: false,
-    instructions: `Log into the Microsoft 365 Admin Center (admin.microsoft.com). Assign a Microsoft 365 license to the employee's work email. On the employee's workstation go to portal.office.com, sign in with the work email, and download/install Microsoft 365.`,
-  },
-  {
-    key: 'zac',
-    label: 'ZAC Phone Software Installed',
-    notes: true,
-    notesLabel: 'Employee extension number',
-    instructions: `Download ZAC from https://www.zultys.com/zac/ and install on the employee's workstation. Configure with the employee's extension number and credentials. Add the employee in the Zultys Administration panel and test with a call.`,
-  },
-  {
-    key: 'sql',
-    label: 'SQL Server Installed',
-    notes: false,
-    instructions: `Install SQL Server client tools on the employee's workstation. Configure the connection string to point to the NU Labs SQL Server instance. Verify the employee can connect to the database with appropriate permissions. Test by running a basic query.`,
-  },
-  {
-    key: 'dba',
-    label: 'DBA Manufacturing Software Installed',
-    notes: false,
-    instructions: `Install DBA manufacturing software from the network share or installation media. Configure with the employee's credentials and company database settings. Verify the employee can log in and access their required modules.`,
-  },
-  {
-    key: 'alarm',
-    label: 'Added to Alarm System',
-    notes: true,
-    notesLabel: 'Alarm code assigned',
-    instructions: `Enter alarm panel admin mode. Add a new user code for the employee. Assign a unique code not shared with others. Test the code and provide it verbally to the employee.`,
-  },
-  {
-    key: 'synology',
-    label: 'Synology Private Share Access Granted',
-    notes: false,
-    instructions: `Log into Synology DSM → Control Panel → Shared Folder. Select the Ballantine private share. Click Edit → Permissions. Add the employee's AD account with the appropriate Read/Write access level. Apply and confirm the employee can access the share from their workstation.`,
-  },
-  {
-    key: 'handbook',
-    label: 'Employee Handbook Signed',
-    notes: true,
-    notesLabel: 'Handbook version / edition',
-    instructions: `Provide the employee with a copy of the current NU Laboratories Employee Handbook. Review key sections together. Have the employee sign the acknowledgment page confirming they received and reviewed the handbook. Retain the signed copy and note the handbook version in the notes field.`,
-  },
-];
+async function _loadOnboardingItems(track, type) {
+  if (!sb) return [];
+  
+  try {
+    const { data } = await sb.from('templates')
+      .select('*')
+      .eq('track', track)
+      .eq('type', type)
+      .eq('is_active', true)
+      .order('sort_order');
+    
+    // Map database structure to expected format
+    return (data || []).map(tmpl => ({
+      key: tmpl.key,
+      label: tmpl.label,
+      instructions: tmpl.instructions || '',
+      notes: tmpl.notes_enabled || false,
+      notesLabel: tmpl.notes_enabled ? 'Notes' : undefined
+    }));
+  } catch (e) {
+    console.error('Failed to load onboarding templates:', e);
+    return [];
+  }
+}
 
 // Offboarding = reverse of onboarding with revoke language
-function _buildOffboardingItems(track) {
-  const src = track === 'ballantine' ? ONBOARDING_BALLANTINE : ONBOARDING_NULABS;
+async function _buildOffboardingItems(track) {
+  // Load onboarding templates from database
+  const src = await _loadOnboardingItems(track, 'onboarding');
+  
   const labels = {
     credentials:  { label: 'Credentials Revoked (AD + Email Disabled)', instructions: `In Active Directory Users and Computers, right-click the employee account and select Disable Account. In Google Workspace Admin disable the user account. Revoke any active sessions. This must be completed on or before the employee's last day.` },
     computer:     { label: 'Computer Removed from Domain & Retrieved', instructions: `Retrieve the assigned workstation from the employee. In Active Directory Users and Computers, delete or disable the computer object. Wipe the workstation before reassigning using a secure erase method.` },
@@ -1224,8 +1110,8 @@ async function _loadOnboardingTab(empId, emp, tabType) {
   const isBallantine = (emp.dept||'').toLowerCase() === 'ballantine';
   const track = isBallantine ? 'ballantine' : 'nulabs';
   const items = tabType === 'onboarding'
-    ? (isBallantine ? ONBOARDING_BALLANTINE : ONBOARDING_NULABS)
-    : _buildOffboardingItems(track);
+    ? await _loadOnboardingItems(track, 'onboarding')
+    : await _buildOffboardingItems(track);
 
   const prefix = tabType === 'onboarding' ? 'ob_' : 'off_';
   const canEdit = isManager();
