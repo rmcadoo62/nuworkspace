@@ -25,8 +25,32 @@ function openEmployeesPanel(el) {
 }
 
 let empDetailOpen = null;
-let empProfileTab = 'profile'; // 'profile' | 'onboarding' | 'offboarding'
-let onboardingCache = {}; // empId -> onboarding record
+let empProfileTab = 'profile'; // 'profile' | 'lifecycle'
+let lifecycleCache = {}; // empId -> lifecycle records
+// Note: `templates` is declared in admin.js. We populate it here on demand.
+
+// Ensure the templates global is populated from Supabase before any lifecycle
+// rendering touches it. Safe to call repeatedly — only hits the DB once.
+async function _ensureTemplatesLoaded() {
+  if (typeof templates !== 'undefined' && templates && templates.length) return;
+  if (!sb) return;
+  try {
+    const { data, error } = await sb.from('templates')
+      .select('*')
+      .eq('is_active', true)
+      .order('sort_order');
+    if (error) {
+      console.error('Failed to load templates:', error);
+      if (typeof templates !== 'undefined') templates = [];
+      return;
+    }
+    // Assign to the shared global (declared in admin.js)
+    templates = data || [];
+  } catch (e) {
+    console.error('Failed to load templates:', e);
+    if (typeof templates !== 'undefined') templates = [];
+  }
+}
 
 // ── Time-off helpers ────────────────────────────────────────────────────────
 
@@ -692,8 +716,8 @@ function showEmpProfile(empId, annivOffset) {
     pane.innerHTML = `
     <!-- Tab bar -->
     <div style="display:flex;gap:0;border-bottom:1.5px solid var(--border);margin-bottom:24px;background:var(--bg);position:sticky;top:0;z-index:10">
-      ${['profile','onboarding','offboarding'].map(t => {
-        const labels = { profile:'👤 Profile', onboarding:'✅ Onboarding', offboarding:'🚪 Offboarding' };
+      ${['profile','lifecycle'].map(t => {
+        const labels = { profile:'👤 Profile', lifecycle:'🔄 Lifecycle' };
         const active = empProfileTab === t;
         return `<button onclick="switchEmpTab('${empId}','${t}')"
           style="padding:10px 20px;background:transparent;border:none;border-bottom:2.5px solid ${active?'var(--amber)':'transparent'};font-family:'DM Sans',sans-serif;font-size:13px;font-weight:${active?'600':'500'};color:${active?'var(--amber)':'var(--muted)'};cursor:pointer;transition:all var(--transition);margin-bottom:-1.5px;white-space:nowrap">
@@ -1013,18 +1037,18 @@ function showEmpProfile(empId, annivOffset) {
             <tbody>${tsRows}</tbody>
           </table>`}
     </div>
-  ` : `<div id="onboardingTabInner"></div>`}
+  ` : `<div id="lifecycleTabInner"></div>`}
   </div>
   `;
 
-  // If not profile tab, load checklist content
-  if (empProfileTab !== 'profile') {
-    _loadOnboardingTab(empId, emp, empProfileTab);
+  // If not profile tab, load lifecycle content
+  if (empProfileTab === 'lifecycle') {
+    _loadLifecycleTab(empId, emp);
   }
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  EMPLOYEE ONBOARDING / OFFBOARDING CHECKLIST
+//  UNIFIED EMPLOYEE LIFECYCLE SYSTEM  
 // ════════════════════════════════════════════════════════════════════
 
 function switchEmpTab(empId, tab) {
@@ -1032,8 +1056,292 @@ function switchEmpTab(empId, tab) {
   showEmpProfile(empId);
 }
 
-// ── Load checklist items from database templates ─────────────────────────────────────────
+// ── Load unified lifecycle data ─────────────────────────────────────────────
 
+async function _loadLifecycleTab(empId, emp) {
+  const inner = document.getElementById('lifecycleTabInner');
+  if (!inner) return;
+  inner.innerHTML = '<div style="padding:20px;color:var(--muted);font-size:13px">Loading…</div>';
+
+  // Make sure template definitions are in memory before we filter them
+  await _ensureTemplatesLoaded();
+  if (!templates.length) {
+    inner.innerHTML = '<div style="padding:20px;color:var(--red);font-size:13px">No lifecycle templates found. Check the <code>templates</code> table in Supabase.</div>';
+    return;
+  }
+
+  // Determine employee track
+  const isBallantine = (emp.dept||'').toLowerCase() === 'ballantine';
+  const track = isBallantine ? 'ballantine' : 'nulabs';
+  
+  // Load lifecycle data for this employee
+  let lifecycleData = {};
+  if (!lifecycleCache[empId]) {
+    const { data } = await sb.from('employee_lifecycle')
+      .select('*')
+      .eq('employee_id', empId);
+    lifecycleCache[empId] = data || [];
+  }
+  
+  // Convert array to lookup object
+  lifecycleCache[empId].forEach(record => {
+    lifecycleData[record.template_key] = record;
+  });
+
+  // Get applicable templates for this track
+  const applicableTemplates = templates.filter(t => 
+    t.track === track && 
+    (t.type === 'onboarding' || t.type === 'offboarding')
+  );
+  
+  // Get unique template keys (each key appears in both onboarding and offboarding)
+  const templateKeys = [...new Set(applicableTemplates.map(t => t.key))]
+    .sort((a, b) => {
+      const aTemplate = applicableTemplates.find(t => t.key === a && t.type === 'onboarding');
+      const bTemplate = applicableTemplates.find(t => t.key === b && t.type === 'onboarding');
+      return (aTemplate?.sort_order || 0) - (bTemplate?.sort_order || 0);
+    });
+
+  // Calculate progress
+  const applicableItems = templateKeys.filter(key => !lifecycleData[key]?.is_na);
+  const onboardingComplete = applicableItems.filter(key => lifecycleData[key]?.onboarding_date).length;
+  const offboardingComplete = applicableItems.filter(key => lifecycleData[key]?.offboarding_date).length;
+  
+  const canEdit = isManager();
+  const isInactive = emp.isActive === false || !!emp.terminationDate;
+
+  inner.innerHTML = `
+    <div style="margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:20px;margin-bottom:12px">
+        <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;border-left:3px solid #4caf7d">
+          <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:2px">Onboarding Progress</div>
+          <div style="font-size:16px;font-weight:700;color:#4caf7d">${onboardingComplete} / ${applicableItems.length} applicable</div>
+        </div>
+        <div style="background:var(--surface2);border-radius:8px;padding:8px 12px;border-left:3px solid #e05c5c">
+          <div style="font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:2px">Offboarding Progress</div>
+          <div style="font-size:16px;font-weight:700;color:#e05c5c">${offboardingComplete} / ${applicableItems.length} applicable</div>
+        </div>
+      </div>
+      
+      ${!isInactive ? `
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(232,162,52,0.07);border:1px solid rgba(232,162,52,0.35);border-radius:8px;font-size:12.5px">
+          <span style="font-size:16px">⚠️</span>
+          <div style="color:var(--amber);font-weight:600">This employee is currently active. Offboarding items are for future use.</div>
+        </div>
+      ` : ''}
+    </div>
+
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:var(--surface2);border-bottom:1px solid var(--border)">
+            <th style="text-align:left;padding:12px 16px;font-size:12px;font-weight:600;color:var(--text)">Template Item</th>
+            <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:600;color:var(--text);width:140px">Onboarding</th>
+            <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:600;color:var(--text);width:140px">Offboarding</th>
+            <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:600;color:var(--text);width:80px">N/A</th>
+            <th style="text-align:center;padding:12px 16px;font-size:12px;font-weight:600;color:var(--text);width:80px">Help</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${templateKeys.map(key => {
+            const onboardingTemplate = applicableTemplates.find(t => t.key === key && t.type === 'onboarding');
+            const record = lifecycleData[key] || {};
+            const isNA = record.is_na || false;
+            const onboardingDate = record.onboarding_date || '';
+            const offboardingDate = record.offboarding_date || '';
+            
+            return `
+              <tr style="border-bottom:1px solid var(--border);${isNA ? 'opacity:0.5;' : ''}" data-key="${key}">
+                <td style="padding:12px 16px;font-size:13px;color:var(--text)">${onboardingTemplate?.label || key}</td>
+                <td style="text-align:center;padding:12px 16px">
+                  ${isNA ? `<span style="color:var(--muted);font-size:12px">N/A</span>` : 
+                    canEdit ? `
+                      <div style="display:inline-flex;align-items:center;gap:6px">
+                        <span style="font-size:14px;font-weight:700;line-height:1;color:${onboardingDate ? '#4caf7d' : 'var(--border)'}">${onboardingDate ? '✓' : '○'}</span>
+                        <input type="date" value="${onboardingDate}" 
+                          onchange="updateLifecycleItem('${empId}', '${key}', 'onboarding_date', this.value)"
+                          style="border:1px solid ${onboardingDate ? '#4caf7d' : 'var(--border)'};border-radius:4px;padding:4px 6px;font-size:12px;background:${onboardingDate ? 'rgba(76,175,125,0.10)' : 'var(--bg)'};color:${onboardingDate ? '#4caf7d' : 'var(--text)'};font-weight:${onboardingDate ? '600' : 'normal'}">
+                      </div>` :
+                    (onboardingDate ? `<span style="color:#4caf7d;font-weight:600">✓ ${formatLifecycleDate(onboardingDate)}</span>` : 
+                     `<span style="color:var(--muted)">⏸️ pending</span>`)
+                  }
+                </td>
+                <td style="text-align:center;padding:12px 16px">
+                  ${isNA ? `<span style="color:var(--muted);font-size:12px">N/A</span>` : 
+                    canEdit ? `
+                      <div style="display:inline-flex;align-items:center;gap:6px">
+                        <span style="font-size:14px;font-weight:700;line-height:1;color:${offboardingDate ? '#e05c5c' : 'var(--border)'}">${offboardingDate ? '●' : '○'}</span>
+                        <input type="date" value="${offboardingDate}" 
+                          onchange="updateLifecycleItem('${empId}', '${key}', 'offboarding_date', this.value)"
+                          style="border:1px solid ${offboardingDate ? '#e05c5c' : 'var(--border)'};border-radius:4px;padding:4px 6px;font-size:12px;background:${offboardingDate ? 'rgba(224,92,92,0.10)' : 'var(--bg)'};color:${offboardingDate ? '#e05c5c' : 'var(--text)'};font-weight:${offboardingDate ? '600' : 'normal'}">
+                      </div>` :
+                    (offboardingDate ? `<span style="color:#e05c5c;font-weight:600">● ${formatLifecycleDate(offboardingDate)}</span>` : 
+                     `<span style="color:var(--muted)">⏸️ pending</span>`)
+                  }
+                </td>
+                <td style="text-align:center;padding:12px 16px">
+                  ${canEdit ? `<input type="checkbox" ${isNA ? 'checked' : ''} 
+                    onchange="updateLifecycleItem('${empId}', '${key}', 'is_na', this.checked)"
+                    style="width:16px;height:16px;accent-color:var(--amber)">` : 
+                    (isNA ? '☑️' : '☐')
+                  }
+                </td>
+                <td style="text-align:center;padding:12px 16px">
+                  <button onclick="showLifecycleInstructions('${key}')" 
+                    style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:4px;padding:4px 8px;font-size:11px;color:var(--text);cursor:pointer">
+                    💡 How-to
+                  </button>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    
+    ${canEdit ? `
+      <div style="margin-top:16px;text-align:center;color:var(--muted);font-size:12px">
+        Changes are saved automatically
+      </div>
+    ` : ''}
+  `;
+}
+
+// ── Update lifecycle item ─────────────────────────────────────────────
+
+async function updateLifecycleItem(empId, templateKey, field, value) {
+  try {
+    // Prepare the update data
+    const updateData = {
+      employee_id: empId,
+      template_key: templateKey,
+      [field]: field === 'is_na' ? value : (value || null)
+    };
+    
+    // If setting N/A, clear both dates
+    if (field === 'is_na' && value) {
+      updateData.onboarding_date = null;
+      updateData.offboarding_date = null;
+    }
+    
+    const { data, error } = await sb
+      .from('employee_lifecycle')
+      .upsert(updateData, { 
+        onConflict: 'employee_id,template_key',
+        ignoreDuplicates: false 
+      })
+      .select()
+      .single();
+      
+    if (error) throw error;
+    
+    // Update cache
+    lifecycleCache[empId] = lifecycleCache[empId] || [];
+    const existingIndex = lifecycleCache[empId].findIndex(r => r.template_key === templateKey);
+    if (existingIndex >= 0) {
+      lifecycleCache[empId][existingIndex] = data;
+    } else {
+      lifecycleCache[empId].push(data);
+    }
+    
+    // Refresh the lifecycle tab to show updated progress
+    const emp = employees.find(e => e.id === empId);
+    if (emp) _loadLifecycleTab(empId, emp);
+    
+  } catch (e) {
+    console.error('Failed to update lifecycle item:', e);
+    toast('⚠ Update failed');
+  }
+}
+
+// ── Show tabbed how-to modal ─────────────────────────────────────────────
+
+function showLifecycleInstructions(templateKey) {
+  const onboardingTemplate = templates.find(t => t.key === templateKey && t.type === 'onboarding');
+  const offboardingTemplate = templates.find(t => t.key === templateKey && t.type === 'offboarding');
+  
+  if (!onboardingTemplate || !offboardingTemplate) {
+    alert('Template instructions not found');
+    return;
+  }
+  
+  // Create modal backdrop
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'lifecycleInstructionsModal';
+  backdrop.onclick = e => { if(e.target===backdrop) backdrop.remove(); };
+  
+  backdrop.innerHTML = `
+    <div class="modal" style="width:680px;max-height:80vh">
+      <div class="modal-header">
+        <div class="modal-title">Instructions: ${onboardingTemplate.label}</div>
+        <button class="modal-close" onclick="document.getElementById('lifecycleInstructionsModal').remove()">✕</button>
+      </div>
+      <div style="display:flex;border-bottom:1px solid var(--border)">
+        <button id="onboardingTab" onclick="switchInstructionTab('onboarding')" 
+          style="flex:1;padding:10px 16px;background:var(--amber);border:none;font-size:13px;font-weight:600;color:var(--bg);cursor:pointer">
+          📋 Onboarding
+        </button>
+        <button id="offboardingTab" onclick="switchInstructionTab('offboarding')" 
+          style="flex:1;padding:10px 16px;background:var(--surface2);border:none;font-size:13px;color:var(--muted);cursor:pointer">
+          🚪 Offboarding
+        </button>
+      </div>
+      <div class="modal-body" style="padding:20px;max-height:400px;overflow-y:auto">
+        <div id="onboardingInstructions" style="font-size:13px;line-height:1.5;color:var(--text)">
+          ${onboardingTemplate.instructions || 'No instructions provided.'}
+        </div>
+        <div id="offboardingInstructions" style="display:none;font-size:13px;line-height:1.5;color:var(--text)">
+          ${offboardingTemplate.instructions || 'No instructions provided.'}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button onclick="document.getElementById('lifecycleInstructionsModal').remove()" 
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 16px;font-size:13px;color:var(--text);cursor:pointer">
+          Close
+        </button>
+      </div>
+    </div>
+  `;
+  
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+// ── Switch instruction tab ─────────────────────────────────────────────
+
+function switchInstructionTab(tab) {
+  const onboardingTab = document.getElementById('onboardingTab');
+  const offboardingTab = document.getElementById('offboardingTab');
+  const onboardingInstructions = document.getElementById('onboardingInstructions');
+  const offboardingInstructions = document.getElementById('offboardingInstructions');
+  
+  if (tab === 'onboarding') {
+    onboardingTab.style.background = 'var(--amber)';
+    onboardingTab.style.color = 'var(--bg)';
+    offboardingTab.style.background = 'var(--surface2)';
+    offboardingTab.style.color = 'var(--muted)';
+    onboardingInstructions.style.display = 'block';
+    offboardingInstructions.style.display = 'none';
+  } else {
+    offboardingTab.style.background = 'var(--amber)';
+    offboardingTab.style.color = 'var(--bg)';
+    onboardingTab.style.background = 'var(--surface2)';
+    onboardingTab.style.color = 'var(--muted)';
+    offboardingInstructions.style.display = 'block';
+    onboardingInstructions.style.display = 'none';
+  }
+}
+
+// ── Format date helper ─────────────────────────────────────────────
+
+function formatLifecycleDate(dateStr) {
+  if (!dateStr) return '';
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+}
+
+// ── Load onboarding/offboarding templates from DB (legacy fallback helper) ─
 async function _loadOnboardingItems(track, type) {
   if (!sb) return [];
   
