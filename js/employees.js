@@ -1362,19 +1362,29 @@ async function _obSave(empId) {
   const rec = onboardingCache[empId];
   if (!rec) return;
 
-  const payload = { ...rec, employee_id: empId, updated_at: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const payload = { 
+    ...rec, 
+    employee_id: empId, 
+    updated_at: now,
+    created_at: rec.created_at || now  // Preserve original created_at if it exists
+  };
 
-  let error;
-  if (rec.id) {
-    const res = await sb.from('employee_onboarding').update(payload).eq('id', rec.id);
-    error = res.error;
-  } else {
-    const res = await sb.from('employee_onboarding').insert({ ...payload, created_at: new Date().toISOString() });
-    error = res.error;
-    if (!error && res.data?.[0]) onboardingCache[empId] = res.data[0];
+  const { data, error } = await sb.from('employee_onboarding')
+    .upsert(payload, { 
+      onConflict: 'employee_id',
+      ignoreDuplicates: false 
+    })
+    .select()
+    .single();
+
+  if (error) { 
+    alert('Save failed: ' + error.message); 
+    return; 
   }
-
-  if (error) { alert('Save failed: ' + error.message); return; }
+  
+  // Update cache with the saved record (including id if it was a new insert)
+  onboardingCache[empId] = data;
   toast('✅ Checklist saved.');
 
   // Refresh progress bar
