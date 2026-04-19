@@ -213,7 +213,32 @@ const TEMPLATE_SEED_DATA = [
   { category: 'HR Templates', key: 'dba', label: 'DBA Manufacturing Software Installed', instructions: `Install DBA manufacturing software from the network share or installation media. Configure with the employee's credentials and company database settings. Verify the employee can log in and access their required modules.`, notes_enabled: false, track: 'ballantine', type: 'onboarding' },
   { category: 'HR Templates', key: 'alarm', label: 'Added to Alarm System', instructions: `Enter alarm panel admin mode. Add a new user code for the employee. Assign a unique code not shared with others. Test the code and provide it verbally to the employee.`, notes_enabled: true, track: 'ballantine', type: 'onboarding' },
   { category: 'HR Templates', key: 'synology', label: 'Synology Private Share Access Granted', instructions: `Log into Synology DSM → Control Panel → Shared Folder. Select the Ballantine private share. Click Edit → Permissions. Add the employee's AD account with the appropriate Read/Write access level. Apply and confirm the employee can access the share from their workstation.`, notes_enabled: false, track: 'ballantine', type: 'onboarding' },
-  { category: 'HR Templates', key: 'handbook', label: 'Employee Handbook Signed', instructions: `Provide the employee with a copy of the current NU Laboratories Employee Handbook. Review key sections together. Have the employee sign the acknowledgment page confirming they received and reviewed the handbook. Retain the signed copy and note the handbook version in the notes field.`, notes_enabled: true, track: 'ballantine', type: 'onboarding' }
+  { category: 'HR Templates', key: 'handbook', label: 'Employee Handbook Signed', instructions: `Provide the employee with a copy of the current NU Laboratories Employee Handbook. Review key sections together. Have the employee sign the acknowledgment page confirming they received and reviewed the handbook. Retain the signed copy and note the handbook version in the notes field.`, notes_enabled: true, track: 'ballantine', type: 'onboarding' },
+
+  // NU Labs Offboarding - Generated from _buildOffboardingItems function mappings (12 items)
+  { category: 'HR Templates', key: 'credentials', label: 'Credentials Revoked (AD + Email Disabled)', instructions: `In Active Directory Users and Computers, right-click the employee account and select Disable Account. In Google Workspace Admin disable the user account. Revoke any active sessions. This must be completed on or before the employee's last day.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'computer', label: 'Computer Removed from Domain & Retrieved', instructions: `Retrieve the assigned workstation from the employee. In Active Directory Users and Computers, delete or disable the computer object. Wipe the workstation before reassigning using a secure erase method.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'nuworkspace', label: 'NUWorkspace Account Deactivated', instructions: `In NUWorkspace Setup → Employees, set the employee's termination date and mark as inactive. In Supabase Authentication → Users, disable or delete the user account so they can no longer log in.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'office', label: 'Office 365 License Revoked', instructions: `In Microsoft 365 Admin Center, remove the employee's license assignment. Sign out all active sessions. Archive or transfer their email and OneDrive data per company policy before deleting.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'zac', label: 'ZAC / Phone Extension Removed', instructions: `Log into Zultys Administration panel. Remove the employee's user account and extension. Reassign the extension if needed. Confirm the employee can no longer access the phone system.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'alarm', label: 'Alarm Code Deleted', instructions: `Enter alarm panel admin mode. Delete the employee's alarm code. Confirm it no longer works. Consider whether combination codes for CUI areas need to be changed per the CMMC offboarding checklist.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'duo', label: 'Duo MFA Enrollment Removed', instructions: `Log into Duo Admin Panel. Find the employee under Users. Delete the user or remove all enrolled devices. Confirm they can no longer authenticate via Duo. This must be done on or before the last day.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'blumira', label: 'Blumira Agent Removed from Computer', instructions: `If the computer is being returned or reassigned, uninstall the Blumira agent. In the Blumira dashboard remove the device from the sensor list. If the workstation is being wiped this step is covered by the wipe process.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'withsecure', label: 'WithSecure EPP Uninstalled', instructions: `In WithSecure Elements Security Center, remove the device from the management console. Uninstall the endpoint protection agent from the workstation if it is being reassigned. If being wiped, the wipe process covers this.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'bitlocker', label: 'BitLocker Status Verified Before Wipe', instructions: `Before wiping or reassigning the workstation, confirm BitLocker is still active and that the recovery key is stored in Active Directory. Perform a secure wipe using BitLocker encryption + format, or use the manufacturer's secure erase tool for SSDs.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'vpn', label: 'VPN Access Removed', instructions: `Log into UniFi Network dashboard. Go to Settings → Teleport & VPN → VPN Server. Remove the employee's VPN user account. Confirm they can no longer establish a VPN connection. Revoke any VPN client config files that were issued.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+  { category: 'HR Templates', key: 'handbook', label: 'Handbook Acknowledgment Filed', instructions: `Confirm the signed employee handbook acknowledgment is on file. Note the handbook version that was in effect at the time of the employee's hire. Retain per company records retention policy.`, notes_enabled: false, track: 'nulabs', type: 'offboarding' },
+
+  // Ballantine Offboarding - Generated from _buildOffboardingItems function mappings (9 items)  
+  { category: 'HR Templates', key: 'credentials', label: 'Credentials Revoked (AD + Email Disabled)', instructions: `In Active Directory Users and Computers, right-click the employee account and select Disable Account. In Google Workspace Admin disable the user account. Revoke any active sessions. This must be completed on or before the employee's last day.`, notes_enabled: false, track: 'ballantine', type: 'offboarding' },
+  { category: 'HR Templates', key: 'email', label: 'Email Account Disabled', instructions: `In Google Workspace Admin disable the employee's account. Set up an out-of-office reply if needed. Archive the mailbox per company policy. Remove from all distribution lists.`, notes_enabled: false, track: 'ballantine', type: 'offboarding' },
+  { category: 'HR Templates', key: 'office', label: 'Office 365 License Revoked', instructions: `In Microsoft 365 Admin Center, remove the employee's license assignment. Sign out all active sessions. Archive or transfer their email and OneDrive data per company policy before deleting.`, notes_enabled: false, track: 'ballantine', type: 'offboarding' },
+  { category: 'HR Templates', key: 'zac', label: 'ZAC / Phone Extension Removed', instructions: `Log into Zultys Administration panel. Remove the employee's user account and extension. Reassign the extension if needed. Confirm the employee can no longer access the phone system.`, notes_enabled: false, track: 'ballantine', type: 'offboarding' },
+  { category: 'HR Templates', key: 'sql', label: 'SQL Server Access Revoked', instructions: `Remove the employee's SQL Server login and database user accounts. Revoke any permissions granted. Confirm they can no longer connect to the database.`, notes_enabled: false, track: 'ballantine', type: 'offboarding' },
+  { category: 'HR Templates', key: 'dba', label: 'DBA Software Access Revoked', instructions: `Remove the employee's DBA manufacturing software user account and any related licenses. Uninstall the software from the returned workstation if being reassigned.`, notes_enabled: false, track: 'ballantine', type: 'offboarding' },
+  { category: 'HR Templates', key: 'alarm', label: 'Alarm Code Deleted', instructions: `Enter alarm panel admin mode. Delete the employee's alarm code. Confirm it no longer works. Consider whether combination codes for CUI areas need to be changed per the CMMC offboarding checklist.`, notes_enabled: false, track: 'ballantine', type: 'offboarding' },
+  { category: 'HR Templates', key: 'synology', label: 'Synology Private Share Access Revoked', instructions: `In Synology DSM → Control Panel → Shared Folder → Ballantine share → Permissions, remove the employee's AD account. Confirm they can no longer access the share.`, notes_enabled: false, track: 'ballantine', type: 'offboarding' },
+  { category: 'HR Templates', key: 'handbook', label: 'Handbook Acknowledgment Filed', instructions: `Confirm the signed employee handbook acknowledgment is on file. Note the handbook version that was in effect at the time of the employee's hire. Retain per company records retention policy.`, notes_enabled: false, track: 'ballantine', type: 'offboarding' }
 ];
 
 let templateCategories = [];
@@ -368,9 +393,11 @@ function renderTemplatesPanel() {
         const categoryTemplates = templates.filter(t => t.category_id === category.id);
         
         if (category.name === 'HR Templates') {
-          // Break down HR templates by track
-          const nulabsTemplates = categoryTemplates.filter(t => t.track === 'nulabs');
-          const ballantineTemplates = categoryTemplates.filter(t => t.track === 'ballantine');
+          // Break down HR templates by track AND type
+          const nulabsOnboarding = categoryTemplates.filter(t => t.track === 'nulabs' && t.type === 'onboarding');
+          const nulabsOffboarding = categoryTemplates.filter(t => t.track === 'nulabs' && t.type === 'offboarding');
+          const ballantineOnboarding = categoryTemplates.filter(t => t.track === 'ballantine' && t.type === 'onboarding');
+          const ballantineOffboarding = categoryTemplates.filter(t => t.track === 'ballantine' && t.type === 'offboarding');
           const generalTemplates = categoryTemplates.filter(t => !t.track || (t.track !== 'nulabs' && t.track !== 'ballantine'));
           
           return `
@@ -381,25 +408,49 @@ function renderTemplatesPanel() {
               <div style="font-size:11px;color:var(--muted);margin-top:4px;">${categoryTemplates.length} total templates</div>
             </div>
             <div style="padding:16px 20px;">
-              ${nulabsTemplates.length > 0 ? `
+              ${nulabsOnboarding.length > 0 ? `
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
                   <div>
                     <div style="font-size:13px;font-weight:600;color:var(--text);">NU Labs Onboarding</div>
-                    <div style="font-size:11px;color:var(--muted);">${nulabsTemplates.length} templates</div>
+                    <div style="font-size:11px;color:var(--muted);">${nulabsOnboarding.length} templates</div>
                   </div>
-                  <button onclick="editTemplateSubgroup('${category.id}', 'nulabs')" 
+                  <button onclick="editTemplateSubgroup('${category.id}', 'nulabs-onboarding')" 
+                    style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    Edit
+                  </button>
+                </div>` : ''}
+
+              ${nulabsOffboarding.length > 0 ? `
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
+                  <div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text);">NU Labs Offboarding</div>
+                    <div style="font-size:11px;color:var(--muted);">${nulabsOffboarding.length} templates</div>
+                  </div>
+                  <button onclick="editTemplateSubgroup('${category.id}', 'nulabs-offboarding')" 
                     style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
                     Edit
                   </button>
                 </div>` : ''}
               
-              ${ballantineTemplates.length > 0 ? `
+              ${ballantineOnboarding.length > 0 ? `
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
                   <div>
                     <div style="font-size:13px;font-weight:600;color:var(--text);">Ballantine Onboarding</div>
-                    <div style="font-size:11px;color:var(--muted);">${ballantineTemplates.length} templates</div>
+                    <div style="font-size:11px;color:var(--muted);">${ballantineOnboarding.length} templates</div>
                   </div>
-                  <button onclick="editTemplateSubgroup('${category.id}', 'ballantine')" 
+                  <button onclick="editTemplateSubgroup('${category.id}', 'ballantine-onboarding')" 
+                    style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    Edit
+                  </button>
+                </div>` : ''}
+
+              ${ballantineOffboarding.length > 0 ? `
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
+                  <div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text);">Ballantine Offboarding</div>
+                    <div style="font-size:11px;color:var(--muted);">${ballantineOffboarding.length} templates</div>
+                  </div>
+                  <button onclick="editTemplateSubgroup('${category.id}', 'ballantine-offboarding')" 
                     style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
                     Edit
                   </button>
@@ -519,10 +570,19 @@ function openTemplateEditModal(categoryId, subgroup = null) {
   
   if (subgroup) {
     if (category.name === 'HR Templates') {
-      // Filter by track for HR templates
-      if (subgroup === 'general') {
+      // Handle new combined track-type subgroups
+      if (subgroup === 'nulabs-onboarding') {
+        filteredTemplates = filteredTemplates.filter(t => t.track === 'nulabs' && t.type === 'onboarding');
+      } else if (subgroup === 'nulabs-offboarding') {
+        filteredTemplates = filteredTemplates.filter(t => t.track === 'nulabs' && t.type === 'offboarding');
+      } else if (subgroup === 'ballantine-onboarding') {
+        filteredTemplates = filteredTemplates.filter(t => t.track === 'ballantine' && t.type === 'onboarding');
+      } else if (subgroup === 'ballantine-offboarding') {
+        filteredTemplates = filteredTemplates.filter(t => t.track === 'ballantine' && t.type === 'offboarding');
+      } else if (subgroup === 'general') {
         filteredTemplates = filteredTemplates.filter(t => !t.track || (t.track !== 'nulabs' && t.track !== 'ballantine'));
       } else {
+        // Legacy support for old subgroup names
         filteredTemplates = filteredTemplates.filter(t => t.track === subgroup);
       }
     } else if (category.name === 'Compliance Templates') {
@@ -579,15 +639,25 @@ function renderTemplateEditModal(category, subgroup = null) {
   
   if (subgroup) {
     if (category.name === 'HR Templates') {
-      if (subgroup === 'nulabs') {
+      if (subgroup === 'nulabs-onboarding') {
         modalTitle = 'Edit NU Labs Onboarding Templates';
         modalDescription = 'Onboarding checklist items for NU Labs employees';
-      } else if (subgroup === 'ballantine') {
+      } else if (subgroup === 'nulabs-offboarding') {
+        modalTitle = 'Edit NU Labs Offboarding Templates';
+        modalDescription = 'Offboarding checklist items for NU Labs employees';
+      } else if (subgroup === 'ballantine-onboarding') {
         modalTitle = 'Edit Ballantine Onboarding Templates';  
         modalDescription = 'Onboarding checklist items for Ballantine employees';
+      } else if (subgroup === 'ballantine-offboarding') {
+        modalTitle = 'Edit Ballantine Offboarding Templates';  
+        modalDescription = 'Offboarding checklist items for Ballantine employees';
       } else if (subgroup === 'general') {
         modalTitle = 'Edit General HR Templates';
         modalDescription = 'General HR templates not specific to any track';
+      } else {
+        // Legacy support
+        modalTitle = `Edit ${subgroup} Templates`;
+        modalDescription = `Templates for ${subgroup} employees`;
       }
     } else if (category.name === 'Compliance Templates') {
       const domainNames = {
@@ -633,8 +703,26 @@ async function addNewTemplate() {
   
   if (editingSubgroup) {
     if (category.name === 'HR Templates') {
-      defaultTrack = editingSubgroup === 'general' ? 'general' : editingSubgroup;
-      defaultType = 'onboarding';
+      if (editingSubgroup === 'nulabs-onboarding') {
+        defaultTrack = 'nulabs';
+        defaultType = 'onboarding';
+      } else if (editingSubgroup === 'nulabs-offboarding') {
+        defaultTrack = 'nulabs';
+        defaultType = 'offboarding';
+      } else if (editingSubgroup === 'ballantine-onboarding') {
+        defaultTrack = 'ballantine';
+        defaultType = 'onboarding';
+      } else if (editingSubgroup === 'ballantine-offboarding') {
+        defaultTrack = 'ballantine';
+        defaultType = 'offboarding';
+      } else if (editingSubgroup === 'general') {
+        defaultTrack = 'general';
+        defaultType = 'general';
+      } else {
+        // Legacy support
+        defaultTrack = editingSubgroup;
+        defaultType = 'onboarding';
+      }
     } else if (category.name === 'Compliance Templates') {
       defaultDomain = editingSubgroup;
       defaultType = 'compliance';
