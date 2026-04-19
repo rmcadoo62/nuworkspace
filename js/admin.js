@@ -366,33 +366,527 @@ function renderTemplatesPanel() {
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;">
       ${templateCategories.map(category => {
         const categoryTemplates = templates.filter(t => t.category_id === category.id);
-        return `
-        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
-          <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
-            <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">${category.icon} ${category.name}</div>
-            <div style="font-size:12px;color:var(--muted);">${category.description}</div>
-          </div>
-          <div style="padding:16px 20px;">
-            ${categoryTemplates.length > 0 
-              ? `<div style="font-size:13px;color:var(--text);margin-bottom:8px;">${categoryTemplates.length} template${categoryTemplates.length !== 1 ? 's' : ''}</div>
-                 <button onclick="editCategoryTemplates('${category.id}')" 
-                   style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
-                   Edit Templates
-                 </button>`
-              : `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">No templates yet</div>`
-            }
-          </div>
-        </div>`;
+        
+        if (category.name === 'HR Templates') {
+          // Break down HR templates by track
+          const nulabsTemplates = categoryTemplates.filter(t => t.track === 'nulabs');
+          const ballantineTemplates = categoryTemplates.filter(t => t.track === 'ballantine');
+          const generalTemplates = categoryTemplates.filter(t => !t.track || (t.track !== 'nulabs' && t.track !== 'ballantine'));
+          
+          return `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+            <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+              <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">${category.icon} ${category.name}</div>
+              <div style="font-size:12px;color:var(--muted);">${category.description}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px;">${categoryTemplates.length} total templates</div>
+            </div>
+            <div style="padding:16px 20px;">
+              ${nulabsTemplates.length > 0 ? `
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
+                  <div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text);">NU Labs Onboarding</div>
+                    <div style="font-size:11px;color:var(--muted);">${nulabsTemplates.length} templates</div>
+                  </div>
+                  <button onclick="editTemplateSubgroup('${category.id}', 'nulabs')" 
+                    style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    Edit
+                  </button>
+                </div>` : ''}
+              
+              ${ballantineTemplates.length > 0 ? `
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
+                  <div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text);">Ballantine Onboarding</div>
+                    <div style="font-size:11px;color:var(--muted);">${ballantineTemplates.length} templates</div>
+                  </div>
+                  <button onclick="editTemplateSubgroup('${category.id}', 'ballantine')" 
+                    style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    Edit
+                  </button>
+                </div>` : ''}
+              
+              ${generalTemplates.length > 0 ? `
+                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
+                  <div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text);">General HR Templates</div>
+                    <div style="font-size:11px;color:var(--muted);">${generalTemplates.length} templates</div>
+                  </div>
+                  <button onclick="editTemplateSubgroup('${category.id}', 'general')" 
+                    style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    Edit
+                  </button>
+                </div>` : ''}
+              
+              ${categoryTemplates.length === 0 ? `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">No templates yet</div>` : ''}
+            </div>
+          </div>`;
+          
+        } else if (category.name === 'Compliance Templates') {
+          // Break down CMMC templates by domain
+          const domains = [
+            { key: 'AC', name: 'Access Control', desc: 'User accounts, permissions, access management' },
+            { key: 'AU', name: 'Audit & Accountability', desc: 'Logging, monitoring, audit trails' },
+            { key: 'CM', name: 'Configuration Management', desc: 'System configurations, change control' },
+            { key: 'IR', name: 'Incident Response', desc: 'Security incidents, response procedures' },
+            { key: 'MA', name: 'Maintenance', desc: 'System maintenance, updates' },
+            { key: 'MP', name: 'Media Protection', desc: 'Data storage, media handling' },
+            { key: 'PE', name: 'Physical Protection', desc: 'Facility security, physical access' },
+            { key: 'PS', name: 'Personnel Security', desc: 'Background checks, training' },
+            { key: 'RA', name: 'Risk Assessment', desc: 'Risk analysis, vulnerability scanning' },
+            { key: 'SC', name: 'System Communications', desc: 'Network security, encryption' },
+            { key: 'SI', name: 'System Integrity', desc: 'Malware protection, system monitoring' }
+          ];
+          
+          return `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+            <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+              <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">${category.icon} ${category.name}</div>
+              <div style="font-size:12px;color:var(--muted);">${category.description}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px;">${categoryTemplates.length} total templates</div>
+            </div>
+            <div style="padding:16px 20px;max-height:400px;overflow-y:auto;">
+              ${domains.map(domain => {
+                const domainTemplates = categoryTemplates.filter(t => (t.domain || '').toUpperCase() === domain.key);
+                return domainTemplates.length > 0 ? `
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:6px 10px;background:var(--surface2);border-radius:6px;font-size:12px;">
+                    <div>
+                      <div style="font-weight:600;color:var(--text);">${domain.key} - ${domain.name}</div>
+                      <div style="font-size:10px;color:var(--muted);">${domainTemplates.length} templates • ${domain.desc}</div>
+                    </div>
+                    <button onclick="editTemplateSubgroup('${category.id}', '${domain.key}')" 
+                      style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:4px;padding:4px 10px;font-size:11px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                      Edit
+                    </button>
+                  </div>` : '';
+              }).join('')}
+              
+              ${categoryTemplates.length === 0 ? `
+                <div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">
+                  No CMMC templates yet.<br>
+                  <button onclick="migrateComplianceEvidence()" 
+                    style="background:var(--blue);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;margin-top:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    Import from compliance.js
+                  </button>
+                </div>` : ''}
+            </div>
+          </div>`;
+          
+        } else {
+          // Other categories - keep existing behavior
+          return `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+            <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+              <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">${category.icon} ${category.name}</div>
+              <div style="font-size:12px;color:var(--muted);">${category.description}</div>
+            </div>
+            <div style="padding:16px 20px;">
+              ${categoryTemplates.length > 0 
+                ? `<div style="font-size:13px;color:var(--text);margin-bottom:8px;">${categoryTemplates.length} template${categoryTemplates.length !== 1 ? 's' : ''}</div>
+                   <button onclick="editCategoryTemplates('${category.id}')" 
+                     style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                     Edit Templates
+                   </button>`
+                : `<div style="color:var(--muted);font-size:13px;text-align:center;padding:20px 0;">No templates yet</div>`
+              }
+            </div>
+          </div>`;
+        }
       }).join('')}
     </div>
   `;
 }
 
 function editCategoryTemplates(categoryId) {
-  // TODO: Open template editing modal/panel
+  openTemplateEditModal(categoryId);
+}
+
+function editTemplateSubgroup(categoryId, subgroup) {
+  openTemplateEditModal(categoryId, subgroup);
+}
+
+// ===== TEMPLATE EDITING MODAL =====
+let editingTemplateData = [];
+let editingCategoryId = null;
+let editingSubgroup = null;
+
+function openTemplateEditModal(categoryId, subgroup = null) {
+  editingCategoryId = categoryId;
+  editingSubgroup = subgroup;
   const category = templateCategories.find(c => c.id === categoryId);
-  const categoryTemplates = templates.filter(t => t.category_id === categoryId);
-  alert(`Edit ${category.name} - ${categoryTemplates.length} templates (TODO: Build editing UI)`);
+  
+  // Filter templates by subgroup
+  let filteredTemplates = templates.filter(t => t.category_id === categoryId);
+  
+  if (subgroup) {
+    if (category.name === 'HR Templates') {
+      // Filter by track for HR templates
+      if (subgroup === 'general') {
+        filteredTemplates = filteredTemplates.filter(t => !t.track || (t.track !== 'nulabs' && t.track !== 'ballantine'));
+      } else {
+        filteredTemplates = filteredTemplates.filter(t => t.track === subgroup);
+      }
+    } else if (category.name === 'Compliance Templates') {
+      // Filter by domain for CMMC templates
+      filteredTemplates = filteredTemplates.filter(t => (t.domain || '').toUpperCase() === subgroup.toUpperCase());
+    }
+  }
+  
+  editingTemplateData = filteredTemplates.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  
+  const modal = document.getElementById('templateEditModal');
+  if (!modal) {
+    createTemplateEditModal();
+  }
+  
+  renderTemplateEditModal(category, subgroup);
+  document.getElementById('templateEditModal').classList.add('open');
+}
+
+function createTemplateEditModal() {
+  const modalHtml = `
+    <div id="templateEditModal" class="modal-backdrop" onclick="if(event.target===this) closeTemplateEditModal()">
+      <div class="modal" style="width:90%;max-width:1000px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;">
+        <div class="modal-header">
+          <div class="modal-title" id="templateEditTitle">Edit Templates</div>
+          <button class="modal-close" onclick="closeTemplateEditModal()">&#x2715;</button>
+        </div>
+        <div class="modal-body" id="templateEditBody" style="flex:1;overflow-y:auto;">
+          <!-- Template list will be rendered here -->
+        </div>
+        <div class="modal-footer">
+          <button onclick="addNewTemplate()" 
+            style="background:var(--amber);color:var(--bg);border:none;border-radius:6px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">
+            + Add Template
+          </button>
+          <button onclick="closeTemplateEditModal()" 
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer;color:var(--muted);font-family:'DM Sans',sans-serif;">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>`;
+  
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+function renderTemplateEditModal(category, subgroup = null) {
+  const body = document.getElementById('templateEditBody');
+  const title = document.getElementById('templateEditTitle');
+  
+  // Generate appropriate title and description
+  let modalTitle = `Edit ${category.name}`;
+  let modalDescription = category.description;
+  
+  if (subgroup) {
+    if (category.name === 'HR Templates') {
+      if (subgroup === 'nulabs') {
+        modalTitle = 'Edit NU Labs Onboarding Templates';
+        modalDescription = 'Onboarding checklist items for NU Labs employees';
+      } else if (subgroup === 'ballantine') {
+        modalTitle = 'Edit Ballantine Onboarding Templates';  
+        modalDescription = 'Onboarding checklist items for Ballantine employees';
+      } else if (subgroup === 'general') {
+        modalTitle = 'Edit General HR Templates';
+        modalDescription = 'General HR templates not specific to any track';
+      }
+    } else if (category.name === 'Compliance Templates') {
+      const domainNames = {
+        'AC': 'Access Control', 'AU': 'Audit & Accountability', 'CM': 'Configuration Management',
+        'IR': 'Incident Response', 'MA': 'Maintenance', 'MP': 'Media Protection',
+        'PE': 'Physical Protection', 'PS': 'Personnel Security', 'RA': 'Risk Assessment',
+        'SC': 'System Communications', 'SI': 'System Integrity'
+      };
+      modalTitle = `Edit ${subgroup} - ${domainNames[subgroup] || subgroup} Templates`;
+      modalDescription = `CMMC Level 2 evidence strings for ${domainNames[subgroup] || subgroup} domain`;
+    }
+  }
+  
+  if (title) title.textContent = modalTitle;
+  
+  if (!body) return;
+  
+  body.innerHTML = `
+    <div style="padding:24px;">
+      <div style="margin-bottom:20px;">
+        <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px;">${category.icon} ${modalTitle}</div>
+        <div style="font-size:13px;color:var(--muted);">${modalDescription}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px;">${editingTemplateData.length} template${editingTemplateData.length !== 1 ? 's' : ''}</div>
+      </div>
+      
+      <div id="templateEditList">
+        ${editingTemplateData.length === 0 
+          ? '<div style="text-align:center;padding:40px;color:var(--muted);">No templates in this group yet.</div>'
+          : editingTemplateData.map((template, index) => renderTemplateEditRow(template, index)).join('')
+        }
+      </div>
+    </div>`;
+}
+
+async function addNewTemplate() {
+  const category = templateCategories.find(c => c.id === editingCategoryId);
+  if (!category) return;
+  
+  // Determine default values based on subgroup
+  let defaultTrack = 'general';
+  let defaultDomain = '';
+  let defaultType = 'general';
+  
+  if (editingSubgroup) {
+    if (category.name === 'HR Templates') {
+      defaultTrack = editingSubgroup === 'general' ? 'general' : editingSubgroup;
+      defaultType = 'onboarding';
+    } else if (category.name === 'Compliance Templates') {
+      defaultDomain = editingSubgroup;
+      defaultType = 'compliance';
+    }
+  }
+  
+  const newTemplate = {
+    category_id: editingCategoryId,
+    key: 'new_template_' + Date.now(),
+    label: 'New Template',
+    instructions: 'Enter template instructions here...',
+    notes_enabled: false,
+    track: defaultTrack,
+    domain: defaultDomain,
+    type: defaultType,
+    sort_order: editingTemplateData.length,
+    is_active: true
+  };
+  
+  try {
+    const { data, error } = await sb.from('templates')
+      .insert([newTemplate])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Template create error:', error);
+      toast('⚠ Create failed: ' + error.message);
+      return;
+    }
+    
+    // Add to local data
+    templates.push(data);
+    editingTemplateData.push(data);
+    
+    // Re-render modal
+    renderTemplateEditModal(category, editingSubgroup);
+    
+    // Update main templates panel
+    renderTemplatesPanel();
+    
+    toast('✓ Template added');
+    
+  } catch (e) {
+    console.error('Template create failed:', e);
+    toast('⚠ Create failed');
+  }
+}
+
+// Placeholder function for CMMC migration
+function migrateComplianceEvidence() {
+  alert('CMMC Evidence Migration\n\nThis will import hardcoded evidence strings from compliance.js into the database-backed template system.\n\n(Feature coming next - need to build the migration tool)');
+}
+
+function renderTemplateEditRow(template, index) {
+  const trackOptions = ['nulabs', 'ballantine', 'general'].map(track => 
+    `<option value="${track}" ${template.track === track ? 'selected' : ''}>${track}</option>`).join('');
+  
+  const typeOptions = ['onboarding', 'offboarding', 'compliance', 'general'].map(type => 
+    `<option value="${type}" ${template.type === type ? 'selected' : ''}>${type}</option>`).join('');
+  
+  const domainOptions = ['AC', 'AU', 'CM', 'IR', 'MA', 'MP', 'PE', 'PS', 'RA', 'SC', 'SI'].map(domain => 
+    `<option value="${domain}" ${(template.domain || '').toUpperCase() === domain ? 'selected' : ''}>${domain}</option>`).join('');
+  
+  return `
+    <div class="template-edit-row" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:12px;">
+      <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px;">
+        <div style="flex:1;">
+          <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Template Label</div>
+          <input type="text" value="${template.label}" 
+            onchange="updateTemplateField('${template.id}', 'label', this.value)"
+            style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
+        </div>
+        <div style="display:flex;gap:8px;align-items:flex-end;">
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Track</div>
+            <select onchange="updateTemplateField('${template.id}', 'track', this.value)"
+              style="background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
+              ${trackOptions}
+            </select>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Type</div>
+            <select onchange="updateTemplateField('${template.id}', 'type', this.value)"
+              style="background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
+              ${typeOptions}
+            </select>
+          </div>
+          ${template.type === 'compliance' || (template.domain && template.domain.length > 0) ? `
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Domain</div>
+            <select onchange="updateTemplateField('${template.id}', 'domain', this.value)"
+              style="background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
+              <option value="">—</option>
+              ${domainOptions}
+            </select>
+          </div>` : ''}
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Sort</div>
+            <input type="number" value="${template.sort_order || index}" min="0" max="999" 
+              onchange="updateTemplateField('${template.id}', 'sort_order', parseInt(this.value))"
+              style="width:60px;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 8px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
+          </div>
+          <button onclick="deleteTemplate('${template.id}')" 
+            style="background:rgba(224,92,92,0.1);border:1px solid rgba(224,92,92,0.3);border-radius:6px;padding:8px 10px;color:var(--red);cursor:pointer;font-size:12px;">
+            🗑
+          </button>
+        </div>
+      </div>
+      
+      <div style="margin-bottom:12px;">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Instructions</div>
+        <textarea onchange="updateTemplateField('${template.id}', 'instructions', this.value)"
+          style="width:100%;min-height:100px;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;resize:vertical;box-sizing:border-box;">${template.instructions}</textarea>
+      </div>
+      
+      <div style="display:flex;align-items:center;gap:8px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text);">
+          <input type="checkbox" ${template.notes_enabled ? 'checked' : ''} 
+            onchange="updateTemplateField('${template.id}', 'notes_enabled', this.checked)"
+            style="margin:0;">
+          Notes field enabled
+        </label>
+        <div style="margin-left:auto;font-size:11px;color:var(--muted);">Key: <code style="font-family:'JetBrains Mono',monospace;background:var(--surface);padding:2px 6px;border-radius:3px;">${template.key}</code></div>
+      </div>
+    </div>`;
+}
+
+function closeTemplateEditModal() {
+  document.getElementById('templateEditModal').classList.remove('open');
+}
+
+async function updateTemplateField(templateId, field, value) {
+  try {
+    // Update database
+    const { error } = await sb.from('templates')
+      .update({ [field]: value })
+      .eq('id', templateId);
+    
+    if (error) {
+      console.error('Template update error:', error);
+      toast('⚠ Update failed: ' + error.message);
+      return;
+    }
+    
+    // Update local data
+    const template = templates.find(t => t.id === templateId);
+    if (template) template[field] = value;
+    
+    const editingTemplate = editingTemplateData.find(t => t.id === templateId);
+    if (editingTemplate) editingTemplate[field] = value;
+    
+    // Show success feedback
+    toast('✓ Template updated');
+    
+    // If sort order changed, re-render to show new order
+    if (field === 'sort_order') {
+      await loadTemplateData(); // Reload to get proper sorting
+      const category = templateCategories.find(c => c.id === editingCategoryId);
+      editingTemplateData = templates.filter(t => t.category_id === editingCategoryId).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      renderTemplateEditModal(category);
+    }
+    
+  } catch (e) {
+    console.error('Template update failed:', e);
+    toast('⚠ Update failed');
+  }
+}
+
+async function deleteTemplate(templateId) {
+  const template = editingTemplateData.find(t => t.id === templateId);
+  if (!template) return;
+  
+  if (!confirm(`Delete template "${template.label}"? This cannot be undone and will affect any onboarding checklists using this template.`)) {
+    return;
+  }
+  
+  try {
+    const { error } = await sb.from('templates').delete().eq('id', templateId);
+    
+    if (error) {
+      console.error('Template delete error:', error);
+      toast('⚠ Delete failed: ' + error.message);
+      return;
+    }
+    
+    // Remove from local data
+    const globalIndex = templates.findIndex(t => t.id === templateId);
+    if (globalIndex > -1) templates.splice(globalIndex, 1);
+    
+    const editingIndex = editingTemplateData.findIndex(t => t.id === templateId);
+    if (editingIndex > -1) editingTemplateData.splice(editingIndex, 1);
+    
+    // Re-render modal
+    const category = templateCategories.find(c => c.id === editingCategoryId);
+    renderTemplateEditModal(category);
+    
+    // Update main templates panel
+    renderTemplatesPanel();
+    
+    toast('✓ Template deleted');
+    
+  } catch (e) {
+    console.error('Template delete failed:', e);
+    toast('⚠ Delete failed');
+  }
+}
+
+async function addNewTemplate() {
+  const category = templateCategories.find(c => c.id === editingCategoryId);
+  if (!category) return;
+  
+  const newTemplate = {
+    category_id: editingCategoryId,
+    key: 'new_template_' + Date.now(),
+    label: 'New Template',
+    instructions: 'Enter template instructions here...',
+    notes_enabled: false,
+    track: 'nulabs',
+    type: 'onboarding',
+    sort_order: editingTemplateData.length,
+    is_active: true
+  };
+  
+  try {
+    const { data, error } = await sb.from('templates')
+      .insert([newTemplate])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Template create error:', error);
+      toast('⚠ Create failed: ' + error.message);
+      return;
+    }
+    
+    // Add to local data
+    templates.push(data);
+    editingTemplateData.push(data);
+    
+    // Re-render modal
+    renderTemplateEditModal(category);
+    
+    // Update main templates panel
+    renderTemplatesPanel();
+    
+    toast('✓ Template added');
+    
+  } catch (e) {
+    console.error('Template create failed:', e);
+    toast('⚠ Create failed');
+  }
 }
 
 
