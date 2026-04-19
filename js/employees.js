@@ -25,6 +25,8 @@ function openEmployeesPanel(el) {
 }
 
 let empDetailOpen = null;
+let empProfileTab = 'profile'; // 'profile' | 'onboarding' | 'offboarding'
+let onboardingCache = {}; // empId -> onboarding record
 
 // ── Time-off helpers ────────────────────────────────────────────────────────
 
@@ -688,7 +690,19 @@ function showEmpProfile(empId, annivOffset) {
   }
 
     pane.innerHTML = `
-    <!-- Header -->
+    <!-- Tab bar -->
+    <div style="display:flex;gap:0;border-bottom:1.5px solid var(--border);margin-bottom:24px;background:var(--bg);position:sticky;top:0;z-index:10">
+      ${['profile','onboarding','offboarding'].map(t => {
+        const labels = { profile:'👤 Profile', onboarding:'✅ Onboarding', offboarding:'🚪 Offboarding' };
+        const active = empProfileTab === t;
+        return `<button onclick="switchEmpTab('${empId}','${t}')"
+          style="padding:10px 20px;background:transparent;border:none;border-bottom:2.5px solid ${active?'var(--amber)':'transparent'};font-family:'DM Sans',sans-serif;font-size:13px;font-weight:${active?'600':'500'};color:${active?'var(--amber)':'var(--muted)'};cursor:pointer;transition:all var(--transition);margin-bottom:-1.5px;white-space:nowrap">
+          ${labels[t]}
+        </button>`;
+      }).join('')}
+    </div>
+    <div id="empTabContent" style="padding:0 28px 28px">
+    ${empProfileTab === 'profile' ? `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
       <div style="display:flex;align-items:center;gap:16px">
         <div style="width:64px;height:64px;border-radius:50%;background:${emp.color};display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:#fff;flex-shrink:0">${emp.initials}</div>
@@ -999,7 +1013,373 @@ function showEmpProfile(empId, annivOffset) {
             <tbody>${tsRows}</tbody>
           </table>`}
     </div>
+  ` : `<div id="onboardingTabInner"></div>`}
+  </div>
   `;
+
+  // If not profile tab, load checklist content
+  if (empProfileTab !== 'profile') {
+    _loadOnboardingTab(empId, emp, empProfileTab);
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  EMPLOYEE ONBOARDING / OFFBOARDING CHECKLIST
+// ════════════════════════════════════════════════════════════════════
+
+function switchEmpTab(empId, tab) {
+  empProfileTab = tab;
+  showEmpProfile(empId);
+}
+
+// ── Checklist definitions ─────────────────────────────────────────
+
+const ONBOARDING_NULABS = [
+  {
+    key: 'credentials',
+    label: 'Initial Credentials Issued',
+    notes: true,
+    notesLabel: 'Note (e.g. confirmed issued, user prompted to change)',
+    instructions: `Create AD account in Active Directory Users and Computers. Set temporary password and check "User must change password at next logon." Create matching email account in Google Workspace using the work email address. Provide credentials to employee securely on their first day in person — do not send via email or text.`,
+  },
+  {
+    key: 'computer',
+    label: 'Computer Assigned & Added to Server',
+    notes: true,
+    notesLabel: 'Computer name / asset tag',
+    instructions: `Record the computer name and asset tag. On the workstation go to System Properties → Computer Name → Change → select Domain and enter the NU Laboratories domain name. Restart when prompted. Verify the computer appears in Active Directory Users and Computers under the Computers OU.`,
+  },
+  {
+    key: 'nuworkspace',
+    label: 'NUWorkspace Account Created & Permissions Set',
+    notes: false,
+    instructions: `Add the employee record in NUWorkspace Setup → Employees. Set permission level, hire date, and role. Then go to your Supabase project → Authentication → Users → Invite User and enter their work email address. They will receive an invite email to set their password. Once they log in verify their profile loads correctly and permissions are appropriate.`,
+  },
+  {
+    key: 'office',
+    label: 'Office Suite Installed',
+    notes: false,
+    instructions: `Log into the Microsoft 365 Admin Center (admin.microsoft.com). Assign a Microsoft 365 license to the employee's work email. On the employee's workstation go to portal.office.com, sign in with the work email, and download/install Microsoft 365. Activate with the work account credentials.`,
+  },
+  {
+    key: 'zac',
+    label: 'ZAC Phone Software Installed',
+    notes: true,
+    notesLabel: 'Employee extension number',
+    instructions: `Download ZAC from https://www.zultys.com/zac/ and install on the employee's workstation. Configure with the employee's extension number and credentials. Log into the Zultys Administration panel and add the employee as a user, assign their extension, and configure voicemail. Test by placing a test call.`,
+  },
+  {
+    key: 'alarm',
+    label: 'Added to Alarm System',
+    notes: true,
+    notesLabel: 'Alarm code assigned',
+    instructions: `Enter alarm panel admin mode using the master code. Add a new user code for the employee. Assign a unique code that is not shared with any other employee. Test the code to confirm it arms and disarms the system correctly. Provide the code to the employee verbally — do not write it down or send electronically.`,
+  },
+  {
+    key: 'duo',
+    label: 'Duo MFA Installed on Computer',
+    notes: false,
+    instructions: `Log into the Duo Admin Panel (admin.duosecurity.com). Go to Users → Add User. Enter the employee's name and work email. Click Send Enrollment Email. The employee will receive an email to enroll their device. Verify the enrollment is complete and the employee can successfully authenticate before granting CUI system access.`,
+  },
+  {
+    key: 'blumira',
+    label: 'Blumira SIEM Agent Installed',
+    notes: false,
+    instructions: `Log into the Blumira dashboard. Navigate to Sensors → Deploy Agent. Select Windows as the platform and download the installer. Run the installer on the employee's workstation. Once installed confirm the agent appears as active in the Blumira dashboard under the Sensors or Devices section.`,
+  },
+  {
+    key: 'withsecure',
+    label: 'WithSecure EPP Installed',
+    notes: false,
+    instructions: `Log into WithSecure Elements Security Center (elements.withsecure.com). Go to Devices → Add Device. Download the Windows endpoint protection installer. Run the installer on the employee's workstation. Confirm the device appears in the Elements Security Center console as protected and showing green status.`,
+  },
+  {
+    key: 'bitlocker',
+    label: 'BitLocker Enabled',
+    notes: false,
+    instructions: `Open Group Policy Management on the AD server and verify the BitLocker GPO is linked to the OU containing the employee's workstation. On the workstation run gpupdate /force in an elevated command prompt. Then go to Control Panel → BitLocker Drive Encryption and confirm encryption is in progress or active. This may take several hours to complete on first encryption.`,
+  },
+  {
+    key: 'vpn',
+    label: 'Added to VPN',
+    notes: false,
+    instructions: `Log into the UniFi Network dashboard. Go to Settings → Teleport & VPN → VPN Server. Add a new user with the employee's credentials. Download the OpenVPN client configuration file. Provide the employee with the VPN client config file and instructions for installing the OpenVPN client. Test the connection by having the employee connect remotely.`,
+  },
+  {
+    key: 'handbook',
+    label: 'Employee Handbook Signed',
+    notes: true,
+    notesLabel: 'Handbook version / edition',
+    instructions: `Provide the employee with a copy of the current NU Laboratories Employee Handbook. Review key sections together including the disciplinary policy, CUI handling requirements, and acceptable use policy. Have the employee sign the acknowledgment page confirming they received and reviewed the handbook. Retain the signed copy and note the handbook version in the notes field.`,
+  },
+];
+
+const ONBOARDING_BALLANTINE = [
+  {
+    key: 'credentials',
+    label: 'Initial Credentials Issued',
+    notes: true,
+    notesLabel: 'Note (e.g. confirmed issued, user prompted to change)',
+    instructions: `Create AD account in Active Directory Users and Computers. Set temporary password and check "User must change password at next logon." Create matching email account in Google Workspace. Provide credentials to employee securely on their first day in person.`,
+  },
+  {
+    key: 'email',
+    label: 'Email Setup',
+    notes: false,
+    instructions: `Log into Google Workspace Admin (admin.google.com). Create a new user account with the employee's work email address. Set a temporary password. Confirm the employee can log in and access email. Set up email signature and configure any needed distribution lists.`,
+  },
+  {
+    key: 'office',
+    label: 'Office Suite Installed',
+    notes: false,
+    instructions: `Log into the Microsoft 365 Admin Center (admin.microsoft.com). Assign a Microsoft 365 license to the employee's work email. On the employee's workstation go to portal.office.com, sign in with the work email, and download/install Microsoft 365.`,
+  },
+  {
+    key: 'zac',
+    label: 'ZAC Phone Software Installed',
+    notes: true,
+    notesLabel: 'Employee extension number',
+    instructions: `Download ZAC from https://www.zultys.com/zac/ and install on the employee's workstation. Configure with the employee's extension number and credentials. Add the employee in the Zultys Administration panel and test with a call.`,
+  },
+  {
+    key: 'sql',
+    label: 'SQL Server Installed',
+    notes: false,
+    instructions: `Install SQL Server client tools on the employee's workstation. Configure the connection string to point to the NU Labs SQL Server instance. Verify the employee can connect to the database with appropriate permissions. Test by running a basic query.`,
+  },
+  {
+    key: 'dba',
+    label: 'DBA Manufacturing Software Installed',
+    notes: false,
+    instructions: `Install DBA manufacturing software from the network share or installation media. Configure with the employee's credentials and company database settings. Verify the employee can log in and access their required modules.`,
+  },
+  {
+    key: 'alarm',
+    label: 'Added to Alarm System',
+    notes: true,
+    notesLabel: 'Alarm code assigned',
+    instructions: `Enter alarm panel admin mode. Add a new user code for the employee. Assign a unique code not shared with others. Test the code and provide it verbally to the employee.`,
+  },
+  {
+    key: 'synology',
+    label: 'Synology Private Share Access Granted',
+    notes: false,
+    instructions: `Log into Synology DSM → Control Panel → Shared Folder. Select the Ballantine private share. Click Edit → Permissions. Add the employee's AD account with the appropriate Read/Write access level. Apply and confirm the employee can access the share from their workstation.`,
+  },
+  {
+    key: 'handbook',
+    label: 'Employee Handbook Signed',
+    notes: true,
+    notesLabel: 'Handbook version / edition',
+    instructions: `Provide the employee with a copy of the current NU Laboratories Employee Handbook. Review key sections together. Have the employee sign the acknowledgment page confirming they received and reviewed the handbook. Retain the signed copy and note the handbook version in the notes field.`,
+  },
+];
+
+// Offboarding = reverse of onboarding with revoke language
+function _buildOffboardingItems(track) {
+  const src = track === 'ballantine' ? ONBOARDING_BALLANTINE : ONBOARDING_NULABS;
+  const labels = {
+    credentials:  { label: 'Credentials Revoked (AD + Email Disabled)', instructions: `In Active Directory Users and Computers, right-click the employee account and select Disable Account. In Google Workspace Admin disable the user account. Revoke any active sessions. This must be completed on or before the employee's last day.` },
+    computer:     { label: 'Computer Removed from Domain & Retrieved', instructions: `Retrieve the assigned workstation from the employee. In Active Directory Users and Computers, delete or disable the computer object. Wipe the workstation before reassigning using a secure erase method.` },
+    nuworkspace:  { label: 'NUWorkspace Account Deactivated', instructions: `In NUWorkspace Setup → Employees, set the employee's termination date and mark as inactive. In Supabase Authentication → Users, disable or delete the user account so they can no longer log in.` },
+    office:       { label: 'Office 365 License Revoked', instructions: `In Microsoft 365 Admin Center, remove the employee's license assignment. Sign out all active sessions. Archive or transfer their email and OneDrive data per company policy before deleting.` },
+    zac:          { label: 'ZAC / Phone Extension Removed', instructions: `Log into Zultys Administration panel. Remove the employee's user account and extension. Reassign the extension if needed. Confirm the employee can no longer access the phone system.` },
+    alarm:        { label: 'Alarm Code Deleted', instructions: `Enter alarm panel admin mode. Delete the employee's alarm code. Confirm it no longer works. Consider whether combination codes for CUI areas need to be changed per the CMMC offboarding checklist.` },
+    duo:          { label: 'Duo MFA Enrollment Removed', instructions: `Log into Duo Admin Panel. Find the employee under Users. Delete the user or remove all enrolled devices. Confirm they can no longer authenticate via Duo. This must be done on or before the last day.` },
+    blumira:      { label: 'Blumira Agent Removed from Computer', instructions: `If the computer is being returned or reassigned, uninstall the Blumira agent. In the Blumira dashboard remove the device from the sensor list. If the workstation is being wiped this step is covered by the wipe process.` },
+    withsecure:   { label: 'WithSecure EPP Uninstalled', instructions: `In WithSecure Elements Security Center, remove the device from the management console. Uninstall the endpoint protection agent from the workstation if it is being reassigned. If being wiped, the wipe process covers this.` },
+    bitlocker:    { label: 'BitLocker Status Verified Before Wipe', instructions: `Before wiping or reassigning the workstation, confirm BitLocker is still active and that the recovery key is stored in Active Directory. Perform a secure wipe using BitLocker encryption + format, or use the manufacturer's secure erase tool for SSDs.` },
+    vpn:          { label: 'VPN Access Removed', instructions: `Log into UniFi Network dashboard. Go to Settings → Teleport & VPN → VPN Server. Remove the employee's VPN user account. Confirm they can no longer establish a VPN connection. Revoke any VPN client config files that were issued.` },
+    email:        { label: 'Email Account Disabled', instructions: `In Google Workspace Admin disable the employee's account. Set up an out-of-office reply if needed. Archive the mailbox per company policy. Remove from all distribution lists.` },
+    sql:          { label: 'SQL Server Access Revoked', instructions: `Remove the employee's SQL Server login and database user accounts. Revoke any permissions granted. Confirm they can no longer connect to the database.` },
+    dba:          { label: 'DBA Software Access Revoked', instructions: `Remove the employee's DBA manufacturing software user account and any related licenses. Uninstall the software from the returned workstation if being reassigned.` },
+    synology:     { label: 'Synology Private Share Access Revoked', instructions: `In Synology DSM → Control Panel → Shared Folder → Ballantine share → Permissions, remove the employee's AD account. Confirm they can no longer access the share.` },
+    handbook:     { label: 'Handbook Acknowledgment Filed', instructions: `Confirm the signed employee handbook acknowledgment is on file. Note the handbook version that was in effect at the time of the employee's hire. Retain per company records retention policy.` },
+  };
+  return src.map(item => ({
+    key: item.key,
+    label: labels[item.key]?.label || `${item.label} — Revoked`,
+    notes: false,
+    instructions: labels[item.key]?.instructions || `Reverse the ${item.label} step completed during onboarding.`,
+  }));
+}
+
+// ── Load and render checklist ─────────────────────────────────────
+
+async function _loadOnboardingTab(empId, emp, tabType) {
+  const inner = document.getElementById('onboardingTabInner');
+  if (!inner) return;
+  inner.innerHTML = '<div style="padding:20px;color:var(--muted);font-size:13px">Loading…</div>';
+
+  // Load or use cached record
+  if (!onboardingCache[empId]) {
+    const { data } = await sb.from('employee_onboarding')
+      .select('*')
+      .eq('employee_id', empId)
+      .maybeSingle();
+    onboardingCache[empId] = data || { employee_id: empId };
+  }
+
+  const rec = onboardingCache[empId];
+  const isBallantine = (emp.dept||'').toLowerCase() === 'ballantine';
+  const track = isBallantine ? 'ballantine' : 'nulabs';
+  const items = tabType === 'onboarding'
+    ? (isBallantine ? ONBOARDING_BALLANTINE : ONBOARDING_NULABS)
+    : _buildOffboardingItems(track);
+
+  const prefix = tabType === 'onboarding' ? 'ob_' : 'off_';
+  const canEdit = isManager();
+  const isInactive = emp.isActive === false || !!emp.terminationDate;
+
+  // Progress
+  const done = items.filter(item => rec[prefix + item.key + '_done']).length;
+  const pct  = items.length ? Math.round((done / items.length) * 100) : 0;
+  const progressColor = pct === 100 ? 'var(--green)' : pct > 50 ? 'var(--amber)' : 'var(--blue)';
+
+  // Offboarding warning banner for active employees
+  const offboardingBanner = tabType === 'offboarding' && !isInactive
+    ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(232,162,52,0.07);border:1px solid rgba(232,162,52,0.35);border-radius:8px;margin-bottom:18px;font-size:12.5px">
+        <span style="font-size:16px">⚠️</span>
+        <div style="color:var(--amber);font-weight:600">This employee is currently active. Complete this checklist on or before their last day.</div>
+      </div>` : '';
+
+  const itemsHtml = items.map(item => {
+    const doneKey  = prefix + item.key + '_done';
+    const dateKey  = prefix + item.key + '_date';
+    const notesKey = prefix + item.key + '_notes';
+    const isDone   = !!rec[doneKey];
+    const dateVal  = rec[dateKey] || '';
+    const notesVal = rec[notesKey] || '';
+
+    return `
+      <div id="obitem_${prefix}${item.key}" style="border:1.5px solid ${isDone?'rgba(46,158,98,0.3)':'var(--border)'};border-radius:10px;margin-bottom:8px;overflow:hidden;background:${isDone?'rgba(46,158,98,0.04)':'var(--surface)'}">
+        <!-- Item header -->
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 16px">
+          <input type="checkbox" ${isDone?'checked':''} ${canEdit?'':'disabled'}
+            onchange="_obToggle('${empId}','${prefix}','${item.key}',this.checked)"
+            style="width:17px;height:17px;cursor:${canEdit?'pointer':'default'};flex-shrink:0;accent-color:var(--green)"/>
+          <div style="flex:1;font-size:13px;font-weight:600;color:${isDone?'var(--muted)':'var(--text)'};${isDone?'text-decoration:line-through':''}">
+            ${item.label}
+          </div>
+          ${canEdit ? `<input type="date" value="${dateVal}" style="color-scheme:light;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11.5px;color:var(--text);font-family:'DM Sans',sans-serif;cursor:pointer"
+            onchange="_obDateChange('${empId}','${prefix}','${item.key}',this.value)"/>` :
+            (dateVal ? `<span style="font-size:11.5px;color:var(--muted);font-family:'JetBrains Mono',monospace">${dateVal}</span>` : '')}
+          <button onclick="_obToggleInstructions('${prefix}${item.key}')"
+            style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap;flex-shrink:0"
+            onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+            💡 How-to
+          </button>
+        </div>
+        <!-- Instructions (collapsed) -->
+        <div id="obinstr_${prefix}${item.key}" style="display:none;padding:0 16px 12px 44px">
+          <div style="background:rgba(192,122,26,0.05);border:1px solid rgba(192,122,26,0.2);border-radius:7px;padding:10px 14px;font-size:12px;color:var(--text);line-height:1.65">
+            ${item.instructions}
+          </div>
+        </div>
+        <!-- Notes field -->
+        ${item.notes && canEdit ? `
+        <div style="padding:0 16px 12px 44px">
+          <input type="text" placeholder="${item.notesLabel||'Notes…'}" value="${(notesVal||'').replace(/"/g,'&quot;')}"
+            onchange="_obNotesChange('${empId}','${prefix}','${item.key}',this.value)"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none"
+            onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'"/>
+        </div>` : (item.notes && notesVal ? `<div style="padding:0 16px 12px 44px;font-size:12px;color:var(--muted);font-style:italic">${notesVal}</div>` : '')}
+      </div>`;
+  }).join('');
+
+  inner.innerHTML = `
+    <!-- Progress -->
+    <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:10px;padding:14px 18px;margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${tabType === 'onboarding' ? '✅ Onboarding Progress' : '🚪 Offboarding Progress'}</div>
+        <div style="font-size:13px;font-weight:700;color:${progressColor};font-family:'JetBrains Mono',monospace">${done} / ${items.length}</div>
+      </div>
+      <div style="background:var(--surface2);border-radius:6px;height:8px;overflow:hidden">
+        <div style="height:100%;border-radius:6px;width:${pct}%;background:${progressColor};transition:width .4s"></div>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">${pct}% complete${pct===100?' — ✓ All steps done':''}</div>
+    </div>
+
+    ${offboardingBanner}
+
+    ${!canEdit ? `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 14px;margin-bottom:14px;font-size:12px;color:var(--muted)">
+      👁 Read-only view — only Owners and Managers can update the checklist.
+    </div>` : ''}
+
+    ${itemsHtml}
+
+    ${canEdit ? `<div style="margin-top:16px;display:flex;justify-content:flex-end">
+      <button onclick="_obSave('${empId}')"
+        style="padding:8px 20px;background:var(--amber);color:#000;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">
+        💾 Save Checklist
+      </button>
+    </div>` : ''}
+  `;
+}
+
+function _obToggleInstructions(key) {
+  const el = document.getElementById(`obinstr_${key}`);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function _obToggle(empId, prefix, key, checked) {
+  if (!onboardingCache[empId]) onboardingCache[empId] = { employee_id: empId };
+  onboardingCache[empId][prefix + key + '_done'] = checked;
+  // Auto-set today's date if checking and no date set
+  const dateKey = prefix + key + '_date';
+  if (checked && !onboardingCache[empId][dateKey]) {
+    const today = new Date().toISOString().split('T')[0];
+    onboardingCache[empId][dateKey] = today;
+    // Update the date input if visible
+    const inputs = document.querySelectorAll(`#obitem_${prefix}${key} input[type="date"]`);
+    inputs.forEach(i => i.value = today);
+  }
+  // Update item appearance
+  const item = document.getElementById(`obitem_${prefix}${key}`);
+  if (item) {
+    item.style.borderColor = checked ? 'rgba(46,158,98,0.3)' : 'var(--border)';
+    item.style.background  = checked ? 'rgba(46,158,98,0.04)' : 'var(--surface)';
+    const label = item.querySelector('div[style*="font-weight:600"]');
+    if (label) {
+      label.style.color = checked ? 'var(--muted)' : 'var(--text)';
+      label.style.textDecoration = checked ? 'line-through' : '';
+    }
+  }
+}
+
+function _obDateChange(empId, prefix, key, value) {
+  if (!onboardingCache[empId]) onboardingCache[empId] = { employee_id: empId };
+  onboardingCache[empId][prefix + key + '_date'] = value || null;
+}
+
+function _obNotesChange(empId, prefix, key, value) {
+  if (!onboardingCache[empId]) onboardingCache[empId] = { employee_id: empId };
+  onboardingCache[empId][prefix + key + '_notes'] = value || null;
+}
+
+async function _obSave(empId) {
+  const rec = onboardingCache[empId];
+  if (!rec) return;
+
+  const payload = { ...rec, employee_id: empId, updated_at: new Date().toISOString() };
+
+  let error;
+  if (rec.id) {
+    const res = await sb.from('employee_onboarding').update(payload).eq('id', rec.id);
+    error = res.error;
+  } else {
+    const res = await sb.from('employee_onboarding').insert({ ...payload, created_at: new Date().toISOString() });
+    error = res.error;
+    if (!error && res.data?.[0]) onboardingCache[empId] = res.data[0];
+  }
+
+  if (error) { alert('Save failed: ' + error.message); return; }
+  toast('✅ Checklist saved.');
+
+  // Refresh progress bar
+  const emp = employees.find(e => e.id === empId);
+  if (emp) _loadOnboardingTab(empId, emp, empProfileTab);
 }
 
 window.deleteEmployee = function deleteEmployee(id) {
