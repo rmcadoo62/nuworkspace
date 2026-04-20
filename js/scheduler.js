@@ -415,7 +415,11 @@ function getProjInfo(projId) {
 }
 
 // Build the display lines shown inside a bar / chip
-function buildBlockDisplayLines(block) {
+// opts.includeLabel — when true, append block.label to Line 1 of project-assigned
+// room blocks ("Project · Client · <label>"). Compact bars leave this off so they
+// don't get cluttered; the tooltip turns it on.
+function buildBlockDisplayLines(block, opts) {
+  const includeLabel = !!(opts && opts.includeLabel);
   const lines = [];
   const rid = block.rowId || block.cat || '';
   const fmt = t => { if (!t) return ''; const [h,m] = t.split(':'); const hr = +h; return (hr%12||12)+(m&&m!=='00'?':'+m:'')+(hr<12?'am':'pm'); };
@@ -442,7 +446,9 @@ function buildBlockDisplayLines(block) {
     if (pi) {
       // Line 1: project name (contains number) · customer
       lines.push([pi.proj.name, pi.info.client].filter(Boolean).join('  \u00B7  '));
-      // Line 2: time · task name
+      // Line 2 (tooltip only): block label on its own line when set
+      if (includeLabel && block.label) lines.push(block.label);
+      // Next line: time · task name
       const task = block.taskId
         ? (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === block.taskId) : null;
       const line2 = [timeStr, task ? task.name : ''].filter(Boolean).join('  \u00B7  ');
@@ -479,6 +485,7 @@ function buildExpandedBarHtml(block, availH) {
 
   const projName = pi.proj.name || '';
   const client   = pi.info.client || '';
+  const blockLbl = block.label || '';
   const dcasRaw  = (pi.info.dcas || '').trim().toUpperCase();
   const witRaw   = (pi.info.customerWitness || '').trim().toUpperCase();
   const dcasLbl  = dcasRaw === 'YES' || dcasRaw === 'CNF' ? 'DCAS \u2713' : dcasRaw === 'NO' ? 'DCAS \u2717' : '';
@@ -500,36 +507,39 @@ function buildExpandedBarHtml(block, availH) {
     return null; // use default single-line
 
   } else if (availH < 60) {
-    // Line 1: proj name · customer
+    // Line 1: proj name · customer [· block label]
     // Line 2: time · task
+    const line1 = [projName, client, blockLbl].filter(Boolean).join('  \u00B7  ');
     const line2 = [timeStr, taskName].filter(Boolean).join('  \u00B7  ');
     return wrap(
-      line([projName, client].filter(Boolean).join('  \u00B7  '), '11px', '700', '1') +
+      line(line1, '11px', '700', '1') +
       line(line2, '9.5px', '500', '0.88')
     );
 
   } else if (availH < 85) {
-    // Line 1: proj name · customer
+    // Line 1: proj name · customer [· block label]
     // Line 2: time · task
     // Line 3: DCAS · Witness
+    const line1 = [projName, client, blockLbl].filter(Boolean).join('  \u00B7  ');
     const line2 = [timeStr, taskName].filter(Boolean).join('  \u00B7  ');
     const line3 = [dcasLbl, witLbl].filter(Boolean).join('  \u00B7  ');
     return wrap(
-      line([projName, client].filter(Boolean).join('  \u00B7  '), '11px', '700', '1') +
+      line(line1, '11px', '700', '1') +
       line(line2, '9.5px', '500', '0.88') +
       line(line3, '9px', '500', '0.82')
     );
 
   } else {
     // Line 1: proj name
-    // Line 2: customer
+    // Line 2: customer [· block label]
     // Line 3: time · task
     // Line 4: DCAS · Witness
+    const line2 = [client, blockLbl].filter(Boolean).join('  \u00B7  ');
     const line3 = [timeStr, taskName].filter(Boolean).join('  \u00B7  ');
     const line4 = [dcasLbl, witLbl].filter(Boolean).join('  \u00B7  ');
     return wrap(
       line(projName, '11.5px', '700', '1') +
-      line(client, '10px', '500', '0.9') +
+      line(line2, '10px', '500', '0.9') +
       line(line3, '9.5px', '500', '0.85') +
       line(line4, '9px', '500', '0.82')
     );
@@ -1640,7 +1650,7 @@ function syncSchedScroll() {
 // ---- Tooltip ----
 function showSchedTooltip(block, e) {
   const days = diffDays(block.start, block.end) + 1;
-  const lines = buildBlockDisplayLines(block);
+  const lines = buildBlockDisplayLines(block, { includeLabel: true });
   const tt = document.getElementById('schedTooltip');
   tt.innerHTML = lines.map((l,i) => i===0 ? `<strong>${l}</strong>` : `<span style="opacity:.85">${l}</span>`).join('<br>') +
     `<br><span style="opacity:.6;font-size:10.5px">${block.start} \u2192 ${block.end} \u00B7 ${days}d</span>`;
