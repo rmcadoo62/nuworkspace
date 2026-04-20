@@ -83,7 +83,7 @@
 /* Matches NU Laboratories Staff Performance Review form (NUI #28) */
 
 .rev-status-pill{padding:3px 10px;border-radius:10px;font-size:10.5px;font-weight:600;letter-spacing:.3px;}
-.rev-meta-grid{display:grid;grid-template-columns:140px 1fr 1fr 1fr;gap:10px;margin-bottom:18px;}
+.rev-meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 14px;margin-bottom:18px;}
 .rev-field{display:flex;flex-direction:column;gap:4px;}
 .rev-field-label{font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);}
 .rev-meta-grid input,.rev-meta-grid select{background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:7px 10px;outline:none;height:34px;}
@@ -160,3 +160,12 @@
 .rev-btn-primary:hover{background:#f0b04a;border-color:#f0b04a;}
 .rev-btn-release{background:rgba(91,156,246,0.15);border-color:#5b9cf6;color:#5b9cf6;font-weight:600;}
 .rev-btn-release:hover{background:rgba(91,156,246,0.25);}
+
+/* Form-type picker dropdown (Staff vs Supervisor) */
+.rev-picker-opt{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;background:transparent;border:none;border-bottom:1px solid var(--border);color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;padding:10px 14px;cursor:pointer;text-align:left;transition:background var(--transition);}
+.rev-picker-opt:last-child{border-bottom:none;}
+.rev-picker-opt:hover{background:var(--amber-glow);color:var(--amber);}
+.rev-picker-formnum{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);font-weight:400;}
+
+/* Sidebar form-type pill */
+.rev-sidebar-form{display:inline-block;padding:3px 10px;border-radius:10px;background:rgba(91,156,246,0.12);color:#5b9cf6;font-size:10.5px;font-weight:600;letter-spacing:.3px;margin-bottom:14px;}

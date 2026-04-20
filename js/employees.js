@@ -2658,6 +2658,105 @@ function _reviewRatingBandLabel(rating) {
   return bands[rating] || '';
 }
 
+// ── Supervisor Performance Review categories (mirrors NU Laboratories Supervisor form, NUI #29) ──
+// Note: The first 7 keys deliberately match STAFF_REVIEW_CATEGORIES keys so both forms share DB columns.
+// The 8th key 'support' is Supervisor-only and uses dedicated columns (support_score/support_comment).
+const SUPERVISOR_REVIEW_CATEGORIES = [
+  {
+    key:'knowledge', label:'Understanding of the Job Supervised', max:20,
+    tiers:[
+      { score:4,  desc:'Inadequate.' },
+      { score:8,  desc:'Fair understanding. Not always sufficient.' },
+      { score:12, desc:'Good understanding of all jobs supervised.' },
+      { score:16, desc:'Well informed in all phases of jobs supervised.' },
+      { score:20, desc:'Thorough knowledge of own and related responsibilities.' },
+    ]
+  },
+  {
+    key:'quantity', label:'Consistency & Accuracy of Judgment', max:20,
+    tiers:[
+      { score:4,  desc:'Often hasty and inaccurate.' },
+      { score:8,  desc:'Sometimes makes decisions without regard to consequences.' },
+      { score:12, desc:'Generally reliable.' },
+      { score:16, desc:'Very good. Based on sound reasoning.' },
+      { score:20, desc:'Superior. Completely reliable.' },
+    ]
+  },
+  {
+    key:'quality', label:'Satisfactory Work by Group Supervised', max:15,
+    tiers:[
+      { score:3,  desc:'Unsatisfactory. Does not meet needs or deadlines.' },
+      { score:6,  desc:'Generally satisfactory but occasionally gets behind.' },
+      { score:9,  desc:'Usually meets production requirements and deadlines.' },
+      { score:12, desc:'Group produces more than expected and meets deadlines.' },
+      { score:15, desc:'Consistently gets maximum production from the group.' },
+    ]
+  },
+  {
+    key:'initiative', label:'Harmony & Cooperation with Employees Supervised', max:15,
+    tiers:[
+      { score:3,  desc:'Ineffective. Does not develop cooperative attitudes.' },
+      { score:6,  desc:'Some lack of skill in handling people.' },
+      { score:9,  desc:'Usually maintains smooth relationships and cooperation.' },
+      { score:12, desc:'Consistently maintains effective relationships and cooperation.' },
+      { score:15, desc:'Superior. Develops utmost cooperation.' },
+    ]
+  },
+  {
+    key:'cooperation', label:'Proceeds on Own Initiative', max:10,
+    tiers:[
+      { score:2,  desc:'Lacks initiative.' },
+      { score:4,  desc:'Occasional inability to plan or organize. Needs to be prodded.' },
+      { score:6,  desc:'Meets needs of the position to get work done.' },
+      { score:8,  desc:'Careful and effective in planning, organizing, and delegating.' },
+      { score:10, desc:'Unusual ability to plan, organize, and delegate.' },
+    ]
+  },
+  {
+    key:'responsibility', label:'Trains & Develops Employees', max:10,
+    tiers:[
+      { score:2,  desc:'Lacks ability to train and develop.' },
+      { score:4,  desc:'Not always thorough in training employees.' },
+      { score:6,  desc:'All employees sufficiently trained to do the job expected.' },
+      { score:8,  desc:'Thorough. Interested in employee development and progress.' },
+      { score:10, desc:'All employees are thoroughly trained and encouraged to seek promotional opportunities.' },
+    ]
+  },
+  {
+    key:'dependability', label:'Work Under Pressure (Emergencies, Deadlines)', max:5,
+    tiers:[
+      { score:1, desc:'Unstable. Cannot cope with emergencies and deadlines.' },
+      { score:2, desc:'Sometimes reacts adversely.' },
+      { score:3, desc:'Usually handles pressures well.' },
+      { score:4, desc:'Very stable under pressure.' },
+      { score:5, desc:'Exceptionally calm and effective under pressure.' },
+    ]
+  },
+  {
+    key:'support', label:'Supports the Organization', max:5,
+    tiers:[
+      { score:1, desc:'Rarely.' },
+      { score:2, desc:'Reluctantly.' },
+      { score:3, desc:'Usually.' },
+      { score:4, desc:'Consistently.' },
+      { score:5, desc:'Always.' },
+    ]
+  },
+];
+
+// Form-type registry: single source of truth for review metadata.
+const REVIEW_FORM_TYPES = {
+  staff:      { label:'Staff',      formNum:'NUI #28', categories: STAFF_REVIEW_CATEGORIES },
+  supervisor: { label:'Supervisor', formNum:'NUI #29', categories: SUPERVISOR_REVIEW_CATEGORIES },
+};
+
+function _reviewCategoriesFor(formType) {
+  const ft = REVIEW_FORM_TYPES[formType] || REVIEW_FORM_TYPES.staff;
+  return ft.categories;
+}
+function _reviewFormLabel(formType) { return REVIEW_FORM_TYPES[formType]?.label   || 'Staff'; }
+function _reviewFormNum(formType)   { return REVIEW_FORM_TYPES[formType]?.formNum || 'NUI #28'; }
+
 // Helpers
 function _hrTier(key)     { return HR_TIERS.find(t => t.key === key) || {label:key, color:'var(--muted)'}; }
 function _hrCategory(key) { return HR_CATEGORIES.find(c => c.key === key) || {label:key, policy:'', counted:false}; }
@@ -2758,7 +2857,14 @@ function _renderHrRecordsTab(empId, emp) {
     <!-- PERFORMANCE REVIEWS -->
     <div style="margin-top:26px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <div style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--text)">📝 Performance Reviews</div>
-      ${canEdit ? `<button onclick="openReviewModal('${empId}')" style="background:var(--amber);color:#0e0e0f;border:none;border-radius:7px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer">+ New Review</button>` : ''}
+      ${canEdit ? `
+        <div style="position:relative" id="revTypePickerWrap_${empId}">
+          <button onclick="_toggleReviewTypePicker('${empId}',event)" style="background:var(--amber);color:#0e0e0f;border:none;border-radius:7px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:6px">+ New Review<span style="font-size:9px;opacity:.65">▼</span></button>
+          <div id="revTypePicker_${empId}" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.35);z-index:250;min-width:200px;overflow:hidden">
+            <button onclick="_closeReviewTypePicker('${empId}');openReviewModal('${empId}',null,'staff')" class="rev-picker-opt">📋 Staff Review<span class="rev-picker-formnum">NUI #28</span></button>
+            <button onclick="_closeReviewTypePicker('${empId}');openReviewModal('${empId}',null,'supervisor')" class="rev-picker-opt">🧭 Supervisor Review<span class="rev-picker-formnum">NUI #29</span></button>
+          </div>
+        </div>` : ''}
     </div>
     <div style="display:flex;flex-direction:column;gap:10px">${reviewsHtml}</div>
 
@@ -2802,7 +2908,7 @@ function _renderReviewCard(r, canEdit, emp) {
 }
 
 function _renderReviewDetail(r, canEdit, emp) {
-  const scoreRows = STAFF_REVIEW_CATEGORIES.map(cat => {
+  const scoreRows = _reviewCategoriesFor(r.form_type).map(cat => {
     const v = r[`${cat.key}_score`];
     const c = r[`${cat.key}_comment`];
     return `
@@ -2838,7 +2944,7 @@ function _renderReviewDetail(r, canEdit, emp) {
       ${(r.job_title || r.division) ? `
         <div style="display:flex;gap:18px;font-size:11.5px;color:var(--muted);margin-bottom:10px">
           ${r.job_title ? `<div><b style="color:var(--text);font-weight:500">${(r.job_title||'').replace(/</g,'&lt;')}</b> · Job Title</div>` : ''}
-          ${r.division  ? `<div><b style="color:var(--text);font-weight:500">${(r.division ||'').replace(/</g,'&lt;')}</b> · Division</div>` : ''}
+          ${r.division  ? `<div><b style="color:var(--text);font-weight:500">${(r.division ||'').replace(/</g,'&lt;')}</b> · Department</div>` : ''}
         </div>` : ''}
 
       <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px">Category Scores</div>
@@ -2940,6 +3046,36 @@ function _renderDisciplineDetail(d, canEdit, emp) {
   `;
 }
 
+// ── Form-type picker (Staff vs Supervisor dropdown on + New Review) ───────
+function _toggleReviewTypePicker(empId, event) {
+  if (event) event.stopPropagation();
+  // Close any other open picker first
+  document.querySelectorAll('[id^="revTypePicker_"]').forEach(el => {
+    if (el.id !== `revTypePicker_${empId}`) el.style.display = 'none';
+  });
+  const picker = document.getElementById(`revTypePicker_${empId}`);
+  if (!picker) return;
+  const nowOpen = picker.style.display === 'none' || !picker.style.display;
+  picker.style.display = nowOpen ? 'block' : 'none';
+  if (nowOpen) {
+    // Close on outside click — one-shot listener
+    setTimeout(() => {
+      const onDocClick = (e) => {
+        const wrap = document.getElementById(`revTypePickerWrap_${empId}`);
+        if (!wrap || !wrap.contains(e.target)) {
+          _closeReviewTypePicker(empId);
+          document.removeEventListener('click', onDocClick);
+        }
+      };
+      document.addEventListener('click', onDocClick);
+    }, 0);
+  }
+}
+function _closeReviewTypePicker(empId) {
+  const picker = document.getElementById(`revTypePicker_${empId}`);
+  if (picker) picker.style.display = 'none';
+}
+
 function _hrToggleCard(id) {
   const el = document.getElementById(id);
   const chev = document.getElementById(id+'_chev');
@@ -2979,10 +3115,14 @@ async function deleteHrRecord(table, id, empId) {
 //   manager_edit   — admin/manager editing an existing draft or released (not yet acked) review
 //   employee_ack   — subject employee viewing their released, unacknowledged review
 //   readonly       — anything else (acknowledged, or viewer not allowed to edit)
-function openReviewModal(empId, reviewId) {
+function openReviewModal(empId, reviewId, formType) {
   const emp = employees.find(e => e.id === empId);
   if (!emp) return;
   const existing = reviewId ? (hrRecordsCache[empId]?.reviews || []).find(r => r.id === reviewId) : null;
+
+  // Resolve form type: explicit arg > existing record > 'staff' default
+  const resolvedFormType = formType || existing?.form_type || 'staff';
+  const categories = _reviewCategoriesFor(resolvedFormType);
 
   const isSelf = currentEmployee && currentEmployee.id === emp.id;
   const isMgr  = isManager() && !_myInfoReadOnly;
@@ -2997,7 +3137,8 @@ function openReviewModal(empId, reviewId) {
   // Modal state lives on window for inline handlers
   const state = window._reviewState = {
     empId, reviewId: existing?.id || null, mode,
-    scores: {}, comments: {}, expandedCat: STAFF_REVIEW_CATEGORIES[0].key,
+    formType: resolvedFormType,
+    scores: {}, comments: {}, expandedCat: categories[0].key,
     reviewDate:              existing?.review_date || new Date().toISOString().slice(0,10),
     reviewerId:              existing?.reviewer_id || (isMgr ? currentEmployee?.id : null),
     jobTitle:                existing?.job_title || emp.role || '',
@@ -3009,7 +3150,7 @@ function openReviewModal(empId, reviewId) {
     disagreementExplanation: existing?.disagreement_explanation || '',
     employeeSignatureName:   existing?.employee_signature_name || (isSelf ? emp.name : ''),
   };
-  STAFF_REVIEW_CATEGORIES.forEach(c => {
+  categories.forEach(c => {
     state.scores[c.key]   = existing?.[`${c.key}_score`]   ?? null;
     state.comments[c.key] = existing?.[`${c.key}_comment`] ?? '';
   });
@@ -3028,11 +3169,11 @@ function openReviewModal(empId, reviewId) {
   backdrop.innerHTML = `
     <div class="modal rev-modal" style="width:900px;max-width:95vw;max-height:92vh;display:flex;flex-direction:column">
       <div class="modal-header" style="display:flex;align-items:center;gap:12px">
-        <div class="modal-title" style="flex:1">Staff Performance Review — ${emp.name}</div>
+        <div class="modal-title" style="flex:1">${_reviewFormLabel(state.formType)} Performance Review — ${emp.name}</div>
         ${statusBadge}
         <button class="modal-close" onclick="closeReviewModal()">✕</button>
       </div>
-      <div class="modal-body rev-body" style="display:grid;grid-template-columns:1fr 220px;gap:0;padding:0;overflow:hidden;flex:1;min-height:0">
+      <div class="modal-body rev-body" style="display:grid;grid-template-columns:1fr 240px;gap:0;padding:0;overflow:hidden;flex:1;min-height:0">
         <div class="rev-main" style="padding:18px 22px;overflow-y:auto">
           ${_renderReviewMeta(state, mgrs)}
           <div class="rev-section-label">I · Rating Categories</div>
@@ -3086,7 +3227,7 @@ function _renderReviewMeta(state, mgrs) {
         <input type="text" id="rev_jobTitle" value="${(state.jobTitle||'').replace(/"/g,'&quot;')}" ${dis} onchange="_reviewState.jobTitle=this.value">
       </div>
       <div class="rev-field">
-        <div class="rev-field-label">Division</div>
+        <div class="rev-field-label">Department</div>
         <input type="text" id="rev_division" value="${(state.division||'').replace(/"/g,'&quot;')}" ${dis} onchange="_reviewState.division=this.value">
       </div>
     </div>
@@ -3096,7 +3237,7 @@ function _renderReviewMeta(state, mgrs) {
 function _renderReviewCategoriesInner(state) {
   const readonly = (state.mode === 'employee_ack' || state.mode === 'readonly');
   const dis      = readonly ? 'disabled' : '';
-  return STAFF_REVIEW_CATEGORIES.map(cat => {
+  return _reviewCategoriesFor(state.formType).map(cat => {
     const expanded = (state.expandedCat === cat.key);
     const score    = state.scores[cat.key];
     const comment  = state.comments[cat.key] || '';
@@ -3219,6 +3360,7 @@ function _renderReviewAckSummary(r) {
 
 function _renderReviewSidebar(state) {
   return `
+    <div class="rev-sidebar-form">${_reviewFormLabel(state.formType)} Form · ${_reviewFormNum(state.formType)}</div>
     <div class="rev-sidebar-label">Total Score</div>
     <div id="rev_totalOut" class="rev-sidebar-total">0</div>
     <div class="rev-sidebar-hint">of 100</div>
@@ -3270,7 +3412,7 @@ function _reviewExpandCat(key) {
 
 function _reviewSetScore(key, val) {
   if (!window._reviewState) return;
-  const cat = STAFF_REVIEW_CATEGORIES.find(c => c.key === key);
+  const cat = _reviewCategoriesFor(window._reviewState.formType).find(c => c.key === key);
   if (!cat) return;
   if (val != null && !isNaN(val)) val = Math.max(0, Math.min(cat.max, val));
   else if (isNaN(val)) val = null;
@@ -3300,8 +3442,9 @@ function _reviewSetScore(key, val) {
 
 function _reviewRecompute() {
   if (!window._reviewState) return;
-  const total = STAFF_REVIEW_CATEGORIES.reduce((sum, c) => sum + (window._reviewState.scores[c.key] || 0), 0);
-  const allScored = STAFF_REVIEW_CATEGORIES.every(c => window._reviewState.scores[c.key] != null);
+  const categories = _reviewCategoriesFor(window._reviewState.formType);
+  const total = categories.reduce((sum, c) => sum + (window._reviewState.scores[c.key] || 0), 0);
+  const allScored = categories.every(c => window._reviewState.scores[c.key] != null);
   const rating = allScored ? _reviewRatingFor(total) : null;
 
   const totalOut = document.getElementById('rev_totalOut');
@@ -3309,7 +3452,7 @@ function _reviewRecompute() {
   const ratingOut = document.getElementById('rev_ratingOut');
   if (ratingOut) ratingOut.textContent = rating != null ? rating : '—';
   const bandOut = document.getElementById('rev_ratingBand');
-  if (bandOut) bandOut.textContent = rating != null ? _reviewRatingBandLabel(rating) : 'Score all 7 categories';
+  if (bandOut) bandOut.textContent = rating != null ? _reviewRatingBandLabel(rating) : `Score all ${categories.length} categories`;
 }
 
 function _reviewToggleDisagreement() {
@@ -3350,15 +3493,16 @@ async function saveReview(action) {
   if (!s.reviewDate) { alert('Review date is required.'); return; }
   if (!s.reviewerId) { alert('Please select a reviewer.'); return; }
 
-  const total = STAFF_REVIEW_CATEGORIES.reduce((sum, c) => sum + (s.scores[c.key] || 0), 0);
-  const allScored = STAFF_REVIEW_CATEGORIES.every(c => s.scores[c.key] != null);
+  const categories = _reviewCategoriesFor(s.formType);
+  const total = categories.reduce((sum, c) => sum + (s.scores[c.key] || 0), 0);
+  const allScored = categories.every(c => s.scores[c.key] != null);
   const rating = allScored ? _reviewRatingFor(total) : null;
 
   const reviewerEmp = employees.find(e => e.id === s.reviewerId);
 
   const payload = {
     employee_id:        s.empId,
-    form_type:          'staff',
+    form_type:          s.formType || 'staff',
     review_date:        s.reviewDate,
     reviewer_id:        s.reviewerId,
     reviewer_name:      reviewerEmp?.name || null,
@@ -3369,13 +3513,13 @@ async function saveReview(action) {
     listed_objectives:  s.listedObjectives || null,
     how_to_accomplish:  s.howToAccomplish  || null,
   };
-  STAFF_REVIEW_CATEGORIES.forEach(c => {
+  categories.forEach(c => {
     payload[`${c.key}_score`]   = (s.scores[c.key] != null) ? s.scores[c.key] : null;
     payload[`${c.key}_comment`] = s.comments[c.key] || null;
   });
 
   if (action === 'release') {
-    if (!allScored) { alert('Please score all 7 categories before releasing.'); return; }
+    if (!allScored) { alert(`Please score all ${categories.length} categories before releasing.`); return; }
     payload.released_to_employee_at = new Date().toISOString();
     payload.released_by             = currentEmployee?.id || null;
   }
@@ -3395,7 +3539,7 @@ async function saveReview(action) {
   toast(action === 'release' ? '🔓 Review released to employee' : (s.reviewId ? '✓ Review updated' : '✓ Review created'));
 }
 
-// ── PDF export (mirrors NUI #28 paper form) ───────────────────────
+// ── PDF export (mirrors NUI #28 Staff / NUI #29 Supervisor paper forms) ───
 async function exportReviewPdf(reviewId, empId) {
   const r = (hrRecordsCache[empId]?.reviews || []).find(x => x.id === reviewId);
   if (!r) { alert('Review not found.'); return; }
@@ -3410,9 +3554,11 @@ async function exportReviewPdf(reviewId, empId) {
   let y = margin;
 
   // Header
+  const formLbl = _reviewFormLabel(r.form_type);
+  const formNum = _reviewFormNum(r.form_type);
   doc.setFont('helvetica','bold'); doc.setFontSize(14);
   doc.text('NU LABORATORIES', pageW/2, y, { align:'center' }); y += 18;
-  doc.text('STAFF EMPLOYEE — PERFORMANCE REVIEW', pageW/2, y, { align:'center' }); y += 16;
+  doc.text(`${formLbl.toUpperCase()} EMPLOYEE — PERFORMANCE REVIEW`, pageW/2, y, { align:'center' }); y += 16;
   doc.setDrawColor(180); doc.line(margin, y, pageW-margin, y); y += 16;
 
   // Metadata
@@ -3426,13 +3572,13 @@ async function exportReviewPdf(reviewId, empId) {
   labelVal('DATE OF REVIEW',   _hrFmtDate(r.review_date),        margin + 180, y);
   labelVal('JOB TITLE',        r.job_title || '',                margin + 340, y);
   y += 30;
-  labelVal('COMPANY/DIVISION', r.division || 'NU Laboratories',  margin,       y);
+  labelVal('DEPARTMENT',       r.division || 'NU Laboratories',  margin,       y);
   labelVal('REVIEWER',         r.reviewer_name || '',            margin + 180, y);
-  labelVal('FORM',             'NUI #28 (Staff)',                margin + 340, y);
+  labelVal('FORM',             `${formNum} (${formLbl})`,        margin + 340, y);
   y += 26;
 
   // Category table
-  const body = STAFF_REVIEW_CATEGORIES.map(cat => {
+  const body = _reviewCategoriesFor(r.form_type).map(cat => {
     const score   = r[`${cat.key}_score`];
     const comment = r[`${cat.key}_comment`] || '';
     return [ cat.label, `${score != null ? score : '—'} / ${cat.max}`, comment ];
@@ -3492,7 +3638,7 @@ async function exportReviewPdf(reviewId, empId) {
 
   // Footer
   doc.setFontSize(8); doc.setTextColor(150);
-  doc.text('NUI #28', pageW - margin, pageH - 20, { align:'right' });
+  doc.text(formNum, pageW - margin, pageH - 20, { align:'right' });
 
   const fname = `Performance_Review_${(emp?.name||'employee').replace(/\s+/g,'_')}_${r.review_date}.pdf`;
   doc.save(fname);
