@@ -105,6 +105,41 @@ function deleteTsRow(key, idx) {
   renderTimesheet();
 }
 
+// Add another task row to an existing project group — project pre-filled, task empty
+function addTsTaskToProject(key, projId) {
+  if (!tsData[key]) tsData[key] = [];
+  tsData[key].push({
+    projId: projId,
+    taskName: '',
+    taskId: null,
+    isOverhead: false,
+    overheadCat: '',
+    hours: {0:0,1:0,2:0,3:0,4:0,5:0,6:0},
+    comments: {0:'',1:'',2:'',3:'',4:'',5:'',6:''}
+  });
+  renderTimesheet();
+  // Focus the new row's task dropdown so user can immediately pick
+  setTimeout(() => {
+    const newIdx = tsData[key].length - 1;
+    const sel = document.getElementById('ts-task-'+key+'-'+newIdx);
+    if (sel) sel.focus();
+  }, 50);
+}
+
+// Remove an entire project group (all task rows sharing this projId) from the week
+function deleteTsProjectGroup(key, projId) {
+  const groupRows = (tsData[key]||[]).filter(r => !r.isOverhead && r.projId === projId);
+  const hasHours = groupRows.some(r => Object.values(r.hours||{}).some(h => h > 0));
+  const msg = hasHours
+    ? 'Remove this project and all its task rows for this week? Hours will be lost.'
+    : 'Remove this project group?';
+  if (!confirm(msg)) return;
+  tsData[key] = (tsData[key]||[]).filter(r => r.isOverhead || r.projId !== projId);
+  if (tsData[key].length === 0) tsData[key].push({projId: '', taskName:'', isOverhead:false, overheadCat:'', hours:{0:0,1:0,2:0,3:0,4:0,5:0,6:0}});
+  renderTimesheet();
+  if (typeof _tsDebounceAutosave === 'function') _tsDebounceAutosave(key);
+}
+
 function setTsComment(key, rowIdx, dayIdx, val) {
   if (!tsData[key] || !tsData[key][rowIdx]) return;
   if (!tsData[key][rowIdx].comments) tsData[key][rowIdx].comments = {};
@@ -169,18 +204,10 @@ function setTsProject(key, rowIdx, val) {
   row.isOverhead = false;
   row.projId = val;
   row.taskName = '';
+  row.taskId = null;
   row.overheadCat = '';
-  // Re-render just the task dropdown for this row
-  const taskSel = document.getElementById('ts-task-'+key+'-'+rowIdx);
-  if (taskSel) {
-    const tasks = taskStore.filter(t => t.proj === val);
-    taskSel.innerHTML = '<option value="">— select task —</option>' +
-      tasks.map(t => {
-        const statusLabels = {new:'New',inprogress:'In Progress',prohold:'Pro Hold',accthold:'Acct Hold',complete:'Complete',cancelled:'Cancelled',billed:'Billed'};
-        const label = '#'+(t.taskNum||'?')+' ['+(statusLabels[t.status]||t.status)+'] '+(t.name.length>38?t.name.slice(0,38)+'…':t.name);
-        return '<option value="'+t._id+'" data-name="'+t.name.replace(/"/g,'&quot;')+'">'+label+'</option>';
-      }).join('');
-  }
+  // Re-render so the row moves into the correct project group visually
+  renderTimesheet();
 }
 
 function setTsTask(key, rowIdx, taskId) {
@@ -226,6 +253,27 @@ function updateTsTotals(key) {
     const rowTotal = Object.values(row.hours).reduce((a,b) => a + b, 0);
     const el = document.getElementById(`ts-rowtotal-${key}-${ri}`);
     if (el) el.textContent = rowTotal > 0 ? rowTotal.toFixed(1) + 'h' : '—';
+  });
+
+  // Project-group subtotals (grouped layout — Option B)
+  const projGroups = {};
+  rows.forEach(r => {
+    if (r.isOverhead || !r.projId) return;
+    if (!projGroups[r.projId]) projGroups[r.projId] = [];
+    projGroups[r.projId].push(r);
+  });
+  Object.keys(projGroups).forEach(pid => {
+    const safe = pid.replace(/[^a-z0-9]/gi,'');
+    // Per-day subtotals for the group
+    days.forEach((d, di) => {
+      const sub = projGroups[pid].reduce((s, r) => s + (r.hours[di]||0), 0);
+      const el = document.getElementById('ts-projgroup-sub-'+key+'-'+safe+'-'+di);
+      if (el) el.textContent = sub > 0 ? sub.toFixed(1) + 'h' : '';
+    });
+    // Grand total for the group
+    const grp = projGroups[pid].reduce((s, r) => s + Object.values(r.hours).reduce((a,b)=>a+b,0), 0);
+    const grpEl = document.getElementById('ts-projgroup-total-'+key+'-'+safe);
+    if (grpEl) grpEl.textContent = grp > 0 ? grp.toFixed(1) + 'h' : '';
   });
 
   // Overhead row totals
@@ -408,11 +456,18 @@ function renderTimesheet() {
   const sat = days[6];
   const weekLabel = `${fmtDate(sun)} – ${fmtDate(sat)}, ${sat.getFullYear()}`;
 
-  // Build table rows
-  const tableRows = rows.map((row, ri) => {
-    const rowTotal = Object.values(row.hours).reduce((a,b)=>a+b,0);
+  // ==================================================================
+  // GROUPED RENDERING (Option B) — rows bucketed by projId
+  // Each project becomes a visual group: header row + task sub-rows +
+  // an inline "+ add task to this project" button. Rows that haven't
+  // picked a project yet render as standalone "unassigned" rows with
+  // the full project picker. Overhead rows keep their existing row.
+  // The underlying tsData[key] array is unchanged — this is pure layout.
+  // ==================================================================
 
-    const cells = days.map((d, di) => {
+  // Build one day-cell block (same markup regardless of layout)
+  function _tsBuildDayCells(row, ri) {
+    return days.map((d, di) => {
       const val = row.hours[di] || 0;
       const comment = (row.comments && row.comments[di]) || '';
       const hasComment = comment.trim().length > 0;
@@ -435,54 +490,189 @@ function renderTimesheet() {
         '</div>'+
       '</td>';
     }).join('');
+  }
 
-    let labelCell;
-    if (row.isOverhead) {
-      // Overhead row
-      labelCell = '<td class="ts-row-label">'+
-        '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'+
-        '<span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;'+
-          'color:var(--purple);background:rgba(124,92,191,0.12);padding:2px 8px;border-radius:10px;white-space:nowrap">Overhead</span>'+
-        '<select class="ts-task-select" style="flex:1;min-width:140px" id="ts-overhead-'+key+'-'+ri+'"'+
-          ' onchange="setTsOverhead(\''+key+'\','+ri+',this.value)">'+
-          OVERHEAD_CATS.map(c=>'<option value="'+c+'" '+(c===row.overheadCat?'selected':'')+'>'+c+'</option>').join('')+
-        '</select>'+
-        '<button style="background:transparent;border:none;color:var(--muted);font-size:10px;cursor:pointer;white-space:nowrap;padding:2px 4px;"'+
-          ' onclick="switchTsToProject(\''+key+'\','+ri+')" title="Switch to project">&#x21C4; Project</button>'+
-        '</div></td>';
-    } else {
-      const projTasks = taskStore.filter(t => t.proj === row.projId);
-      const taskOpts = '<option value="">— select task —</option>' +
-        projTasks.map(t => {
-          const statusLabels = {new:'New',inprogress:'In Progress',prohold:'Pro Hold',accthold:'Acct Hold',complete:'Complete',cancelled:'Cancelled',billed:'Billed'};
-          const label = '#'+(t.taskNum||'?')+' ['+(statusLabels[t.status]||t.status)+'] '+(t.name.length>38?t.name.slice(0,38)+'…':t.name);
-          const isSelected = row.taskId ? t._id === row.taskId : t.name === row.taskName;
-          return '<option value="'+t._id+'" data-name="'+t.name.replace(/"/g,'&quot;')+'" '+(isSelected?'selected':'')+'>'+label+'</option>';
-        }).join('');
-      const selProj = projects.find(p => p.id === row.projId);
-      const projDisplayName = selProj ? selProj.emoji+' '+selProj.name : '';
-      labelCell = '<td class="ts-row-label">'+
-        '<div class="ts-proj-picker" id="ts-picker-wrap-'+key+'-'+ri+'">'+
-          '<input class="ts-proj-input" id="ts-proj-input-'+key+'-'+ri+'"'+
-            ' value="'+projDisplayName.replace(/"/g,'&quot;')+'"'+
-            ' placeholder="Search project…"'+
-            ' autocomplete="off"'+
-            ' onfocus="openTsProjDropdown(\''+key+'\','+ri+')"'+
-            ' oninput="filterTsProjDropdown(\''+key+'\','+ri+',this.value)"'+
-            ' onkeydown="tsProjKeydown(event,\''+key+'\','+ri+')" />'+
-          '<div class="ts-proj-dropdown" id="ts-proj-dd-'+key+'-'+ri+'"></div>'+
-        '</div>'+
-        '<select class="ts-task-select" id="ts-task-'+key+'-'+ri+'"'+
-          ' onchange="setTsTask(\''+key+'\','+ri+',this.value)">'+taskOpts+'</select>'+
-        '</td>';
+  // Build the task dropdown options for a given project id (symbol + sort + color)
+  function _tsBuildTaskOptions(projId, row) {
+    // Leading symbol per status — carries meaning independent of color
+    //   ○ new       ● inprogress  ⏸ prohold  ⚑ accthold
+    //   ✓ complete  $ billed      ✗ cancelled
+    const STATUS_SYM = {
+      new:'○', inprogress:'●', prohold:'⏸', accthold:'⚑',
+      complete:'✓', billed:'$', cancelled:'✗'
+    };
+    const DONE = ['complete','billed','cancelled'];
+
+    const allTasks = taskStore.filter(t => t.proj === projId);
+    const active = allTasks.filter(t => !DONE.includes(t.status||'new'))
+      .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+    const done = allTasks.filter(t => DONE.includes(t.status))
+      .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+
+    function buildOpt(t) {
+      const status = t.status || 'new';
+      const color = (typeof statusColor === 'function') ? statusColor(status) : '#7a7a85';
+      const lbl   = (typeof statusLabel === 'function') ? statusLabel(status) : status;
+      const sym   = STATUS_SYM[status] || '·';
+      const shortName = t.name.length > 32 ? t.name.slice(0,32) + '…' : t.name;
+      const text = sym+' #'+(t.taskNum||'?')+'  '+shortName+'  '+lbl;
+      const isSelected = row.taskId ? t._id === row.taskId : t.name === row.taskName;
+      // Strikethrough for "don't work on this" states — visual cue at a glance
+      const strike = (status === 'cancelled' || status === 'complete') ? 'text-decoration:line-through;' : '';
+      return '<option value="'+t._id+'" data-name="'+t.name.replace(/"/g,'&quot;')+'" '+
+             'style="color:'+color+';font-weight:600;'+strike+'" '+
+             (isSelected?'selected':'')+'>'+text+'</option>';
     }
 
+    let html = '<option value="">— select task —</option>';
+    active.forEach(t => { html += buildOpt(t); });
+    if (done.length > 0) {
+      html += '<optgroup label="── completed / billed / cancelled ──">';
+      done.forEach(t => { html += buildOpt(t); });
+      html += '</optgroup>';
+    }
+    return html;
+  }
+
+  // Build the inline status pill shown NEXT to the task dropdown after a task is selected
+  function _tsBuildStatusPill(row) {
+    if (!row.taskId) return '';
+    const t = taskStore.find(x => x._id === row.taskId);
+    if (!t) return '';
+    const status = t.status || 'new';
+    const color = (typeof statusColor === 'function') ? statusColor(status) : '#7a7a85';
+    const lbl   = (typeof statusLabel === 'function') ? statusLabel(status) : status;
+    const STATUS_SYM = {new:'○', inprogress:'●', prohold:'⏸', accthold:'⚑', complete:'✓', billed:'$', cancelled:'✗'};
+    const sym = STATUS_SYM[status] || '·';
+    return '<span class="ts-task-status-pill" style="background:'+color+'22;color:'+color+';border:1px solid '+color+'55">'+sym+' '+lbl+'</span>';
+  }
+
+  // Build a task sub-row (indented, no project picker — project is implied by group)
+  function _tsBuildTaskSubRow(row, ri) {
+    const rowTotal = Object.values(row.hours).reduce((a,b)=>a+b,0);
+    const cells = _tsBuildDayCells(row, ri);
+    const taskOpts = _tsBuildTaskOptions(row.projId, row);
+    const pill = _tsBuildStatusPill(row);
+    const labelCell = '<td class="ts-row-label ts-task-subrow-label">'+
+        '<div class="ts-task-subrow-inner">'+
+          '<select class="ts-task-select ts-task-select-grouped" id="ts-task-'+key+'-'+ri+'"'+
+            ' onchange="setTsTask(\''+key+'\','+ri+',this.value)">'+taskOpts+'</select>'+
+          pill+
+        '</div>'+
+      '</td>';
+    return '<tr class="ts-task-subrow">'+labelCell+cells+
+      '<td class="ts-row-total" id="ts-rowtotal-'+key+'-'+ri+'">'+(rowTotal>0?rowTotal.toFixed(1)+'h':'—')+'</td>'+
+      '<td style="padding:0 8px;background:var(--surface)">'+
+        '<button class="ts-del-row" onclick="deleteTsRow(\''+key+'\','+ri+')" title="Remove this task">&#x2715;</button>'+
+      '</td></tr>';
+  }
+
+  // Build a project group (header + task sub-rows + "+ add task" button)
+  function _tsBuildProjectGroup(projId, groupEntries) {
+    const p = projects.find(x => x.id === projId);
+    const projLabel = p ? (p.emoji+' '+p.name) : '(unknown project)';
+    const projDot   = p ? '<span class="ts-proj-dot" style="background:'+(p.color||'#888')+'"></span>' : '';
+    const safe = projId.replace(/[^a-z0-9]/gi,'');
+    const locked = isWeekLocked(key);
+
+    // Per-day subtotals across this group
+    const daySubs = days.map((d, di) => {
+      const sub = groupEntries.reduce((s, g) => s + (g.row.hours[di]||0), 0);
+      return '<td class="ts-projgroup-sub" id="ts-projgroup-sub-'+key+'-'+safe+'-'+di+'">'+(sub>0?sub.toFixed(1)+'h':'')+'</td>';
+    }).join('');
+    const grpTotal = groupEntries.reduce((s, g) => s + Object.values(g.row.hours).reduce((a,b)=>a+b,0), 0);
+
+    let html = '<tr class="ts-proj-group-header">'+
+      '<td class="ts-proj-group-namecell">'+
+        '<span class="ts-proj-group-name">'+projDot+projLabel+'</span>'+
+        '<span class="ts-proj-group-count">'+groupEntries.length+' task'+(groupEntries.length===1?'':'s')+'</span>'+
+      '</td>'+
+      daySubs+
+      '<td class="ts-projgroup-total" id="ts-projgroup-total-'+key+'-'+safe+'">'+(grpTotal>0?grpTotal.toFixed(1)+'h':'')+'</td>'+
+      '<td class="ts-projgroup-actions">'+
+        (locked ? '' : '<button class="ts-del-group" onclick="deleteTsProjectGroup(\''+key+'\',\''+projId+'\')" title="Remove entire project group">&#x2715;</button>')+
+      '</td>'+
+    '</tr>';
+
+    // Task sub-rows
+    groupEntries.forEach(g => {
+      html += _tsBuildTaskSubRow(g.row, g.ri);
+    });
+
+    // Add-task button row (not shown when locked)
+    if (!locked) {
+      html += '<tr class="ts-add-task-row"><td colspan="'+(2+days.length)+'">'+
+        '<button class="ts-add-task-btn" onclick="addTsTaskToProject(\''+key+'\',\''+projId+'\')">+ add task to this project</button>'+
+        '</td><td></td></tr>';
+    }
+    return html;
+  }
+
+  // Build an unassigned (no projId yet) row — shows the full project picker
+  function _tsBuildUnassignedRow(row, ri) {
+    const rowTotal = Object.values(row.hours).reduce((a,b)=>a+b,0);
+    const cells = _tsBuildDayCells(row, ri);
+    const labelCell = '<td class="ts-row-label">'+
+      '<div class="ts-proj-picker" id="ts-picker-wrap-'+key+'-'+ri+'">'+
+        '<input class="ts-proj-input" id="ts-proj-input-'+key+'-'+ri+'"'+
+          ' value=""'+
+          ' placeholder="Search project…"'+
+          ' autocomplete="off"'+
+          ' onfocus="openTsProjDropdown(\''+key+'\','+ri+')"'+
+          ' oninput="filterTsProjDropdown(\''+key+'\','+ri+',this.value)"'+
+          ' onkeydown="tsProjKeydown(event,\''+key+'\','+ri+')" />'+
+        '<div class="ts-proj-dropdown" id="ts-proj-dd-'+key+'-'+ri+'"></div>'+
+      '</div>'+
+      '<div style="font-size:10.5px;color:var(--muted);margin-top:4px;padding-left:6px">pick a project to add tasks</div>'+
+      '</td>';
+    return '<tr class="ts-unassigned-row">'+labelCell+cells+
+      '<td class="ts-row-total" id="ts-rowtotal-'+key+'-'+ri+'">'+(rowTotal>0?rowTotal.toFixed(1)+'h':'—')+'</td>'+
+      '<td style="padding:0 8px;background:var(--surface)">'+
+        '<button class="ts-del-row" onclick="deleteTsRow(\''+key+'\','+ri+')" title="Remove row">&#x2715;</button>'+
+      '</td></tr>';
+  }
+
+  // Build an overhead-in-project-slot row (when user switched a row to overhead)
+  function _tsBuildOverheadProjRow(row, ri) {
+    const rowTotal = Object.values(row.hours).reduce((a,b)=>a+b,0);
+    const cells = _tsBuildDayCells(row, ri);
+    const labelCell = '<td class="ts-row-label">'+
+      '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">'+
+      '<span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;'+
+        'color:var(--purple);background:rgba(124,92,191,0.12);padding:2px 8px;border-radius:10px;white-space:nowrap">Overhead</span>'+
+      '<select class="ts-task-select" style="flex:1;min-width:140px" id="ts-overhead-'+key+'-'+ri+'"'+
+        ' onchange="setTsOverhead(\''+key+'\','+ri+',this.value)">'+
+        OVERHEAD_CATS.map(c=>'<option value="'+c+'" '+(c===row.overheadCat?'selected':'')+'>'+c+'</option>').join('')+
+      '</select>'+
+      '<button style="background:transparent;border:none;color:var(--muted);font-size:10px;cursor:pointer;white-space:nowrap;padding:2px 4px;"'+
+        ' onclick="switchTsToProject(\''+key+'\','+ri+')" title="Switch to project">&#x21C4; Project</button>'+
+      '</div></td>';
     return '<tr>'+labelCell+cells+
       '<td class="ts-row-total" id="ts-rowtotal-'+key+'-'+ri+'">'+(rowTotal>0?rowTotal.toFixed(1)+'h':'—')+'</td>'+
       '<td style="padding:0 8px;background:var(--surface)">'+
         '<button class="ts-del-row" onclick="deleteTsRow(\''+key+'\','+ri+')" title="Remove row">&#x2715;</button>'+
       '</td></tr>';
-  }).join('');
+  }
+
+  // Bucket rows into groups (preserving first-occurrence order)
+  const _groupOrder = [];
+  const _groups = {};
+  const _unassigned = [];
+  const _overheadProj = [];
+  rows.forEach((row, ri) => {
+    if (row.isOverhead) { _overheadProj.push({row, ri}); return; }
+    if (!row.projId) { _unassigned.push({row, ri}); return; }
+    if (!_groups[row.projId]) {
+      _groups[row.projId] = [];
+      _groupOrder.push(row.projId);
+    }
+    _groups[row.projId].push({row, ri});
+  });
+
+  let tableRows = '';
+  _groupOrder.forEach(pid => { tableRows += _tsBuildProjectGroup(pid, _groups[pid]); });
+  _unassigned.forEach(u => { tableRows += _tsBuildUnassignedRow(u.row, u.ri); });
+  _overheadProj.forEach(o => { tableRows += _tsBuildOverheadProjRow(o.row, o.ri); });
 
   // Day total row (project rows only)
   const dayTotals = days.map((d, di) => {
@@ -530,7 +720,7 @@ function renderTimesheet() {
     </div>
     ${(function(){
       var locked = isWeekLocked(key);
-      if (!locked) return '<div style="margin-bottom:10px"><button class="ts-add-row-btn" onclick="addTsRow(\'' + key + '\')">+ Add Row</button></div>';
+      if (!locked) return '<div style="margin-bottom:10px"><button class="ts-add-row-btn" onclick="addTsRow(\'' + key + '\')">+ Add Project</button></div>';
       return '';
     })()}
         <div class="ts-summary">

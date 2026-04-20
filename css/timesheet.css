@@ -120,3 +120,110 @@ tr:hover .ts-del-row{color:var(--muted);}
 .ts-comment-input{width:100%;min-width:80px;background:var(--surface2);border:1.5px solid rgba(224,92,92,0.4);border-radius:5px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:10.5px;padding:4px 6px;outline:none;resize:vertical;min-height:36px;box-sizing:border-box;transition:border-color var(--transition);}
 .ts-comment-input:focus{border-color:#e05c5c;box-shadow:0 0 0 3px rgba(224,92,92,0.12);}
 .ts-comment-input[readonly]{opacity:0.6;cursor:default;}
+
+
+/* ===== TIMESHEET PROJECT GROUPING (Option B) ===== */
+/* ===== TIMESHEET PROJECT GROUPING (Option B) ===== */
+/* Project group header row — sits above a project's task sub-rows */
+.ts-proj-group-header td{
+  background:linear-gradient(to right, rgba(232,162,52,0.08), rgba(232,162,52,0.02) 60%, transparent);
+  border-top:2px solid var(--border);
+  padding:9px 14px;
+}
+.ts-proj-group-header:hover td{background:rgba(232,162,52,0.10);}
+.ts-proj-group-namecell{
+  padding:9px 14px !important;
+  font-family:'DM Sans',sans-serif;
+}
+.ts-proj-group-name{
+  display:inline-flex;align-items:center;gap:8px;
+  font-size:13.5px;font-weight:600;color:var(--text);
+  letter-spacing:.2px;
+}
+.ts-proj-group-name .ts-proj-dot{
+  display:inline-block;width:9px;height:9px;border-radius:50%;
+  box-shadow:0 0 0 2px rgba(0,0,0,0.15);
+}
+.ts-proj-group-count{
+  display:inline-block;margin-left:10px;
+  font-size:10.5px;font-weight:500;letter-spacing:.6px;text-transform:uppercase;
+  color:var(--muted);
+  background:var(--surface2);border:1px solid var(--border);
+  padding:2px 7px;border-radius:10px;
+}
+.ts-projgroup-sub{
+  text-align:center;font-family:'JetBrains Mono',monospace;
+  font-size:11.5px;font-weight:600;color:var(--amber);
+  padding:6px 4px;
+}
+.ts-projgroup-total{
+  text-align:center;font-family:'JetBrains Mono',monospace;
+  font-size:12.5px;font-weight:700;color:var(--amber);
+  padding:6px 10px;border-left:1px solid var(--border);
+}
+.ts-projgroup-actions{padding:0 8px;text-align:center;}
+.ts-del-group{
+  background:transparent;border:none;color:transparent;
+  cursor:pointer;font-size:12px;padding:4px 6px;border-radius:4px;
+  transition:all var(--transition);
+}
+.ts-proj-group-header:hover .ts-del-group{color:var(--muted);}
+.ts-del-group:hover{color:var(--red) !important;background:rgba(224,92,92,0.12);}
+
+/* Task sub-row — indented, no project picker (project is implied by parent group) */
+.ts-task-subrow > td:first-child{
+  padding-left:28px !important;
+}
+.ts-task-subrow-label{padding:6px 12px 6px 28px !important;}
+.ts-task-subrow-inner{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.ts-task-select-grouped{
+  flex:1;min-width:180px;
+  font-size:12px !important;
+  color:var(--text) !important;
+  background:var(--surface2) !important;
+  border:1px solid var(--border) !important;
+  border-radius:6px !important;
+  padding:4px 8px !important;
+}
+.ts-task-select-grouped:hover,
+.ts-task-select-grouped:focus{
+  border-color:var(--amber-dim) !important;
+  background:var(--surface) !important;
+}
+/* Inline status pill shown next to task dropdown after selection */
+.ts-task-status-pill{
+  display:inline-block;
+  padding:2px 8px;border-radius:10px;
+  font-size:10px;font-weight:600;letter-spacing:.3px;
+  white-space:nowrap;flex-shrink:0;
+}
+
+/* "+ add task to this project" button row */
+.ts-add-task-row td{
+  padding:2px 14px 8px 28px !important;
+  border-bottom:none !important;
+  background:transparent !important;
+}
+.ts-add-task-btn{
+  font-size:11.5px;font-weight:500;
+  color:var(--amber);
+  background:transparent;
+  border:1px dashed rgba(232,162,52,0.45);
+  border-radius:6px;
+  padding:4px 12px;cursor:pointer;
+  font-family:'DM Sans',sans-serif;
+  transition:all var(--transition);
+}
+.ts-add-task-btn:hover{
+  background:var(--amber-glow);
+  border-color:var(--amber-dim);
+  border-style:solid;
+}
+
+/* Unassigned rows (no project picked yet) */
+.ts-unassigned-row > td:first-child{
+  background:rgba(91,156,246,0.04);
+  border-left:3px solid rgba(91,156,246,0.4);
+}

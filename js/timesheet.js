@@ -93,18 +93,16 @@ function selectTsProjItem(e, key, ri, projId) {
   row.isOverhead = false;
   row.projId = projId;
   row.taskName = '';
+  row.taskId = null;
   row.overheadCat = '';
-  const p = projects.find(x => x.id === projId);
-  const inp = document.getElementById('ts-proj-input-'+key+'-'+ri);
-  if (inp) inp.value = p ? p.emoji+' '+p.name : '';
   closeTsProjDropdown(key, ri);
-  // Update task dropdown — value is task UUID, display is task name
-  const taskSel = document.getElementById('ts-task-'+key+'-'+ri);
-  if (taskSel) {
-    const tasks = taskStore.filter(t => t.proj === projId);
-    taskSel.innerHTML = '<option value="">— select task —</option>'+
-      tasks.map(t => '<option value="'+t._id+'" data-name="'+t.name.replace(/"/g,'&quot;')+'">'+(t.name.length>38?t.name.slice(0,38)+'…':t.name)+'</option>').join('');
-  }
+  // Re-render so the row moves into the correct project group (grouped layout)
+  renderTimesheet();
+  // Auto-focus the new row's task dropdown for fast entry
+  setTimeout(() => {
+    const sel = document.getElementById('ts-task-'+key+'-'+ri);
+    if (sel) sel.focus();
+  }, 50);
 }
 
 function selectTsOverheadItem(e, key, ri, cat) {
