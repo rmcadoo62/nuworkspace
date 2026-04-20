@@ -3390,16 +3390,17 @@ function _renderReviewFooter(state) {
     : '';
 
   if (state.mode === 'employee_ack') {
-    return `${cancelBtn}${pdfBtn}<button class="rev-btn rev-btn-primary" onclick="saveReview('ack')" style="margin-left:auto">✓ Acknowledge</button>`;
+    return `${cancelBtn}${pdfBtn}<button id="revSaveBtnAck" class="rev-btn rev-btn-primary" onclick="saveReview('ack')" style="margin-left:auto">✓ Acknowledge</button>`;
   }
   if (state.mode === 'readonly') {
     return `${cancelBtn}${pdfBtn}`;
   }
-  // manager_new / manager_edit
-  const releaseBtn = (state.reviewId && !state.released)
-    ? `<button class="rev-btn rev-btn-release" onclick="saveReview('release')">🔓 Save &amp; Release</button>`
+  // manager_new / manager_edit — Save & Release available anytime (no draft-first requirement)
+  const releaseBtn = !state.released
+    ? `<button id="revSaveBtnRelease" class="rev-btn rev-btn-release" onclick="saveReview('release')">🔓 Save &amp; Release</button>`
     : '';
-  return `${cancelBtn}${pdfBtn}${releaseBtn}<button class="rev-btn rev-btn-primary" onclick="saveReview('draft')" style="margin-left:auto">${state.reviewId?'Save Changes':'Create Draft'}</button>`;
+  const draftLabel = state.reviewId ? 'Save Changes' : 'Save Draft';
+  return `${cancelBtn}${pdfBtn}${releaseBtn}<button id="revSaveBtnDraft" class="rev-btn rev-btn-primary" onclick="saveReview('draft')" style="margin-left:auto">${draftLabel}</button>`;
 }
 
 // ── Modal interactions ────────────────────────────────────────────
@@ -3466,6 +3467,28 @@ async function saveReview(action) {
   const s = window._reviewState;
   if (!s) return;
 
+  // Re-entrancy guard — prevents double-clicks from firing duplicate inserts
+  if (window._reviewSaving) return;
+  window._reviewSaving = true;
+  // Visually disable all save buttons during the save
+  ['revSaveBtnDraft','revSaveBtnRelease','revSaveBtnAck'].forEach(id => {
+    const b = document.getElementById(id);
+    if (b) { b.disabled = true; b.style.opacity = '.55'; b.style.cursor = 'wait'; }
+  });
+  try {
+    await _saveReviewInner(action, s);
+  } finally {
+    window._reviewSaving = false;
+    // Buttons are either gone (modal closed) or still in DOM (error path); re-enable if still present
+    ['revSaveBtnDraft','revSaveBtnRelease','revSaveBtnAck'].forEach(id => {
+      const b = document.getElementById(id);
+      if (b) { b.disabled = false; b.style.opacity = ''; b.style.cursor = ''; }
+    });
+  }
+}
+
+async function _saveReviewInner(action, s) {
+
   // Employee acknowledgment path
   if (action === 'ack') {
     if (!s.agreementStatus) { alert('Please select Agree or Disagree before acknowledging.'); return; }
@@ -3482,6 +3505,30 @@ async function saveReview(action) {
     };
     const { error } = await sb.from('performance_reviews').update(payload).eq('id', s.reviewId);
     if (error) { alert('Acknowledge failed: ' + error.message); return; }
+
+    // Notify the reviewing manager — skip self-review (manager reviewed themselves)
+    try {
+      const reviewRow = (hrRecordsCache[s.empId]?.reviews || []).find(r => r.id === s.reviewId);
+      const reviewerId = reviewRow?.reviewer_id;
+      if (reviewerId && reviewerId !== s.empId) {
+        const subject = employees.find(e => e.id === s.empId);
+        const icon = s.agreementStatus === 'agree' ? '✓' : '⚠';
+        const label = s.agreementStatus === 'agree' ? 'Agreed' : 'Disagreed';
+        const { error: notifErr } = await sb.from('chatter_notifs').insert([{
+          employee_id:   reviewerId,
+          proj_id:       null,
+          msg_id:        null,
+          from_name:     subject?.name || 'Employee',
+          from_initials: subject?.initials || 'E',
+          from_color:    subject?.color || '#888',
+          preview:       `${icon} ${subject?.name || 'Employee'} acknowledged their review (${label})||empHr:${s.empId}`,
+          is_read:       false,
+          created_at:    new Date().toISOString(),
+        }]);
+        if (notifErr) { toast('⚠ Notif error: ' + notifErr.message); console.error('review-ack notif insert error:', notifErr); }
+      }
+    } catch(e) { console.warn('review-ack notif insert failed:', e); }
+
     closeReviewModal();
     delete hrRecordsCache[s.empId];
     await _loadHrRecordsTab(s.empId, employees.find(e => e.id === s.empId));
@@ -3532,6 +3579,24 @@ async function saveReview(action) {
     ({ error: err } = await sb.from('performance_reviews').insert(payload));
   }
   if (err) { alert('Save failed: ' + err.message); return; }
+
+  // On release, notify the subject employee so they see the red-badge and can jump to HR Records
+  if (action === 'release') {
+    try {
+      const { error: notifErr } = await sb.from('chatter_notifs').insert([{
+        employee_id:   s.empId,
+        proj_id:       null,
+        msg_id:        null,
+        from_name:     currentEmployee?.name || 'Manager',
+        from_initials: currentEmployee?.initials || 'M',
+        from_color:    currentEmployee?.color || '#888',
+        preview:       `📋 Your performance review is ready. Please review and acknowledge.||myinfo:hrrecords`,
+        is_read:       false,
+        created_at:    new Date().toISOString(),
+      }]);
+      if (notifErr) { toast('⚠ Notif error: ' + notifErr.message); console.error('review-release notif insert error:', notifErr); }
+    } catch(e) { console.warn('review-release notif insert failed:', e); }
+  }
 
   closeReviewModal();
   delete hrRecordsCache[s.empId];

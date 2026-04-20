@@ -270,7 +270,7 @@ function renderNotifPanel() {
   list.innerHTML = notifStore.map(n => {
     const proj = projects.find(p => p.id === n.projId);
     const timeStr = new Date(n.ts).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|issueTracker)$/, '');
+    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|empHr:[a-f0-9-]+|myinfo:hrrecords|issueTracker)$/, '');
     return '<div class="notif-item' + (n.read ? '' : ' unread') + '" onclick="notifClick(\x27' + n.id + '\x27,\x27' + (n.projId||'') + '\x27)">' +
       '<div class="notif-item-avatar" style="background:' + (n.fromColor||'#888') + ';color:#fff">' + (n.fromInitials||'?') + '</div>' +
       '<div class="notif-item-body">' +
@@ -300,6 +300,29 @@ function notifClick(notifId, projId) {
       if (typeof openEmployeesPanel === 'function') openEmployeesPanel(null);
       setTimeout(() => { if (typeof showEmpProfile === 'function') showEmpProfile(requestingEmpId); }, 250);
     }
+    return;
+  }
+
+  // Check for employee HR Records routing — preview ends with ||empHr:uuid
+  // Used when a manager is notified that a review has been acknowledged; routes them
+  // to the subject employee's HR Records tab where the full review detail is visible.
+  const empHrMatch = preview.match(/\|\|empHr:([a-f0-9-]+)$/);
+  if (empHrMatch) {
+    const subjectId = empHrMatch[1];
+    if (typeof openEmployeesPanel === 'function') openEmployeesPanel(null);
+    setTimeout(() => {
+      if (typeof empProfileTab !== 'undefined') empProfileTab = 'hrrecords';
+      if (typeof showEmpProfile === 'function') showEmpProfile(subjectId);
+    }, 250);
+    return;
+  }
+
+  // Check for self-HR-Records routing — preview ends with ||myinfo:hrrecords
+  // Used when an employee is notified that their review has been released;
+  // routes them to My Info → HR Records tab where the "acknowledge" banner is shown.
+  if (preview.endsWith('||myinfo:hrrecords')) {
+    if (typeof openMyInfoPanel === 'function') openMyInfoPanel(document.getElementById('navMyInfo'));
+    setTimeout(() => { if (typeof switchMyInfoTab === 'function') switchMyInfoTab('hrrecords'); }, 250);
     return;
   }
 
