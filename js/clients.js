@@ -958,6 +958,22 @@ let _sfParsed = []; // [{ accountName, city, state, zip, address, website, phone
 // ===== MERGE DUPLICATE CLIENTS =====
 // ===== MERGE DUPLICATE CLIENTS =====
 let _mergeDecisions = {}; // pairKey -> 'dismissed'
+let _mergeAllPairs = [];  // cached ALL pairs (score > 0) from last scan, sorted desc
+let _mergeHasScanned = false;
+let _mergeDismissalsLoadPromise = null; // awaited by runMergeScan so we never render dismissed pairs
+const _MERGE_THRESHOLD = 0.45;
+
+async function loadMergeDismissals() {
+  _mergeDecisions = {};
+  if (!sb) return;
+  try {
+    const { data, error } = await sb.from('merge_dismissals').select('pair_key');
+    if (error) throw error;
+    (data || []).forEach(r => { _mergeDecisions[r.pair_key] = 'dismissed'; });
+  } catch(e) {
+    console.warn('Could not load merge dismissals:', e.message);
+  }
+}
 
 function openMergeClientsPanel(el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -967,6 +983,13 @@ function openMergeClientsPanel(el) {
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-merge-clients').classList.add('active');
   document.getElementById('mergeResultsWrap').innerHTML = '<div style="color:var(--muted);font-size:13px">Click Scan to find potential duplicates.</div>';
+  // Reset search UI — hidden until scan runs
+  const searchWrap = document.getElementById('mergeSearchWrap');
+  if (searchWrap) searchWrap.style.display = 'none';
+  const searchInput = document.getElementById('mergeSearchInput');
+  if (searchInput) searchInput.value = '';
+  // Kick off dismissals fetch (fire-and-forget; runMergeScan awaits it)
+  _mergeDismissalsLoadPromise = loadMergeDismissals();
 }
 
 function mergeSimScore(a, b) {
@@ -992,33 +1015,84 @@ function runMergeScan() {
   const wrap = document.getElementById('mergeResultsWrap');
   wrap.innerHTML = '<div style="color:var(--muted);font-size:13px">Scanning…</div>';
 
-  const THRESHOLD = 0.45;
-  const pairs = [];
-  const seen = new Set();
+  // Wait for persisted dismissals to load before rendering, so dismissed pairs stay hidden.
+  const proceed = () => {
+    // Compute ALL pairs with any positive score — we cache them so search can reach
+    // below the 0.45 threshold (e.g. typos like "Elma Electoronics") without re-scanning.
+    _mergeAllPairs = [];
+    const seen = new Set();
 
-  for (let i = 0; i < clientStore.length; i++) {
-    for (let j = i + 1; j < clientStore.length; j++) {
-      const a = clientStore[i], b = clientStore[j];
-      const key = [a.id, b.id].sort().join('|');
-      if (seen.has(key) || _mergeDecisions[key] === 'dismissed') continue;
-      const score = mergeSimScore(a.name, b.name);
-      if (score >= THRESHOLD) {
-        pairs.push({ a, b, score, key });
-        seen.add(key);
+    for (let i = 0; i < clientStore.length; i++) {
+      for (let j = i + 1; j < clientStore.length; j++) {
+        const a = clientStore[i], b = clientStore[j];
+        const key = [a.id, b.id].sort().join('|');
+        if (seen.has(key)) continue;
+        const score = mergeSimScore(a.name, b.name);
+        if (score > 0) {
+          _mergeAllPairs.push({ a, b, score, key });
+          seen.add(key);
+        }
       }
     }
+    _mergeAllPairs.sort((x, y) => y.score - x.score);
+    _mergeHasScanned = true;
+
+    // Reveal the search input now that we have data to filter
+    const searchWrap = document.getElementById('mergeSearchWrap');
+    if (searchWrap) searchWrap.style.display = '';
+
+    renderMergeResults();
+  };
+
+  if (_mergeDismissalsLoadPromise) {
+    _mergeDismissalsLoadPromise.then(proceed);
+  } else {
+    proceed();
+  }
+}
+
+function filterMergePairs() {
+  if (!_mergeHasScanned) return;
+  renderMergeResults();
+}
+
+function renderMergeResults() {
+  const wrap = document.getElementById('mergeResultsWrap');
+  if (!wrap) return;
+  const searchEl = document.getElementById('mergeSearchInput');
+  const search = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+  // Empty search → default behavior (pairs ≥ 0.45).
+  // Non-empty search → show ANY pair where either name contains the text, regardless of score.
+  // Dismissed pairs are always hidden.
+  let pairs;
+  if (search) {
+    pairs = _mergeAllPairs.filter(p =>
+      _mergeDecisions[p.key] !== 'dismissed' &&
+      (p.a.name.toLowerCase().includes(search) || p.b.name.toLowerCase().includes(search))
+    );
+  } else {
+    pairs = _mergeAllPairs.filter(p =>
+      _mergeDecisions[p.key] !== 'dismissed' &&
+      p.score >= _MERGE_THRESHOLD
+    );
   }
 
   if (pairs.length === 0) {
-    wrap.innerHTML = '<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">✅</div><div>No duplicate candidates found.</div></div>';
+    if (search) {
+      wrap.innerHTML = `<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">🔍</div><div>No client pairs match "${search}".</div></div>`;
+    } else {
+      wrap.innerHTML = '<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">✅</div><div>No duplicate candidates found.</div></div>';
+    }
     return;
   }
 
-  // Sort by score desc
-  pairs.sort((a,b) => b.score - a.score);
+  const headerText = search
+    ? `${pairs.length} match${pairs.length!==1?'es':''} for "${search}" — showing all scores`
+    : `${pairs.length} potential duplicate pair${pairs.length!==1?'s':''} found — review and merge or dismiss each one.`;
 
   wrap.innerHTML = `
-    <div style="font-size:13px;color:var(--muted);margin-bottom:18px">${pairs.length} potential duplicate pair${pairs.length!==1?'s':''} found — review and merge or dismiss each one.</div>
+    <div style="font-size:13px;color:var(--muted);margin-bottom:18px">${headerText}</div>
     ${pairs.map(p => renderMergePair(p)).join('')}`;
 }
 
@@ -1128,6 +1202,15 @@ function dismissMergePair(key) {
   const el = document.getElementById('merge-pair-' + key.replace(/[^a-z0-9]/gi,'-'));
   if (el) el.style.opacity = '0.3';
   setTimeout(() => { if (el) el.remove(); }, 400);
+  // Persist so the dismissal survives reload (work the list down to zero over time)
+  if (sb) {
+    const empId = (typeof currentEmployee !== 'undefined' && currentEmployee) ? currentEmployee.id : null;
+    sb.from('merge_dismissals')
+      .upsert({ pair_key: key, dismissed_by: empId }, { onConflict: 'pair_key' })
+      .then(({ error }) => {
+        if (error) console.warn('Could not persist dismissal:', error.message);
+      });
+  }
 }
 
 function confirmMerge(key, keeperId, loserId) {
@@ -1159,6 +1242,8 @@ async function executeMerge(key, keeperId, loserId) {
     contactStore.forEach(c => { if (c.clientId === loserId) c.clientId = keeperId; });
     Object.values(projectInfo).forEach(info => { if (info.clientId === loserId) info.clientId = keeperId; });
     clientStore = clientStore.filter(c => c.id !== loserId);
+    // Purge any cached pair referencing the deleted client so search doesn't show ghosts
+    _mergeAllPairs = _mergeAllPairs.filter(p => p.a.id !== loserId && p.b.id !== loserId);
 
     _mergeDecisions[key] = 'dismissed';
     const el = document.getElementById('merge-pair-' + key.replace(/[^a-z0-9]/gi,'-'));
