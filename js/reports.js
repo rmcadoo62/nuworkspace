@@ -368,9 +368,10 @@ async function renderTimesheetsReport(filterDept, filterStatus) {
   }).filter(ws => eligibleEmpIds.has(ws.employeeId));
 
   // Add "not_submitted" placeholder for any eligible employee missing from a week.
-  // Always seed the current week so placeholders appear even before ANY
-  // employee has submitted — otherwise the latest week is invisible.
-  const allWeekKeys = [...new Set([...entries.map(e => e.weekKey), getWeekKey(0)])];
+  // Always seed the current week AND last week so placeholders appear even before
+  // ANY employee has submitted — otherwise recent weeks are invisible.
+  // (Matches the live-refresh window above, which rebuilds tsData for both weeks.)
+  const allWeekKeys = [...new Set([...entries.map(e => e.weekKey), getWeekKey(0), getWeekKey(-1)])];
   allWeekKeys.forEach(wk => {
     const submittedIds = new Set(entries.filter(e => e.weekKey === wk).map(e => e.employeeId));
     eligibleEmps.forEach(emp => {
