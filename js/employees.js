@@ -1145,13 +1145,18 @@ async function _loadLifecycleTab(empId, emp) {
         <tbody>
           ${templateKeys.map(key => {
             const onboardingTemplate = applicableTemplates.find(t => t.key === key && t.type === 'onboarding');
+            const offboardingTemplate = applicableTemplates.find(t => t.key === key && t.type === 'offboarding');
             const record = lifecycleData[key] || {};
             const isNA = record.is_na || false;
             const onboardingDate = record.onboarding_date || '';
             const offboardingDate = record.offboarding_date || '';
+            const onbNotes = record.onboarding_notes || '';
+            const offNotes = record.offboarding_notes || '';
+            const showOnbNotes = !isNA && onboardingTemplate?.notes_enabled;
+            const showOffNotes = !isNA && offboardingTemplate?.notes_enabled;
             
             return `
-              <tr style="border-bottom:1px solid var(--border);${isNA ? 'opacity:0.5;' : ''}" data-key="${key}">
+              <tr style="border-bottom:${(showOnbNotes || showOffNotes) ? 'none' : '1px solid var(--border)'};${isNA ? 'opacity:0.5;' : ''}" data-key="${key}">
                 <td style="padding:12px 16px;font-size:13px;color:var(--text)">${onboardingTemplate?.label || key}</td>
                 <td style="text-align:center;padding:12px 16px">
                   ${isNA ? `<span style="color:var(--muted);font-size:12px">N/A</span>` : 
@@ -1193,6 +1198,36 @@ async function _loadLifecycleTab(empId, emp) {
                   </button>
                 </td>
               </tr>
+              ${showOnbNotes ? `
+                <tr style="border-bottom:${showOffNotes ? 'none' : '1px solid var(--border)'}">
+                  <td colspan="5" style="padding:0 16px 10px 16px">
+                    <div style="display:flex;align-items:center;gap:8px;padding-left:8px">
+                      <span style="font-size:11px;font-weight:600;color:#4caf7d;min-width:130px;text-transform:uppercase;letter-spacing:0.5px">📝 Onboarding Notes</span>
+                      ${canEdit ? `
+                        <input type="text" value="${onbNotes.replace(/"/g,'&quot;')}" placeholder="e.g. Dell Latitude s/n ABC123, assigned to desk 4…"
+                          onchange="updateLifecycleItem('${empId}', '${key}', 'onboarding_notes', this.value)"
+                          style="flex:1;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif"
+                          onfocus="this.style.borderColor='#4caf7d'" onblur="this.style.borderColor='var(--border)'">
+                      ` : `<span style="flex:1;font-size:12px;color:var(--muted);font-style:${onbNotes ? 'normal' : 'italic'}">${onbNotes || '(none)'}</span>`}
+                    </div>
+                  </td>
+                </tr>
+              ` : ''}
+              ${showOffNotes ? `
+                <tr style="border-bottom:1px solid var(--border)">
+                  <td colspan="5" style="padding:0 16px 10px 16px">
+                    <div style="display:flex;align-items:center;gap:8px;padding-left:8px">
+                      <span style="font-size:11px;font-weight:600;color:#e05c5c;min-width:130px;text-transform:uppercase;letter-spacing:0.5px">📝 Offboarding Notes</span>
+                      ${canEdit ? `
+                        <input type="text" value="${offNotes.replace(/"/g,'&quot;')}" placeholder="e.g. Retrieved, wiped, returned to inventory…"
+                          onchange="updateLifecycleItem('${empId}', '${key}', 'offboarding_notes', this.value)"
+                          style="flex:1;border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px;background:var(--bg);color:var(--text);font-family:'DM Sans',sans-serif"
+                          onfocus="this.style.borderColor='#e05c5c'" onblur="this.style.borderColor='var(--border)'">
+                      ` : `<span style="flex:1;font-size:12px;color:var(--muted);font-style:${offNotes ? 'normal' : 'italic'}">${offNotes || '(none)'}</span>`}
+                    </div>
+                  </td>
+                </tr>
+              ` : ''}
             `;
           }).join('')}
         </tbody>
