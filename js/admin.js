@@ -1035,6 +1035,8 @@ function openMyInfoPanel(el) {
   }
 
   // Render profile tab
+  _myInfoReadOnly = true;      // lock Lifecycle/HR tabs to read-only for self-view
+  empProfileTab = 'profile';   // always land on Profile when opening My Info
   showEmpProfile(currentEmployee.id);
   window._myInfoActiveTab = 'profile';
 }

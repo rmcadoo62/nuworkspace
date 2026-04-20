@@ -21,12 +21,15 @@ function openEmployeesPanel(el) {
   document.getElementById('topbarName').textContent = 'Employees';
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.getElementById('panel-employees').classList.add('active');
+  _myInfoReadOnly = false;  // ensure full edit rights in the manager view
   _loadCmmcScreenedIds().then(() => renderEmployeesPanel(''));
 }
 
 let empDetailOpen = null;
-let empProfileTab = 'profile'; // 'profile' | 'lifecycle'
+let empProfileTab = 'profile'; // 'profile' | 'lifecycle' | 'hrrecords'
 let lifecycleCache = {}; // empId -> lifecycle records
+let hrRecordsCache = {}; // empId -> { reviews: [], discipline: [] }
+let _myInfoReadOnly = false; // when true, Lifecycle/HR tabs render read-only even for managers
 // Note: `templates` is declared in admin.js. We populate it here on demand.
 
 // Ensure the templates global is populated from Supabase before any lifecycle
@@ -716,8 +719,8 @@ function showEmpProfile(empId, annivOffset) {
     pane.innerHTML = `
     <!-- Tab bar -->
     <div style="display:flex;gap:0;border-bottom:1.5px solid var(--border);margin-bottom:24px;background:var(--bg);position:sticky;top:0;z-index:10">
-      ${['profile','lifecycle'].map(t => {
-        const labels = { profile:'👤 Profile', lifecycle:'🔄 Lifecycle' };
+      ${(_myInfoReadOnly ? ['profile','lifecycle'] : ['profile','lifecycle','hrrecords']).map(t => {
+        const labels = { profile:'👤 Profile', lifecycle:'🔄 Lifecycle', hrrecords:'📋 HR Records' };
         const active = empProfileTab === t;
         return `<button onclick="switchEmpTab('${empId}','${t}')"
           style="padding:10px 20px;background:transparent;border:none;border-bottom:2.5px solid ${active?'var(--amber)':'transparent'};font-family:'DM Sans',sans-serif;font-size:13px;font-weight:${active?'600':'500'};color:${active?'var(--amber)':'var(--muted)'};cursor:pointer;transition:all var(--transition);margin-bottom:-1.5px;white-space:nowrap">
@@ -736,7 +739,7 @@ function showEmpProfile(empId, annivOffset) {
           ${yearsWorked ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">Hired ${fmtDate(emp.hireDate)} · ${yearsWorked} yrs seniority</div>` : ''}
         </div>
       </div>
-      ${isManager() ? `<div style="display:flex;gap:8px">
+      ${isManager() && !_myInfoReadOnly ? `<div style="display:flex;gap:8px">
         <button onclick="openEmployeeModal('${empId}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--text);cursor:pointer">✎ Edit</button>
         <button onclick="deleteEmployee('${empId}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--red);cursor:pointer">✕ Remove</button>
       </div>` : ''}
@@ -1037,13 +1040,15 @@ function showEmpProfile(empId, annivOffset) {
             <tbody>${tsRows}</tbody>
           </table>`}
     </div>
-  ` : `<div id="lifecycleTabInner"></div>`}
+  ` : empProfileTab === 'hrrecords' ? `<div id="hrRecordsTabInner"></div>` : `<div id="lifecycleTabInner"></div>`}
   </div>
   `;
 
-  // If not profile tab, load lifecycle content
+  // If not profile tab, load tab content
   if (empProfileTab === 'lifecycle') {
     _loadLifecycleTab(empId, emp);
+  } else if (empProfileTab === 'hrrecords') {
+    _loadHrRecordsTab(empId, emp);
   }
 }
 
@@ -1107,7 +1112,7 @@ async function _loadLifecycleTab(empId, emp) {
   const onboardingComplete = applicableItems.filter(key => lifecycleData[key]?.onboarding_date).length;
   const offboardingComplete = applicableItems.filter(key => lifecycleData[key]?.offboarding_date).length;
   
-  const canEdit = isManager();
+  const canEdit = isManager() && !_myInfoReadOnly;
   const isInactive = emp.isActive === false || !!emp.terminationDate;
 
   inner.innerHTML = `
@@ -2534,4 +2539,671 @@ async function _loadMyChatter(empId) {
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:14px">Last 100 messages · Click any row to jump to that project's chatter</div>
     ${rows}`;
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  PHASE 2 — HR RECORDS (Performance Reviews + Disciplinary Actions)
+// ════════════════════════════════════════════════════════════════════
+
+// ── Shared constants ───────────────────────────────────────────────
+const HR_TIERS = [
+  { key:'verbal',        label:'Verbal Warning',        color:'#5b9cf6' },
+  { key:'written',       label:'Written Warning',       color:'#e8a234' },
+  { key:'final_written', label:'Final Written Warning', color:'#e05c5c' },
+  { key:'demotion',      label:'Demotion',              color:'#9c56a4' },
+  { key:'transfer',      label:'Transfer',              color:'#888899' },
+  { key:'forced_leave',  label:'Forced Leave',          color:'#e05c5c' },
+  { key:'termination',   label:'Termination',           color:'#e05c5c' },
+];
+const HR_CATEGORIES = [
+  { key:'attendance',      label:'Attendance',              policy:'§4.1 Attendance',             counted:true },
+  { key:'vacation',        label:'Vacation Shortage',       policy:'§7.8 Vacation',               counted:true },
+  { key:'conduct',         label:'Standards of Conduct',    policy:'§5.5 Standards of Conduct',   counted:false },
+  { key:'safety',          label:'Safety Violation',        policy:'§8.2 General Safety',         counted:false },
+  { key:'drug_alcohol',    label:'Drug/Alcohol Policy',     policy:'§8.1 Drug and Alcohol',       counted:false },
+  { key:'harassment',      label:'Harassment / EEO',        policy:'EEO & Nonharassment',         counted:false },
+  { key:'violence',        label:'Workplace Violence',      policy:'§8.3 Workplace Violence',     counted:false },
+  { key:'confidentiality', label:'Confidentiality / TS',    policy:'Trade Secrets / §6.2',        counted:false },
+  { key:'falsify_time',    label:'Falsifying Time Records', policy:'§4.6 Recording Time',         counted:false },
+  { key:'other',           label:'Other',                   policy:'',                            counted:false },
+];
+const HR_RATING_LABELS = [
+  { key:'r_quality',       label:'Quality of Work' },
+  { key:'r_technical',     label:'Technical Skills' },
+  { key:'r_reliability',   label:'Reliability & Attendance' },
+  { key:'r_communication', label:'Communication & Teamwork' },
+  { key:'r_initiative',    label:'Initiative & Problem Solving' },
+  { key:'r_safety',        label:'Safety & Compliance' },
+  { key:'r_overall',       label:'Overall Rating' },
+];
+const HR_RATING_DESC = {1:'Unsatisfactory',2:'Needs Improvement',3:'Meets Expectations',4:'Exceeds Expectations',5:'Exceptional'};
+
+// Helpers
+function _hrTier(key)     { return HR_TIERS.find(t => t.key === key) || {label:key, color:'var(--muted)'}; }
+function _hrCategory(key) { return HR_CATEGORIES.find(c => c.key === key) || {label:key, policy:'', counted:false}; }
+function _hrFmtDate(s)    { if(!s) return ''; const d=new Date(s); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }
+function _hrIsWithin12mo(dateStr) {
+  if (!dateStr) return false;
+  const d = new Date(dateStr);
+  const cutoff = new Date(); cutoff.setFullYear(cutoff.getFullYear() - 1);
+  return d >= cutoff;
+}
+
+// ── Load HR Records for an employee (with cache) ───────────────────
+async function _loadHrRecordsTab(empId, emp) {
+  const inner = document.getElementById('hrRecordsTabInner');
+  if (!inner) return;
+  inner.innerHTML = '<div style="padding:20px;color:var(--muted);font-size:13px">Loading…</div>';
+
+  if (!hrRecordsCache[empId]) {
+    const [revRes, discRes] = await Promise.all([
+      sb.from('performance_reviews').select('*').eq('employee_id', empId).order('review_date', {ascending:false}),
+      sb.from('disciplinary_actions').select('*').eq('employee_id', empId).order('incident_date', {ascending:false}),
+    ]);
+    hrRecordsCache[empId] = {
+      reviews:    revRes.data  || [],
+      discipline: discRes.data || [],
+    };
+  }
+  _renderHrRecordsTab(empId, emp);
+}
+
+function _renderHrRecordsTab(empId, emp) {
+  const inner = document.getElementById('hrRecordsTabInner');
+  if (!inner) return;
+  const data   = hrRecordsCache[empId] || { reviews: [], discipline: [] };
+  const canEdit = isManager() && !_myInfoReadOnly;
+
+  // Category counters (rolling 12-mo + all-time), counted categories only
+  const counters = HR_CATEGORIES.filter(c => c.counted).map(c => {
+    const all = data.discipline.filter(d => d.category === c.key);
+    const rolling = all.filter(d => _hrIsWithin12mo(d.incident_date));
+    return { ...c, count12: rolling.length, countAll: all.length };
+  });
+  // All-time totals per non-counted category
+  const otherCounts = HR_CATEGORIES.filter(c => !c.counted).map(c => {
+    return { ...c, countAll: data.discipline.filter(d => d.category === c.key).length };
+  }).filter(c => c.countAll > 0);
+
+  // Status pill helper
+  const statusPill = (rec) => {
+    if (rec.employee_acknowledged_at) {
+      return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:rgba(76,175,125,0.15);color:#4caf7d;font-size:10.5px;font-weight:600">🟢 Acknowledged ${_hrFmtDate(rec.employee_acknowledged_at)}</span>`;
+    }
+    if (rec.released_to_employee_at) {
+      return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:rgba(91,156,246,0.15);color:#5b9cf6;font-size:10.5px;font-weight:600">🔵 Released</span>`;
+    }
+    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:rgba(232,162,52,0.15);color:#e8a234;font-size:10.5px;font-weight:600">🟡 Draft</span>`;
+  };
+
+  // Counter card markup
+  const counterHtml = counters.map(c => `
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;min-width:180px;flex:1">
+      <div style="font-size:10.5px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">${c.label}</div>
+      <div style="display:flex;align-items:baseline;gap:8px">
+        <div style="font-size:20px;font-weight:700;color:${c.count12 >= 3 ? '#e05c5c' : c.count12 >= 2 ? '#e8a234' : 'var(--text)'}">${c.count12}</div>
+        <div style="font-size:11px;color:var(--muted)">last 12 mo</div>
+      </div>
+      <div style="font-size:10.5px;color:var(--muted);margin-top:2px">Total all-time: ${c.countAll}</div>
+    </div>
+  `).join('');
+  const otherCountHtml = otherCounts.length ? `
+    <div style="margin-top:8px;font-size:11.5px;color:var(--muted)">
+      Other categories: ${otherCounts.map(c => `<span style="margin-right:10px"><b style="color:var(--text)">${c.countAll}</b> ${c.label}</span>`).join('')}
+    </div>` : '';
+
+  // Reviews list
+  const reviewsHtml = data.reviews.length === 0
+    ? `<div style="padding:28px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px dashed var(--border);border-radius:10px">No performance reviews yet.</div>`
+    : data.reviews.map(r => _renderReviewCard(r, canEdit, emp)).join('');
+
+  // Disciplinary list
+  const discHtml = data.discipline.length === 0
+    ? `<div style="padding:28px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px dashed var(--border);border-radius:10px">No disciplinary actions on record.</div>`
+    : data.discipline.map(d => _renderDisciplineCard(d, canEdit, emp)).join('');
+
+  inner.innerHTML = `
+    ${counters.length ? `
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">${counterHtml}</div>
+      ${otherCountHtml}
+    ` : ''}
+
+    <!-- PERFORMANCE REVIEWS -->
+    <div style="margin-top:26px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--text)">📝 Performance Reviews</div>
+      ${canEdit ? `<button onclick="openReviewModal('${empId}')" style="background:var(--amber);color:#0e0e0f;border:none;border-radius:7px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer">+ New Review</button>` : ''}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">${reviewsHtml}</div>
+
+    <!-- DISCIPLINARY ACTIONS -->
+    <div style="margin-top:26px;display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <div style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--text)">⚠️ Disciplinary Actions</div>
+      ${canEdit ? `<button onclick="openDisciplineModal('${empId}')" style="background:var(--red);color:#fff;border:none;border-radius:7px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer">+ New Action</button>` : ''}
+    </div>
+    <div style="display:flex;flex-direction:column;gap:10px">${discHtml}</div>
+  `;
+  // Re-target status pill renderer for all cards (attached to window for expand handlers)
+  window._hrStatusPill = statusPill;
+}
+
+// ── Review Card ────────────────────────────────────────────────────
+function _renderReviewCard(r, canEdit, emp) {
+  const overall = r.r_overall;
+  const statusPill = (window._hrStatusPill) ? window._hrStatusPill(r) : '';
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+      <div style="padding:12px 16px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="_hrToggleCard('rev_${r.id}')">
+        <div style="flex:1;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">Review — ${_hrFmtDate(r.review_date)}</div>
+          ${overall ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;background:rgba(91,156,246,0.12);color:#5b9cf6;font-size:11px;font-weight:600">Overall: ${overall}/5</span>` : `<span style="font-size:11px;color:var(--muted);font-style:italic">No overall rating</span>`}
+          ${statusPill}
+          ${r.reviewer_name ? `<span style="font-size:11px;color:var(--muted)">by ${r.reviewer_name}</span>` : ''}
+          ${r.next_review_date ? `<span style="font-size:11px;color:var(--muted)">Next: ${_hrFmtDate(r.next_review_date)}</span>` : ''}
+        </div>
+        <span id="rev_${r.id}_chev" style="font-size:11px;color:var(--muted)">▼</span>
+      </div>
+      <div id="rev_${r.id}" style="display:none;padding:0 16px 14px 16px;border-top:1px solid var(--border)">
+        ${_renderReviewDetail(r, canEdit, emp)}
+      </div>
+    </div>
+  `;
+}
+
+function _renderReviewDetail(r, canEdit, emp) {
+  const ratings = HR_RATING_LABELS.map(rl => {
+    const v = r[rl.key];
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px dotted var(--border)">
+        <div style="font-size:12.5px;color:var(--text)">${rl.label}</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          ${v ? `<span style="font-size:11px;color:var(--muted)">${HR_RATING_DESC[v]||''}</span>
+                 <span style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;color:#5b9cf6">${v}/5</span>` 
+               : `<span style="font-size:11px;color:var(--muted);font-style:italic">not rated</span>`}
+        </div>
+      </div>`;
+  }).join('');
+
+  const prevGoals = Array.isArray(r.previous_goals) ? r.previous_goals : (r.previous_goals ? JSON.parse(r.previous_goals) : []);
+  const nextGoals = Array.isArray(r.next_goals)     ? r.next_goals     : (r.next_goals     ? JSON.parse(r.next_goals)     : []);
+
+  const goalStatusPill = (s) => {
+    const m = { met:['Met','#4caf7d'], partial:['Partially Met','#e8a234'], not_met:['Not Met','#e05c5c'], na:['N/A','var(--muted)'] };
+    const [lab,col] = m[s] || ['—','var(--muted)'];
+    return `<span style="padding:1px 7px;border-radius:8px;background:${col === 'var(--muted)' ? 'var(--surface2)' : col+'22'};color:${col};font-size:10.5px;font-weight:600">${lab}</span>`;
+  };
+
+  const prevHtml = prevGoals.length ? prevGoals.map(g => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:12.5px">
+      <div style="color:var(--text);flex:1">${g.goal || ''}</div>${goalStatusPill(g.status)}
+    </div>`).join('') : `<div style="font-size:12px;color:var(--muted);font-style:italic">None recorded</div>`;
+  const nextHtml = nextGoals.length ? nextGoals.map(g => `
+    <div style="padding:5px 0;font-size:12.5px;color:var(--text)">• ${g.goal || ''}</div>`).join('') : `<div style="font-size:12px;color:var(--muted);font-style:italic">None recorded</div>`;
+
+  return `
+    <div style="margin-top:12px">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px">Ratings</div>
+      ${ratings}
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Previous Period Goals</div>
+      ${prevHtml}
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Next Period Goals</div>
+      ${nextHtml}
+      ${r.reviewer_comments ? `
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Reviewer Comments</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap">${(r.reviewer_comments||'').replace(/</g,'&lt;')}</div>` : ''}
+      ${r.employee_comments ? `
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Employee Comments</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap;background:var(--surface2);padding:10px 12px;border-radius:6px">${(r.employee_comments||'').replace(/</g,'&lt;')}</div>` : ''}
+      ${canEdit ? `
+        <div style="display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);flex-wrap:wrap">
+          <button onclick="openReviewModal('${r.employee_id}','${r.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;color:var(--text);cursor:pointer">✎ Edit</button>
+          ${!r.released_to_employee_at ? `<button onclick="releaseHrRecord('performance_reviews','${r.id}','${r.employee_id}')" style="background:rgba(91,156,246,0.15);border:1px solid #5b9cf6;border-radius:6px;padding:5px 12px;font-size:12px;color:#5b9cf6;cursor:pointer;font-weight:600">🔓 Release to Employee</button>` : ''}
+          <button onclick="deleteHrRecord('performance_reviews','${r.id}','${r.employee_id}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e05c5c;cursor:pointer;margin-left:auto">✕ Delete</button>
+        </div>` : ''}
+    </div>
+  `;
+}
+
+// ── Discipline Card ────────────────────────────────────────────────
+function _renderDisciplineCard(d, canEdit, emp) {
+  const tier = _hrTier(d.tier);
+  const cat  = _hrCategory(d.category);
+  const statusPill = (window._hrStatusPill) ? window._hrStatusPill(d) : '';
+  return `
+    <div style="background:var(--surface);border:1px solid var(--border);border-left:3px solid ${tier.color};border-radius:10px;overflow:hidden">
+      <div style="padding:12px 16px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="_hrToggleCard('disc_${d.id}')">
+        <div style="flex:1;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${_hrFmtDate(d.incident_date)}</div>
+          <span style="padding:2px 10px;border-radius:10px;background:${tier.color}22;color:${tier.color};font-size:11px;font-weight:700">${tier.label}</span>
+          <span style="font-size:11.5px;color:var(--muted)">${cat.label}</span>
+          ${statusPill}
+          ${d.issued_by_name ? `<span style="font-size:11px;color:var(--muted)">by ${d.issued_by_name}</span>` : ''}
+        </div>
+        <span id="disc_${d.id}_chev" style="font-size:11px;color:var(--muted)">▼</span>
+      </div>
+      <div id="disc_${d.id}" style="display:none;padding:0 16px 14px 16px;border-top:1px solid var(--border)">
+        ${_renderDisciplineDetail(d, canEdit, emp)}
+      </div>
+    </div>
+  `;
+}
+
+function _renderDisciplineDetail(d, canEdit, emp) {
+  const ackMap = { pending:['Pending','var(--muted)'], signed:['Signed','#4caf7d'], refused:['Refused to Sign','#e05c5c'] };
+  const [ackLabel, ackColor] = ackMap[d.emp_ack_status] || ackMap.pending;
+  return `
+    <div style="margin-top:12px">
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px">Description</div>
+      <div style="font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap">${(d.description||'').replace(/</g,'&lt;')}</div>
+      ${d.policy_cited ? `
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:12px 0 4px">Handbook Policy Cited</div>
+        <div style="font-size:12.5px;color:var(--text);font-family:'JetBrains Mono',monospace">${(d.policy_cited||'').replace(/</g,'&lt;')}</div>` : ''}
+      ${d.witnesses ? `
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:12px 0 4px">Witnesses</div>
+        <div style="font-size:12.5px;color:var(--text)">${(d.witnesses||'').replace(/</g,'&lt;')}</div>` : ''}
+      ${d.corrective_action ? `
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:12px 0 4px">Corrective Action Plan</div>
+        <div style="font-size:12.5px;color:var(--text);line-height:1.55;white-space:pre-wrap">${(d.corrective_action||'').replace(/</g,'&lt;')}</div>` : ''}
+      <div style="display:flex;gap:16px;align-items:center;margin-top:14px;padding:10px 12px;background:var(--surface2);border-radius:7px">
+        <div>
+          <div style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Paper Ack</div>
+          <div style="font-size:12.5px;color:${ackColor};font-weight:600">${ackLabel}${d.emp_ack_date ? ' · '+_hrFmtDate(d.emp_ack_date) : ''}</div>
+        </div>
+      </div>
+      ${d.employee_comment ? `
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Employee Response (from My Info)</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap;background:var(--surface2);padding:10px 12px;border-radius:6px">${(d.employee_comment||'').replace(/</g,'&lt;')}</div>` : ''}
+      ${canEdit ? `
+        <div style="display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);flex-wrap:wrap">
+          <button onclick="openDisciplineModal('${d.employee_id}','${d.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;color:var(--text);cursor:pointer">✎ Edit</button>
+          ${!d.released_to_employee_at ? `<button onclick="releaseHrRecord('disciplinary_actions','${d.id}','${d.employee_id}')" style="background:rgba(91,156,246,0.15);border:1px solid #5b9cf6;border-radius:6px;padding:5px 12px;font-size:12px;color:#5b9cf6;cursor:pointer;font-weight:600">🔓 Release to Employee</button>` : ''}
+          <button onclick="deleteHrRecord('disciplinary_actions','${d.id}','${d.employee_id}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e05c5c;cursor:pointer;margin-left:auto">✕ Delete</button>
+        </div>` : ''}
+    </div>
+  `;
+}
+
+function _hrToggleCard(id) {
+  const el = document.getElementById(id);
+  const chev = document.getElementById(id+'_chev');
+  if (!el) return;
+  const open = el.style.display !== 'none';
+  el.style.display = open ? 'none' : 'block';
+  if (chev) chev.textContent = open ? '▼' : '▲';
+}
+
+// ── Release / Delete ───────────────────────────────────────────────
+async function releaseHrRecord(table, id, empId) {
+  if (!confirm('Release this record to the employee? This cannot be undone — once released, the employee can see it in My Info.')) return;
+  const releasedBy = currentEmployee?.id || null;
+  const { error } = await sb.from(table).update({
+    released_to_employee_at: new Date().toISOString(),
+    released_by: releasedBy,
+  }).eq('id', id);
+  if (error) { alert('Release failed: ' + error.message); return; }
+  delete hrRecordsCache[empId];
+  await _loadHrRecordsTab(empId, employees.find(e => e.id === empId));
+  toast('🔓 Released to employee');
+}
+
+async function deleteHrRecord(table, id, empId) {
+  const typeLabel = table === 'performance_reviews' ? 'performance review' : 'disciplinary action';
+  if (!confirm(`Delete this ${typeLabel}? This cannot be undone.`)) return;
+  const { error } = await sb.from(table).delete().eq('id', id);
+  if (error) { alert('Delete failed: ' + error.message); return; }
+  delete hrRecordsCache[empId];
+  await _loadHrRecordsTab(empId, employees.find(e => e.id === empId));
+  toast('✕ Record deleted');
+}
+
+// ── Review modal (create + edit) ───────────────────────────────────
+function openReviewModal(empId, reviewId) {
+  const emp = employees.find(e => e.id === empId);
+  if (!emp) return;
+  const existing = reviewId ? (hrRecordsCache[empId]?.reviews || []).find(r => r.id === reviewId) : null;
+
+  // Managers available as reviewer
+  const mgrs = employees.filter(e => ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) && e.isActive !== false);
+
+  const prevGoals = existing ? (Array.isArray(existing.previous_goals) ? existing.previous_goals : (existing.previous_goals ? JSON.parse(existing.previous_goals) : [])) : [];
+  const nextGoals = existing ? (Array.isArray(existing.next_goals)     ? existing.next_goals     : (existing.next_goals     ? JSON.parse(existing.next_goals)     : [])) : [];
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'reviewModal';
+  backdrop.onclick = e => { if(e.target===backdrop) backdrop.remove(); };
+
+  const rating = (key, label) => {
+    const v = existing?.[key] || 0;
+    return `
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px dotted var(--border)">
+        <div style="font-size:12.5px;color:var(--text);flex:1">${label}</div>
+        <div style="display:flex;gap:4px" id="rate_${key}">
+          ${[1,2,3,4,5].map(n => `<button type="button" onclick="_hrSetRating('${key}',${n})"
+            class="rate-btn" data-val="${n}"
+            style="width:32px;height:32px;border-radius:6px;border:1.5px solid ${v===n?'var(--amber)':'var(--border)'};background:${v===n?'var(--amber-glow)':'var(--surface2)'};color:${v===n?'var(--amber)':'var(--muted)'};font-weight:700;font-size:13px;cursor:pointer">${n}</button>`).join('')}
+        </div>
+      </div>`;
+  };
+
+  backdrop.innerHTML = `
+    <div class="modal" style="width:720px;max-height:90vh">
+      <div class="modal-header">
+        <div class="modal-title">${existing ? '✎ Edit' : '+ New'} Performance Review — ${emp.name}</div>
+        <button class="modal-close" onclick="document.getElementById('reviewModal').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="rev_id" value="${existing?.id || ''}">
+        <input type="hidden" id="rev_empId" value="${empId}">
+        <div class="field-row">
+          <div class="field">
+            <div class="field-label">Review Date *</div>
+            <input type="date" id="rev_date" class="f-input" value="${existing?.review_date || new Date().toISOString().slice(0,10)}">
+          </div>
+          <div class="field">
+            <div class="field-label">Next Review Date</div>
+            <input type="date" id="rev_next" class="f-input" value="${existing?.next_review_date || ''}">
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <div class="field-label">Period Start</div>
+            <input type="date" id="rev_pStart" class="f-input" value="${existing?.period_start || ''}">
+          </div>
+          <div class="field">
+            <div class="field-label">Period End</div>
+            <input type="date" id="rev_pEnd" class="f-input" value="${existing?.period_end || ''}">
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-label">Reviewer *</div>
+          <select id="rev_reviewer" class="f-select">
+            <option value="">— Select reviewer —</option>
+            ${mgrs.map(m => `<option value="${m.id}" data-name="${m.name}" ${existing?.reviewer_id===m.id?'selected':''}>${m.name}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="modal-div"></div>
+        <div class="field-label">Ratings (1 = Unsatisfactory, 5 = Exceptional)</div>
+        ${HR_RATING_LABELS.map(rl => rating(rl.key, rl.label)).join('')}
+
+        <div class="modal-div"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+          <div class="field-label" style="margin:0">Previous Period Goals</div>
+          <button type="button" onclick="_hrAddGoal('prev')" style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 10px;font-size:11.5px;color:var(--muted);cursor:pointer">+ Add</button>
+        </div>
+        <div id="rev_prevGoals">${prevGoals.map((g,i)=>_hrGoalRow('prev',i,g.goal||'',g.status||'met')).join('')}</div>
+
+        <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px">
+          <div class="field-label" style="margin:0">Next Period Goals</div>
+          <button type="button" onclick="_hrAddGoal('next')" style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 10px;font-size:11.5px;color:var(--muted);cursor:pointer">+ Add</button>
+        </div>
+        <div id="rev_nextGoals">${nextGoals.map((g,i)=>_hrGoalRow('next',i,g.goal||'')).join('')}</div>
+
+        <div class="modal-div"></div>
+        <div class="field">
+          <div class="field-label">Reviewer Comments</div>
+          <textarea id="rev_comments" class="f-textarea" placeholder="Strengths, areas to develop, context…">${(existing?.reviewer_comments||'').replace(/</g,'&lt;')}</textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-close" style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 16px;font-size:12.5px;color:var(--text);cursor:pointer" onclick="document.getElementById('reviewModal').remove()">Cancel</button>
+        <button onclick="saveReview()" style="background:var(--amber);color:#0e0e0f;border:none;border-radius:7px;padding:8px 18px;font-size:12.5px;font-weight:600;cursor:pointer">${existing?'Save Changes':'Create Review'}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+
+  // Preload in-memory rating state
+  window._hrRatings = {};
+  HR_RATING_LABELS.forEach(rl => window._hrRatings[rl.key] = existing?.[rl.key] || 0);
+}
+
+function _hrSetRating(key, val) {
+  window._hrRatings = window._hrRatings || {};
+  const current = window._hrRatings[key] || 0;
+  const next = (current === val) ? 0 : val; // click same = clear
+  window._hrRatings[key] = next;
+  // Repaint this group
+  document.querySelectorAll(`#rate_${key} .rate-btn`).forEach(b => {
+    const n = parseInt(b.dataset.val,10);
+    const sel = n === next;
+    b.style.borderColor = sel ? 'var(--amber)' : 'var(--border)';
+    b.style.background  = sel ? 'var(--amber-glow)' : 'var(--surface2)';
+    b.style.color       = sel ? 'var(--amber)' : 'var(--muted)';
+  });
+}
+
+function _hrGoalRow(kind, idx, text, status) {
+  const id = `${kind}Goal_${idx}`;
+  const statusDropdown = kind === 'prev' ? `
+    <select data-kind="${kind}" data-idx="${idx}" class="f-select" style="width:140px;height:34px;padding:6px 10px;font-size:12px">
+      <option value="met"     ${status==='met'?'selected':''}>Met</option>
+      <option value="partial" ${status==='partial'?'selected':''}>Partially Met</option>
+      <option value="not_met" ${status==='not_met'?'selected':''}>Not Met</option>
+      <option value="na"      ${status==='na'?'selected':''}>N/A</option>
+    </select>` : '';
+  return `
+    <div id="${id}" class="hr-goal-row" data-kind="${kind}" data-idx="${idx}" style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
+      <input type="text" class="f-input hr-goal-text" value="${(text||'').replace(/"/g,'&quot;')}" placeholder="Goal…" style="flex:1;height:34px;padding:6px 10px;font-size:12.5px">
+      ${statusDropdown}
+      <button type="button" onclick="_hrRemoveGoal('${id}')" style="background:transparent;border:1px solid var(--border);border-radius:5px;padding:4px 8px;font-size:11px;color:var(--muted);cursor:pointer">✕</button>
+    </div>`;
+}
+
+function _hrAddGoal(kind) {
+  const container = document.getElementById(kind === 'prev' ? 'rev_prevGoals' : 'rev_nextGoals');
+  if (!container) return;
+  const idx = container.children.length;
+  const wrapper = document.createElement('div');
+  wrapper.innerHTML = _hrGoalRow(kind, idx, '', 'met');
+  container.appendChild(wrapper.firstElementChild);
+}
+
+function _hrRemoveGoal(id) {
+  const el = document.getElementById(id);
+  if (el) el.remove();
+}
+
+function _hrCollectGoals(kind) {
+  const container = document.getElementById(kind === 'prev' ? 'rev_prevGoals' : 'rev_nextGoals');
+  if (!container) return [];
+  return Array.from(container.querySelectorAll('.hr-goal-row')).map(row => {
+    const text = row.querySelector('.hr-goal-text').value.trim();
+    if (!text) return null;
+    const sel = row.querySelector('select');
+    return kind === 'prev'
+      ? { goal: text, status: sel ? sel.value : 'met' }
+      : { goal: text };
+  }).filter(Boolean);
+}
+
+async function saveReview() {
+  const id    = document.getElementById('rev_id').value || null;
+  const empId = document.getElementById('rev_empId').value;
+  const date  = document.getElementById('rev_date').value;
+  if (!date) { alert('Review date is required'); return; }
+
+  const reviewerSel = document.getElementById('rev_reviewer');
+  const reviewerId  = reviewerSel.value || null;
+  const reviewerName = reviewerSel.selectedOptions[0]?.dataset.name || null;
+  if (!reviewerId) { alert('Please select a reviewer'); return; }
+
+  const payload = {
+    employee_id: empId,
+    review_date: date,
+    period_start: document.getElementById('rev_pStart').value || null,
+    period_end:   document.getElementById('rev_pEnd').value || null,
+    next_review_date: document.getElementById('rev_next').value || null,
+    reviewer_id: reviewerId,
+    reviewer_name: reviewerName,
+    previous_goals: _hrCollectGoals('prev'),
+    next_goals:     _hrCollectGoals('next'),
+    reviewer_comments: document.getElementById('rev_comments').value || null,
+  };
+  // Ratings
+  HR_RATING_LABELS.forEach(rl => {
+    payload[rl.key] = (window._hrRatings?.[rl.key]) || null;
+  });
+
+  let err;
+  if (id) {
+    ({ error: err } = await sb.from('performance_reviews').update(payload).eq('id', id));
+  } else {
+    ({ error: err } = await sb.from('performance_reviews').insert(payload));
+  }
+  if (err) { alert('Save failed: ' + err.message); return; }
+
+  document.getElementById('reviewModal')?.remove();
+  delete hrRecordsCache[empId];
+  await _loadHrRecordsTab(empId, employees.find(e => e.id === empId));
+  toast(id ? '✓ Review updated' : '✓ Review created');
+}
+
+// ── Discipline modal (create + edit) ───────────────────────────────
+function openDisciplineModal(empId, actionId) {
+  const emp = employees.find(e => e.id === empId);
+  if (!emp) return;
+  const existing = actionId ? (hrRecordsCache[empId]?.discipline || []).find(d => d.id === actionId) : null;
+  const mgrs = employees.filter(e => ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) && e.isActive !== false);
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'discModal';
+  backdrop.onclick = e => { if(e.target===backdrop) backdrop.remove(); };
+
+  backdrop.innerHTML = `
+    <div class="modal" style="width:680px;max-height:90vh">
+      <div class="modal-header">
+        <div class="modal-title">${existing ? '✎ Edit' : '+ New'} Disciplinary Action — ${emp.name}</div>
+        <button class="modal-close" onclick="document.getElementById('discModal').remove()">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="disc_id" value="${existing?.id || ''}">
+        <input type="hidden" id="disc_empId" value="${empId}">
+        <div class="field-row">
+          <div class="field">
+            <div class="field-label">Incident Date *</div>
+            <input type="date" id="disc_date" class="f-input" value="${existing?.incident_date || new Date().toISOString().slice(0,10)}">
+          </div>
+          <div class="field">
+            <div class="field-label">Warning Tier *</div>
+            <select id="disc_tier" class="f-select">
+              ${HR_TIERS.map(t => `<option value="${t.key}" ${existing?.tier===t.key?'selected':''}>${t.label}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field">
+            <div class="field-label">Category *</div>
+            <select id="disc_category" class="f-select" onchange="_hrPolicyAutoFill()">
+              ${HR_CATEGORIES.map(c => `<option value="${c.key}" data-policy="${c.policy}" ${existing?.category===c.key?'selected':''}>${c.label}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label">Handbook Policy Cited</div>
+            <input type="text" id="disc_policy" class="f-input" value="${(existing?.policy_cited||'').replace(/"/g,'&quot;')}" placeholder="e.g. §4.1 Attendance">
+          </div>
+        </div>
+        <div class="field">
+          <div class="field-label">Description of Incident *</div>
+          <textarea id="disc_desc" class="f-textarea" placeholder="What happened, when, and how…">${(existing?.description||'').replace(/</g,'&lt;')}</textarea>
+        </div>
+        <div class="field">
+          <div class="field-label">Witness(es)</div>
+          <input type="text" id="disc_witnesses" class="f-input" value="${(existing?.witnesses||'').replace(/"/g,'&quot;')}" placeholder="Names of anyone present, if any">
+        </div>
+        <div class="field">
+          <div class="field-label">Corrective Action Plan</div>
+          <textarea id="disc_corrective" class="f-textarea" placeholder="Expected changes, follow-up date, consequences of repeat…">${(existing?.corrective_action||'').replace(/</g,'&lt;')}</textarea>
+        </div>
+        <div class="field">
+          <div class="field-label">Issued By *</div>
+          <select id="disc_issuer" class="f-select">
+            <option value="">— Select —</option>
+            ${mgrs.map(m => `<option value="${m.id}" data-name="${m.name}" ${existing?.issued_by_id===m.id?'selected':''}>${m.name}</option>`).join('')}
+          </select>
+        </div>
+        <div class="modal-div"></div>
+        <div class="field-row">
+          <div class="field">
+            <div class="field-label">Paper Acknowledgment</div>
+            <select id="disc_ack" class="f-select">
+              <option value="pending" ${existing?.emp_ack_status==='pending'||!existing?'selected':''}>Pending</option>
+              <option value="signed"  ${existing?.emp_ack_status==='signed'?'selected':''}>Signed</option>
+              <option value="refused" ${existing?.emp_ack_status==='refused'?'selected':''}>Refused to Sign</option>
+            </select>
+          </div>
+          <div class="field">
+            <div class="field-label">Acknowledgment Date</div>
+            <input type="date" id="disc_ackDate" class="f-input" value="${existing?.emp_ack_date || ''}">
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-close" style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 16px;font-size:12.5px;color:var(--text);cursor:pointer" onclick="document.getElementById('discModal').remove()">Cancel</button>
+        <button onclick="saveDiscipline()" style="background:var(--red);color:#fff;border:none;border-radius:7px;padding:8px 18px;font-size:12.5px;font-weight:600;cursor:pointer">${existing?'Save Changes':'Create Action'}</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+
+  // Auto-fill policy if new and category default selected
+  if (!existing) _hrPolicyAutoFill();
+}
+
+function _hrPolicyAutoFill() {
+  const catSel = document.getElementById('disc_category');
+  const polIn  = document.getElementById('disc_policy');
+  if (!catSel || !polIn) return;
+  // Only auto-fill if empty, to not clobber manual edits
+  if (polIn.value.trim()) return;
+  const suggested = catSel.selectedOptions[0]?.dataset.policy || '';
+  polIn.value = suggested;
+}
+
+async function saveDiscipline() {
+  const id    = document.getElementById('disc_id').value || null;
+  const empId = document.getElementById('disc_empId').value;
+  const date  = document.getElementById('disc_date').value;
+  const tier  = document.getElementById('disc_tier').value;
+  const cat   = document.getElementById('disc_category').value;
+  const desc  = document.getElementById('disc_desc').value.trim();
+  const issuerSel = document.getElementById('disc_issuer');
+  const issuerId  = issuerSel.value || null;
+  const issuerName = issuerSel.selectedOptions[0]?.dataset.name || null;
+
+  if (!date)    { alert('Incident date is required'); return; }
+  if (!tier)    { alert('Warning tier is required'); return; }
+  if (!cat)     { alert('Category is required'); return; }
+  if (!desc)    { alert('Description is required'); return; }
+  if (!issuerId){ alert('Please select who issued this'); return; }
+
+  const payload = {
+    employee_id: empId,
+    incident_date: date,
+    tier, category: cat,
+    description: desc,
+    policy_cited:      document.getElementById('disc_policy').value || null,
+    witnesses:         document.getElementById('disc_witnesses').value || null,
+    corrective_action: document.getElementById('disc_corrective').value || null,
+    issued_by_id: issuerId,
+    issued_by_name: issuerName,
+    emp_ack_status: document.getElementById('disc_ack').value || 'pending',
+    emp_ack_date:   document.getElementById('disc_ackDate').value || null,
+  };
+
+  let err;
+  if (id) {
+    ({ error: err } = await sb.from('disciplinary_actions').update(payload).eq('id', id));
+  } else {
+    ({ error: err } = await sb.from('disciplinary_actions').insert(payload));
+  }
+  if (err) { alert('Save failed: ' + err.message); return; }
+
+  document.getElementById('discModal')?.remove();
+  delete hrRecordsCache[empId];
+  await _loadHrRecordsTab(empId, employees.find(e => e.id === empId));
+  toast(id ? '✓ Action updated' : '✓ Action created');
 }
