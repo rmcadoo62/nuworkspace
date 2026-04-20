@@ -996,19 +996,22 @@ function openMyInfoPanel(el) {
   // Remove any stray empProfilePane to avoid duplicate-ID conflicts
   document.querySelectorAll('#empProfilePane').forEach(el => el.remove());
 
-  // Build tabbed layout
+  // Build tabbed layout — single-row flat tab bar
   body.innerHTML = `
     <div style="display:flex;flex-direction:column;height:100%">
       <!-- Tab bar -->
       <div style="display:flex;gap:2px;padding:12px 32px 0;border-bottom:1px solid var(--border);background:var(--bg);flex-shrink:0">
-        <button id="myInfoTab-profile"  onclick="switchMyInfoTab('profile')"  class="myinfo-tab active-tab">👤 Profile</button>
-        <button id="myInfoTab-vacation" onclick="switchMyInfoTab('vacation')" class="myinfo-tab">✈️ Vacation</button>
-        <button id="myInfoTab-chatter"  onclick="switchMyInfoTab('chatter')"  class="myinfo-tab">💬 My Chatter</button>
+        <button id="myInfoTab-profile"   onclick="switchMyInfoTab('profile')"   class="myinfo-tab active-tab">👤 Profile</button>
+        <button id="myInfoTab-vacation"  onclick="switchMyInfoTab('vacation')"  class="myinfo-tab">✈️ Vacation</button>
+        <button id="myInfoTab-chatter"   onclick="switchMyInfoTab('chatter')"   class="myinfo-tab">💬 Chatter</button>
+        <button id="myInfoTab-lifecycle" onclick="switchMyInfoTab('lifecycle')" class="myinfo-tab">🔄 Lifecycle</button>
+        <button id="myInfoTab-hrrecords" onclick="switchMyInfoTab('hrrecords')" class="myinfo-tab">📋 HR Records</button>
       </div>
-      <!-- Tab content -->
+      <!-- Tab content —
+           Profile / Lifecycle / HR Records all render into #empProfilePane inside the shared pane.
+           Vacation and Chatter have their own panes. -->
       <div id="myInfoTabContent" style="flex:1;overflow-y:auto;background:var(--bg)">
-        <!-- Profile pane — showEmpProfile renders into empProfilePane -->
-        <div id="myInfoPane-profile" style="padding:28px 32px">
+        <div id="myInfoPane-empprofile" style="padding:28px 32px">
           <div id="empProfilePane"></div>
         </div>
         <div id="myInfoPane-vacation" style="display:none;padding:28px 32px"></div>
@@ -1043,20 +1046,29 @@ function openMyInfoPanel(el) {
 
 function switchMyInfoTab(tab) {
   window._myInfoActiveTab = tab;
-  ['profile','vacation','chatter'].forEach(t => {
-    const pane = document.getElementById('myInfoPane-' + t);
-    const btn  = document.getElementById('myInfoTab-' + t);
-    if (pane) pane.style.display = t === tab ? '' : 'none';
-    if (btn)  btn.classList.toggle('active-tab', t === tab);
+  const allTabs = ['profile','vacation','chatter','lifecycle','hrrecords'];
+  allTabs.forEach(t => {
+    const btn = document.getElementById('myInfoTab-' + t);
+    if (btn) btn.classList.toggle('active-tab', t === tab);
   });
+
+  const empProfilePane = document.getElementById('myInfoPane-empprofile');
+  const vacPane        = document.getElementById('myInfoPane-vacation');
+  const chatPane       = document.getElementById('myInfoPane-chatter');
+  const usesEmpPane    = ['profile','lifecycle','hrrecords'].includes(tab);
+  if (empProfilePane) empProfilePane.style.display = usesEmpPane ? '' : 'none';
+  if (vacPane)        vacPane.style.display        = tab === 'vacation' ? '' : 'none';
+  if (chatPane)       chatPane.style.display       = tab === 'chatter'  ? '' : 'none';
 
   const empId = currentEmployee?.id;
   if (!empId) return;
 
-  if (tab === 'vacation' && typeof renderMyInfoVacationTab === 'function') {
+  if (usesEmpPane) {
+    empProfileTab = tab;
+    if (typeof showEmpProfile === 'function') showEmpProfile(empId);
+  } else if (tab === 'vacation' && typeof renderMyInfoVacationTab === 'function') {
     renderMyInfoVacationTab(empId);
-  }
-  if (tab === 'chatter' && typeof renderMyInfoChatterTab === 'function') {
+  } else if (tab === 'chatter' && typeof renderMyInfoChatterTab === 'function') {
     renderMyInfoChatterTab(empId);
   }
 }

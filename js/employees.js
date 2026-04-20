@@ -717,9 +717,10 @@ function showEmpProfile(empId, annivOffset) {
   }
 
     pane.innerHTML = `
-    <!-- Tab bar -->
+    ${_myInfoReadOnly ? '' : `
+    <!-- Tab bar (shown only in manager-view of Employees panel; in My Info the outer tab bar handles this) -->
     <div style="display:flex;gap:0;border-bottom:1.5px solid var(--border);margin-bottom:24px;background:var(--bg);position:sticky;top:0;z-index:10">
-      ${(_myInfoReadOnly ? ['profile','lifecycle'] : ['profile','lifecycle','hrrecords']).map(t => {
+      ${['profile','lifecycle','hrrecords'].map(t => {
         const labels = { profile:'👤 Profile', lifecycle:'🔄 Lifecycle', hrrecords:'📋 HR Records' };
         const active = empProfileTab === t;
         return `<button onclick="switchEmpTab('${empId}','${t}')"
@@ -727,7 +728,7 @@ function showEmpProfile(empId, annivOffset) {
           ${labels[t]}
         </button>`;
       }).join('')}
-    </div>
+    </div>`}
     <div id="empTabContent" style="padding:0 28px 28px">
     ${empProfileTab === 'profile' ? `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
@@ -2567,16 +2568,95 @@ const HR_CATEGORIES = [
   { key:'falsify_time',    label:'Falsifying Time Records', policy:'§4.6 Recording Time',         counted:false },
   { key:'other',           label:'Other',                   policy:'',                            counted:false },
 ];
-const HR_RATING_LABELS = [
-  { key:'r_quality',       label:'Quality of Work' },
-  { key:'r_technical',     label:'Technical Skills' },
-  { key:'r_reliability',   label:'Reliability & Attendance' },
-  { key:'r_communication', label:'Communication & Teamwork' },
-  { key:'r_initiative',    label:'Initiative & Problem Solving' },
-  { key:'r_safety',        label:'Safety & Compliance' },
-  { key:'r_overall',       label:'Overall Rating' },
+// ── Staff Performance Review categories (mirrors NU Laboratories Staff form, NUI #28) ──
+const STAFF_REVIEW_CATEGORIES = [
+  {
+    key:'knowledge', label:'Knowledge of Job', max:20,
+    tiers:[
+      { score:4,  desc:'Lacks understanding of the job. Needs constant supervision and instruction.' },
+      { score:8,  desc:'Less than adequate. Must be supervised and instructed more than necessary.' },
+      { score:12, desc:'Has sufficient knowledge. Occasional supervision and/or instruction.' },
+      { score:16, desc:'Better than normally expected knowledge of the job. Seldom needs supervision.' },
+      { score:20, desc:'Exceptionally knowledgeable about all aspects of the job. Needs no supervision.' },
+    ]
+  },
+  {
+    key:'quantity', label:'Quantity of Work', max:10,
+    tiers:[
+      { score:2,  desc:'Inadequate production.' },
+      { score:4,  desc:'Production slower than normally expected.' },
+      { score:6,  desc:'Production adequate for requirements of the job.' },
+      { score:8,  desc:'Usually produces more than expected.' },
+      { score:10, desc:'Consistently produces an exceptional amount of work.' },
+    ]
+  },
+  {
+    key:'quality', label:'Quality of Work', max:20,
+    tiers:[
+      { score:4,  desc:'Careless. Work quality poor. Needs constant correction. Repeats mistakes.' },
+      { score:8,  desc:'Occasionally careless. Work needs more than normal amount of correction.' },
+      { score:12, desc:'Accuracy and thoroughness meet job requirements. Work needs only occasional correction.' },
+      { score:16, desc:'Consistently more thorough and accurate than expected. Work seldom needs correction.' },
+      { score:20, desc:'Exceptionally thorough and accurate. Work never needs correction.' },
+    ]
+  },
+  {
+    key:'initiative', label:'Initiative', max:10,
+    tiers:[
+      { score:2,  desc:'Must be told what to do. Never makes suggestions.' },
+      { score:4,  desc:'Often needs help getting started. Seldom makes suggestions.' },
+      { score:6,  desc:'Proceeds on own work without prompting. Occasionally makes suggestions.' },
+      { score:8,  desc:'Proceeds on own work without prompting. Frequently offers suggestions.' },
+      { score:10, desc:'Resourceful and imaginative. Consistently looks for ways to increase efficiency and makes suggestions to improve own work and that of the department.' },
+    ]
+  },
+  {
+    key:'cooperation', label:'Cooperation', max:15,
+    tiers:[
+      { score:3,  desc:'Uncooperative. Refuses when asked for help.' },
+      { score:6,  desc:'Cooperates reluctantly but will do so when pressed.' },
+      { score:9,  desc:'Cooperates well when assistance is requested.' },
+      { score:12, desc:'Very cooperative. Willingly responds to requests for help.' },
+      { score:15, desc:'Extremely cooperative. Always willing to go the extra mile.' },
+    ]
+  },
+  {
+    key:'responsibility', label:'Responsibility', max:15,
+    tiers:[
+      { score:3,  desc:'Refuses any responsibility. Lacks interest in job and department.' },
+      { score:6,  desc:'Hesitates to accept any responsibility toward own job or department function.' },
+      { score:9,  desc:'Accepts but does not seek responsibility. Is comfortable with job as described.' },
+      { score:12, desc:'Accepts and handles responsibility well. Has better than normally expected interest in the job.' },
+      { score:15, desc:'Welcomes, accepts, and handles responsibility exceptionally well. Has total interest in the job and department.' },
+    ]
+  },
+  {
+    key:'dependability', label:'Dependability', max:10,
+    commentHint:'Comment here on attendance and punctuality.',
+    tiers:[
+      { score:2,  desc:'Cannot be depended upon.' },
+      { score:4,  desc:'Often undependable.' },
+      { score:6,  desc:'Usually dependable.' },
+      { score:8,  desc:'Unusually dependable.' },
+      { score:10, desc:'Exceptionally dependable.' },
+    ]
+  },
 ];
-const HR_RATING_DESC = {1:'Unsatisfactory',2:'Needs Improvement',3:'Meets Expectations',4:'Exceeds Expectations',5:'Exceptional'};
+
+// Total → Performance Rating conversion (1-9 scale, per paper form)
+const REVIEW_RATING_BANDS = [
+  { min:92, rating:9 }, { min:83, rating:8 }, { min:74, rating:7 },
+  { min:65, rating:6 }, { min:56, rating:5 }, { min:47, rating:4 },
+  { min:38, rating:3 }, { min:29, rating:2 }, { min:0,  rating:1 },
+];
+function _reviewRatingFor(total) {
+  for (const b of REVIEW_RATING_BANDS) if (total >= b.min) return b.rating;
+  return 1;
+}
+function _reviewRatingBandLabel(rating) {
+  const bands = { 9:'92–100', 8:'83–91', 7:'74–82', 6:'65–73', 5:'56–64', 4:'47–55', 3:'38–46', 2:'29–37', 1:'20–28' };
+  return bands[rating] || '';
+}
 
 // Helpers
 function _hrTier(key)     { return HR_TIERS.find(t => t.key === key) || {label:key, color:'var(--muted)'}; }
@@ -2611,7 +2691,14 @@ async function _loadHrRecordsTab(empId, emp) {
 function _renderHrRecordsTab(empId, emp) {
   const inner = document.getElementById('hrRecordsTabInner');
   if (!inner) return;
-  const data   = hrRecordsCache[empId] || { reviews: [], discipline: [] };
+  const rawData = hrRecordsCache[empId] || { reviews: [], discipline: [] };
+  // In self-view, only show records that have been released to the employee — drafts stay private to managers
+  const data = _myInfoReadOnly
+    ? {
+        reviews:    rawData.reviews.filter(r => r.released_to_employee_at),
+        discipline: rawData.discipline.filter(d => d.released_to_employee_at),
+      }
+    : rawData;
   const canEdit = isManager() && !_myInfoReadOnly;
 
   // Category counters (rolling 12-mo + all-time), counted categories only
@@ -2688,17 +2775,22 @@ function _renderHrRecordsTab(empId, emp) {
 
 // ── Review Card ────────────────────────────────────────────────────
 function _renderReviewCard(r, canEdit, emp) {
-  const overall = r.r_overall;
+  const total   = r.total_score;
+  const rating  = r.performance_rating;
   const statusPill = (window._hrStatusPill) ? window._hrStatusPill(r) : '';
+  const ackAgreePill = r.agreement_status
+    ? `<span style="padding:2px 8px;border-radius:10px;background:${r.agreement_status==='agree'?'rgba(76,175,125,0.15)':'rgba(224,92,92,0.15)'};color:${r.agreement_status==='agree'?'#4caf7d':'#e05c5c'};font-size:10.5px;font-weight:600">${r.agreement_status==='agree'?'Agreed':'Disagreed'}</span>`
+    : '';
   return `
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
       <div style="padding:12px 16px;display:flex;align-items:center;gap:12px;cursor:pointer" onclick="_hrToggleCard('rev_${r.id}')">
         <div style="flex:1;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <div style="font-size:13px;font-weight:600;color:var(--text)">Review — ${_hrFmtDate(r.review_date)}</div>
-          ${overall ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;background:rgba(91,156,246,0.12);color:#5b9cf6;font-size:11px;font-weight:600">Overall: ${overall}/5</span>` : `<span style="font-size:11px;color:var(--muted);font-style:italic">No overall rating</span>`}
+          <div style="font-size:13px;font-weight:600;color:var(--text)">Staff Review — ${_hrFmtDate(r.review_date)}</div>
+          ${(total != null) ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;background:rgba(91,156,246,0.12);color:#5b9cf6;font-size:11px;font-weight:600">Score ${total}/100</span>` : ''}
+          ${(rating != null) ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:10px;background:rgba(232,162,52,0.15);color:var(--amber);font-size:11px;font-weight:700">Rating ${rating}/9</span>` : `<span style="font-size:11px;color:var(--muted);font-style:italic">Not scored</span>`}
           ${statusPill}
+          ${ackAgreePill}
           ${r.reviewer_name ? `<span style="font-size:11px;color:var(--muted)">by ${r.reviewer_name}</span>` : ''}
-          ${r.next_review_date ? `<span style="font-size:11px;color:var(--muted)">Next: ${_hrFmtDate(r.next_review_date)}</span>` : ''}
         </div>
         <span id="rev_${r.id}_chev" style="font-size:11px;color:var(--muted)">▼</span>
       </div>
@@ -2710,55 +2802,81 @@ function _renderReviewCard(r, canEdit, emp) {
 }
 
 function _renderReviewDetail(r, canEdit, emp) {
-  const ratings = HR_RATING_LABELS.map(rl => {
-    const v = r[rl.key];
+  const scoreRows = STAFF_REVIEW_CATEGORIES.map(cat => {
+    const v = r[`${cat.key}_score`];
+    const c = r[`${cat.key}_comment`];
     return `
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px dotted var(--border)">
-        <div style="font-size:12.5px;color:var(--text)">${rl.label}</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          ${v ? `<span style="font-size:11px;color:var(--muted)">${HR_RATING_DESC[v]||''}</span>
-                 <span style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;color:#5b9cf6">${v}/5</span>` 
-               : `<span style="font-size:11px;color:var(--muted);font-style:italic">not rated</span>`}
+      <div style="padding:8px 0;border-bottom:1px dotted var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+          <div style="font-size:12.5px;color:var(--text);font-weight:500">${cat.label}</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;color:${v!=null?'#5b9cf6':'var(--muted)'}">${v!=null ? v : '—'}<span style="color:var(--muted);font-weight:400">/${cat.max}</span></div>
         </div>
+        ${c ? `<div style="font-size:11.5px;color:var(--muted);margin-top:3px;white-space:pre-wrap">${(c||'').replace(/</g,'&lt;')}</div>` : ''}
       </div>`;
   }).join('');
 
-  const prevGoals = Array.isArray(r.previous_goals) ? r.previous_goals : (r.previous_goals ? JSON.parse(r.previous_goals) : []);
-  const nextGoals = Array.isArray(r.next_goals)     ? r.next_goals     : (r.next_goals     ? JSON.parse(r.next_goals)     : []);
+  // Decide whether to show employee-acknowledge panel (self view, released, not yet acked)
+  const selfView     = !isManager() || _myInfoReadOnly || (currentEmployee && currentEmployee.id === r.employee_id && !canEdit);
+  const canAck       = selfView && r.released_to_employee_at && !r.employee_acknowledged_at
+                       && currentEmployee && currentEmployee.id === r.employee_id;
 
-  const goalStatusPill = (s) => {
-    const m = { met:['Met','#4caf7d'], partial:['Partially Met','#e8a234'], not_met:['Not Met','#e05c5c'], na:['N/A','var(--muted)'] };
-    const [lab,col] = m[s] || ['—','var(--muted)'];
-    return `<span style="padding:1px 7px;border-radius:8px;background:${col === 'var(--muted)' ? 'var(--surface2)' : col+'22'};color:${col};font-size:10.5px;font-weight:600">${lab}</span>`;
-  };
-
-  const prevHtml = prevGoals.length ? prevGoals.map(g => `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:12.5px">
-      <div style="color:var(--text);flex:1">${g.goal || ''}</div>${goalStatusPill(g.status)}
-    </div>`).join('') : `<div style="font-size:12px;color:var(--muted);font-style:italic">None recorded</div>`;
-  const nextHtml = nextGoals.length ? nextGoals.map(g => `
-    <div style="padding:5px 0;font-size:12.5px;color:var(--text)">• ${g.goal || ''}</div>`).join('') : `<div style="font-size:12px;color:var(--muted);font-style:italic">None recorded</div>`;
+  const agreementBlock = r.employee_acknowledged_at
+    ? `
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Employee Acknowledgment</div>
+      <div style="background:var(--surface2);border-radius:7px;padding:10px 12px;font-size:12.5px;color:var(--text);line-height:1.55">
+        <div>
+          <b style="color:${r.agreement_status==='agree'?'#4caf7d':'#e05c5c'}">${r.agreement_status==='agree'?'✓ I AM IN AGREEMENT':'✕ I DO NOT AGREE'}</b>
+          · signed <b>${(r.employee_signature_name||'').replace(/</g,'&lt;')}</b>
+          · ${_hrFmtDate(r.employee_acknowledged_at)}
+        </div>
+        ${r.disagreement_explanation ? `<div style="margin-top:6px;white-space:pre-wrap;color:var(--muted);font-size:12px">${(r.disagreement_explanation||'').replace(/</g,'&lt;')}</div>` : ''}
+      </div>`
+    : '';
 
   return `
     <div style="margin-top:12px">
-      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px">Ratings</div>
-      ${ratings}
-      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Previous Period Goals</div>
-      ${prevHtml}
-      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Next Period Goals</div>
-      ${nextHtml}
-      ${r.reviewer_comments ? `
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Reviewer Comments</div>
-        <div style="font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap">${(r.reviewer_comments||'').replace(/</g,'&lt;')}</div>` : ''}
-      ${r.employee_comments ? `
-        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Employee Comments</div>
-        <div style="font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap;background:var(--surface2);padding:10px 12px;border-radius:6px">${(r.employee_comments||'').replace(/</g,'&lt;')}</div>` : ''}
-      ${canEdit ? `
-        <div style="display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);flex-wrap:wrap">
-          <button onclick="openReviewModal('${r.employee_id}','${r.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;color:var(--text);cursor:pointer">✎ Edit</button>
-          ${!r.released_to_employee_at ? `<button onclick="releaseHrRecord('performance_reviews','${r.id}','${r.employee_id}')" style="background:rgba(91,156,246,0.15);border:1px solid #5b9cf6;border-radius:6px;padding:5px 12px;font-size:12px;color:#5b9cf6;cursor:pointer;font-weight:600">🔓 Release to Employee</button>` : ''}
-          <button onclick="deleteHrRecord('performance_reviews','${r.id}','${r.employee_id}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e05c5c;cursor:pointer;margin-left:auto">✕ Delete</button>
+      ${(r.job_title || r.division) ? `
+        <div style="display:flex;gap:18px;font-size:11.5px;color:var(--muted);margin-bottom:10px">
+          ${r.job_title ? `<div><b style="color:var(--text);font-weight:500">${(r.job_title||'').replace(/</g,'&lt;')}</b> · Job Title</div>` : ''}
+          ${r.division  ? `<div><b style="color:var(--text);font-weight:500">${(r.division ||'').replace(/</g,'&lt;')}</b> · Division</div>` : ''}
         </div>` : ''}
+
+      <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin-bottom:6px">Category Scores</div>
+      ${scoreRows}
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;margin-top:10px;background:var(--surface2);border-radius:7px">
+        <div style="font-size:12.5px;color:var(--text);font-weight:600">Total</div>
+        <div style="display:flex;align-items:center;gap:14px">
+          <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:15px;color:#5b9cf6">${r.total_score ?? '—'}<span style="color:var(--muted);font-weight:400;font-size:13px">/100</span></div>
+          <div style="font-family:'JetBrains Mono',monospace;font-weight:700;font-size:15px;color:var(--amber)">Rating ${r.performance_rating ?? '—'}<span style="color:var(--muted);font-weight:400;font-size:13px">/9</span></div>
+        </div>
+      </div>
+
+      ${r.listed_objectives ? `
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Listed Objectives</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap">${(r.listed_objectives||'').replace(/</g,'&lt;')}</div>` : ''}
+      ${r.how_to_accomplish ? `
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">How to Accomplish</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap">${(r.how_to_accomplish||'').replace(/</g,'&lt;')}</div>` : ''}
+      ${r.employee_input ? `
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px">Employee Input</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.55;white-space:pre-wrap;background:var(--surface2);padding:10px 12px;border-radius:6px">${(r.employee_input||'').replace(/</g,'&lt;')}</div>` : ''}
+
+      ${agreementBlock}
+
+      ${canAck ? `
+        <div style="display:flex;gap:8px;margin-top:16px;padding:12px;border:1px solid var(--amber-dim);border-radius:8px;background:var(--amber-glow);align-items:center;flex-wrap:wrap">
+          <div style="font-size:12.5px;color:var(--text);flex:1;min-width:220px">
+            <b>Your review has been released.</b> Please read it and acknowledge.
+          </div>
+          <button onclick="openReviewModal('${r.employee_id}','${r.id}')" style="background:var(--amber);color:#0e0e0f;border:none;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer">Open &amp; Acknowledge</button>
+        </div>` : ''}
+
+      <div style="display:flex;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);flex-wrap:wrap">
+        ${canEdit ? `<button onclick="openReviewModal('${r.employee_id}','${r.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;color:var(--text);cursor:pointer">✎ Edit</button>` : ''}
+        ${canEdit && !r.released_to_employee_at ? `<button onclick="releaseHrRecord('performance_reviews','${r.id}','${r.employee_id}')" style="background:rgba(91,156,246,0.15);border:1px solid #5b9cf6;border-radius:6px;padding:5px 12px;font-size:12px;color:#5b9cf6;cursor:pointer;font-weight:600">🔓 Release to Employee</button>` : ''}
+        <button onclick="exportReviewPdf('${r.id}','${r.employee_id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;color:var(--text);cursor:pointer">📄 Export PDF</button>
+        ${canEdit ? `<button onclick="deleteHrRecord('performance_reviews','${r.id}','${r.employee_id}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e05c5c;cursor:pointer;margin-left:auto">✕ Delete</button>` : ''}
+      </div>
     </div>
   `;
 }
@@ -2855,209 +2973,529 @@ async function deleteHrRecord(table, id, empId) {
   toast('✕ Record deleted');
 }
 
-// ── Review modal (create + edit) ───────────────────────────────────
+// ── Review modal (create + edit + acknowledge) ────────────────────
+// Modes:
+//   manager_new    — admin/manager creating a new review
+//   manager_edit   — admin/manager editing an existing draft or released (not yet acked) review
+//   employee_ack   — subject employee viewing their released, unacknowledged review
+//   readonly       — anything else (acknowledged, or viewer not allowed to edit)
 function openReviewModal(empId, reviewId) {
   const emp = employees.find(e => e.id === empId);
   if (!emp) return;
   const existing = reviewId ? (hrRecordsCache[empId]?.reviews || []).find(r => r.id === reviewId) : null;
 
-  // Managers available as reviewer
+  const isSelf = currentEmployee && currentEmployee.id === emp.id;
+  const isMgr  = isManager() && !_myInfoReadOnly;
+  let mode;
+  if (!existing && isMgr)                                                            mode = 'manager_new';
+  else if (existing && isMgr && !existing.employee_acknowledged_at)                  mode = 'manager_edit';
+  else if (existing && isSelf && existing.released_to_employee_at && !existing.employee_acknowledged_at) mode = 'employee_ack';
+  else                                                                                mode = 'readonly';
+
   const mgrs = employees.filter(e => ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) && e.isActive !== false);
 
-  const prevGoals = existing ? (Array.isArray(existing.previous_goals) ? existing.previous_goals : (existing.previous_goals ? JSON.parse(existing.previous_goals) : [])) : [];
-  const nextGoals = existing ? (Array.isArray(existing.next_goals)     ? existing.next_goals     : (existing.next_goals     ? JSON.parse(existing.next_goals)     : [])) : [];
+  // Modal state lives on window for inline handlers
+  const state = window._reviewState = {
+    empId, reviewId: existing?.id || null, mode,
+    scores: {}, comments: {}, expandedCat: STAFF_REVIEW_CATEGORIES[0].key,
+    reviewDate:              existing?.review_date || new Date().toISOString().slice(0,10),
+    reviewerId:              existing?.reviewer_id || (isMgr ? currentEmployee?.id : null),
+    jobTitle:                existing?.job_title || emp.role || '',
+    division:                existing?.division  || emp.dept || '',
+    listedObjectives:        existing?.listed_objectives || '',
+    howToAccomplish:         existing?.how_to_accomplish  || '',
+    employeeInput:           existing?.employee_input || '',
+    agreementStatus:         existing?.agreement_status || '',
+    disagreementExplanation: existing?.disagreement_explanation || '',
+    employeeSignatureName:   existing?.employee_signature_name || (isSelf ? emp.name : ''),
+  };
+  STAFF_REVIEW_CATEGORIES.forEach(c => {
+    state.scores[c.key]   = existing?.[`${c.key}_score`]   ?? null;
+    state.comments[c.key] = existing?.[`${c.key}_comment`] ?? '';
+  });
 
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
   backdrop.id = 'reviewModal';
-  backdrop.onclick = e => { if(e.target===backdrop) backdrop.remove(); };
+  backdrop.onclick = e => { if(e.target===backdrop) closeReviewModal(); };
 
-  const rating = (key, label) => {
-    const v = existing?.[key] || 0;
-    return `
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px dotted var(--border)">
-        <div style="font-size:12.5px;color:var(--text);flex:1">${label}</div>
-        <div style="display:flex;gap:4px" id="rate_${key}">
-          ${[1,2,3,4,5].map(n => `<button type="button" onclick="_hrSetRating('${key}',${n})"
-            class="rate-btn" data-val="${n}"
-            style="width:32px;height:32px;border-radius:6px;border:1.5px solid ${v===n?'var(--amber)':'var(--border)'};background:${v===n?'var(--amber-glow)':'var(--surface2)'};color:${v===n?'var(--amber)':'var(--muted)'};font-weight:700;font-size:13px;cursor:pointer">${n}</button>`).join('')}
-        </div>
-      </div>`;
-  };
+  const statusBadge = existing?.employee_acknowledged_at
+    ? `<span class="rev-status-pill" style="background:rgba(76,175,125,0.15);color:#4caf7d">Acknowledged</span>`
+    : existing?.released_to_employee_at
+      ? `<span class="rev-status-pill" style="background:rgba(91,156,246,0.15);color:#5b9cf6">Released</span>`
+      : `<span class="rev-status-pill" style="background:rgba(232,162,52,0.15);color:var(--amber)">Draft</span>`;
 
   backdrop.innerHTML = `
-    <div class="modal" style="width:720px;max-height:90vh">
-      <div class="modal-header">
-        <div class="modal-title">${existing ? '✎ Edit' : '+ New'} Performance Review — ${emp.name}</div>
-        <button class="modal-close" onclick="document.getElementById('reviewModal').remove()">✕</button>
+    <div class="modal rev-modal" style="width:900px;max-width:95vw;max-height:92vh;display:flex;flex-direction:column">
+      <div class="modal-header" style="display:flex;align-items:center;gap:12px">
+        <div class="modal-title" style="flex:1">Staff Performance Review — ${emp.name}</div>
+        ${statusBadge}
+        <button class="modal-close" onclick="closeReviewModal()">✕</button>
       </div>
-      <div class="modal-body">
-        <input type="hidden" id="rev_id" value="${existing?.id || ''}">
-        <input type="hidden" id="rev_empId" value="${empId}">
-        <div class="field-row">
-          <div class="field">
-            <div class="field-label">Review Date *</div>
-            <input type="date" id="rev_date" class="f-input" value="${existing?.review_date || new Date().toISOString().slice(0,10)}">
-          </div>
-          <div class="field">
-            <div class="field-label">Next Review Date</div>
-            <input type="date" id="rev_next" class="f-input" value="${existing?.next_review_date || ''}">
-          </div>
+      <div class="modal-body rev-body" style="display:grid;grid-template-columns:1fr 220px;gap:0;padding:0;overflow:hidden;flex:1;min-height:0">
+        <div class="rev-main" style="padding:18px 22px;overflow-y:auto">
+          ${_renderReviewMeta(state, mgrs)}
+          <div class="rev-section-label">I · Rating Categories</div>
+          <div class="rev-cats">${_renderReviewCategoriesInner(state)}</div>
+          ${_renderReviewObjectives(state)}
+          ${_renderReviewEmployeeInput(state)}
+          ${(state.mode === 'employee_ack') ? _renderReviewAgreement(state) : (existing?.employee_acknowledged_at ? _renderReviewAckSummary(existing) : '')}
         </div>
-        <div class="field-row">
-          <div class="field">
-            <div class="field-label">Period Start</div>
-            <input type="date" id="rev_pStart" class="f-input" value="${existing?.period_start || ''}">
-          </div>
-          <div class="field">
-            <div class="field-label">Period End</div>
-            <input type="date" id="rev_pEnd" class="f-input" value="${existing?.period_end || ''}">
-          </div>
-        </div>
-        <div class="field">
-          <div class="field-label">Reviewer *</div>
-          <select id="rev_reviewer" class="f-select">
-            <option value="">— Select reviewer —</option>
-            ${mgrs.map(m => `<option value="${m.id}" data-name="${m.name}" ${existing?.reviewer_id===m.id?'selected':''}>${m.name}</option>`).join('')}
-          </select>
-        </div>
-
-        <div class="modal-div"></div>
-        <div class="field-label">Ratings (1 = Unsatisfactory, 5 = Exceptional)</div>
-        ${HR_RATING_LABELS.map(rl => rating(rl.key, rl.label)).join('')}
-
-        <div class="modal-div"></div>
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div class="field-label" style="margin:0">Previous Period Goals</div>
-          <button type="button" onclick="_hrAddGoal('prev')" style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 10px;font-size:11.5px;color:var(--muted);cursor:pointer">+ Add</button>
-        </div>
-        <div id="rev_prevGoals">${prevGoals.map((g,i)=>_hrGoalRow('prev',i,g.goal||'',g.status||'met')).join('')}</div>
-
-        <div style="display:flex;align-items:center;justify-content:space-between;margin:14px 0 4px">
-          <div class="field-label" style="margin:0">Next Period Goals</div>
-          <button type="button" onclick="_hrAddGoal('next')" style="background:var(--surface2);border:1px solid var(--border);border-radius:5px;padding:3px 10px;font-size:11.5px;color:var(--muted);cursor:pointer">+ Add</button>
-        </div>
-        <div id="rev_nextGoals">${nextGoals.map((g,i)=>_hrGoalRow('next',i,g.goal||'')).join('')}</div>
-
-        <div class="modal-div"></div>
-        <div class="field">
-          <div class="field-label">Reviewer Comments</div>
-          <textarea id="rev_comments" class="f-textarea" placeholder="Strengths, areas to develop, context…">${(existing?.reviewer_comments||'').replace(/</g,'&lt;')}</textarea>
+        <div class="rev-sidebar" style="background:var(--surface2);border-left:1px solid var(--border);padding:18px 16px;overflow-y:auto">
+          ${_renderReviewSidebar(state)}
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="modal-close" style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 16px;font-size:12.5px;color:var(--text);cursor:pointer" onclick="document.getElementById('reviewModal').remove()">Cancel</button>
-        <button onclick="saveReview()" style="background:var(--amber);color:#0e0e0f;border:none;border-radius:7px;padding:8px 18px;font-size:12.5px;font-weight:600;cursor:pointer">${existing?'Save Changes':'Create Review'}</button>
+      <div class="modal-footer" style="flex-shrink:0">
+        ${_renderReviewFooter(state)}
       </div>
     </div>
   `;
   document.body.appendChild(backdrop);
   requestAnimationFrame(() => backdrop.classList.add('open'));
-
-  // Preload in-memory rating state
-  window._hrRatings = {};
-  HR_RATING_LABELS.forEach(rl => window._hrRatings[rl.key] = existing?.[rl.key] || 0);
+  _reviewRecompute();
 }
 
-function _hrSetRating(key, val) {
-  window._hrRatings = window._hrRatings || {};
-  const current = window._hrRatings[key] || 0;
-  const next = (current === val) ? 0 : val; // click same = clear
-  window._hrRatings[key] = next;
-  // Repaint this group
-  document.querySelectorAll(`#rate_${key} .rate-btn`).forEach(b => {
-    const n = parseInt(b.dataset.val,10);
-    const sel = n === next;
-    b.style.borderColor = sel ? 'var(--amber)' : 'var(--border)';
-    b.style.background  = sel ? 'var(--amber-glow)' : 'var(--surface2)';
-    b.style.color       = sel ? 'var(--amber)' : 'var(--muted)';
-  });
+function closeReviewModal() {
+  document.getElementById('reviewModal')?.remove();
+  window._reviewState = null;
 }
 
-function _hrGoalRow(kind, idx, text, status) {
-  const id = `${kind}Goal_${idx}`;
-  const statusDropdown = kind === 'prev' ? `
-    <select data-kind="${kind}" data-idx="${idx}" class="f-select" style="width:140px;height:34px;padding:6px 10px;font-size:12px">
-      <option value="met"     ${status==='met'?'selected':''}>Met</option>
-      <option value="partial" ${status==='partial'?'selected':''}>Partially Met</option>
-      <option value="not_met" ${status==='not_met'?'selected':''}>Not Met</option>
-      <option value="na"      ${status==='na'?'selected':''}>N/A</option>
-    </select>` : '';
+function _reviewFieldsDisabled() {
+  const m = window._reviewState?.mode;
+  return (m === 'employee_ack' || m === 'readonly') ? 'disabled' : '';
+}
+
+function _renderReviewMeta(state, mgrs) {
+  const dis = (state.mode === 'employee_ack' || state.mode === 'readonly') ? 'disabled' : '';
+  const reviewerOpts = mgrs.map(m => `<option value="${m.id}" ${state.reviewerId===m.id?'selected':''}>${m.name}</option>`).join('');
   return `
-    <div id="${id}" class="hr-goal-row" data-kind="${kind}" data-idx="${idx}" style="display:flex;gap:8px;margin-bottom:6px;align-items:center">
-      <input type="text" class="f-input hr-goal-text" value="${(text||'').replace(/"/g,'&quot;')}" placeholder="Goal…" style="flex:1;height:34px;padding:6px 10px;font-size:12.5px">
-      ${statusDropdown}
-      <button type="button" onclick="_hrRemoveGoal('${id}')" style="background:transparent;border:1px solid var(--border);border-radius:5px;padding:4px 8px;font-size:11px;color:var(--muted);cursor:pointer">✕</button>
+    <div class="rev-meta-grid">
+      <div class="rev-field">
+        <div class="rev-field-label">Review Date *</div>
+        <input type="date" id="rev_date" value="${state.reviewDate}" ${dis} onchange="_reviewState.reviewDate=this.value">
+      </div>
+      <div class="rev-field">
+        <div class="rev-field-label">Reviewer *</div>
+        <select id="rev_reviewer" ${dis} onchange="_reviewState.reviewerId=this.value">
+          <option value="">— Select reviewer —</option>
+          ${reviewerOpts}
+        </select>
+      </div>
+      <div class="rev-field">
+        <div class="rev-field-label">Job Title</div>
+        <input type="text" id="rev_jobTitle" value="${(state.jobTitle||'').replace(/"/g,'&quot;')}" ${dis} onchange="_reviewState.jobTitle=this.value">
+      </div>
+      <div class="rev-field">
+        <div class="rev-field-label">Division</div>
+        <input type="text" id="rev_division" value="${(state.division||'').replace(/"/g,'&quot;')}" ${dis} onchange="_reviewState.division=this.value">
+      </div>
+    </div>
+  `;
+}
+
+function _renderReviewCategoriesInner(state) {
+  const readonly = (state.mode === 'employee_ack' || state.mode === 'readonly');
+  const dis      = readonly ? 'disabled' : '';
+  return STAFF_REVIEW_CATEGORIES.map(cat => {
+    const expanded = (state.expandedCat === cat.key);
+    const score    = state.scores[cat.key];
+    const comment  = state.comments[cat.key] || '';
+    const nearest  = (score == null) ? null : cat.tiers.reduce((p,t)=>Math.abs(t.score-score)<Math.abs(p.score-score)?t:p, cat.tiers[0]);
+
+    if (!expanded) {
+      return `
+        <div class="rev-cat rev-cat-collapsed" data-catkey="${cat.key}" onclick="_reviewExpandCat('${cat.key}')">
+          <div class="rev-cat-label">${cat.label}<span class="rev-cat-max">/ ${cat.max}</span></div>
+          <div class="rev-cat-right">
+            <span class="rev-cat-score" data-catkey="${cat.key}">${score != null ? score : '—'}</span>
+            <span class="rev-cat-caret">▸</span>
+          </div>
+        </div>`;
+    }
+
+    const tierCells = cat.tiers.map(t => {
+      const active = nearest && nearest.score === t.score;
+      const clickAttr = readonly ? '' : `onclick="_reviewSetScore('${cat.key}',${t.score})"`;
+      return `
+        <div class="rev-tier ${active?'rev-tier-active':''}" data-catkey="${cat.key}" data-tier-score="${t.score}" ${clickAttr}>
+          <div class="rev-tier-score">${t.score}${active?' ←':''}</div>
+          <div class="rev-tier-desc">${t.desc}</div>
+        </div>`;
+    }).join('');
+
+    return `
+      <div class="rev-cat rev-cat-expanded" data-catkey="${cat.key}">
+        <div class="rev-cat-header" onclick="_reviewExpandCat('${cat.key}')">
+          <div class="rev-cat-label">${cat.label}<span class="rev-cat-max">/ ${cat.max}</span></div>
+          <div class="rev-cat-right">
+            <span class="rev-cat-score" data-catkey="${cat.key}">${score != null ? score : '—'}</span>
+            <span class="rev-cat-caret">▾</span>
+          </div>
+        </div>
+        <div class="rev-tier-grid">${tierCells}</div>
+        <div class="rev-slider-row">
+          <input type="range" min="0" max="${cat.max}" step="1" value="${score != null ? score : 0}" ${dis}
+                 class="rev-slider" data-catkey="${cat.key}"
+                 oninput="_reviewSetScore('${cat.key}', parseInt(this.value,10))">
+          <input type="number" min="0" max="${cat.max}" value="${score != null ? score : ''}" ${dis}
+                 class="rev-score-num" data-catkey="${cat.key}" placeholder="—"
+                 onchange="_reviewSetScore('${cat.key}', this.value===''?null:parseInt(this.value,10))">
+          <span class="rev-slider-max">/ ${cat.max}</span>
+        </div>
+        <textarea ${dis} class="rev-comment" placeholder="${cat.commentHint || 'Comments…'}"
+                  onchange="_reviewState.comments['${cat.key}']=this.value">${(comment||'').replace(/</g,'&lt;')}</textarea>
+      </div>`;
+  }).join('');
+}
+
+function _renderReviewObjectives(state) {
+  const dis = (state.mode === 'employee_ack' || state.mode === 'readonly') ? 'disabled' : '';
+  return `
+    <div class="rev-section-label" style="margin-top:20px">II · Specifics of Comments</div>
+    <div class="rev-field">
+      <div class="rev-field-label">Listed Objectives</div>
+      <textarea ${dis} class="rev-longtext" onchange="_reviewState.listedObjectives=this.value"
+                placeholder="Goals and targets for the upcoming period…">${(state.listedObjectives||'').replace(/</g,'&lt;')}</textarea>
+    </div>
+    <div class="rev-field" style="margin-top:10px">
+      <div class="rev-field-label">How to Accomplish</div>
+      <textarea ${dis} class="rev-longtext" onchange="_reviewState.howToAccomplish=this.value"
+                placeholder="Concrete steps, support, resources, or training needed…">${(state.howToAccomplish||'').replace(/</g,'&lt;')}</textarea>
     </div>`;
 }
 
-function _hrAddGoal(kind) {
-  const container = document.getElementById(kind === 'prev' ? 'rev_prevGoals' : 'rev_nextGoals');
-  if (!container) return;
-  const idx = container.children.length;
-  const wrapper = document.createElement('div');
-  wrapper.innerHTML = _hrGoalRow(kind, idx, '', 'met');
-  container.appendChild(wrapper.firstElementChild);
+function _renderReviewEmployeeInput(state) {
+  const canWrite = (state.mode === 'employee_ack');
+  const dis = canWrite ? '' : 'disabled';
+  const hint = canWrite
+    ? 'Add your own comments before acknowledging.'
+    : 'Writable by the employee after the review is released.';
+  return `
+    <div class="rev-section-label" style="margin-top:20px">III · Employee Input</div>
+    <div class="rev-field-label" style="color:var(--muted);font-size:11px;margin-bottom:6px">${hint}</div>
+    <textarea ${dis} class="rev-longtext" onchange="_reviewState.employeeInput=this.value"
+              placeholder="Your comments, disagreements, or context…">${(state.employeeInput||'').replace(/</g,'&lt;')}</textarea>`;
 }
 
-function _hrRemoveGoal(id) {
-  const el = document.getElementById(id);
-  if (el) el.remove();
+function _renderReviewAgreement(state) {
+  return `
+    <div class="rev-agreement">
+      <div class="rev-section-label" style="margin-top:20px">IV · Your Acknowledgment</div>
+      <div style="font-size:12.5px;color:var(--text);margin-bottom:10px">This performance review has been discussed with me and:</div>
+      <label class="rev-agree-opt">
+        <input type="radio" name="rev_agreement" value="agree" ${state.agreementStatus==='agree'?'checked':''}
+               onchange="_reviewState.agreementStatus='agree';_reviewToggleDisagreement()">
+        <span><b style="color:#4caf7d">✓ I AM IN AGREEMENT</b></span>
+      </label>
+      <label class="rev-agree-opt">
+        <input type="radio" name="rev_agreement" value="disagree" ${state.agreementStatus==='disagree'?'checked':''}
+               onchange="_reviewState.agreementStatus='disagree';_reviewToggleDisagreement()">
+        <span><b style="color:#e05c5c">✕ I DO NOT AGREE</b> (please explain below)</span>
+      </label>
+      <div id="rev_disagreeBox" style="display:${state.agreementStatus==='disagree'?'block':'none'};margin-top:8px">
+        <textarea class="rev-longtext" onchange="_reviewState.disagreementExplanation=this.value"
+                  placeholder="Explanation…">${(state.disagreementExplanation||'').replace(/</g,'&lt;')}</textarea>
+      </div>
+      <div class="rev-field" style="margin-top:14px">
+        <div class="rev-field-label">Signature (type your full name)</div>
+        <input type="text" id="rev_sigName" value="${(state.employeeSignatureName||'').replace(/"/g,'&quot;')}"
+               onchange="_reviewState.employeeSignatureName=this.value"
+               placeholder="Your full name">
+      </div>
+    </div>`;
 }
 
-function _hrCollectGoals(kind) {
-  const container = document.getElementById(kind === 'prev' ? 'rev_prevGoals' : 'rev_nextGoals');
-  if (!container) return [];
-  return Array.from(container.querySelectorAll('.hr-goal-row')).map(row => {
-    const text = row.querySelector('.hr-goal-text').value.trim();
-    if (!text) return null;
-    const sel = row.querySelector('select');
-    return kind === 'prev'
-      ? { goal: text, status: sel ? sel.value : 'met' }
-      : { goal: text };
-  }).filter(Boolean);
+function _renderReviewAckSummary(r) {
+  return `
+    <div class="rev-section-label" style="margin-top:20px">IV · Acknowledgment</div>
+    <div style="background:var(--surface2);border-radius:7px;padding:12px 14px;font-size:12.5px;color:var(--text);line-height:1.55">
+      <div><b style="color:${r.agreement_status==='agree'?'#4caf7d':'#e05c5c'}">${r.agreement_status==='agree'?'✓ I AM IN AGREEMENT':'✕ I DO NOT AGREE'}</b>
+        · signed <b>${(r.employee_signature_name||'').replace(/</g,'&lt;')}</b>
+        · ${_hrFmtDate(r.employee_acknowledged_at)}
+      </div>
+      ${r.disagreement_explanation ? `<div style="margin-top:6px;white-space:pre-wrap;color:var(--muted);font-size:12px">${(r.disagreement_explanation||'').replace(/</g,'&lt;')}</div>` : ''}
+    </div>`;
 }
 
-async function saveReview() {
-  const id    = document.getElementById('rev_id').value || null;
-  const empId = document.getElementById('rev_empId').value;
-  const date  = document.getElementById('rev_date').value;
-  if (!date) { alert('Review date is required'); return; }
+function _renderReviewSidebar(state) {
+  return `
+    <div class="rev-sidebar-label">Total Score</div>
+    <div id="rev_totalOut" class="rev-sidebar-total">0</div>
+    <div class="rev-sidebar-hint">of 100</div>
 
-  const reviewerSel = document.getElementById('rev_reviewer');
-  const reviewerId  = reviewerSel.value || null;
-  const reviewerName = reviewerSel.selectedOptions[0]?.dataset.name || null;
-  if (!reviewerId) { alert('Please select a reviewer'); return; }
+    <div class="rev-sidebar-label" style="margin-top:18px">Performance Rating</div>
+    <div id="rev_ratingOut" class="rev-sidebar-rating">—</div>
+    <div id="rev_ratingBand" class="rev-sidebar-hint" style="text-align:center"></div>
+
+    <div class="rev-sidebar-label" style="margin-top:18px">Scale (1–9)</div>
+    <div class="rev-scale">
+      <div><span>9</span><span>92–100</span></div>
+      <div><span>8</span><span>83–91</span></div>
+      <div><span>7</span><span>74–82</span></div>
+      <div><span>6</span><span>65–73</span></div>
+      <div><span>5</span><span>56–64</span></div>
+      <div><span>4</span><span>47–55</span></div>
+      <div><span>3</span><span>38–46</span></div>
+      <div><span>2</span><span>29–37</span></div>
+      <div><span>1</span><span>20–28</span></div>
+    </div>`;
+}
+
+function _renderReviewFooter(state) {
+  const cancelBtn = `<button class="rev-btn rev-btn-cancel" onclick="closeReviewModal()">Cancel</button>`;
+  const pdfBtn    = state.reviewId
+    ? `<button class="rev-btn" onclick="exportReviewPdf('${state.reviewId}','${state.empId}')">📄 Export PDF</button>`
+    : '';
+
+  if (state.mode === 'employee_ack') {
+    return `${cancelBtn}${pdfBtn}<button class="rev-btn rev-btn-primary" onclick="saveReview('ack')" style="margin-left:auto">✓ Acknowledge</button>`;
+  }
+  if (state.mode === 'readonly') {
+    return `${cancelBtn}${pdfBtn}`;
+  }
+  // manager_new / manager_edit
+  const releaseBtn = (state.reviewId && !state.released)
+    ? `<button class="rev-btn rev-btn-release" onclick="saveReview('release')">🔓 Save &amp; Release</button>`
+    : '';
+  return `${cancelBtn}${pdfBtn}${releaseBtn}<button class="rev-btn rev-btn-primary" onclick="saveReview('draft')" style="margin-left:auto">${state.reviewId?'Save Changes':'Create Draft'}</button>`;
+}
+
+// ── Modal interactions ────────────────────────────────────────────
+function _reviewExpandCat(key) {
+  if (!window._reviewState) return;
+  window._reviewState.expandedCat = (window._reviewState.expandedCat === key) ? null : key;
+  const host = document.querySelector('.rev-cats');
+  if (host) host.innerHTML = _renderReviewCategoriesInner(window._reviewState);
+}
+
+function _reviewSetScore(key, val) {
+  if (!window._reviewState) return;
+  const cat = STAFF_REVIEW_CATEGORIES.find(c => c.key === key);
+  if (!cat) return;
+  if (val != null && !isNaN(val)) val = Math.max(0, Math.min(cat.max, val));
+  else if (isNaN(val)) val = null;
+  window._reviewState.scores[key] = val;
+
+  // Update tier highlight in-place (no re-render, to preserve slider drag)
+  const nearest = (val == null) ? null : cat.tiers.reduce((p,t)=>Math.abs(t.score-val)<Math.abs(p.score-val)?t:p, cat.tiers[0]);
+  document.querySelectorAll(`.rev-tier[data-catkey="${key}"]`).forEach(el => {
+    const ts = parseInt(el.dataset.tierScore, 10);
+    const active = nearest && nearest.score === ts;
+    el.classList.toggle('rev-tier-active', active);
+    const lab = el.querySelector('.rev-tier-score');
+    if (lab) lab.textContent = ts + (active ? ' ←' : '');
+  });
+  // Update displayed score numbers
+  document.querySelectorAll(`.rev-cat-score[data-catkey="${key}"]`).forEach(el => {
+    el.textContent = val != null ? val : '—';
+  });
+  // Sync slider + number input (only when they're not the active element, to avoid disrupting drag)
+  const slider = document.querySelector(`.rev-slider[data-catkey="${key}"]`);
+  if (slider && document.activeElement !== slider) slider.value = val != null ? val : 0;
+  const num = document.querySelector(`.rev-score-num[data-catkey="${key}"]`);
+  if (num && document.activeElement !== num) num.value = val != null ? val : '';
+
+  _reviewRecompute();
+}
+
+function _reviewRecompute() {
+  if (!window._reviewState) return;
+  const total = STAFF_REVIEW_CATEGORIES.reduce((sum, c) => sum + (window._reviewState.scores[c.key] || 0), 0);
+  const allScored = STAFF_REVIEW_CATEGORIES.every(c => window._reviewState.scores[c.key] != null);
+  const rating = allScored ? _reviewRatingFor(total) : null;
+
+  const totalOut = document.getElementById('rev_totalOut');
+  if (totalOut) totalOut.textContent = total;
+  const ratingOut = document.getElementById('rev_ratingOut');
+  if (ratingOut) ratingOut.textContent = rating != null ? rating : '—';
+  const bandOut = document.getElementById('rev_ratingBand');
+  if (bandOut) bandOut.textContent = rating != null ? _reviewRatingBandLabel(rating) : 'Score all 7 categories';
+}
+
+function _reviewToggleDisagreement() {
+  const box = document.getElementById('rev_disagreeBox');
+  if (!box || !window._reviewState) return;
+  box.style.display = window._reviewState.agreementStatus === 'disagree' ? 'block' : 'none';
+}
+
+// ── Save ───────────────────────────────────────────────────────────
+async function saveReview(action) {
+  const s = window._reviewState;
+  if (!s) return;
+
+  // Employee acknowledgment path
+  if (action === 'ack') {
+    if (!s.agreementStatus) { alert('Please select Agree or Disagree before acknowledging.'); return; }
+    if (s.agreementStatus === 'disagree' && !(s.disagreementExplanation||'').trim()) {
+      alert('Please explain why you disagree.'); return;
+    }
+    if (!(s.employeeSignatureName||'').trim()) { alert('Please type your name as your signature.'); return; }
+    const payload = {
+      employee_input:           s.employeeInput || null,
+      agreement_status:         s.agreementStatus,
+      disagreement_explanation: s.agreementStatus === 'disagree' ? (s.disagreementExplanation || null) : null,
+      employee_signature_name:  s.employeeSignatureName.trim(),
+      employee_acknowledged_at: new Date().toISOString(),
+    };
+    const { error } = await sb.from('performance_reviews').update(payload).eq('id', s.reviewId);
+    if (error) { alert('Acknowledge failed: ' + error.message); return; }
+    closeReviewModal();
+    delete hrRecordsCache[s.empId];
+    await _loadHrRecordsTab(s.empId, employees.find(e => e.id === s.empId));
+    toast('✓ Review acknowledged');
+    return;
+  }
+
+  // Manager save (draft or release)
+  if (!s.reviewDate) { alert('Review date is required.'); return; }
+  if (!s.reviewerId) { alert('Please select a reviewer.'); return; }
+
+  const total = STAFF_REVIEW_CATEGORIES.reduce((sum, c) => sum + (s.scores[c.key] || 0), 0);
+  const allScored = STAFF_REVIEW_CATEGORIES.every(c => s.scores[c.key] != null);
+  const rating = allScored ? _reviewRatingFor(total) : null;
+
+  const reviewerEmp = employees.find(e => e.id === s.reviewerId);
 
   const payload = {
-    employee_id: empId,
-    review_date: date,
-    period_start: document.getElementById('rev_pStart').value || null,
-    period_end:   document.getElementById('rev_pEnd').value || null,
-    next_review_date: document.getElementById('rev_next').value || null,
-    reviewer_id: reviewerId,
-    reviewer_name: reviewerName,
-    previous_goals: _hrCollectGoals('prev'),
-    next_goals:     _hrCollectGoals('next'),
-    reviewer_comments: document.getElementById('rev_comments').value || null,
+    employee_id:        s.empId,
+    form_type:          'staff',
+    review_date:        s.reviewDate,
+    reviewer_id:        s.reviewerId,
+    reviewer_name:      reviewerEmp?.name || null,
+    job_title:          s.jobTitle || null,
+    division:           s.division || null,
+    total_score:        allScored ? total : null,
+    performance_rating: rating,
+    listed_objectives:  s.listedObjectives || null,
+    how_to_accomplish:  s.howToAccomplish  || null,
   };
-  // Ratings
-  HR_RATING_LABELS.forEach(rl => {
-    payload[rl.key] = (window._hrRatings?.[rl.key]) || null;
+  STAFF_REVIEW_CATEGORIES.forEach(c => {
+    payload[`${c.key}_score`]   = (s.scores[c.key] != null) ? s.scores[c.key] : null;
+    payload[`${c.key}_comment`] = s.comments[c.key] || null;
   });
 
+  if (action === 'release') {
+    if (!allScored) { alert('Please score all 7 categories before releasing.'); return; }
+    payload.released_to_employee_at = new Date().toISOString();
+    payload.released_by             = currentEmployee?.id || null;
+  }
+
   let err;
-  if (id) {
-    ({ error: err } = await sb.from('performance_reviews').update(payload).eq('id', id));
+  if (s.reviewId) {
+    ({ error: err } = await sb.from('performance_reviews').update(payload).eq('id', s.reviewId));
   } else {
+    payload.created_by = currentEmployee?.id || null;
     ({ error: err } = await sb.from('performance_reviews').insert(payload));
   }
   if (err) { alert('Save failed: ' + err.message); return; }
 
-  document.getElementById('reviewModal')?.remove();
-  delete hrRecordsCache[empId];
-  await _loadHrRecordsTab(empId, employees.find(e => e.id === empId));
-  toast(id ? '✓ Review updated' : '✓ Review created');
+  closeReviewModal();
+  delete hrRecordsCache[s.empId];
+  await _loadHrRecordsTab(s.empId, employees.find(e => e.id === s.empId));
+  toast(action === 'release' ? '🔓 Review released to employee' : (s.reviewId ? '✓ Review updated' : '✓ Review created'));
+}
+
+// ── PDF export (mirrors NUI #28 paper form) ───────────────────────
+async function exportReviewPdf(reviewId, empId) {
+  const r = (hrRecordsCache[empId]?.reviews || []).find(x => x.id === reviewId);
+  if (!r) { alert('Review not found.'); return; }
+  const emp = employees.find(e => e.id === empId);
+  if (!window.jspdf || !window.jspdf.jsPDF) { alert('PDF library not loaded.'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ unit:'pt', format:'letter' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const margin = 40;
+  let y = margin;
+
+  // Header
+  doc.setFont('helvetica','bold'); doc.setFontSize(14);
+  doc.text('NU LABORATORIES', pageW/2, y, { align:'center' }); y += 18;
+  doc.text('STAFF EMPLOYEE — PERFORMANCE REVIEW', pageW/2, y, { align:'center' }); y += 16;
+  doc.setDrawColor(180); doc.line(margin, y, pageW-margin, y); y += 16;
+
+  // Metadata
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  const labelVal = (label, val, x, yy) => {
+    doc.setTextColor(120); doc.text(label, x, yy);
+    doc.setTextColor(0); doc.setFont('helvetica','bold');
+    doc.text(val || '—', x, yy+12); doc.setFont('helvetica','normal');
+  };
+  labelVal('NAME',             emp?.name || '',                  margin,       y);
+  labelVal('DATE OF REVIEW',   _hrFmtDate(r.review_date),        margin + 180, y);
+  labelVal('JOB TITLE',        r.job_title || '',                margin + 340, y);
+  y += 30;
+  labelVal('COMPANY/DIVISION', r.division || 'NU Laboratories',  margin,       y);
+  labelVal('REVIEWER',         r.reviewer_name || '',            margin + 180, y);
+  labelVal('FORM',             'NUI #28 (Staff)',                margin + 340, y);
+  y += 26;
+
+  // Category table
+  const body = STAFF_REVIEW_CATEGORIES.map(cat => {
+    const score   = r[`${cat.key}_score`];
+    const comment = r[`${cat.key}_comment`] || '';
+    return [ cat.label, `${score != null ? score : '—'} / ${cat.max}`, comment ];
+  });
+  doc.autoTable({
+    startY: y,
+    head: [['Category','Score','Comments']],
+    body,
+    theme: 'grid',
+    styles: { fontSize: 9, cellPadding: 5, valign: 'top', overflow: 'linebreak' },
+    headStyles: { fillColor: [60,60,60], textColor: 255, fontStyle: 'bold' },
+    columnStyles: { 0:{ cellWidth: 130, fontStyle:'bold' }, 1:{ cellWidth: 55, halign:'center' }, 2:{ cellWidth: 'auto' } },
+    margin: { left: margin, right: margin },
+  });
+  y = doc.lastAutoTable.finalY + 12;
+
+  // Totals
+  doc.setFont('helvetica','bold'); doc.setFontSize(11);
+  doc.text(`TOTAL SCORE: ${r.total_score != null ? r.total_score : '—'} / 100`, margin, y);
+  doc.text(`PERFORMANCE RATING: ${r.performance_rating != null ? r.performance_rating : '—'} / 9`, margin + 240, y);
+  y += 20;
+
+  // Sections
+  const addSection = (label, text) => {
+    if (!text) return;
+    if (y > pageH - 140) { doc.addPage(); y = margin; }
+    doc.setFont('helvetica','bold'); doc.setFontSize(9); doc.setTextColor(80);
+    doc.text(label.toUpperCase(), margin, y); y += 12;
+    doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(0);
+    const lines = doc.splitTextToSize(text, pageW - margin*2);
+    doc.text(lines, margin, y); y += lines.length * 12 + 10;
+  };
+  addSection('II · Listed Objectives', r.listed_objectives);
+  addSection('    How to Accomplish',  r.how_to_accomplish);
+  addSection('III · Employee Input',   r.employee_input);
+
+  // Signature / agreement
+  if (y > pageH - 110) { doc.addPage(); y = margin; }
+  doc.setDrawColor(180); doc.line(margin, y, pageW-margin, y); y += 14;
+  doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(0);
+  doc.text('This performance review has been discussed with me and:', margin, y); y += 14;
+  doc.setFont('helvetica','normal');
+  const ack = r.agreement_status;
+  doc.text(`[${ack==='agree'?'X':' '}] I AM IN AGREEMENT`,   margin, y);
+  doc.text(`[${ack==='disagree'?'X':' '}] I DO NOT AGREE`, margin + 200, y); y += 14;
+  if (ack === 'disagree' && r.disagreement_explanation) {
+    doc.setTextColor(60);
+    const lines = doc.splitTextToSize(r.disagreement_explanation, pageW - margin*2);
+    doc.text(lines, margin, y); y += lines.length * 12 + 6;
+    doc.setTextColor(0);
+  }
+  y += 6;
+  doc.setTextColor(120); doc.setFontSize(9);
+  doc.text(`SIGNATURE: ${r.employee_signature_name || '— not signed —'}`, margin, y);
+  doc.text(`DATE: ${r.employee_acknowledged_at ? _hrFmtDate(r.employee_acknowledged_at) : '—'}`, margin + 320, y); y += 14;
+  doc.text(`RELEASED BY: ${r.reviewer_name || ''}${r.released_to_employee_at ? '  ·  ' + _hrFmtDate(r.released_to_employee_at) : '  ·  not released'}`, margin, y);
+
+  // Footer
+  doc.setFontSize(8); doc.setTextColor(150);
+  doc.text('NUI #28', pageW - margin, pageH - 20, { align:'right' });
+
+  const fname = `Performance_Review_${(emp?.name||'employee').replace(/\s+/g,'_')}_${r.review_date}.pdf`;
+  doc.save(fname);
 }
 
 // ── Discipline modal (create + edit) ───────────────────────────────
