@@ -1291,6 +1291,30 @@ function handleSfCsvFile(file) {
   reader.readAsText(file);
 }
 
+// Full US state name → 2-letter code (includes DC + PR). Used to normalize
+// address data coming in from Salesforce exports (which may contain either
+// "Massachusetts" or "MA" in the state column).
+const US_STATE_MAP = {
+  'alabama':'AL','alaska':'AK','arizona':'AZ','arkansas':'AR','california':'CA',
+  'colorado':'CO','connecticut':'CT','delaware':'DE','florida':'FL','georgia':'GA',
+  'hawaii':'HI','idaho':'ID','illinois':'IL','indiana':'IN','iowa':'IA',
+  'kansas':'KS','kentucky':'KY','louisiana':'LA','maine':'ME','maryland':'MD',
+  'massachusetts':'MA','michigan':'MI','minnesota':'MN','mississippi':'MS','missouri':'MO',
+  'montana':'MT','nebraska':'NE','nevada':'NV','new hampshire':'NH','new jersey':'NJ',
+  'new mexico':'NM','new york':'NY','north carolina':'NC','north dakota':'ND','ohio':'OH',
+  'oklahoma':'OK','oregon':'OR','pennsylvania':'PA','rhode island':'RI','south carolina':'SC',
+  'south dakota':'SD','tennessee':'TN','texas':'TX','utah':'UT','vermont':'VT',
+  'virginia':'VA','washington':'WA','west virginia':'WV','wisconsin':'WI','wyoming':'WY',
+  'district of columbia':'DC','puerto rico':'PR',
+};
+function normalizeState(s) {
+  if (!s) return '';
+  const trimmed = s.trim();
+  if (!trimmed) return '';
+  if (/^[A-Za-z]{2}$/.test(trimmed)) return trimmed.toUpperCase();
+  return US_STATE_MAP[trimmed.toLowerCase()] || trimmed;
+}
+
 function parseSfCsv(text) {
   // Parse CSV respecting quoted fields with embedded newlines
   const rows = [];
@@ -1313,9 +1337,11 @@ function parseSfCsv(text) {
 
   if (rows.length < 2) { toast('⚠ Could not parse CSV — check file format'); return; }
 
-  // Map headers
+  // Map headers. Accept both "Mailing ___" (contacts export) and "Billing ___"
+  // (accounts-only export used for address backfill).
   const headers = rows[0].map(h => h.replace(/["\r\n]/g,'').trim().toLowerCase());
-  const col = name => headers.indexOf(name);
+  const col     = name => headers.indexOf(name);
+  const colAny  = (...names) => { for (const n of names) { const i = col(n); if (i !== -1) return i; } return -1; };
   const iAcctName  = col('account name');
   const iFirst     = col('first name');
   const iLast      = col('last name');
@@ -1323,10 +1349,10 @@ function parseSfCsv(text) {
   const iEmail     = col('email');
   const iPhone     = col('phone');
   const iMobile    = col('mobile');
-  const iStreet    = col('mailing street');
-  const iCity      = col('mailing city');
-  const iState     = col('mailing state/province (text only)');
-  const iZip       = col('mailing zip/postal code');
+  const iStreet    = colAny('mailing street', 'billing street');
+  const iCity      = colAny('mailing city', 'billing city');
+  const iState     = colAny('mailing state/province (text only)', 'mailing state/province', 'billing state/province', 'billing state');
+  const iZip       = colAny('mailing zip/postal code', 'billing zip/postal code');
   const iWebsite   = col('website');
 
   if (iAcctName === -1) { toast('⚠ "Account Name" column not found'); return; }
@@ -1343,7 +1369,7 @@ function parseSfCsv(text) {
         accountName: acct,
         address: iStreet > -1 ? (r[iStreet]||'').replace(/\n/g,' ').trim() : '',
         city:    iCity    > -1 ? (r[iCity]||'').trim()    : '',
-        state:   iState   > -1 ? (r[iState]||'').trim()   : '',
+        state:   iState   > -1 ? normalizeState(r[iState]||'') : '',
         zip:     iZip     > -1 ? (r[iZip]||'').trim()     : '',
         website: iWebsite > -1 ? (r[iWebsite]||'').trim() : '',
         phone:   iPhone   > -1 ? (r[iPhone]||'').trim()   : '',
@@ -1375,10 +1401,34 @@ function renderSfPreview() {
   const existingCount = _sfParsed.length - newCount;
   const contactCount  = _sfParsed.reduce((s,a) => s + a.contacts.length, 0);
 
+  // "Backfill mode" = the CSV has zero contacts across all rows (e.g. a Salesforce
+  // Accounts-only export with billing addresses). In this mode we skip unmatched
+  // rows by default and only fill blank address fields on matched clients.
+  const backfillMode  = contactCount === 0 && _sfParsed.length > 0;
+
+  // Pre-compute what each matched row would actually fill, for accurate preview copy.
+  const fillPlan = _sfParsed.map(a => {
+    const existing = sfFindExisting(a.accountName);
+    if (!existing) return null;
+    const blanks = {};
+    if (!existing.address && a.address) blanks.address = a.address;
+    if (!existing.city    && a.city)    blanks.city    = a.city;
+    if (!existing.state   && a.state)   blanks.state   = a.state;
+    if (!existing.zip     && a.zip)     blanks.zip     = a.zip;
+    return blanks;
+  });
+  const willFillCount = fillPlan.filter(p => p && Object.keys(p).length > 0).length;
+
   document.getElementById('sfDropZone').style.display = 'none';
   document.getElementById('sfImportPreview').style.display = '';
-  document.getElementById('sfPreviewTitle').textContent = `${_sfParsed.length} accounts · ${contactCount} contacts`;
-  document.getElementById('sfPreviewSub').textContent = `${existingCount} exact matches found · ${newCount} need review — use the Match column to link or create new`;
+
+  if (backfillMode) {
+    document.getElementById('sfPreviewTitle').textContent = `${_sfParsed.length} accounts · address backfill`;
+    document.getElementById('sfPreviewSub').textContent   = `${willFillCount} will fill blanks · ${existingCount - willFillCount} matched but nothing to fill · ${newCount} unmatched (will skip)`;
+  } else {
+    document.getElementById('sfPreviewTitle').textContent = `${_sfParsed.length} accounts · ${contactCount} contacts`;
+    document.getElementById('sfPreviewSub').textContent   = `${existingCount} exact matches found · ${newCount} need review — use the Match column to link or create new`;
+  }
 
   // Build sorted client list for dropdowns
   const clientOpts = clientStore
@@ -1391,20 +1441,53 @@ function renderSfPreview() {
     const location = [a.city, a.state].filter(Boolean).join(', ') || '—';
     const existingContactCount = existing ? contactStore.filter(c => c.clientId === existing.id).length : 0;
 
-    const matchCell = existing
-      ? `<span style="font-size:11px;color:#2e9e62;font-weight:600">✓ Exact match</span>
-         <div style="font-size:10px;color:var(--muted);margin-top:2px">${existingContactCount} contacts in system</div>`
-      : `<select class="sf-match-sel" data-idx="${i}"
+    let matchCell;
+    if (existing) {
+      // Exact match — show what we'll fill
+      const blanks = fillPlan[i] || {};
+      const blankKeys = Object.keys(blanks);
+      if (backfillMode) {
+        if (blankKeys.length > 0) {
+          matchCell = `<span style="font-size:11px;color:#2e9e62;font-weight:600">✓ Will fill ${blankKeys.length} field${blankKeys.length!==1?'s':''}</span>
+             <div style="font-size:10px;color:var(--muted);margin-top:2px">${blankKeys.join(', ')}</div>`;
+        } else {
+          matchCell = `<span style="font-size:11px;color:var(--muted);font-weight:600">— No blanks to fill</span>
+             <div style="font-size:10px;color:var(--muted);margin-top:2px">Already has address data</div>`;
+        }
+      } else {
+        matchCell = `<span style="font-size:11px;color:#2e9e62;font-weight:600">✓ Exact match</span>
+           <div style="font-size:10px;color:var(--muted);margin-top:2px">${existingContactCount} contacts in system</div>`;
+      }
+    } else {
+      // Unmatched — dropdown. In backfill mode, default to Skip.
+      const newSel  = backfillMode ? '' : ' selected';
+      const skipSel = backfillMode ? ' selected' : '';
+      matchCell = `<select class="sf-match-sel" data-idx="${i}"
            style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;font-family:'DM Sans',sans-serif;font-size:11px;padding:4px 6px;color:var(--text);outline:none;width:100%;max-width:220px;cursor:pointer"
            onchange="sfMatchChanged(${i},this)">
-           <option value="__new__">➕ Create New Client</option>
-           <option value="__skip__">⊘ Skip</option>
+           <option value="__new__"${newSel}>➕ Create New Client</option>
+           <option value="__skip__"${skipSel}>⊘ Skip</option>
            <optgroup label="── Match to Existing ──">${clientOpts}</optgroup>
          </select>`;
+    }
 
-    const statusBadge = existing
-      ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">Exact Match</span>`
-      : `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:rgba(232,162,52,0.15);color:var(--amber);border:1px solid rgba(232,162,52,0.3)" id="sf-badge-${i}">New</span>`;
+    let statusBadge;
+    if (existing) {
+      if (backfillMode) {
+        const blankKeys = Object.keys(fillPlan[i] || {});
+        statusBadge = blankKeys.length > 0
+          ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">Will Fill</span>`
+          : `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">No Change</span>`;
+      } else {
+        statusBadge = `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">Exact Match</span>`;
+      }
+    } else {
+      const label = backfillMode ? 'Skip' : 'New';
+      const style = backfillMode
+        ? 'font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)'
+        : 'font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:rgba(232,162,52,0.15);color:var(--amber);border:1px solid rgba(232,162,52,0.3)';
+      statusBadge = `<span style="${style}" id="sf-badge-${i}">${label}</span>`;
+    }
 
     return `<tr style="border-bottom:1px solid var(--border)" id="sf-row-${i}" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
       <td style="padding:9px 14px">${statusBadge}</td>
@@ -1435,7 +1518,7 @@ async function runSfImport() {
   const btn = document.getElementById('sfImportBtn');
   btn.disabled = true; btn.textContent = '⏳ Importing…';
 
-  let clientsAdded = 0, contactsAdded = 0, skipped = 0, errors = 0;
+  let clientsAdded = 0, contactsAdded = 0, skipped = 0, errors = 0, addressesFilled = 0;
 
   for (let i = 0; i < _sfParsed.length; i++) {
     const a = _sfParsed[i];
@@ -1469,8 +1552,27 @@ async function runSfImport() {
         clientsAdded++;
         logEl.innerHTML += `<div style="color:var(--green)">✓ Created: ${a.accountName} (${a.contacts.length} contacts)</div>`;
       } else {
+        // contacts_only — matched to an existing client. Backfill address fields
+        // that are currently blank on the existing record (never overwrites).
         const matched = clientStore.find(c => c.id === clientId);
-        logEl.innerHTML += `<div style="color:var(--blue)">→ Contacts only: ${a.accountName} → ${matched?.name||clientId}</div>`;
+        if (matched) {
+          const addrUpdate = {};
+          if (!matched.address && a.address) addrUpdate.address = a.address;
+          if (!matched.city    && a.city)    addrUpdate.city    = a.city;
+          if (!matched.state   && a.state)   addrUpdate.state   = a.state;
+          if (!matched.zip     && a.zip)     addrUpdate.zip     = a.zip;
+          const filledKeys = Object.keys(addrUpdate);
+          if (filledKeys.length > 0) {
+            if (sb) await dbUpdate('clients', clientId, addrUpdate);
+            Object.assign(matched, addrUpdate);
+            addressesFilled++;
+            logEl.innerHTML += `<div style="color:var(--green)">✓ Address backfilled: ${a.accountName} (${filledKeys.join(', ')})</div>`;
+          } else if (a.contacts.length > 0) {
+            logEl.innerHTML += `<div style="color:var(--blue)">→ Contacts only: ${a.accountName} → ${matched.name}</div>`;
+          } else {
+            logEl.innerHTML += `<div style="color:var(--muted)">— No change: ${a.accountName} (address already filled)</div>`;
+          }
+        }
       }
 
       for (const ct of a.contacts) {
@@ -1491,8 +1593,22 @@ async function runSfImport() {
     logEl.scrollTop = logEl.scrollHeight;
   }
 
-  logEl.innerHTML += `<div style="margin-top:8px;color:var(--amber);font-weight:700">Done — ${clientsAdded} clients, ${contactsAdded} contacts imported${errors?' · '+errors+' errors':''}.</div>`;
+  const tallyParts = [];
+  if (clientsAdded)    tallyParts.push(`${clientsAdded} clients created`);
+  if (contactsAdded)   tallyParts.push(`${contactsAdded} contacts imported`);
+  if (addressesFilled) tallyParts.push(`${addressesFilled} addresses backfilled`);
+  if (skipped)         tallyParts.push(`${skipped} skipped`);
+  if (errors)          tallyParts.push(`${errors} errors`);
+  logEl.innerHTML += `<div style="margin-top:8px;color:var(--amber);font-weight:700">Done — ${tallyParts.join(' · ') || 'no changes'}.</div>`;
   btn.textContent = '✓ Import Complete';
-  toast(`✅ ${clientsAdded} clients · ${contactsAdded} contacts imported`);
+
+  // Refresh the clients panel so the new city/state shows up on cards immediately
+  renderClientsPanel('');
+
+  const toastParts = [];
+  if (clientsAdded)    toastParts.push(`${clientsAdded} clients`);
+  if (contactsAdded)   toastParts.push(`${contactsAdded} contacts`);
+  if (addressesFilled) toastParts.push(`${addressesFilled} addresses`);
+  toast(`✅ ${toastParts.join(' · ') || 'done'}`);
 }
 
