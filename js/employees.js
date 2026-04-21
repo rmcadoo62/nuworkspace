@@ -518,203 +518,214 @@ function showEmpProfile(empId, annivOffset) {
     </tr>`;
   }).join('');
 
-  // Build weekly hours data for bar chart
-  const weeklyHours = {};      // weekKey -> total hours
-  const weeklySick = {};       // weekKey -> sick hours
-  const weeklyVacation = {};   // weekKey -> vacation hours only
-  const weeklyHoliday = {};    // weekKey -> holiday hours only
-  // Chart starts at hire date in the current year (or Jan 1 if no hire date)
-  // Chart shows last 52 weeks of data regardless of anniversary
-  const chartStart = (() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 364); // 52 weeks back
-    // Snap to nearest Sunday
-    const dow = d.getDay();
-    d.setDate(d.getDate() - dow);
-    return d;
-  })();
+  // ===== Weekly Hours Pivot Table (anniversary year × categories) =====
+  // Replaces the legacy Chart.js bar chart — avoids stale-canvas issues and
+  // makes per-category hours explicit and scannable.
+  const PIVOT_CATEGORIES = [
+    { key:'project',  label:'Direct to Job'    },
+    { key:'genoh',    label:'General Overhead' },
+    { key:'salessup', label:'Sales Support'    },
+    { key:'vacation', label:'Vacation Time'    },
+    { key:'personal', label:'Personal Time'    },
+    { key:'holiday',  label:'Holiday'          },
+    { key:'snow',     label:'Snow Day'         },
+    { key:'sick',     label:'Sick'             },
+  ];
 
-  const SICK_CATS = ['Sick', 'Sick Time', '⬡ Sick Time'];
-  const VAC_CATS  = ['Vacation Time', 'Holiday', 'Personal Time'];
+  // Snap a date to the Sunday on or before it (timesheets are Sun–Sat weeks)
+  const _sundayOnOrBefore = (d) => {
+    const x = new Date(d);
+    x.setDate(x.getDate() - x.getDay());
+    x.setHours(0,0,0,0);
+    return x;
+  };
 
-  const empWeekKeys = new Set();
-  Object.keys(tsData).forEach(key => {
-    if (key.startsWith(empId + '|') && !key.startsWith('oh_')) empWeekKeys.add(key.split('|')[1]);
-    if (key.startsWith('oh_' + empId + '|')) empWeekKeys.add(key.split('|')[1]);
-  });
+  // Anniversary window for full-time, calendar-year for part-time (matches PTO tracking)
+  const _yearAnchor = isPartTime
+    ? new Date(year, 0, 1)
+    : ((_annivRange && _annivRange.start)
+        ? _annivRange.start
+        : new Date((new Date().getFullYear() + (annivOffset || 0)), 0, 1));
+  const _yearStart = _sundayOnOrBefore(_yearAnchor);
+  const pivotWeeks = [];
+  for (let i = 0; i < 52; i++) {
+    const d = new Date(_yearStart);
+    d.setDate(d.getDate() + 7 * i);
+    pivotWeeks.push(d.toISOString().split('T')[0]);
+  }
+  const _todayWeekKey = _sundayOnOrBefore(new Date()).toISOString().split('T')[0];
 
-  empWeekKeys.forEach(weekKey => {
-    const key = empId + '|' + weekKey;
-    const rows = tsData[key] || [];
-    if (!weekKey || weekKey.length < 10) return;
-    const weekDate = new Date(weekKey + 'T00:00:00');
-    if (weekDate < chartStart) return;
-    let projHrs = 0, sickHrs = 0, vacHrs = 0, holHrs = 0, ohWorkHrs = 0;
-    rows.forEach(r => { if (r && r.hours) projHrs += Object.values(r.hours).reduce((s,h)=>s+(parseFloat(h)||0),0); });
-    const ohKey = 'oh_' + key;
-    const oh = tsData[ohKey] || {};
-    // Deduplicate overhead categories — normalize names like "290-Sales Support" → "Sales Support"
-    const ohNormalized = {};
+  // Aggregate hours per category per week
+  const pivotData = {};
+  PIVOT_CATEGORIES.forEach(c => { pivotData[c.key] = {}; });
+
+  pivotWeeks.forEach(wk => {
+    const storeKey = empId + '|' + wk;
+    const rows = tsData[storeKey] || [];
+    let projHrs = 0;
+    rows.forEach(r => {
+      if (r && r.hours) projHrs += Object.values(r.hours).reduce((s,h)=>s+(parseFloat(h)||0),0);
+    });
+    if (projHrs > 0) pivotData.project[wk] = projHrs;
+
+    // Overhead — normalize category names (strip "290-" / "⬡ ")
+    const oh = tsData['oh_' + storeKey] || {};
+    const ohNorm = {};
     Object.entries(oh).forEach(([cat, dayMap]) => {
       if (!dayMap) return;
-      const normCat = cat.replace(/^\d+-/, '').replace(/^⬡\s*/, '').trim();
-      if (!ohNormalized[normCat]) ohNormalized[normCat] = {};
-      Object.entries(dayMap).forEach(([di, h]) => {
-        ohNormalized[normCat][di] = Math.max(ohNormalized[normCat][di]||0, parseFloat(h)||0);
-      });
+      const nc = cat.replace(/^\d+-/, '').replace(/^⬡\s*/, '').trim();
+      const hrs = Object.values(dayMap).reduce((s,h)=>s+(parseFloat(h)||0),0);
+      ohNorm[nc] = (ohNorm[nc] || 0) + hrs;
     });
-    Object.entries(ohNormalized).forEach(([cat, dayMap]) => {
-      const catHrs = Object.values(dayMap).reduce((s,h)=>s+(parseFloat(h)||0),0);
-      if (SICK_CATS.some(sc => sc.replace(/^⬡\s*/,'').trim() === cat)) sickHrs += catHrs;
-      else if (cat === 'Vacation Time' || cat === 'Personal Time') vacHrs += catHrs;
-      else if (cat === 'Holiday' || cat === 'Snow Day') holHrs += catHrs;
-      else ohWorkHrs += catHrs;
+    Object.entries(ohNorm).forEach(([cat, hrs]) => {
+      if (hrs <= 0) return;
+      let k = 'genoh'; // unknown cats fall into the "other work" bucket
+      if (cat === 'General Overhead')      k = 'genoh';
+      else if (cat === 'Sales Support')    k = 'salessup';
+      else if (cat === 'Vacation Time')    k = 'vacation';
+      else if (cat === 'Personal Time')    k = 'personal';
+      else if (cat === 'Holiday')          k = 'holiday';
+      else if (cat === 'Snow Day')         k = 'snow';
+      else if (cat === 'Sick' || cat === 'Sick Time') k = 'sick';
+      pivotData[k][wk] = (pivotData[k][wk] || 0) + hrs;
     });
-    const total = projHrs + ohWorkHrs + sickHrs + vacHrs + holHrs;
-    if (total > 0) {
-      weeklyHours[weekKey] = projHrs + ohWorkHrs;
-      weeklySick[weekKey] = sickHrs;
-      weeklyVacation[weekKey] = vacHrs;
-      weeklyHoliday[weekKey] = holHrs;
+  });
+
+  // Per-week totals and utilization
+  const _utilCutoff = new Date('2026-03-09T00:00:00');
+  const weekTotals = {};
+  const weekUtil = {}; // null = not computable (pre-cutoff, future, or zero in-building)
+  pivotWeeks.forEach(wk => {
+    const t = PIVOT_CATEGORIES.reduce((s,c) => s + (pivotData[c.key][wk]||0), 0);
+    weekTotals[wk] = t;
+    const inBuilding = (pivotData.project[wk]||0) + (pivotData.genoh[wk]||0) + (pivotData.salessup[wk]||0);
+    const wkDate = new Date(wk + 'T00:00:00');
+    if (wkDate < _utilCutoff || wk > _todayWeekKey || inBuilding <= 0) {
+      weekUtil[wk] = null;
+    } else {
+      weekUtil[wk] = Math.round(((pivotData.project[wk]||0) / inBuilding) * 100);
     }
   });
 
-  const chartWeeks = Object.keys(weeklyHours).concat(
-    Object.keys(weeklySick).filter(k => !weeklyHours[k]),
-    Object.keys(weeklyVacation).filter(k => !weeklyHours[k] && !weeklySick[k]),
-    Object.keys(weeklyHoliday).filter(k => !weeklyHours[k] && !weeklySick[k] && !weeklyVacation[k])
-  ).filter((v,i,a)=>a.indexOf(v)===i).sort();
+  // YTD totals per category (sum only up to current week) + weighted utilization
+  const ytd = {};
+  PIVOT_CATEGORIES.forEach(c => {
+    ytd[c.key] = pivotWeeks.reduce((s,wk) => s + (wk <= _todayWeekKey ? (pivotData[c.key][wk]||0) : 0), 0);
+  });
+  const ytdTotal = PIVOT_CATEGORIES.reduce((s,c) => s + ytd[c.key], 0);
+  const ytdInBuilding = ytd.project + ytd.genoh + ytd.salessup;
+  const ytdUtil = ytdInBuilding > 0 ? Math.round((ytd.project / ytdInBuilding) * 100) : null;
+  const weeksLoggedCount = pivotWeeks.filter(wk => wk <= _todayWeekKey && (weekTotals[wk]||0) > 0).length;
 
-  const maxHrs = Math.max(40, ...chartWeeks.map(wk => (weeklyHours[wk]||0)+(weeklySick[wk]||0)+(weeklyVacation[wk]||0)+(weeklyHoliday[wk]||0)));
+  // Formatters / helpers
+  const _fmtHdr = (wk) => { const s = new Date(wk+'T00:00:00'); s.setDate(s.getDate()+6); return s.toLocaleDateString('en-US',{month:'short',day:'numeric'}); };
+  const _fmtRange = (d) => d ? d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '';
+  const _utilColor = u => u === null ? 'var(--muted)' : u >= 80 ? 'var(--green)' : u >= 60 ? 'var(--amber)' : 'var(--red)';
+  const _cellBg = (wk) => {
+    if (wk === _todayWeekKey) return 'rgba(232,162,52,0.12)';
+    if (wk > _todayWeekKey)   return 'var(--surface2)';
+    return 'var(--surface)';
+  };
+  const _numCell = (val, wk, opts) => {
+    opts = opts || {};
+    const isFuture = wk > _todayWeekKey;
+    const bg = _cellBg(wk);
+    const borders = 'border-bottom:1px solid var(--border);' + (opts.topBorder ? 'border-top:2px solid var(--border);' : '');
+    const fw = opts.bold ? 'font-weight:700' : '';
+    let display;
+    if (val > 0) display = val.toFixed(1);
+    else if (isFuture) display = '';
+    else display = '<span style="color:var(--muted)">—</span>';
+    return '<td style="background:'+bg+';padding:6px;'+borders+';text-align:right;font-family:\'JetBrains Mono\',monospace;font-size:12px;'+fw+'">'+display+'</td>';
+  };
+  const _utilCell = (wk) => {
+    const u = weekUtil[wk];
+    const isFuture = wk > _todayWeekKey;
+    const bg = _cellBg(wk);
+    let display;
+    if (u !== null) display = '<span style="color:'+_utilColor(u)+';font-weight:600">'+u+'%</span>';
+    else if (isFuture) display = '';
+    else display = '<span style="color:var(--muted)">—</span>';
+    return '<td style="background:'+bg+';padding:6px;border-bottom:1px solid var(--border);text-align:right;font-family:\'JetBrains Mono\',monospace;font-size:11px">'+display+'</td>';
+  };
 
-  // Build chart HTML
-  const weeklyChartId = 'empHoursChart_' + empId;
-  let weeklyHoursChartHtml = '';
-  if (chartWeeks.length > 0) {
-    const chartLabels = chartWeeks.map(wk => { const sat=new Date(wk+'T00:00:00'); sat.setDate(sat.getDate()+6); return sat.toLocaleDateString('en-US',{month:'short',day:'numeric'}); });
-    const chartWork   = chartWeeks.map(wk => weeklyHours[wk]   || 0);
-    const chartVac    = chartWeeks.map(wk => weeklyVacation[wk] || 0);
-    const chartHol    = chartWeeks.map(wk => weeklyHoliday[wk]  || 0);
-    const chartSick   = chartWeeks.map(wk => weeklySick[wk]     || 0);
+  // Sticky-cell base styles
+  const STICKY_L_TH = 'position:sticky;left:0;z-index:3;background:var(--surface2);padding:8px 12px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);font-weight:600;font-size:11px;color:var(--muted);text-align:left;min-width:140px';
+  const STICKY_R_TH = 'position:sticky;right:0;z-index:3;background:var(--surface2);padding:8px 12px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);font-weight:600;font-size:11px;color:var(--text);text-align:center;min-width:68px';
+  const STICKY_L_TD = 'position:sticky;left:0;z-index:2;background:var(--surface);padding:8px 12px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);font-size:12px;color:var(--text);min-width:140px';
+  const STICKY_R_TD = 'position:sticky;right:0;z-index:2;background:var(--surface2);padding:6px 12px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);text-align:right;font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;min-width:68px';
 
-    // Utilization: project hours / total hours, only for weeks on/after Mar 15 2026
-    const utilCutoff = new Date('2026-03-09T00:00:00');
-    const chartUtil = chartWeeks.map((wk, i) => {
-      const wkDate = new Date(wk + 'T00:00:00');
-      if (wkDate < utilCutoff) return null;
-      // Hours in building = project hours + overhead work (Sales Support, General Overhead)
-      const inBuilding = (chartWork[i]||0);
-      if (inBuilding <= 0) return null;
-      // Pure project hours only (exclude General Overhead from denominator's numerator)
-      const key = empId + '|' + wk;
-      const rows2 = tsData[key] || [];
-      const projOnly = rows2.reduce((s, r) => s + Object.values(r.hours||{}).reduce((a,b)=>a+(parseFloat(b)||0),0), 0);
-      return Math.round((projOnly / inBuilding) * 100);
-    });
+  const annivLabel = isPartTime
+    ? 'Calendar year ' + year
+    : ((_annivRange && _annivRange.start)
+        ? _fmtRange(_annivRange.start) + ' – ' + _fmtRange(_annivRange.end)
+        : 'Year ' + (new Date().getFullYear() + (annivOffset || 0)));
 
-    // Running average utilization from cutoff to latest week with data
-    const utilWeeks = chartUtil.filter(v => v !== null);
-    const utilAvg = utilWeeks.length > 0 ? Math.round(utilWeeks.reduce((s,v)=>s+v,0) / utilWeeks.length) : null;
-
-    weeklyHoursChartHtml =
-      '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'+
-          '<div style="font-size:13px;font-weight:700;color:var(--text)">📊 Weekly Hours — Last 12 Months</div>'+
-          '<div style="display:flex;align-items:center;gap:12px">'+
-            (utilAvg !== null ? '<div style="font-size:12px;color:var(--muted)">Avg utilization <span style="font-weight:700;color:var(--green)">'+utilAvg+'%</span></div>' : '')+
-            '<div style="font-size:11px;color:var(--muted)">'+chartWeeks.length+' weeks</div>'+
-          '</div>'+
+  let weeklyHoursChartHtml =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;gap:12px;flex-wrap:wrap">'+
+        '<div>'+
+          '<div style="font-size:13px;font-weight:700;color:var(--text)">📋 Weekly Hours — '+(isPartTime ? 'Calendar Year' : 'Anniversary Year')+'</div>'+
+          '<div style="font-size:11px;color:var(--muted);margin-top:2px">'+annivLabel+'</div>'+
         '</div>'+
-        '<div style="position:relative;height:280px">'+
-          '<canvas id="'+weeklyChartId+'"></canvas>'+
+        '<div style="font-size:12px;color:var(--muted);text-align:right">'+
+          (ytdUtil !== null ? 'Avg utilization <span style="font-weight:700;color:'+_utilColor(ytdUtil)+'">'+ytdUtil+'%</span> · ' : '')+
+          weeksLoggedCount+' of 52 weeks logged'+
         '</div>'+
-      '</div>';
-
-    // Draw chart after HTML is injected
-    setTimeout(() => {
-      const canvas = document.getElementById(weeklyChartId);
-      if (!canvas || !window.Chart) return;
-      const existing = Chart.getChart(canvas);
-      if (existing) existing.destroy();
-      new Chart(canvas, {
-        type: 'bar',
-        data: {
-          labels: chartLabels,
-          datasets: [
-            { label: 'Work',      data: chartWork, backgroundColor: '#4caf7dcc', borderRadius: 3, stack: 'a' },
-            { label: 'Vacation',  data: chartVac,  backgroundColor: '#c07a1acc', borderRadius: 3, stack: 'a' },
-            { label: 'Holiday',   data: chartHol,  backgroundColor: '#3a7fd4cc', borderRadius: 3, stack: 'a' },
-            { label: 'Sick',      data: chartSick, backgroundColor: '#d04040cc', borderRadius: 3, stack: 'a' },
-          ]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          interaction: { mode: 'index', intersect: false },
-          plugins: {
-            legend: {
-              position: 'bottom',
-              labels: { color: '#6b6b78', font: { size: 11 }, boxWidth: 12, padding: 16 }
-            },
-            tooltip: {
-              callbacks: {
-                footer: items => {
-                  const total = items.reduce((s, i) => s + i.raw, 0);
-                  const idx = items[0]?.dataIndex;
-                  const util = chartUtil[idx];
-                  return 'Total: ' + total.toFixed(1) + 'h' + (util !== null ? '  |  Utilization: ' + util + '%' : '');
-                }
-              }
-            },
-            afterDraw: undefined
-          },
-          scales: {
-            x: {
-              stacked: true,
-              ticks: { color: '#6b6b78', font: { size: 10 }, maxRotation: 45, autoSkip: true, maxTicksLimit: 20 },
-              grid: { display: false }
-            },
-            y: {
-              stacked: true,
-              beginAtZero: true,
-              suggestedMax: 50,
-              ticks: { color: '#6b6b78', font: { size: 11 }, stepSize: 10 },
-              grid: { color: 'rgba(220,220,224,0.3)' }
-            }
-          },
-          animation: {
-            onComplete: function() {
-              const chart = this;
-              const ctx = chart.ctx;
-              ctx.save();
-              ctx.font = '600 10px DM Sans, sans-serif';
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'bottom';
-              chart.data.datasets[0].data.forEach((_, i) => {
-                const util = chartUtil[i];
-                if (util === null) return;
-                const meta = chart.getDatasetMeta(chart.data.datasets.length - 1);
-                // find topmost visible bar for this index
-                let topY = Infinity;
-                chart.data.datasets.forEach((ds, di) => {
-                  const m = chart.getDatasetMeta(di);
-                  if (!m.hidden && m.data[i]) {
-                    topY = Math.min(topY, m.data[i].y);
-                  }
-                });
-                if (topY === Infinity) return;
-                const x = chart.getDatasetMeta(0).data[i]?.x;
-                if (x === undefined) return;
-                ctx.fillStyle = util >= 80 ? '#2e9e62' : util >= 60 ? '#c07a1a' : '#d04040';
-                ctx.fillText(util + '%', x, topY - 4);
-              });
-              ctx.restore();
-            }
-          }
-        }
-      });
-    }, 80);
-  }
+      '</div>'+
+      '<div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px">'+
+        '<table id="empPivot_'+empId+'" style="border-collapse:separate;border-spacing:0;width:max-content;font-size:12px">'+
+          '<thead>'+
+            // Row 1: week numbers
+            '<tr>'+
+              '<th style="'+STICKY_L_TH+';border-bottom:0">&nbsp;</th>'+
+              pivotWeeks.map((wk, i) => {
+                const bg = _cellBg(wk);
+                const isNow = wk === _todayWeekKey;
+                const weight = isNow ? '700' : '600';
+                const col = isNow ? 'var(--amber)' : 'var(--muted)';
+                const idAttr = isNow ? ' id="empPivotNowCol_'+empId+'"' : '';
+                return '<th'+idAttr+' style="background:'+bg+';padding:6px 6px 2px;border-bottom:0;font-weight:'+weight+';font-size:10px;color:'+col+';text-align:center;min-width:50px;font-family:\'JetBrains Mono\',monospace">Wk '+(i+1)+'</th>';
+              }).join('')+
+              '<th style="'+STICKY_R_TH+';border-bottom:0">&nbsp;</th>'+
+            '</tr>'+
+            // Row 2: week-ending dates
+            '<tr>'+
+              '<th style="'+STICKY_L_TH+'">Category</th>'+
+              pivotWeeks.map(wk => {
+                const bg = _cellBg(wk);
+                return '<th style="background:'+bg+';padding:2px 6px 8px;border-bottom:1px solid var(--border);font-weight:500;font-size:10px;color:var(--muted);text-align:center;min-width:50px;font-family:\'JetBrains Mono\',monospace">'+_fmtHdr(wk)+'</th>';
+              }).join('')+
+              '<th style="'+STICKY_R_TH+'">YTD</th>'+
+            '</tr>'+
+          '</thead>'+
+          '<tbody>'+
+            PIVOT_CATEGORIES.map(c => '<tr>'+
+              '<td style="'+STICKY_L_TD+'">'+c.label+'</td>'+
+              pivotWeeks.map(wk => _numCell(pivotData[c.key][wk]||0, wk)).join('')+
+              '<td style="'+STICKY_R_TD+'">'+(ytd[c.key] > 0 ? ytd[c.key].toFixed(1) : '<span style="color:var(--muted);font-weight:400">—</span>')+'</td>'+
+            '</tr>').join('')+
+            // Total row
+            '<tr>'+
+              '<td style="'+STICKY_L_TD.replace('background:var(--surface)','background:var(--surface2)')+';border-top:2px solid var(--border);font-weight:700">Total</td>'+
+              pivotWeeks.map(wk => _numCell(weekTotals[wk]||0, wk, {topBorder:true, bold:true})).join('')+
+              '<td style="'+STICKY_R_TD+';border-top:2px solid var(--border)">'+(ytdTotal > 0 ? ytdTotal.toFixed(1) : '—')+'</td>'+
+            '</tr>'+
+            // Utilization row
+            '<tr>'+
+              '<td style="'+STICKY_L_TD+';font-style:italic;color:var(--muted)">Utilization</td>'+
+              pivotWeeks.map(wk => _utilCell(wk)).join('')+
+              '<td style="'+STICKY_R_TD+';font-size:11px">'+(ytdUtil !== null ? '<span style="color:'+_utilColor(ytdUtil)+'">'+ytdUtil+'%</span>' : '<span style="color:var(--muted);font-weight:400">—</span>')+'</td>'+
+            '</tr>'+
+          '</tbody>'+
+        '</table>'+
+      '</div>'+
+      '<div style="display:flex;gap:16px;margin-top:10px;font-size:10.5px;color:var(--muted);align-items:center;flex-wrap:wrap">'+
+        '<span><span style="display:inline-block;width:10px;height:10px;background:rgba(232,162,52,0.25);vertical-align:middle;margin-right:5px;border-radius:2px;border:1px solid rgba(232,162,52,0.4)"></span>current week</span>'+
+        '<span><span style="display:inline-block;width:10px;height:10px;background:var(--surface2);vertical-align:middle;margin-right:5px;border-radius:2px;border:1px solid var(--border)"></span>future (not yet entered)</span>'+
+        '<span style="margin-left:auto;opacity:0.7">← scroll left for earlier weeks</span>'+
+      '</div>'+
+    '</div>';
 
     pane.innerHTML = `
     ${_myInfoReadOnly ? '' : `
@@ -810,7 +821,7 @@ function showEmpProfile(empId, annivOffset) {
         ${isPartTime ? '<div style="display:none">' : '<div>'}
           <div style="display:flex;justify-content:space-between;align-items:baseline">
             <div style="font-size:12px;font-weight:600;color:var(--text)">Vacation</div>
-            <div style="font-size:13px;font-weight:600;color:${isInFirstYear(emp.hireDate) ? 'var(--muted)' : 'var(--blue)'}">
+            <div style="font-size:13px;font-weight:600;color:${isInFirstYear(emp.hireDate) ? 'var(--muted)' : (annivOffset === 0 && vacBankBalance < 0 ? 'rgba(208,64,64,0.95)' : 'var(--blue)')}">
               ${isInFirstYear(emp.hireDate) && annivOffset === 0
                 ? '0h — first year'
                 : annivOffset === 0 ? vacBankBalance.toFixed(2)+'h bank balance' : (used.vacation + sickOverage).toFixed(1)+'h used'}
@@ -857,7 +868,7 @@ function showEmpProfile(empId, annivOffset) {
                 <!-- Bar track -->
                 <div style="background:var(--surface2);border-radius:6px;height:10px;position:relative;overflow:visible">
                   <!-- Used fill -->
-                  <div style="height:100%;border-radius:6px;width:${usedPct}%;background:${over?'var(--red)':'var(--blue)'};transition:width .4s;position:relative;z-index:1"></div>
+                  <div style="height:100%;border-radius:6px;width:${usedPct}%;background:${over?'rgba(208,64,64,0.85)':'var(--blue)'};transition:width .4s;position:relative;z-index:1"></div>
                   <!-- Today marker -->
                   ${todayPct !== null && annivOffset === 0 ? `<div style="position:absolute;left:${todayPct}%;top:-4px;bottom:-4px;width:2px;background:var(--amber);border-radius:2px;z-index:3" title="Today"></div>` : ''}
                   <!-- Drop tick marks -->
@@ -876,7 +887,7 @@ function showEmpProfile(empId, annivOffset) {
                 </div>
               </div>
               <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:-20px">
-                <span>${usedHrs.toFixed(1)}h used${over?' ⚠ Over':''}</span>
+                <span>${usedHrs.toFixed(1)}h used${over?' · bank overdrawn '+Math.abs(vacBankBalance).toFixed(1)+'h':''}</span>
                 ${annivOffset === 0 ? `<span>opened ${vacOpeningBalance}h + ${vacAccrued}h accrued = ${(vacOpeningBalance + vacAccrued).toFixed(1)}h</span>` : `<span>${vacAllotment}h allotted</span>`}
               </div>`;
           })()}
@@ -915,7 +926,7 @@ function showEmpProfile(empId, annivOffset) {
               ).join('') +
               '</div></div>';
           })()}
-          ${sickOverage > 0 ? `<div style="margin-top:6px;padding:5px 9px;border-radius:6px;background:rgba(208,64,64,0.08);border:1px solid rgba(208,64,64,0.25);font-size:11px;color:var(--red)">+ ${sickOverage.toFixed(1)}h charged from sick overage</div>` : ''}
+          ${sickOverage > 0 ? `<div style="margin-top:6px;padding:5px 9px;border-radius:6px;background:rgba(208,64,64,0.08);border:1px solid rgba(208,64,64,0.25);font-size:11px;color:var(--muted)"><span style="color:rgba(208,64,64,0.85);font-weight:600">+ ${sickOverage.toFixed(1)}h</span> charged from sick overage</div>` : ''}
         </div>
         <!-- Sick -->
         <div>
@@ -938,10 +949,14 @@ function showEmpProfile(empId, annivOffset) {
                   <span>~${totalHrsWorked}h worked · 1h per 30h (NJ)</span>
                 </div>`;
             }
-            const totalSick = 48;
             const usedSick = used.sick;
-            const usedPct = totalSick > 0 ? Math.min(100, (usedSick / totalSick) * 100) : 0;
             const over = usedSick > sickAllotment;
+            // Sick bar is a "what's in the sick ledger" gauge, not a cumulative-used counter.
+            // Overage hours have been transferred out to the vacation ledger and no longer
+            // count against the sick bucket, so the bar only ever shows bank-drawn hours.
+            const inBucket = Math.min(usedSick, sickAllotment);
+            const toVacation = Math.max(0, usedSick - sickAllotment);
+            const sickUsedPct = sickAllotment > 0 ? Math.min(100, (inBucket / sickAllotment) * 100) : 0;
             const fmtShort = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
             const today2 = new Date();
             const sickDrops = [];
@@ -961,10 +976,20 @@ function showEmpProfile(empId, annivOffset) {
             const todayPct = _annivRange ? Math.min(100, Math.max(0,
               ((today2 - _annivRange.start) / (_annivRange.end - _annivRange.start)) * 100
             )) : null;
+            // Label tells the full story: what's in the sick bucket right now, plus any
+            // hours that were taken this year but transferred out to vacation.
+            let leftLabel;
+            if (over && inBucket === 0) {
+              leftLabel = '0.0h in bucket · ' + usedSick.toFixed(1) + 'h taken this year (all \u2192 vacation)';
+            } else if (over) {
+              leftLabel = inBucket.toFixed(1) + 'h in bucket · ' + toVacation.toFixed(1) + 'h of ' + usedSick.toFixed(1) + 'h taken went \u2192 vacation';
+            } else {
+              leftLabel = usedSick.toFixed(1) + 'h used';
+            }
             return `
               <div style="position:relative;margin-top:10px;margin-bottom:32px">
                 <div style="background:var(--surface2);border-radius:6px;height:10px;position:relative;overflow:visible">
-                  <div style="height:100%;border-radius:6px;width:${usedPct}%;background:${over?'var(--red)':'var(--amber)'};transition:width .4s;position:relative;z-index:1"></div>
+                  <div style="height:100%;border-radius:6px;width:${sickUsedPct}%;background:var(--amber);transition:width .4s;position:relative;z-index:1"></div>
                   ${todayPct !== null && annivOffset === 0 ? `<div style="position:absolute;left:${todayPct}%;top:-4px;bottom:-4px;width:2px;background:var(--amber);border-radius:2px;z-index:3" title="Today"></div>` : ''}
                   ${sickDrops.map(d => `
                     <div style="position:absolute;left:${d.pct}%;top:-3px;bottom:-3px;width:2px;background:${d.past?'rgba(232,162,52,0.7)':'rgba(232,162,52,0.25)'};z-index:2;border-radius:1px"></div>
@@ -979,12 +1004,82 @@ function showEmpProfile(empId, annivOffset) {
                   `).join('')}
                 </div>
               </div>
-              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:-20px">
-                <span>${usedSick.toFixed(1)}h used${over?' ⚠ Over':''}</span>
-                <span>opened ${sickOpeningBalance}h + up to 48h drops</span>
-              </div>`;
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:-20px;gap:10px">
+                <span>${leftLabel}</span>
+                <span style="white-space:nowrap">opened ${sickOpeningBalance}h + up to 48h drops</span>
+              </div>${(() => {
+                // Show the next upcoming drop (if any) and what the bank will look like after.
+                // Overage under Interpretation A is already paid from vacation — future drops
+                // create fresh sick capacity, they do NOT retroactively rebate vacation.
+                const futureDrops = sickDrops.filter(d => !d.past);
+                if (futureDrops.length === 0) return '';
+                const next = futureDrops[0];
+                // Projected bank after drop = current bank + drop amount (capped at 48 by policy,
+                // but actual cap logic runs in getTimeOffUsed so keep this display simple).
+                const projectedBank = Math.min(48, Math.max(0, sickBankBalance) + next.amt);
+                return '<div style="margin-top:4px;font-size:10px;color:var(--muted);font-style:italic">Next drop ' + next.label + ' (+' + next.amt + 'h) → sick bank will be ' + projectedBank.toFixed(1) + 'h</div>';
+              })()}`;
           })()}
-          ${sickOverage > 0 ? `<div style="margin-top:6px;padding:5px 9px;border-radius:6px;background:rgba(208,64,64,0.1);border:1px solid rgba(208,64,64,0.3);font-size:11px;color:var(--red)">⚠ ${sickOverage.toFixed(1)}h overage — charged against vacation</div>` : ''}
+          ${(() => {
+            // Sick-days drill-down — mirrors the vacation list, colors overage chips
+            // in soft red so it's visually obvious which day(s) hit the vacation bank.
+            if (isPartTime) return ''; // part-time sick accounting works differently
+            const sickEntries = [];
+            const _srs = _annivRange?.start || new Date(year, 0, 1);
+            const _sre = _annivRange?.end   || new Date(year + 1, 0, 1);
+            const SICK_CAT_KEYS = ['Sick', 'Sick Time', '⬡ Sick Time'];
+            Object.keys(tsData).forEach(key => {
+              if (!key.startsWith('oh_' + empId + '|')) return;
+              const weekKey = key.split('|')[1];
+              if (!weekKey) return;
+              const weekDate = new Date(weekKey + 'T00:00:00');
+              const weekEnd = new Date(weekDate); weekEnd.setDate(weekDate.getDate() + 6);
+              if (weekEnd < _srs || weekDate >= _sre) return;
+              const oh = tsData[key] || {};
+              // Merge all sick variants per day so we don't double-count
+              const byDay = {};
+              SICK_CAT_KEYS.forEach(cat => {
+                Object.entries(oh[cat] || {}).forEach(([di, hrs]) => {
+                  byDay[di] = (byDay[di] || 0) + (parseFloat(hrs) || 0);
+                });
+              });
+              Object.entries(byDay).forEach(([di, hrs]) => {
+                if (hrs <= 0) return;
+                const d = new Date(weekDate);
+                d.setDate(weekDate.getDate() + parseInt(di));
+                if (d < _srs || d >= _sre) return;
+                sickEntries.push({ date: d.toISOString().slice(0,10), hrs: hrs });
+              });
+            });
+            sickEntries.sort((a,b) => a.date.localeCompare(b.date));
+            if (sickEntries.length === 0) return '';
+            // Walk chronologically and tag hours past the allotment as 'overage'
+            let runningUsed = 0;
+            const tagged = sickEntries.map(e => {
+              const before = runningUsed;
+              runningUsed += e.hrs;
+              const bankHrs    = Math.max(0, Math.min(e.hrs, sickAllotment - before));
+              const overageHrs = Math.max(0, e.hrs - bankHrs);
+              return { ...e, bankHrs, overageHrs };
+            });
+            return '<div style="margin-top:8px;padding:8px 10px;background:var(--surface2);border-radius:6px;border:1px solid var(--border)">' +
+              '<div style="font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Sick Days Used</div>' +
+              '<div style="display:flex;flex-wrap:wrap;gap:5px">' +
+              tagged.map(e => {
+                const dateLabel = new Date(e.date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',weekday:'short'});
+                // Fully from sick bank → amber. Fully overage → soft red. Split → show both chips.
+                if (e.overageHrs === 0) {
+                  return '<span title="Drawn from sick bank" style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(232,162,52,0.12);border:1px solid rgba(232,162,52,0.35);color:var(--amber)">' + dateLabel + ' — ' + e.hrs + 'h</span>';
+                }
+                if (e.bankHrs === 0) {
+                  return '<span title="Sick bank empty — charged against vacation" style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(208,64,64,0.1);border:1px solid rgba(208,64,64,0.3);color:rgba(208,64,64,0.95)">↪ ' + dateLabel + ' — ' + e.hrs + 'h</span>';
+                }
+                // Split day: part sick bank, part overage
+                return '<span title="' + e.bankHrs + 'h from sick bank, ' + e.overageHrs + 'h charged against vacation" style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(232,162,52,0.12);border:1px solid rgba(208,64,64,0.3);color:var(--amber)">' + dateLabel + ' — ' + e.bankHrs + 'h <span style="color:rgba(208,64,64,0.95)">+ ' + e.overageHrs + 'h ↪</span></span>';
+              }).join('') +
+              '</div></div>';
+          })()}
+          ${sickOverage > 0 ? `<div style="margin-top:6px;padding:5px 9px;border-radius:6px;background:rgba(208,64,64,0.08);border:1px solid rgba(208,64,64,0.25);font-size:11px;color:var(--muted)"><span style="color:rgba(208,64,64,0.85);font-weight:600">↪ ${sickOverage.toFixed(1)}h</span> charged against vacation bank</div> ` : ''}
         </div>
       </div>
       <!-- Holiday -->
@@ -1044,6 +1139,30 @@ function showEmpProfile(empId, annivOffset) {
   ` : empProfileTab === 'hrrecords' ? `<div id="hrRecordsTabInner"></div>` : `<div id="lifecycleTabInner"></div>`}
   </div>
   `;
+
+  // Scroll the pivot table so the current week lands at the right edge of the
+  // visible scroll area (just left of the sticky YTD column). If you're viewing
+  // a past anniversary year, no current week exists in view so we scroll to the end.
+  if (empProfileTab === 'profile') {
+    setTimeout(() => {
+      const table = document.getElementById('empPivot_' + empId);
+      if (!table) return;
+      const scroller = table.parentElement;
+      if (!scroller) return;
+      const nowCol = document.getElementById('empPivotNowCol_' + empId);
+      if (nowCol) {
+        // Find the sticky YTD column width so we don't hide the current week under it
+        const ytdTh = table.querySelector('thead tr:last-child th:last-child');
+        const ytdW = ytdTh ? ytdTh.offsetWidth : 68;
+        // Target scroll: place current-week column flush against the YTD sticky edge
+        const target = nowCol.offsetLeft + nowCol.offsetWidth - (scroller.clientWidth - ytdW);
+        scroller.scrollLeft = Math.max(0, target);
+      } else {
+        // No current week in this view (viewing a prior anniversary year) — show the tail end
+        scroller.scrollLeft = scroller.scrollWidth;
+      }
+    }, 40);
+  }
 
   // If not profile tab, load tab content
   if (empProfileTab === 'lifecycle') {
