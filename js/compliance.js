@@ -13,6 +13,7 @@ let editingTrainingId = null;
 let editingPoamId = null;
 let trainingSearchVal = '';
 let poamStatusFilter = 'all';
+let complianceEvidenceCache = {}; // keyed by practice_id, loaded from templates table (type='compliance_evidence')
 
 // ===== PANEL OPEN =====
 function openCompliancePanel(navEl) {
@@ -96,9 +97,34 @@ function _renderComingSoonTab(tab) {
   `;
 }
 
+// ════════════════════════════════════════════════════════════════════
+//  EVIDENCE TEMPLATE CACHE (DB-backed; edited via Setup → Templates)
+// ════════════════════════════════════════════════════════════════════
+
+// Loads compliance evidence templates from the DB into a local cache.
+// Called at the start of every Self-Assessment render so edits made in
+// Setup → Templates → Compliance Templates are picked up immediately.
+async function _loadComplianceEvidenceCache() {
+  const { data, error } = await sb
+    .from('templates')
+    .select('key, instructions')
+    .eq('type', 'compliance_evidence')
+    .eq('is_active', true);
+  if (error) { console.error('Compliance evidence load error:', error); return; }
+  complianceEvidenceCache = {};
+  (data || []).forEach(r => { complianceEvidenceCache[r.key] = r.instructions || ''; });
+}
+
+// Returns the DB-backed evidence template for a practice, or '' if missing.
+// Returning '' means the 💡 button is hidden and MET click won't auto-fill —
+// this is intentional per the "show blank when missing" design decision.
+function getEvidenceTemplate(practiceId) {
+  return complianceEvidenceCache[practiceId] || '';
+}
+
 
 // ════════════════════════════════════════════════════════════════════
-//  MODULE 1 — SECURITY AWARENESS TRAINING TRACKING  (AT.L2-3.2.1/2)
+//  MODULE 1 — SECURITY AWARENESS TRAINING TRACKING  (AT.L2-3.2.1/2/3)
 // ════════════════════════════════════════════════════════════════════
 // Fields per AT policy Section 6:
 //   Employee Name | Training Track | Training Version | Date Completed | Logged By | Next Due Date
@@ -164,7 +190,7 @@ async function _renderTrainingTab() {
       <div class="comp-policy-banner">
         <span class="comp-policy-icon">📌</span>
         <div>
-          <strong>AT.L2-3.2.1 &amp; AT.L2-3.2.2</strong> — All CUI-authorized personnel must complete Standard training before first CUI access and annually by Dec 31.
+          <strong>AT.L2-3.2.1, AT.L2-3.2.2 &amp; AT.L2-3.2.3</strong> — All CUI-authorized personnel must complete Standard training (which includes insider threat awareness and reporting) before first CUI access and annually by Dec 31.
           The Owner / IT Administrator additionally completes Admin (privileged-user) training each Q4. Records are retained for 3 years.
         </div>
       </div>
@@ -483,6 +509,7 @@ const POAM_PRACTICES = [
   // AT — Awareness & Training (2 practices)
   { id: 'AT.L2-3.2.1',  desc: 'Ensure that managers, system administrators, and users of organizational systems are made aware of the security risks associated with their activities.' },
   { id: 'AT.L2-3.2.2',  desc: 'Ensure that personnel are trained to carry out their assigned information security responsibilities.' },
+  { id: 'AT.L2-3.2.3',  desc: 'Provide security awareness training on recognizing and reporting potential indicators of insider threat.' },
   // AU — Audit & Accountability (9 practices)
   { id: 'AU.L2-3.3.1',  desc: 'Create and retain system audit logs and records to the extent needed to enable the monitoring, analysis, investigation, and reporting of unlawful or unauthorized system activity.' },
   { id: 'AU.L2-3.3.2',  desc: 'Ensure that the actions of individual system users can be uniquely traced to those users so they can be held accountable for their actions.' },
@@ -1043,7 +1070,7 @@ function _renderComingSoonTab(tab) {
 // Using simplified 1-pt-per-practice model (common for small orgs).
 const ASSESSMENT_DOMAINS = [
   { abbrev: 'AC', name: 'Access Control',                    practices: ['AC.L1-3.1.1','AC.L1-3.1.2','AC.L2-3.1.3','AC.L2-3.1.4','AC.L2-3.1.5','AC.L2-3.1.6','AC.L2-3.1.7','AC.L2-3.1.8','AC.L2-3.1.9','AC.L2-3.1.10','AC.L2-3.1.11','AC.L2-3.1.12','AC.L2-3.1.13','AC.L2-3.1.14','AC.L2-3.1.15','AC.L2-3.1.16','AC.L2-3.1.17','AC.L2-3.1.18','AC.L2-3.1.19','AC.L2-3.1.20','AC.L2-3.1.21','AC.L2-3.1.22'] },
-  { abbrev: 'AT', name: 'Awareness & Training',              practices: ['AT.L2-3.2.1','AT.L2-3.2.2'] },
+  { abbrev: 'AT', name: 'Awareness & Training',              practices: ['AT.L2-3.2.1','AT.L2-3.2.2','AT.L2-3.2.3'] },
   { abbrev: 'AU', name: 'Audit & Accountability',            practices: ['AU.L2-3.3.1','AU.L2-3.3.2','AU.L2-3.3.3','AU.L2-3.3.4','AU.L2-3.3.5','AU.L2-3.3.6','AU.L2-3.3.7','AU.L2-3.3.8','AU.L2-3.3.9'] },
   { abbrev: 'CA', name: 'Security Assessment',               practices: ['CA.L2-3.12.1','CA.L2-3.12.2','CA.L2-3.12.3','CA.L2-3.12.4'] },
   { abbrev: 'CM', name: 'Configuration Management',          practices: ['CM.L2-3.4.1','CM.L2-3.4.2','CM.L2-3.4.3','CM.L2-3.4.4','CM.L2-3.4.5','CM.L2-3.4.6','CM.L2-3.4.7','CM.L2-3.4.8','CM.L2-3.4.9'] },
@@ -1058,38 +1085,56 @@ const ASSESSMENT_DOMAINS = [
   { abbrev: 'SI', name: 'System & Information Integrity',    practices: ['SI.L1-3.14.1','SI.L1-3.14.2','SI.L1-3.14.4','SI.L2-3.14.3','SI.L2-3.14.5','SI.L2-3.14.6','SI.L2-3.14.7'] },
 ];
 
-// DoD SPRS point values — officially assigned per NIST 800-171A
-// Source: DoD Assessment Methodology v1.2.1
+// DoD SPRS point values — officially assigned per DoD Assessment Methodology v1.2.1, Annex A.
+// Breakdown: 42 × 5pt + 14 × 3pt + 52 × 1pt + 2 variable (3.5.3 MFA, 3.13.11 FIPS).
+// Variable practices score 5 when fully unimplemented, 3 when partially implemented.
+// We store them as 5 here; partial-credit scoring is rare in small-org self-assessments and
+// would require additional UI (a "partial" toggle) to track properly.
+// Max score: 110 (all met). Max deduction: 314 (all unmet). Lowest possible: -204.
 const SPRS_POINTS = {
-  'AC.L1-3.1.1':1,'AC.L1-3.1.2':1,'AC.L2-3.1.3':3,'AC.L2-3.1.4':5,'AC.L2-3.1.5':3,
-  'AC.L2-3.1.6':3,'AC.L2-3.1.7':5,'AC.L2-3.1.8':3,'AC.L2-3.1.9':1,'AC.L2-3.1.10':3,
-  'AC.L2-3.1.11':3,'AC.L2-3.1.12':3,'AC.L2-3.1.13':5,'AC.L2-3.1.14':3,'AC.L2-3.1.15':3,
-  'AC.L2-3.1.16':3,'AC.L2-3.1.17':5,'AC.L2-3.1.18':3,'AC.L2-3.1.19':5,'AC.L2-3.1.20':3,
-  'AC.L2-3.1.21':3,'AC.L2-3.1.22':3,
-  'AT.L2-3.2.1':5,'AT.L2-3.2.2':5,
-  'AU.L2-3.3.1':5,'AU.L2-3.3.2':5,'AU.L2-3.3.3':3,'AU.L2-3.3.4':3,'AU.L2-3.3.5':3,
-  'AU.L2-3.3.6':1,'AU.L2-3.3.7':1,'AU.L2-3.3.8':3,'AU.L2-3.3.9':1,
-  'CA.L2-3.12.1':5,'CA.L2-3.12.2':5,'CA.L2-3.12.3':3,'CA.L2-3.12.4':3,
-  'CM.L2-3.4.1':3,'CM.L2-3.4.2':3,'CM.L2-3.4.3':3,'CM.L2-3.4.4':3,'CM.L2-3.4.5':3,
-  'CM.L2-3.4.6':3,'CM.L2-3.4.7':3,'CM.L2-3.4.8':3,'CM.L2-3.4.9':3,
-  'IA.L1-3.5.1':1,'IA.L1-3.5.2':1,'IA.L2-3.5.3':5,'IA.L2-3.5.4':3,'IA.L2-3.5.5':3,
-  'IA.L2-3.5.6':3,'IA.L2-3.5.7':5,'IA.L2-3.5.8':3,'IA.L2-3.5.9':1,'IA.L2-3.5.10':3,
+  // AC — Access Control (22)
+  'AC.L1-3.1.1':5,'AC.L1-3.1.2':5,'AC.L2-3.1.3':1,'AC.L2-3.1.4':1,'AC.L2-3.1.5':3,
+  'AC.L2-3.1.6':1,'AC.L2-3.1.7':1,'AC.L2-3.1.8':1,'AC.L2-3.1.9':1,'AC.L2-3.1.10':1,
+  'AC.L2-3.1.11':1,'AC.L2-3.1.12':5,'AC.L2-3.1.13':5,'AC.L2-3.1.14':1,'AC.L2-3.1.15':1,
+  'AC.L2-3.1.16':5,'AC.L2-3.1.17':5,'AC.L2-3.1.18':5,'AC.L2-3.1.19':3,'AC.L2-3.1.20':1,
+  'AC.L2-3.1.21':1,'AC.L2-3.1.22':1,
+  // AT — Awareness & Training (3)
+  'AT.L2-3.2.1':5,'AT.L2-3.2.2':5,'AT.L2-3.2.3':1,
+  // AU — Audit & Accountability (9)
+  'AU.L2-3.3.1':5,'AU.L2-3.3.2':3,'AU.L2-3.3.3':1,'AU.L2-3.3.4':1,'AU.L2-3.3.5':5,
+  'AU.L2-3.3.6':1,'AU.L2-3.3.7':1,'AU.L2-3.3.8':1,'AU.L2-3.3.9':1,
+  // CA — Security Assessment (4)
+  'CA.L2-3.12.1':5,'CA.L2-3.12.2':3,'CA.L2-3.12.3':5,'CA.L2-3.12.4':1,
+  // CM — Configuration Management (9)
+  'CM.L2-3.4.1':5,'CM.L2-3.4.2':5,'CM.L2-3.4.3':1,'CM.L2-3.4.4':1,'CM.L2-3.4.5':5,
+  'CM.L2-3.4.6':5,'CM.L2-3.4.7':5,'CM.L2-3.4.8':5,'CM.L2-3.4.9':1,
+  // IA — Identification & Authentication (11)
+  'IA.L1-3.5.1':5,'IA.L1-3.5.2':5,'IA.L2-3.5.3':5,'IA.L2-3.5.4':1,'IA.L2-3.5.5':1,
+  'IA.L2-3.5.6':1,'IA.L2-3.5.7':1,'IA.L2-3.5.8':1,'IA.L2-3.5.9':1,'IA.L2-3.5.10':5,
   'IA.L2-3.5.11':1,
-  'IR.L2-3.6.1':5,'IR.L2-3.6.2':5,'IR.L2-3.6.3':3,
-  'MA.L2-3.7.1':3,'MA.L2-3.7.2':3,'MA.L2-3.7.3':3,'MA.L2-3.7.4':3,'MA.L2-3.7.5':3,
-  'MA.L2-3.7.6':3,
-  'MP.L1-3.8.1':1,'MP.L1-3.8.2':1,'MP.L2-3.8.3':5,'MP.L2-3.8.4':1,'MP.L2-3.8.5':3,
-  'MP.L2-3.8.6':3,'MP.L2-3.8.7':3,'MP.L2-3.8.8':1,'MP.L2-3.8.9':3,
-  'PE.L1-3.10.1':1,'PE.L1-3.10.2':1,'PE.L2-3.10.3':3,'PE.L2-3.10.4':1,'PE.L2-3.10.5':1,
-  'PE.L2-3.10.6':3,
-  'PS.L2-3.9.1':3,'PS.L2-3.9.2':3,
-  'RA.L2-3.11.1':3,'RA.L2-3.11.2':5,'RA.L2-3.11.3':5,
-  'SC.L1-3.13.1':1,'SC.L1-3.13.5':1,'SC.L2-3.13.2':3,'SC.L2-3.13.3':3,'SC.L2-3.13.4':3,
-  'SC.L2-3.13.6':3,'SC.L2-3.13.7':3,'SC.L2-3.13.8':5,'SC.L2-3.13.9':1,'SC.L2-3.13.10':3,
-  'SC.L2-3.13.11':5,'SC.L2-3.13.12':1,'SC.L2-3.13.13':1,'SC.L2-3.13.14':1,'SC.L2-3.13.15':3,
-  'SC.L2-3.13.16':5,
-  'SI.L1-3.14.1':1,'SI.L1-3.14.2':1,'SI.L1-3.14.4':1,'SI.L2-3.14.3':3,'SI.L2-3.14.5':3,
-  'SI.L2-3.14.6':5,'SI.L2-3.14.7':5,
+  // IR — Incident Response (3)
+  'IR.L2-3.6.1':5,'IR.L2-3.6.2':5,'IR.L2-3.6.3':1,
+  // MA — Maintenance (6)
+  'MA.L2-3.7.1':3,'MA.L2-3.7.2':5,'MA.L2-3.7.3':1,'MA.L2-3.7.4':3,'MA.L2-3.7.5':5,
+  'MA.L2-3.7.6':1,
+  // MP — Media Protection (9)
+  'MP.L1-3.8.1':3,'MP.L1-3.8.2':3,'MP.L2-3.8.3':5,'MP.L2-3.8.4':1,'MP.L2-3.8.5':1,
+  'MP.L2-3.8.6':1,'MP.L2-3.8.7':5,'MP.L2-3.8.8':3,'MP.L2-3.8.9':1,
+  // PE — Physical Protection (6)
+  'PE.L1-3.10.1':5,'PE.L1-3.10.2':5,'PE.L2-3.10.3':1,'PE.L2-3.10.4':1,'PE.L2-3.10.5':1,
+  'PE.L2-3.10.6':1,
+  // PS — Personnel Security (2)
+  'PS.L2-3.9.1':3,'PS.L2-3.9.2':5,
+  // RA — Risk Assessment (3)
+  'RA.L2-3.11.1':3,'RA.L2-3.11.2':5,'RA.L2-3.11.3':1,
+  // SC — System & Communications Protection (16)
+  'SC.L1-3.13.1':5,'SC.L1-3.13.5':5,'SC.L2-3.13.2':5,'SC.L2-3.13.3':1,'SC.L2-3.13.4':1,
+  'SC.L2-3.13.6':5,'SC.L2-3.13.7':1,'SC.L2-3.13.8':3,'SC.L2-3.13.9':1,'SC.L2-3.13.10':1,
+  'SC.L2-3.13.11':5,'SC.L2-3.13.12':1,'SC.L2-3.13.13':1,'SC.L2-3.13.14':1,'SC.L2-3.13.15':5,
+  'SC.L2-3.13.16':1,
+  // SI — System & Information Integrity (7)
+  'SI.L1-3.14.1':5,'SI.L1-3.14.2':5,'SI.L1-3.14.4':5,'SI.L2-3.14.3':5,'SI.L2-3.14.5':3,
+  'SI.L2-3.14.6':5,'SI.L2-3.14.7':3,
 };
 
 // NU Laboratories-specific evidence suggestions for all 110 practices.
@@ -1121,6 +1166,7 @@ const ASSESSMENT_EVIDENCE = {
   // ── AT — Awareness & Training ───────────────────────────────────────────────
   'AT.L2-3.2.1':  'Annual security awareness training via owner-developed PowerPoint/PDF; covers CUI identification, approved channels, phishing awareness, physical security, session lock, removable media, insider threat, and incident reporting; completed before first CUI access (new hires) and annually each Q4; completion logged in NUWorkspace with employee name, version, date, and next due date.',
   'AT.L2-3.2.2':  'Standard training for all CUI-authorized personnel; supplemental Admin track for Owner/IT Administrator covering Active Directory security, audit log review, cryptographic key management, firewall administration, IR procedures, and patch management; both tracks logged separately in NUWorkspace HR/PM System.',
+  'AT.L2-3.2.3':  'Insider threat awareness and reporting module integrated into annual Standard security awareness training (owner-developed PowerPoint/PDF); covers recognition of insider threat indicators (unusual data access patterns, unexplained after-hours activity, attempts to access information outside job scope, concerning behavioral changes, policy violations, workplace misconduct), organizational reporting channels to Owner/IT Administrator, and non-retaliation policy; Admin track includes additional guidance for managers on observing team members for potential indicators; completed before first CUI access (new hires) and annually each Q4; completion logged in NUWorkspace HR/PM System with employee name, version, date, and next due date.',
   // ── AU — Audit & Accountability ─────────────────────────────────────────────
   'AU.L2-3.3.1':  'Blumira cloud SIEM ingests logs from all CUI systems: Windows Security Event Logs, Synology NAS audit logs, hardware firewall logs, and WithSecure Elements Security Center; 1-year cloud retention in tamper-resistant storage; local logs retained 90 days on each system; Blumira pre-built CMMC 2.0 compliance reports provide ready-made assessment evidence.',
   'AU.L2-3.3.2':  'All CUI system accounts are unique named accounts — no shared/generic accounts; every log entry includes specific user account, timestamp, and system identifier; admin actions logged under dedicated rmcadoo@nulabs.com account providing clean attributable audit trail for all privileged activity.',
@@ -1220,8 +1266,21 @@ const ASSESSMENT_EVIDENCE = {
   'SI.L2-3.14.7': 'Blumira correlates activity across Windows, NAS, firewall, and WithSecure logs to detect unauthorized use patterns not visible in any single log source; unique named AD accounts ensure all activity attributable to specific individuals; Blumira detection rules identify credential stuffing, after-hours access anomalies, bulk data access, and lateral movement; unauthorized use alerts investigated by Owner/IT Administrator and escalated to IR process if confirmed.',
 };
 
+// Expose for one-time migration in Setup → Templates → Compliance Templates.
+// Read by admin.js migrateComplianceEvidence(). Once the DB migration is confirmed
+// good and stable, the hardcoded POAM_PRACTICES/ASSESSMENT_EVIDENCE blocks can be
+// removed from this file — the Self-Assessment itself reads from the DB cache.
+if (typeof window !== 'undefined') {
+  window.POAM_PRACTICES       = POAM_PRACTICES;
+  window.ASSESSMENT_EVIDENCE  = ASSESSMENT_EVIDENCE;
+}
+
 async function _renderAssessmentTab() {
   const area = document.getElementById('complianceTabContent');
+
+  // Load DB-backed evidence templates into cache (powers 💡 button + MET auto-fill).
+  // Reloaded on every render so edits in Setup → Templates show up immediately.
+  await _loadComplianceEvidenceCache();
 
   // Load saved assessments for selected year
   const { data, error } = await sb
@@ -1406,7 +1465,7 @@ function _renderAssessmentDomains() {
       const rec = assessmentRecords[p.id];
       const status = rec?.status || null;
       const pts = SPRS_POINTS[p.id] || 1;
-      const suggestedEvidence = ASSESSMENT_EVIDENCE[p.id] || '';
+      const suggestedEvidence = getEvidenceTemplate(p.id);
       const hasSuggestion = !!suggestedEvidence;
 
       const statusBtn = (s, label, cls) => {
@@ -1516,7 +1575,7 @@ async function setAssessmentStatus(practiceId, status) {
   };
 
   // Auto-fill evidence when clicking MET, only if no evidence already exists
-  const suggestedEvidence = ASSESSMENT_EVIDENCE[practiceId] || '';
+  const suggestedEvidence = getEvidenceTemplate(practiceId);
   if (status === 'MET' && (!existing || !existing.evidence)) {
     payload.evidence = suggestedEvidence;
   }
@@ -1548,7 +1607,7 @@ async function setAssessmentStatus(practiceId, status) {
 }
 
 function fillSuggestedEvidence(practiceId, btn) {
-  const suggested = ASSESSMENT_EVIDENCE[practiceId] || '';
+  const suggested = getEvidenceTemplate(practiceId);
   if (!suggested) return;
   const textarea = btn.previousElementSibling;
   if (!textarea) return;
