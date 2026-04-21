@@ -94,6 +94,7 @@ function chatterMsgHtml(m, isReply) {
       '<div class="chatter-msg-header"><span class="chatter-msg-name">' + m.authorName + '</span><span class="chatter-msg-time">' + timeStr + '</span></div>' +
       '<div class="chatter-msg-text">' + textHtml + '</div>' +
       attachHtml +
+      notifyHtml +
       '<div class="chatter-msg-actions">' + replyBtn + deleteBtn + '</div>' +
     '</div></div>';
 }
