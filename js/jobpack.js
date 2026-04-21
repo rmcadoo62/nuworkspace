@@ -13,10 +13,8 @@ const JOB_PACK_FORMS = [
   { id:'acoustic',     group:'Acoustic',         icon:'🔊', name:'Acoustic Noise Requirements',    desc:'Frequency data sheet 25–10,000 Hz with job info, inputs, and recorded levels' },
   { id:'photo-index',  group:'Documentation',    icon:'📷', name:'Digital Photograph Index Sheet', desc:'64-row photo log with index numbers and descriptions' },
   { id:'equip-list',   group:'Documentation',    icon:'🔧', name:'Test Equipment List',            desc:'NU Form #21-4 — calibrated instruments, asset IDs, cal dates' },
-  { id:'octal-log',    group:'Production (ESS)', icon:'🔁', name:'ESS Batch Test Log',             desc:'Production run log — serial # tracking, temp cycle + vibe checkboxes per unit' },
-  { id:'octal-photo',  group:'Production (ESS)', icon:'📷', name:'ESS Photo Index (Batch)',        desc:'Photo log with serial number rows and Z/X/Y axis confirmation checkboxes' },
 ];
-const JP_GROUPS = ['Job Prep','Shock Testing','Vibration','Acoustic','Production (ESS)','Documentation'];
+const JP_GROUPS = ['Job Prep','Shock Testing','Vibration','Acoustic','Documentation'];
 const jobPackSelected = {};
 
 async function loadJobPackState(projId) {
@@ -226,8 +224,6 @@ function buildFormHtml(formId, proj, info) {
     case 'acoustic':     return formAcoustic(proj, info);
     case 'photo-index':  return formPhotoIndex(proj, info);
     case 'equip-list':   return formEquipList(proj, info);
-    case 'octal-log':    return formOctalLog(proj, info);
-    case 'octal-photo':  return formOctalPhoto(proj, info);
     default: return '<p>Unknown form</p>';
   }
 }
@@ -444,56 +440,3 @@ ${rows}
 </table></div>`;
 }
 
-// FORM 13: ESS Batch Test Log
-function formOctalLog(proj, info) {
-  const steps=['Receive and unpack [&nbsp;&nbsp;&nbsp;] pcs','','Inspect all units for damage, scratches, uneven seams, rattling. Photograph and note any defects in test log.','','Load units into temperature chamber and start ESS test program','','Unload units from temperature chamber and save data to job folder','Review data for correct temperature cycles','Inspect units for damage, photograph any anomalies','','Vibrate each unit per ESS document, check for damage, photograph any anomalies. Record date in column to left, record time and run number in spaces below for each axis.'];
-  const stepRows=steps.map(s=>`<tr><td style="width:15%"></td><td style="width:55%">${s}</td><td style="width:30%"></td></tr>`).join('');
-  const unitCell=`<table style="width:100%;border-collapse:collapse;border:none"><tr><td style="border:none;padding:0;font-size:9px;width:25%">Vertical (Z)</td><td style="border:none;padding:0;font-size:9px;width:25%">Long (X)</td><td style="border:none;padding:0;font-size:9px;width:25%">Short (Y)</td><td style="border:none;padding:0;font-size:9px;width:25%">Inspect</td></tr><tr><td style="border:none;padding:1px 0">[ ] [ ]</td><td style="border:none;padding:1px 0">[ ] [ ]</td><td style="border:none;padding:1px 0">[ ] [ ]</td><td style="border:none;padding:1px 0">[ ]</td></tr></table>`;
-  const unitRows=Array.from({length:12},()=>`<tr><td style="width:15%;font-weight:700"></td><td style="width:55%">${unitCell}</td><td style="width:30%"></td></tr>`).join('');
-  return `<div class="jp-form"><table>
-<tr><td colspan="2" style="font-weight:700;font-size:14px;border:2px solid #333;padding:7px">NU LABORATORIES</td><td class="jp-header-cell" style="font-size:15px">TEST LOG</td></tr>
-<tr><td style="width:15%"><span class="jp-field-label">Client</span></td><td class="jp-auto"><span class="jp-field-value">${info.client||''}</span></td><td class="jp-auto"><span class="jp-field-label">Job No.</span> <span class="jp-field-value">${proj.name||''}</span></td></tr>
-<tr><td><span class="jp-field-label">Test</span></td><td class="jp-auto"><span class="jp-field-value">${info.testDesc||''}</span></td><td><span class="jp-field-label">Date</span></td></tr>
-<tr><td><span class="jp-field-label">Spec.</span></td><td></td><td><span class="jp-field-label">Initials</span></td></tr>
-<tr><td><span class="jp-field-label">Materials</span></td><td colspan="2" class="jp-auto"><span class="jp-field-value">${info.testArticleDesc||''}</span></td></tr>
-<tr><td colspan="3" class="jp-section-label" style="padding:3px 5px">Lab Conditions</td></tr>
-<tr><td><span class="jp-field-label">Temp</span>&nbsp;</td><td><span class="jp-field-label">RH</span>&nbsp;</td><td><span class="jp-field-label">Atmospheric Pressure</span>&nbsp;</td></tr>
-<tr><td colspan="3"><span class="jp-field-label">Notes</span></td></tr>
-<tr style="height:30px"><td colspan="3"></td></tr>
-<tr><td class="jp-col-header" style="width:15%">Serial #</td><td class="jp-col-header" style="width:55%">Log Entry</td><td class="jp-col-header" style="width:30%">Init.</td></tr>
-${stepRows}
-<tr><td colspan="3" class="jp-section-label" style="padding:3px 5px">Unit Test Tracking — Vertical (Z) | Long (X) | Short (Y) | Inspect</td></tr>
-${unitRows}
-<tr style="height:18px"><td colspan="3" style="font-size:9px;color:#555;padding:2px 5px">2nd Person verify correct vibration levels were applied. &nbsp; ESS completed, repack units for shipment.</td></tr>
-</table></div>`;
-}
-
-// FORM 14: ESS Photo Index (Batch)
-function formOctalPhoto(proj, info) {
-  const today=new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
-  const sRows=Array.from({length:16},()=>`<tr><td style="width:30%"></td><td style="width:23%;text-align:center">[ ]</td><td style="width:23%;text-align:center">[ ]</td><td style="width:24%;text-align:center">[ ]</td></tr>`).join('');
-  return `<div class="jp-form"><table>
-<tr><td colspan="4" class="jp-header-cell" style="font-size:15px">ESS PHOTO INDEX SHEET</td></tr>
-<tr><td style="width:40%"><span class="jp-field-label">Job #</span> <span class="jp-auto" style="display:inline-block;padding:1px 6px;border-radius:3px;font-weight:700;color:#0a3d6b">${proj.name||''}</span></td>
-<td colspan="2"><span class="jp-field-label">Customer</span> <span class="jp-auto" style="display:inline-block;padding:1px 6px;border-radius:3px;font-weight:700;color:#0a3d6b">${info.client||''}</span></td>
-<td><span class="jp-field-label">Date</span> <span class="jp-auto" style="display:inline-block;padding:1px 6px;border-radius:3px;font-weight:700;color:#0a3d6b">${today}</span></td></tr>
-<tr><td colspan="4" style="font-size:9px;font-weight:700;text-transform:uppercase;color:#555;padding:3px 5px;background:#f0f0f0">Pre-Test Photos</td></tr>
-<tr><td colspan="4">Any incoming inspection damage</td></tr>
-<tr style="height:18px"><td colspan="4"></td></tr>
-<tr><td colspan="4">Units loaded into temperature chamber before test</td></tr>
-<tr style="height:18px"><td colspan="4"></td></tr>
-<tr><td colspan="4">Units loaded into temperature chamber after test, before removal</td></tr>
-<tr style="height:18px"><td colspan="4"></td></tr>
-<tr><td colspan="4">Units mounted for vibration:</td></tr>
-<tr style="height:18px"><td colspan="4"></td></tr>
-<tr><td colspan="4" style="font-size:9px;font-weight:700;text-transform:uppercase;color:#555;padding:3px 5px;background:#f0f0f0">Unit Vibration Photos</td></tr>
-<tr><td class="jp-col-header">Serial Number</td><td class="jp-col-header">Vertical (Z)</td><td class="jp-col-header">Long (X)</td><td class="jp-col-header">Short (Y)</td></tr>
-${sRows}
-<tr><td colspan="4" style="font-size:9px;font-weight:700;text-transform:uppercase;color:#555;padding:3px 5px;background:#f0f0f0">Post-Test Photos</td></tr>
-<tr><td colspan="4">Any post-test damage</td></tr>
-<tr style="height:18px"><td colspan="4"></td></tr>
-<tr><td colspan="4"><span class="jp-field-label">Notes</span></td></tr>
-<tr style="height:20px"><td colspan="4"></td></tr>
-<tr style="height:20px"><td colspan="4"></td></tr>
-</table></div>`;
-}
