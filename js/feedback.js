@@ -437,7 +437,10 @@ async function saveIssueChanges() {
     const orig = window.afterLogin;
     window.afterLogin = async function(...args) {
       const result = await orig.apply(this, args);
-      try { updateIssueBadge(); } catch (e) { console.error('updateIssueBadge failed:', e); }
+      // Fetch actual issue data (not just update the badge against empty in-memory
+      // array). loadIssueTracker() bails early for non-admins, populates
+      // issueTrackerData from Supabase, then calls updateIssueBadge() itself.
+      try { await loadIssueTracker(); } catch (e) { console.error('loadIssueTracker failed:', e); }
       return result;
     };
   }
@@ -453,7 +456,9 @@ document.addEventListener('DOMContentLoaded', () => {
     tries++;
     if (currentUser || tries >= 20) { // up to 10 seconds
       clearInterval(poll);
-      updateIssueBadge();
+      // Full load (not just updateIssueBadge) so the badge reflects actual
+      // unread count on refresh, not whatever was in the empty in-memory array.
+      loadIssueTracker();
     }
   }, 500);
 });
