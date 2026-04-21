@@ -1509,6 +1509,7 @@ async function loadClosedProjects(el) {
         while (true) {
           const { data } = await sb.from('tasks').select('*')
             .in('project_id', chunk)
+            .order('id', { ascending: true })
             .range(taskPage * 1000, taskPage * 1000 + 999);
           if (!data || data.length === 0) break;
           data.forEach(r => {

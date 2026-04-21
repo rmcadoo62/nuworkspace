@@ -72,8 +72,10 @@ async function loadAllData() {
       let rows = [], page = 0;
       while (true) {
         let q = sb.from(table).select(selectCols).range(page * 1000, page * 1000 + 999);
-        if (orderCol) q = q.order(orderCol, { ascending: true });
-        if (filterFn)  q = filterFn(q);
+        // Always order — paginated queries without .order() silently drop rows
+        // because Postgres is free to return rows in any order between pages.
+        q = q.order(orderCol || 'id', { ascending: true });
+        if (filterFn) q = filterFn(q);
         const { data } = await q;
         if (!data || data.length === 0) break;
         rows = rows.concat(data);
@@ -108,6 +110,7 @@ async function loadAllData() {
         while (true) {
           const { data } = await sb.from('tasks').select('*')
             .in('project_id', openProjIds)
+            .order('id', { ascending: true })
             .range(page * 1000, page * 1000 + 999);
           if (!data || data.length === 0) break;
           rows = rows.concat(data);
@@ -127,6 +130,7 @@ async function loadAllData() {
         let rows = [], page = 0;
         while (true) {
           const { data } = await sb.from('billed_revenue_monthly').select('*')
+            .order('year_month', { ascending: true })
             .range(page * 1000, page * 1000 + 999);
           if (!data || data.length === 0) break;
           rows = rows.concat(data);
@@ -139,6 +143,7 @@ async function loadAllData() {
         let rows = [], page = 0;
         while (true) {
           const { data } = await sb.from('billed_revenue_by_category').select('*')
+            .order('year_month', { ascending: true })
             .range(page * 1000, page * 1000 + 999);
           if (!data || data.length === 0) break;
           rows = rows.concat(data);
