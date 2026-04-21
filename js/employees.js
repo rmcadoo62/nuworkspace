@@ -467,8 +467,35 @@ function showEmpProfile(empId, annivOffset) {
     return Math.max(0, running - used.sick);
   })();
 
-  // Calculate sick overage and how much flows to vacation
-  const sickOverage = Math.max(0, used.sick - sickAllotment);
+  // Calculate sick overage. For first-year employees the "spill to vacation" rule
+  // doesn't apply — they have no vacation bank to pay from. Their sick debt is
+  // held against future sick drops and settles itself as drops arrive. Only the
+  // pathological excess beyond the 48h annual cap would actually spill to vacation.
+  const _rawSickOverage = Math.max(0, used.sick - sickAllotment);
+  let sickOverage;            // the portion that actually hits vacation
+  let firstYearPendingDebt;   // first-year-only: sick debt awaiting future drops
+  if (isInFirstYear(emp.hireDate) && !isPartTime) {
+    // Future drops remaining in this anniversary year (Jan 1 / May 1 that haven't happened yet)
+    let futureSickCapacity = 0;
+    if (_annivRange) {
+      const annivStart = _annivRange.start;
+      const annivEnd   = _annivRange.end;
+      for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
+        for (const mo of [0, 4]) {
+          const drop = new Date(y, mo, 1);
+          if (drop > annivStart && drop <= annivEnd && drop > today && _dropIsCreditable(emp, drop)) {
+            futureSickCapacity += 24;
+          }
+        }
+      }
+    }
+    // Only spill to vacation what even future drops cannot cover
+    sickOverage = Math.max(0, _rawSickOverage - futureSickCapacity);
+    firstYearPendingDebt = _rawSickOverage - sickOverage;
+  } else {
+    sickOverage = _rawSickOverage;
+    firstYearPendingDebt = 0;
+  }
   // Vacation bank: opening balance + accrued so far - used (incl. sick overage charged to vacation)
   const vacBankBalance = vacOpeningBalance + vacAccrued - (used.vacation + sickOverage);
   const holidays = getHolidays(year);
@@ -968,7 +995,9 @@ function showEmpProfile(empId, annivOffset) {
             // Overage hours have been transferred out to the vacation ledger and no longer
             // count against the sick bucket, so the bar only ever shows bank-drawn hours.
             const inBucket = Math.min(usedSick, sickAllotment);
-            const toVacation = Math.max(0, usedSick - sickAllotment);
+            // toVacation is the portion actually charged to vacation, matching the outer
+            // sickOverage calc — for first-year employees this excludes pending-drop debt.
+            const toVacation = sickOverage;
             const sickUsedPct = sickAllotment > 0 ? Math.min(100, (inBucket / sickAllotment) * 100) : 0;
             const fmtShort = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
             const today2 = new Date();
@@ -990,12 +1019,19 @@ function showEmpProfile(empId, annivOffset) {
               ((today2 - _annivRange.start) / (_annivRange.end - _annivRange.start)) * 100
             )) : null;
             // Label tells the full story: what's in the sick bucket right now, plus any
-            // hours that were taken this year but transferred out to vacation.
+            // hours that were taken this year but transferred out to vacation — or, for
+            // first-year employees, held pending against a future sick drop.
             let leftLabel;
-            if (over && inBucket === 0) {
-              leftLabel = '0.0h in bucket · ' + usedSick.toFixed(1) + 'h taken this year (all \u2192 vacation)';
+            if (over && firstYearPendingDebt > 0 && toVacation === 0) {
+              // First-year employee: all overage is pending against future drops, no vacation spill
+              leftLabel = inBucket.toFixed(1) + 'h in bucket \u00b7 ' + firstYearPendingDebt.toFixed(1) + 'h pending next sick drop';
+            } else if (over && firstYearPendingDebt > 0) {
+              // First-year employee with overage exceeding what future drops can cover (rare)
+              leftLabel = inBucket.toFixed(1) + 'h in bucket \u00b7 ' + firstYearPendingDebt.toFixed(1) + 'h pending + ' + toVacation.toFixed(1) + 'h \u2192 vacation';
+            } else if (over && inBucket === 0) {
+              leftLabel = '0.0h in bucket \u00b7 ' + usedSick.toFixed(1) + 'h taken this year (all \u2192 vacation)';
             } else if (over) {
-              leftLabel = inBucket.toFixed(1) + 'h in bucket · ' + toVacation.toFixed(1) + 'h of ' + usedSick.toFixed(1) + 'h taken went \u2192 vacation';
+              leftLabel = inBucket.toFixed(1) + 'h in bucket \u00b7 ' + toVacation.toFixed(1) + 'h of ' + usedSick.toFixed(1) + 'h taken went \u2192 vacation';
             } else {
               leftLabel = usedSick.toFixed(1) + 'h used';
             }
@@ -1080,14 +1116,23 @@ function showEmpProfile(empId, annivOffset) {
               '<div style="display:flex;flex-wrap:wrap;gap:5px">' +
               tagged.map(e => {
                 const dateLabel = new Date(e.date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',weekday:'short'});
-                // Fully from sick bank → amber. Fully overage → soft red. Split → show both chips.
+                // First-year employees: overage is held against future drops, not charged to vacation.
+                // Use a muted amber "pending" treatment instead of the red "redirect" treatment.
+                const isFirstYearHold = isInFirstYear(emp.hireDate) && firstYearPendingDebt > 0;
+                // Fully from sick bank → amber. Fully overage → soft red (or amber-pending for first-year). Split → show both.
                 if (e.overageHrs === 0) {
                   return '<span title="Drawn from sick bank" style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(232,162,52,0.12);border:1px solid rgba(232,162,52,0.35);color:var(--amber)">' + dateLabel + ' — ' + e.hrs + 'h</span>';
                 }
                 if (e.bankHrs === 0) {
+                  if (isFirstYearHold) {
+                    return '<span title="Pending — will be covered by next sick drop" style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(232,162,52,0.08);border:1px dashed rgba(232,162,52,0.5);color:var(--amber);font-style:italic">\u29D6 ' + dateLabel + ' — ' + e.hrs + 'h</span>';
+                  }
                   return '<span title="Sick bank empty — charged against vacation" style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(208,64,64,0.1);border:1px solid rgba(208,64,64,0.3);color:rgba(208,64,64,0.95)">↪ ' + dateLabel + ' — ' + e.hrs + 'h</span>';
                 }
                 // Split day: part sick bank, part overage
+                if (isFirstYearHold) {
+                  return '<span title="' + e.bankHrs + 'h from sick bank, ' + e.overageHrs + 'h pending next drop" style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(232,162,52,0.12);border:1px dashed rgba(232,162,52,0.5);color:var(--amber)">' + dateLabel + ' — ' + e.bankHrs + 'h <span style="font-style:italic">+ ' + e.overageHrs + 'h \u29D6</span></span>';
+                }
                 return '<span title="' + e.bankHrs + 'h from sick bank, ' + e.overageHrs + 'h charged against vacation" style="font-size:10px;padding:2px 8px;border-radius:6px;background:rgba(232,162,52,0.12);border:1px solid rgba(208,64,64,0.3);color:var(--amber)">' + dateLabel + ' — ' + e.bankHrs + 'h <span style="color:rgba(208,64,64,0.95)">+ ' + e.overageHrs + 'h ↪</span></span>';
               }).join('') +
               '</div></div>';
