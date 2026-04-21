@@ -6,6 +6,17 @@ let employees = []; // loaded from Supabase
 let editingEmpId = null;
 let empColor = '#5b4fcf';
 
+// ===== BALLANTINE ACCRUAL CUTOFF =====
+// One-time migration rule: Ballantine employees were onboarded into NUWorkspace
+// on 2026-04-12 with opening balances that already reflected any drops occurring
+// earlier in their anniversary year. Suppress those earlier drops to avoid
+// double-counting. In future anniversary years this has no effect (no drops will
+// fall before April 12, 2026 once new anniversary cycles begin).
+const BALLANTINE_ACCRUAL_START = new Date('2026-04-12T00:00:00');
+const _isBallantineDept = (emp) => (emp && emp.dept && emp.dept.toLowerCase() === 'ballantine');
+const _dropIsCreditable = (emp, dropDate) => !_isBallantineDept(emp) || dropDate >= BALLANTINE_ACCRUAL_START;
+
+
 
 // ===== EMPLOYEES PANEL =====
 // ===== EMPLOYEES PANEL =====
@@ -121,11 +132,13 @@ function isInFirstYear(hireDateStr) {
   return firstAnniv > new Date();
 }
 
-function getQuarterlyAccrual(hireDateStr, annivStart) {
+function getQuarterlyAccrual(hireDateStr, annivStart, emp) {
   // Returns how much vacation has accrued so far in the current anniversary year.
   // Rule: NO vacation accrues during the first year of employment.
   // On the first anniversary the full allotment drops at once.
   // From year 2 onward, quarterly drops apply.
+  // `emp` optional — if provided and employee is Ballantine dept, drops before
+  // BALLANTINE_ACCRUAL_START are suppressed (already in their opening balance).
   const today = new Date();
 
   if (!hireDateStr) return 0;
@@ -152,7 +165,7 @@ function getQuarterlyAccrual(hireDateStr, annivStart) {
     let accrued = 0;
     for (let q = 1; q <= 4; q++) {
       const dropDate = new Date(annivStart.getFullYear(), annivStart.getMonth() + (q * 3), annivStart.getDate());
-      if (dropDate <= today) accrued += dropAmt;
+      if (dropDate <= today && _dropIsCreditable(emp, dropDate)) accrued += dropAmt;
     }
     return accrued;
   }
@@ -161,7 +174,7 @@ function getQuarterlyAccrual(hireDateStr, annivStart) {
   let accrued = 0;
   for (let q = 1; q <= 4; q++) {
     const dropDate = new Date(annivStart.getFullYear(), annivStart.getMonth() + (q * 3), annivStart.getDate());
-    if (dropDate <= today) accrued += dropAmt;
+    if (dropDate <= today && _dropIsCreditable(emp, dropDate)) accrued += dropAmt;
   }
   return accrued;
 }
@@ -405,7 +418,7 @@ function showEmpProfile(empId, annivOffset) {
   // For holiday display, always use calendar year so Jan holidays aren't missed for mid-year hire dates
   const usedHolidays = getTimeOffUsed(empId, year, null, null);
   const vacAllotment = getVacationAllotment(emp.hireDate);
-  const vacAccrued = getQuarterlyAccrual(emp.hireDate, _annivRange?.start);
+  const vacAccrued = getQuarterlyAccrual(emp.hireDate, _annivRange?.start, emp);
   const vacOpeningBalance = emp.vacBank || 0;
   const today = new Date();
 
@@ -424,7 +437,7 @@ function showEmpProfile(empId, annivOffset) {
     for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
       for (const mo of [0, 4]) { // Jan=0, May=4
         const drop = new Date(y, mo, 1);
-        if (drop > annivStart && drop <= annivEnd && drop <= today) {
+        if (drop > annivStart && drop <= annivEnd && drop <= today && _dropIsCreditable(emp, drop)) {
           running = Math.min(48, running + 24);
         }
       }
@@ -446,7 +459,7 @@ function showEmpProfile(empId, annivOffset) {
     for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
       for (const mo of [0, 4]) {
         const drop = new Date(y, mo, 1);
-        if (drop > annivStart && drop <= annivEnd && drop <= today) {
+        if (drop > annivStart && drop <= annivEnd && drop <= today && _dropIsCreditable(emp, drop)) {
           running += 24; // no cap on bank balance
         }
       }
