@@ -450,6 +450,7 @@ function renderClientsPanel(search) {
     <div class="emp-panel-header">
       <div class="emp-panel-title">Clients <span style="font-size:14px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-weight:400">(${clientStore.length})</span></div>
       <input class="emp-search" placeholder="Search clients…" value="${_clientSearchQuery}" oninput="_clientSearchQuery=this.value;renderClientsPanel()" />
+      ${can('add_clients') ? `<button class="emp-add-btn" style="background:var(--surface2);border:1.5px solid var(--border);color:var(--text);margin-right:8px" onclick="openSfImportPanel()" title="Import or backfill from a Salesforce CSV export">📥 Import CSV</button>` : ''}
       ${can('add_clients') ? `<button class="emp-add-btn" onclick="openNewClientDrawer()">+ Add Client</button>` : ''}
     </div>
     <div class="client-grid">
@@ -1259,7 +1260,74 @@ async function executeMerge(key, keeperId, loserId) {
   }
 }
 
+// Builds the SF import panel DOM if it hasn't been added to index.html yet.
+// Safe to call multiple times — only creates the panel once.
+function ensureSfImportPanel() {
+  if (document.getElementById('panel-sf-import')) return;
+  const anchor = document.getElementById('panel-clients');
+  if (!anchor || !anchor.parentElement) return;
+  const panel = document.createElement('div');
+  panel.id = 'panel-sf-import';
+  panel.className = 'view-panel';
+  panel.innerHTML = `
+    <div style="max-width:1100px;margin:0 auto;padding:20px 28px">
+      <div style="margin-bottom:20px">
+        <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text)">📥 Import from Salesforce</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">
+          Drop a Salesforce CSV export to create new clients + contacts, or backfill addresses on existing clients.
+          The importer auto-detects both <em>Mailing ___</em> (contacts export) and <em>Billing ___</em> (accounts-only export) column formats.
+        </div>
+      </div>
+
+      <div id="sfDropZone"
+           style="border:2px dashed var(--border);border-radius:12px;padding:48px 24px;text-align:center;cursor:pointer;transition:all .15s;background:var(--surface)"
+           onclick="document.getElementById('sfCsvInput').click()"
+           ondragover="event.preventDefault();this.style.borderColor='var(--amber)';this.style.background='var(--amber-glow)'"
+           ondragleave="this.style.borderColor='var(--border)';this.style.background='var(--surface)'"
+           ondrop="event.preventDefault();this.style.borderColor='var(--border)';this.style.background='var(--surface)';handleSfCsvDrop(event)">
+        <div style="font-size:42px;margin-bottom:10px">📄</div>
+        <div style="font-size:15px;color:var(--text);font-weight:600;margin-bottom:6px">Drop a CSV file here</div>
+        <div style="font-size:12px;color:var(--muted)">…or click to browse. Expects Salesforce export columns (Account Name required).</div>
+        <input id="sfCsvInput" type="file" accept=".csv,text/csv" style="display:none"
+               onchange="handleSfCsvFile(this.files[0])" />
+      </div>
+
+      <div id="sfImportPreview" style="display:none;margin-top:20px">
+        <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:14px;gap:12px;flex-wrap:wrap">
+          <div>
+            <div id="sfPreviewTitle" style="font-family:'DM Serif Display',serif;font-size:20px;color:var(--text)"></div>
+            <div id="sfPreviewSub"   style="font-size:12px;color:var(--muted);margin-top:3px"></div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" onclick="resetSfImport()"
+              style="background:var(--surface2);border:1.5px solid var(--border);color:var(--text);border-radius:8px;font-size:12px;font-weight:600;padding:7px 14px;cursor:pointer;font-family:'DM Sans',sans-serif">Cancel</button>
+            <button id="sfImportBtn" class="btn btn-primary" onclick="runSfImport()">Import Selected</button>
+          </div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse">
+            <thead>
+              <tr style="border-bottom:2px solid var(--border);background:var(--surface2)">
+                <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Status</th>
+                <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Account</th>
+                <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Contacts</th>
+                <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Location</th>
+                <th style="padding:9px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">Match</th>
+              </tr>
+            </thead>
+            <tbody id="sfPreviewBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div id="sfImportLog" style="display:none;margin-top:18px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:12px;max-height:360px;overflow-y:auto;line-height:1.6"></div>
+    </div>
+  `;
+  anchor.parentElement.appendChild(panel);
+}
+
 function openSfImportPanel(el) {
+  ensureSfImportPanel();
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
   activeProjectId = null;
@@ -1313,6 +1381,49 @@ function normalizeState(s) {
   if (!trimmed) return '';
   if (/^[A-Za-z]{2}$/.test(trimmed)) return trimmed.toUpperCase();
   return US_STATE_MAP[trimmed.toLowerCase()] || trimmed;
+}
+
+// Corporate suffixes stripped when fuzzy-matching account names. Order matters —
+// longer phrases listed first so they match before shorter ones (e.g. "incorporated"
+// before "inc"). Periods are optional in the regex below.
+const COMPANY_SUFFIXES = [
+  'incorporated', 'corporation', 'limited liability company',
+  'company', 'limited', 'inc', 'corp', 'llc', 'l l c',
+  'ltd', 'co', 'l p', 'lp', 'l l p', 'llp',
+  'p l l c', 'pllc', 'plc', 'p c', 'pc', 'p a', 'pa',
+];
+
+// Normalize a company name for fuzzy matching: lowercase, strip punctuation,
+// collapse whitespace, then strip trailing corporate suffixes (stacked OK,
+// e.g. "Acme Co., LLC" → "acme").
+function normalizeCompanyName(name) {
+  if (!name) return '';
+  let s = name.toLowerCase().trim();
+  s = s.replace(/[.,'"()&/\\\-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const suf of COMPANY_SUFFIXES) {
+      const re = new RegExp('(^|\\s)' + suf.replace(/ /g, '\\s+') + '$');
+      if (re.test(s)) { s = s.replace(re, '').trim(); changed = true; break; }
+    }
+  }
+  return s;
+}
+
+// Look up a Salesforce account in clientStore. Returns { client, mode } where
+// mode is 'exact' (case-insensitive trimmed) or 'fuzzy' (normalized — only
+// tried when _sfFuzzyMode is on). Returns null if nothing matches.
+let _sfFuzzyMode = false;
+function sfFindMatchMode(accountName) {
+  const exact = sfFindExisting(accountName);
+  if (exact) return { client: exact, mode: 'exact' };
+  if (!_sfFuzzyMode) return null;
+  const normed = normalizeCompanyName(accountName);
+  if (!normed) return null;
+  const fuzzy = clientStore.find(c => normalizeCompanyName(c.name) === normed);
+  if (fuzzy) return { client: fuzzy, mode: 'fuzzy' };
+  return null;
 }
 
 function parseSfCsv(text) {
@@ -1397,9 +1508,12 @@ function sfFindExisting(accountName) {
 }
 
 function renderSfPreview() {
-  const newCount      = _sfParsed.filter(a => !sfFindExisting(a.accountName)).length;
+  // Look up each row's match result (exact first, then fuzzy if enabled).
+  const matches = _sfParsed.map(a => sfFindMatchMode(a.accountName));
+  const newCount      = matches.filter(m => !m).length;
   const existingCount = _sfParsed.length - newCount;
   const contactCount  = _sfParsed.reduce((s,a) => s + a.contacts.length, 0);
+  const fuzzyCount    = matches.filter(m => m && m.mode === 'fuzzy').length;
 
   // "Backfill mode" = the CSV has zero contacts across all rows (e.g. a Salesforce
   // Accounts-only export with billing addresses). In this mode we skip unmatched
@@ -1407,8 +1521,8 @@ function renderSfPreview() {
   const backfillMode  = contactCount === 0 && _sfParsed.length > 0;
 
   // Pre-compute what each matched row would actually fill, for accurate preview copy.
-  const fillPlan = _sfParsed.map(a => {
-    const existing = sfFindExisting(a.accountName);
+  const fillPlan = _sfParsed.map((a, i) => {
+    const existing = matches[i]?.client;
     if (!existing) return null;
     const blanks = {};
     if (!existing.address && a.address) blanks.address = a.address;
@@ -1423,12 +1537,34 @@ function renderSfPreview() {
   document.getElementById('sfImportPreview').style.display = '';
 
   if (backfillMode) {
+    const fuzzyNote = fuzzyCount > 0 ? ` (incl. ${fuzzyCount} fuzzy)` : '';
     document.getElementById('sfPreviewTitle').textContent = `${_sfParsed.length} accounts · address backfill`;
-    document.getElementById('sfPreviewSub').textContent   = `${willFillCount} will fill blanks · ${existingCount - willFillCount} matched but nothing to fill · ${newCount} unmatched (will skip)`;
+    document.getElementById('sfPreviewSub').textContent   = `${willFillCount} will fill blanks${fuzzyNote} · ${existingCount - willFillCount} matched but nothing to fill · ${newCount} unmatched (will skip)`;
   } else {
     document.getElementById('sfPreviewTitle').textContent = `${_sfParsed.length} accounts · ${contactCount} contacts`;
-    document.getElementById('sfPreviewSub').textContent   = `${existingCount} exact matches found · ${newCount} need review — use the Match column to link or create new`;
+    document.getElementById('sfPreviewSub').textContent   = `${existingCount} matches found · ${newCount} need review — use the Match column to link or create new`;
   }
+
+  // Fuzzy-match toggle bar (injected above the preview table).
+  let toggleBar = document.getElementById('sfFuzzyBar');
+  if (!toggleBar) {
+    toggleBar = document.createElement('div');
+    toggleBar.id = 'sfFuzzyBar';
+    toggleBar.style.cssText = 'background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:10px;font-size:12px';
+    const previewDiv = document.getElementById('sfImportPreview');
+    const table = previewDiv.querySelector('table')?.parentElement;
+    if (table) previewDiv.insertBefore(toggleBar, table);
+  }
+  toggleBar.innerHTML = `
+    <label style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none">
+      <input type="checkbox" id="sfFuzzyChk" ${_sfFuzzyMode ? 'checked' : ''}
+             onchange="_sfFuzzyMode=this.checked;renderSfPreview()"
+             style="accent-color:var(--amber);width:15px;height:15px;cursor:pointer" />
+      <span style="font-weight:600;color:var(--text)">🔍 Fuzzy matching</span>
+    </label>
+    <span style="color:var(--muted);font-size:11.5px">Strips Inc./LLC/Corp/punctuation before comparing — catches "Acme Inc." ↔ "Acme, Inc"</span>
+    ${_sfFuzzyMode && fuzzyCount > 0 ? `<span style="margin-left:auto;font-size:11px;color:var(--amber);font-weight:700">${fuzzyCount} new fuzzy match${fuzzyCount!==1?'es':''}</span>` : ''}
+  `;
 
   // Build sorted client list for dropdowns
   const clientOpts = clientStore
@@ -1437,25 +1573,28 @@ function renderSfPreview() {
 
   const tbody = document.getElementById('sfPreviewBody');
   tbody.innerHTML = _sfParsed.map((a, i) => {
-    const existing = sfFindExisting(a.accountName);
+    const match    = matches[i];
+    const existing = match?.client;
+    const isFuzzy  = match?.mode === 'fuzzy';
     const location = [a.city, a.state].filter(Boolean).join(', ') || '—';
     const existingContactCount = existing ? contactStore.filter(c => c.clientId === existing.id).length : 0;
 
     let matchCell;
     if (existing) {
-      // Exact match — show what we'll fill
       const blanks = fillPlan[i] || {};
       const blankKeys = Object.keys(blanks);
+      const matchLabel = isFuzzy ? `✓ Fuzzy match: <strong>${existing.name}</strong>` : `✓ Exact match`;
+      const matchColor = isFuzzy ? 'var(--amber)' : '#2e9e62';
       if (backfillMode) {
         if (blankKeys.length > 0) {
-          matchCell = `<span style="font-size:11px;color:#2e9e62;font-weight:600">✓ Will fill ${blankKeys.length} field${blankKeys.length!==1?'s':''}</span>
-             <div style="font-size:10px;color:var(--muted);margin-top:2px">${blankKeys.join(', ')}</div>`;
+          matchCell = `<span style="font-size:11px;color:${matchColor};font-weight:600">${matchLabel}</span>
+             <div style="font-size:10px;color:var(--muted);margin-top:2px">Will fill: ${blankKeys.join(', ')}</div>`;
         } else {
-          matchCell = `<span style="font-size:11px;color:var(--muted);font-weight:600">— No blanks to fill</span>
-             <div style="font-size:10px;color:var(--muted);margin-top:2px">Already has address data</div>`;
+          matchCell = `<span style="font-size:11px;color:${matchColor};font-weight:600">${matchLabel}</span>
+             <div style="font-size:10px;color:var(--muted);margin-top:2px">Already has address data — no change</div>`;
         }
       } else {
-        matchCell = `<span style="font-size:11px;color:#2e9e62;font-weight:600">✓ Exact match</span>
+        matchCell = `<span style="font-size:11px;color:${matchColor};font-weight:600">${matchLabel}</span>
            <div style="font-size:10px;color:var(--muted);margin-top:2px">${existingContactCount} contacts in system</div>`;
       }
     } else {
@@ -1475,11 +1614,17 @@ function renderSfPreview() {
     if (existing) {
       if (backfillMode) {
         const blankKeys = Object.keys(fillPlan[i] || {});
-        statusBadge = blankKeys.length > 0
-          ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">Will Fill</span>`
-          : `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">No Change</span>`;
+        if (blankKeys.length > 0) {
+          statusBadge = isFuzzy
+            ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(232,162,52,0.15);color:var(--amber);border:1px solid rgba(232,162,52,0.3)">🔍 Fuzzy Fill</span>`
+            : `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">Will Fill</span>`;
+        } else {
+          statusBadge = `<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:10px;background:var(--surface2);color:var(--muted);border:1px solid var(--border)">No Change</span>`;
+        }
       } else {
-        statusBadge = `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">Exact Match</span>`;
+        statusBadge = isFuzzy
+          ? `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(232,162,52,0.15);color:var(--amber);border:1px solid rgba(232,162,52,0.3)">🔍 Fuzzy Match</span>`
+          : `<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:rgba(46,158,98,0.15);color:#2e9e62;border:1px solid rgba(46,158,98,0.3)">Exact Match</span>`;
       }
     } else {
       const label = backfillMode ? 'Skip' : 'New';
@@ -1522,9 +1667,11 @@ async function runSfImport() {
 
   for (let i = 0; i < _sfParsed.length; i++) {
     const a = _sfParsed[i];
-    const existing = sfFindExisting(a.accountName);
+    const match = sfFindMatchMode(a.accountName);
+    const existing = match?.client;
+    const isFuzzy  = match?.mode === 'fuzzy';
 
-    // Determine mode: exact match → contacts_only, dropdown selection otherwise
+    // Determine mode: exact or fuzzy match → contacts_only, dropdown selection otherwise
     let mode, clientId;
     if (existing) {
       mode = 'contacts_only';
@@ -1566,7 +1713,8 @@ async function runSfImport() {
             if (sb) await dbUpdate('clients', clientId, addrUpdate);
             Object.assign(matched, addrUpdate);
             addressesFilled++;
-            logEl.innerHTML += `<div style="color:var(--green)">✓ Address backfilled: ${a.accountName} (${filledKeys.join(', ')})</div>`;
+            const prefix = isFuzzy ? '🔍 Fuzzy backfill' : '✓ Address backfilled';
+            logEl.innerHTML += `<div style="color:${isFuzzy ? 'var(--amber)' : 'var(--green)'}">${prefix}: ${a.accountName} → ${matched.name} (${filledKeys.join(', ')})</div>`;
           } else if (a.contacts.length > 0) {
             logEl.innerHTML += `<div style="color:var(--blue)">→ Contacts only: ${a.accountName} → ${matched.name}</div>`;
           } else {
