@@ -993,23 +993,85 @@ function openMergeClientsPanel(el) {
   _mergeDismissalsLoadPromise = loadMergeDismissals();
 }
 
+// ─── Fuzzy string matching helpers for duplicate detection ──────────────────
+
+// Levenshtein edit distance (iterative two-row, O(m·n) time, O(n) space)
+function _mergeLevenshtein(a, b) {
+  if (a === b) return 0;
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = new Array(n + 1);
+  let curr = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    curr[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const cost = a.charCodeAt(i-1) === b.charCodeAt(j-1) ? 0 : 1;
+      curr[j] = Math.min(prev[j] + 1, curr[j-1] + 1, prev[j-1] + cost);
+    }
+    [prev, curr] = [curr, prev];
+  }
+  return prev[n];
+}
+
+// Word-level similarity: 1.0 for exact match, 0.85 for prefix match (mfg → mfghouse),
+// 0.75 for abbreviation match (labs → laboratories, first 3 chars match),
+// partial for typos within tolerance, 0 otherwise.
+function _mergeWordSim(a, b) {
+  if (a === b) return 1;
+  if (!a || !b) return 0;
+  if (a.length >= 3 && b.length >= 3) {
+    const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+    // Clean prefix match (one word is a literal prefix of the other)
+    if (longer.startsWith(shorter)) return 0.85;
+    // Abbreviation: first 3 chars match, shorter is ≤5 chars AND notably shorter (labs/laboratories, intl/international)
+    if (shorter.length <= 5 && longer.length >= shorter.length + 3 &&
+        shorter.slice(0, 3) === longer.slice(0, 3)) return 0.75;
+  }
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen < 3) return 0; // too short to fuzzy-match reliably
+  // Allowed edits scales with word length — more tolerant for longer words
+  const allowed = maxLen <= 5 ? 1 : maxLen <= 8 ? 2 : Math.floor(maxLen * 0.2);
+  const dist = _mergeLevenshtein(a, b);
+  if (dist > allowed) return 0;
+  return 1 - (dist / maxLen);
+}
+
 function mergeSimScore(a, b) {
   // Normalize: lowercase, strip common suffixes and punctuation
   const norm = s => s.toLowerCase()
-    .replace(/[,\.]/g,'')
+    .replace(/[,\.\-\(\)\/]/g, ' ')
     .replace(/\b(inc|llc|ltd|corp|co|company|corporation|the|and|&|div|division|systems|technologies|technology|group|services|manufacturing|products|aerospace)\b/g,'')
     .replace(/\s+/g,' ').trim();
   const na = norm(a), nb = norm(b);
   if (!na || !nb) return 0;
   if (na === nb) return 1;
-  // Word overlap score
-  const wa = new Set(na.split(' ').filter(w=>w.length>2));
-  const wb = new Set(nb.split(' ').filter(w=>w.length>2));
-  if (!wa.size || !wb.size) return 0;
-  let overlap = 0;
-  wa.forEach(w => { if (wb.has(w)) overlap++; });
-  const score = overlap / Math.max(wa.size, wb.size);
-  return score;
+  // Tokenize (keep words 2+ chars so "DRS" survives)
+  const wa = na.split(' ').filter(w => w.length >= 2);
+  const wb = nb.split(' ').filter(w => w.length >= 2);
+  if (!wa.length || !wb.length) return 0;
+
+  // Greedy best-match: for each word in the shorter list, find its best fuzzy match
+  // in the longer list (without reusing a matched word). Sum the similarities.
+  const [shorter, longer] = wa.length <= wb.length ? [wa, wb] : [wb, wa];
+  const used = new Set();
+  let totalSim = 0;
+  shorter.forEach(w => {
+    let best = 0, bestIdx = -1;
+    longer.forEach((w2, i) => {
+      if (used.has(i)) return;
+      const sim = _mergeWordSim(w, w2);
+      if (sim > best) { best = sim; bestIdx = i; }
+    });
+    // Only count it as a match if the word is at least 70% similar
+    if (bestIdx >= 0 && best >= 0.7) {
+      totalSim += best;
+      used.add(bestIdx);
+    }
+  });
+
+  return totalSim / Math.max(wa.length, wb.length);
 }
 
 function runMergeScan() {
@@ -1093,11 +1155,41 @@ function renderMergeResults() {
     : `${pairs.length} potential duplicate pair${pairs.length!==1?'s':''} found — review and merge or dismiss each one.`;
 
   wrap.innerHTML = `
-    <div style="font-size:13px;color:var(--muted);margin-bottom:18px">${headerText}</div>
+    <div id="mergeHeaderText" style="font-size:13px;color:var(--muted);margin-bottom:18px">${headerText}</div>
     ${pairs.map(p => renderMergePair(p)).join('')}`;
 }
 
-function renderMergePair(p) {
+// Recomputes the live pair count and updates just the header text in place.
+// Called after dismiss/merge so the "X potential duplicate pairs found" number
+// reflects what's actually left on screen — no full re-render, fade animations preserved.
+function updateMergeHeaderCount() {
+  const headerEl = document.getElementById('mergeHeaderText');
+  if (!headerEl) return;
+  const searchEl = document.getElementById('mergeSearchInput');
+  const search = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+  let liveCount;
+  if (search) {
+    liveCount = _mergeAllPairs.filter(p =>
+      _mergeDecisions[p.key] !== 'dismissed' &&
+      (p.a.name.toLowerCase().includes(search) || p.b.name.toLowerCase().includes(search))
+    ).length;
+  } else {
+    liveCount = _mergeAllPairs.filter(p =>
+      _mergeDecisions[p.key] !== 'dismissed' &&
+      p.score >= _MERGE_THRESHOLD
+    ).length;
+  }
+
+  // If we've dismissed/merged everything, re-render to show the empty-state screen
+  if (liveCount === 0) { renderMergeResults(); return; }
+
+  headerEl.textContent = search
+    ? `${liveCount} match${liveCount!==1?'es':''} for "${search}" — showing all scores`
+    : `${liveCount} potential duplicate pair${liveCount!==1?'s':''} found — review and merge or dismiss each one.`;
+}
+
+function renderMergePair(p, forceKeeperId) {
   const { a, b, score, key } = p;
   const aContacts = contactStore.filter(c => c.clientId === a.id);
   const bContacts = contactStore.filter(c => c.clientId === b.id);
@@ -1106,27 +1198,64 @@ function renderMergePair(p) {
   const pct = Math.round(score * 100);
   const barColor = pct >= 80 ? 'var(--red)' : pct >= 60 ? 'var(--amber)' : 'var(--blue)';
 
-  const clientCard = (c, contacts, jobs, isKeeper) => `
+  // Build a Set of normalized contact names that appear on BOTH sides — these are strong
+  // dup signals (same person at both companies = almost certainly the same company).
+  const fullName = c => ((c.firstName||'') + ' ' + (c.lastName||'')).trim();
+  const normName = n => (n||'').toLowerCase().trim().replace(/\s+/g,' ');
+  const aNames = new Set(aContacts.map(c => normName(fullName(c))).filter(Boolean));
+  const bNames = new Set(bContacts.map(c => normName(fullName(c))).filter(Boolean));
+  const sharedNames = [...aNames].filter(n => bNames.has(n));
+  const hasSharedContact = sharedNames.length > 0;
+
+  // Render contact list inline: up to 3 names, bold+amber if the name appears on the other side
+  const renderContacts = (contacts, otherNamesSet) => {
+    if (!contacts.length) return '<span style="color:var(--muted)">no contacts</span>';
+    const rendered = contacts.slice(0, 3).map(c => {
+      const display = fullName(c) || '(unnamed)';
+      const isShared = otherNamesSet.has(normName(fullName(c)));
+      return isShared
+        ? `<span style="color:var(--amber);font-weight:700">${display}</span>`
+        : `<span>${display}</span>`;
+    }).join(', ');
+    const more = contacts.length > 3 ? `<span style="color:var(--muted)"> +${contacts.length-3} more</span>` : '';
+    return rendered + more;
+  };
+
+  const clientCard = (c, contacts, jobs, isKeeper, otherNamesSet) => `
     <div style="flex:1;background:var(--surface2);border:1.5px solid ${isKeeper?'var(--amber-dim)':'var(--border)'};border-radius:10px;padding:16px 18px">
-      ${isKeeper ? '<div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--amber);margin-bottom:8px">⭐ Keep (Newer)</div>' : '<div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Remove</div>'}
+      ${isKeeper ? '<div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--amber);margin-bottom:8px">⭐ Keep</div>' : '<div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Remove</div>'}
       <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:8px">${c.name}</div>
       <div style="display:flex;gap:12px;font-size:11px;color:var(--muted)">
-        <span>👤 ${contacts.length} contact${contacts.length!==1?'s':''}</span>
         <span>📁 ${jobs} job${jobs!==1?'s':''}</span>
+        ${c.city||c.state ? `<span>📍 ${[c.city,c.state].filter(Boolean).join(', ')}</span>` : ''}
       </div>
-      ${c.city||c.state ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">📍 ${[c.city,c.state].filter(Boolean).join(', ')}</div>` : ''}
+      <div style="font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5">👤 ${renderContacts(contacts, otherNamesSet)}</div>
     </div>`;
 
-  // Newer = higher created_at = the Salesforce import = keeper by default
-  // We don't have created_at in clientStore, so use index in store (later = newer)
-  const aIdx = clientStore.indexOf(a);
-  const bIdx = clientStore.indexOf(b);
-  const keeper = aIdx > bIdx ? a : b;
-  const loser  = aIdx > bIdx ? b : a;
+  // Determine keeper: forceKeeperId (from swap button) takes priority; otherwise newer = keeper.
+  let keeper, loser;
+  if (forceKeeperId) {
+    keeper = a.id === forceKeeperId ? a : b;
+    loser  = a.id === forceKeeperId ? b : a;
+  } else {
+    const aIdx = clientStore.indexOf(a);
+    const bIdx = clientStore.indexOf(b);
+    keeper = aIdx > bIdx ? a : b;
+    loser  = aIdx > bIdx ? b : a;
+  }
   const kContacts = keeper === a ? aContacts : bContacts;
-  const lContacts = keeper === b ? aContacts : bContacts; // unused but consistent
+  const lContacts = keeper === b ? aContacts : bContacts;
   const kJobs = keeper === a ? aJobs : bJobs;
   const lJobs = keeper === b ? aJobs : bJobs;
+  const kOtherNames = keeper === a ? bNames : aNames;
+  const lOtherNames = keeper === a ? aNames : bNames;
+
+  // Shared-contact banner: impossible to miss when two clients share a person
+  const sharedBanner = hasSharedContact
+    ? `<div style="background:rgba(192,122,26,0.12);border:1px solid var(--amber-dim);border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12px;color:var(--amber)">
+         ⚠ Shared contact${sharedNames.length>1?'s':''}: <strong>${sharedNames.map(n => n.replace(/\b\w/g, ch => ch.toUpperCase())).join(', ')}</strong> — likely the same company
+       </div>`
+    : '';
 
   return `<div id="merge-pair-${key.replace(/[^a-z0-9]/gi,'-')}" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:14px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
@@ -1135,10 +1264,11 @@ function renderMergePair(p) {
       </div>
       <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--muted);white-space:nowrap">${pct}% match</div>
     </div>
+    ${sharedBanner}
     <div style="display:flex;gap:14px;margin-bottom:16px;align-items:stretch">
-      ${clientCard(keeper, kContacts, kJobs, true)}
+      ${clientCard(keeper, kContacts, kJobs, true, kOtherNames)}
       <div style="display:flex;align-items:center;font-size:18px;color:var(--muted);flex-shrink:0">⟵</div>
-      ${clientCard(loser, lContacts, lJobs, false)}
+      ${clientCard(loser, lContacts, lJobs, false, lOtherNames)}
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-ghost" style="font-size:12px" onclick="dismissMergePair('${key}')">Dismiss</button>
@@ -1151,51 +1281,16 @@ function renderMergePair(p) {
 }
 
 function swapMergeKeeper(key, keeperId, loserId) {
-  // Re-render this pair with swapped roles
+  // Re-render this pair with loser forced as the new keeper.
   const a = clientStore.find(c => c.id === keeperId);
   const b = clientStore.find(c => c.id === loserId);
   if (!a || !b) return;
   const score = mergeSimScore(a.name, b.name);
   const pairEl = document.getElementById('merge-pair-' + key.replace(/[^a-z0-9]/gi,'-'));
   if (!pairEl) return;
-  // Force b as keeper by temporarily swapping their store indices
-  const aContacts = contactStore.filter(c => c.clientId === a.id);
-  const bContacts = contactStore.filter(c => c.clientId === b.id);
-  const aJobs = Object.values(projectInfo).filter(i => i.clientId === a.id).length;
-  const bJobs = Object.values(projectInfo).filter(i => i.clientId === b.id).length;
-  const pct = Math.round(score * 100);
-  const barColor = pct >= 80 ? 'var(--red)' : pct >= 60 ? 'var(--amber)' : 'var(--blue)';
-
-  const clientCard = (c, contacts, jobs, isKeeper) => `
-    <div style="flex:1;background:var(--surface2);border:1.5px solid ${isKeeper?'var(--amber-dim)':'var(--border)'};border-radius:10px;padding:16px 18px">
-      ${isKeeper ? '<div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--amber);margin-bottom:8px">⭐ Keep</div>' : '<div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Remove</div>'}
-      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:8px">${c.name}</div>
-      <div style="display:flex;gap:12px;font-size:11px;color:var(--muted)">
-        <span>👤 ${contacts.length} contact${contacts.length!==1?'s':''}</span>
-        <span>📁 ${jobs} job${jobs!==1?'s':''}</span>
-      </div>
-      ${c.city||c.state ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">📍 ${[c.city,c.state].filter(Boolean).join(', ')}</div>` : ''}
-    </div>`;
-
-  pairEl.innerHTML = `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
-      <div style="flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden">
-        <div style="width:${pct}%;height:100%;background:${barColor};border-radius:3px"></div>
-      </div>
-      <div style="font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--muted);white-space:nowrap">${pct}% match</div>
-    </div>
-    <div style="display:flex;gap:14px;margin-bottom:16px;align-items:stretch">
-      ${clientCard(b, bContacts, bJobs, true)}
-      <div style="display:flex;align-items:center;font-size:18px;color:var(--muted);flex-shrink:0">⟵</div>
-      ${clientCard(a, aContacts, aJobs, false)}
-    </div>
-    <div style="display:flex;gap:8px;justify-content:flex-end">
-      <button class="btn btn-ghost" style="font-size:12px" onclick="dismissMergePair('${key}')">Dismiss</button>
-      <button class="btn" style="font-size:12px;background:rgba(192,122,26,0.15);color:var(--amber);border:1px solid var(--amber-dim)"
-        onclick="swapMergeKeeper('${key}','${loserId}','${keeperId}')">⇄ Swap</button>
-      <button class="btn btn-primary" style="font-size:12px"
-        onclick="confirmMerge('${key}','${loserId}','${keeperId}')">Merge →</button>
-    </div>`;
+  // Delegate to renderMergePair with loserId forced as keeper — single source of truth.
+  const replacement = renderMergePair({ a, b, score, key }, loserId);
+  pairEl.outerHTML = replacement;
 }
 
 function dismissMergePair(key) {
@@ -1203,6 +1298,7 @@ function dismissMergePair(key) {
   const el = document.getElementById('merge-pair-' + key.replace(/[^a-z0-9]/gi,'-'));
   if (el) el.style.opacity = '0.3';
   setTimeout(() => { if (el) el.remove(); }, 400);
+  updateMergeHeaderCount();
   // Persist so the dismissal survives reload (work the list down to zero over time)
   if (sb) {
     const empId = (typeof currentEmployee !== 'undefined' && currentEmployee) ? currentEmployee.id : null;
@@ -1229,34 +1325,75 @@ async function executeMerge(key, keeperId, loserId) {
   const loser  = clientStore.find(c => c.id === loserId);
   if (!keeper || !loser) return;
 
+  // ── Snapshot state so we can roll back if the DB write fails ────────
+  const affectedContactIds = contactStore.filter(c => c.clientId === loserId).map(c => c.id);
+  const affectedProjIds    = Object.keys(projectInfo).filter(pid => projectInfo[pid].clientId === loserId);
+  const affectedArticleIds = articleStore.filter(a => a.clientId === loserId).map(a => a._id);
+  const removedPairs       = _mergeAllPairs.filter(p => p.a.id === loserId || p.b.id === loserId);
+
+  // ── Optimistic: update in-memory stores immediately so Russ can move on ──
+  contactStore.forEach(c => { if (c.clientId === loserId) c.clientId = keeperId; });
+  Object.values(projectInfo).forEach(info => { if (info.clientId === loserId) info.clientId = keeperId; });
+  articleStore.forEach(a => { if (a.clientId === loserId) a.clientId = keeperId; });
+  clientStore = clientStore.filter(c => c.id !== loserId);
+  _mergeAllPairs = _mergeAllPairs.filter(p => p.a.id !== loserId && p.b.id !== loserId);
+  _mergeDecisions[key] = 'dismissed';
+
+  // ── Remove the pair card from the DOM immediately (tiny fade only) ──
+  const el = document.getElementById('merge-pair-' + key.replace(/[^a-z0-9]/gi,'-'));
+  if (el) {
+    el.style.transition = 'opacity .15s';
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 150);
+  }
+  // Also remove any OTHER visible pair cards that referenced the now-deleted loser
+  // (cluster merging: if 3 dups of Acme existed as 3 pairs AB/AC/BC, merging B into A
+  // should also remove the BC card since B no longer exists).
+  document.querySelectorAll('[id^="merge-pair-"]').forEach(card => {
+    const cardKey = card.id.replace('merge-pair-', '');
+    const stillValid = _mergeAllPairs.some(p => p.key.replace(/[^a-z0-9]/gi,'-') === cardKey);
+    if (!stillValid) {
+      card.style.transition = 'opacity .15s';
+      card.style.opacity = '0';
+      setTimeout(() => card.remove(), 150);
+    }
+  });
+  updateMergeHeaderCount();
+
+  if (!sb) { toast(`✓ Merged into "${keeper.name}"`); return; }
+
+  // ── Fire DB writes in the background ────────────────────────────────
+  // UPDATEs run in parallel (independent); DELETE waits until all finish
+  // (the clients row can't be deleted while FKs still reference it).
   try {
-    if (sb) {
-      // Move contacts
-      await sb.from('contacts').update({ client_id: keeperId }).eq('client_id', loserId);
-      // Move project_info client links
-      await sb.from('project_info').update({ client_id: keeperId }).eq('client_id', loserId);
-      // Delete loser client
-      await sb.from('clients').delete().eq('id', loserId);
-    }
-
-    // Update in-memory stores
-    contactStore.forEach(c => { if (c.clientId === loserId) c.clientId = keeperId; });
-    Object.values(projectInfo).forEach(info => { if (info.clientId === loserId) info.clientId = keeperId; });
-    clientStore = clientStore.filter(c => c.id !== loserId);
-    // Purge any cached pair referencing the deleted client so search doesn't show ghosts
-    _mergeAllPairs = _mergeAllPairs.filter(p => p.a.id !== loserId && p.b.id !== loserId);
-
-    _mergeDecisions[key] = 'dismissed';
-    const el = document.getElementById('merge-pair-' + key.replace(/[^a-z0-9]/gi,'-'));
-    if (el) {
-      el.style.background = 'rgba(46,158,98,0.08)';
-      el.style.borderColor = 'rgba(46,158,98,0.3)';
-      el.innerHTML = `<div style="padding:12px;font-size:13px;color:#2e9e62">✓ Merged "${loser.name}" into "${keeper.name}"</div>`;
-      setTimeout(() => el.remove(), 2000);
-    }
+    const [contactsRes, projInfoRes, articlesRes] = await Promise.all([
+      sb.from('contacts').update({ client_id: keeperId }).eq('client_id', loserId),
+      sb.from('project_info').update({ client_id: keeperId }).eq('client_id', loserId),
+      sb.from('test_articles').update({ client_id: keeperId }).eq('client_id', loserId),
+    ]);
+    if (contactsRes.error) throw contactsRes.error;
+    if (projInfoRes.error) throw projInfoRes.error;
+    if (articlesRes.error) throw articlesRes.error;
+    const delRes = await sb.from('clients').delete().eq('id', loserId);
+    if (delRes.error) throw delRes.error;
     toast(`✓ Merged into "${keeper.name}"`);
   } catch(e) {
-    toast('⚠ Merge error: ' + e.message);
+    // Roll back the optimistic changes
+    clientStore.push(loser);
+    affectedContactIds.forEach(cid => {
+      const c = contactStore.find(x => x.id === cid);
+      if (c) c.clientId = loserId;
+    });
+    affectedProjIds.forEach(pid => { if (projectInfo[pid]) projectInfo[pid].clientId = loserId; });
+    affectedArticleIds.forEach(aid => {
+      const a = articleStore.find(x => x._id === aid);
+      if (a) a.clientId = loserId;
+    });
+    _mergeAllPairs.push(...removedPairs);
+    _mergeAllPairs.sort((x, y) => y.score - x.score);
+    delete _mergeDecisions[key];
+    toast('⚠ Merge failed: ' + e.message + ' — reverted');
+    renderMergeResults();
   }
 }
 
