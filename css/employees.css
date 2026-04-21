@@ -132,7 +132,7 @@
 .rev-comment:disabled{opacity:.65;cursor:not-allowed;}
 
 /* Long-text areas (objectives, how-to, employee input, disagreement explanation) */
-.rev-longtext{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:8px 10px;outline:none;min-height:64px;resize:vertical;line-height:1.5;box-sizing:border-box;}
+.rev-longtext{width:100%;background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;padding:10px 12px;outline:none;min-height:160px;resize:vertical;line-height:1.55;box-sizing:border-box;}
 .rev-longtext:focus{border-color:var(--amber-dim);box-shadow:0 0 0 3px var(--amber-glow);}
 .rev-longtext:disabled{opacity:.65;cursor:not-allowed;background:var(--surface);}
 
