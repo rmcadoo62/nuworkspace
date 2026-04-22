@@ -3711,6 +3711,71 @@ function openAddContactFromEmailModal() {
   }
 }
 
+// Compute warning tier based on the project's export-control flags:
+//   RED   = DPAS is DO or DX (serious — export-controlled)
+//   AMBER = NOFORN=Yes (and not DPAS DO/DX)
+//   DEFAULT = neither flag set
+// This drives both the banner shown in the email modal and the audit log.
+function _computeEmailWarningTier(projId) {
+  const info = projectInfo[projId] || {};
+  const dpas = (info.dpas || '').toUpperCase();
+  const noforn = (info.noforn || '').toLowerCase() === 'yes';
+  if (dpas === 'DO' || dpas === 'DX') return 'red';
+  if (noforn) return 'amber';
+  return 'default';
+}
+
+// Build the warning banner HTML for a given tier.
+function _renderEmailWarningBanner(projId, tier) {
+  const info = projectInfo[projId] || {};
+  if (tier === 'red') {
+    const flags = [];
+    if ((info.dpas||'').toUpperCase() === 'DO' || (info.dpas||'').toUpperCase() === 'DX') {
+      flags.push('DPAS ' + info.dpas.toUpperCase());
+    }
+    if ((info.noforn||'').toLowerCase() === 'yes') flags.push('NOFORN');
+    return `<div style="background:rgba(208,64,64,0.08);border:1.5px solid rgba(208,64,64,0.5);border-radius:8px;padding:12px 14px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--red);margin-bottom:6px">
+        🛑 This project is flagged ${flags.join(' + ')}
+      </div>
+      <div style="font-size:12px;color:var(--text);line-height:1.5;margin-bottom:10px">
+        External email is not appropriate for CUI, ITAR-controlled technical data, or NOFORN content. Use <strong>Synology C2 Transfer</strong> for any communication containing this project's technical data, test results, drawings, or specs. General scheduling/logistics email is still fine.
+      </div>
+      <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px;color:var(--text);line-height:1.4">
+        <input type="checkbox" id="emailWarnAckCheckbox" onchange="onEmailWarningAckChange()" style="margin:2px 0 0 0;flex-shrink:0">
+        <span>I confirm this email contains <strong>no CUI, ITAR-controlled technical data, or NOFORN content</strong>.</span>
+      </label>
+    </div>`;
+  }
+  if (tier === 'amber') {
+    return `<div style="background:var(--amber-glow);border:1.5px solid var(--amber-dim);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text);line-height:1.5">
+      <span style="color:var(--amber);font-weight:700">⚠ This project is flagged NOFORN</span> — do not send foreign-national-restricted content by email. Use <strong>Synology C2 Transfer</strong> for any NOFORN material.
+    </div>`;
+  }
+  // default
+  return `<div style="font-size:11.5px;color:var(--muted);padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;line-height:1.4">
+    ⚠ <strong style="color:var(--text)">Before you send:</strong> CUI, ITAR-controlled technical data, or NOFORN content must use <strong>Synology C2 Transfer</strong>, not this email.
+  </div>`;
+}
+
+// Enable/disable Send button based on the red-tier acknowledgment checkbox.
+function onEmailWarningAckChange() {
+  const chk = document.getElementById('emailWarnAckCheckbox');
+  const btn = document.getElementById('emailContactSendBtn');
+  if (!btn) return;
+  if (chk && !chk.checked) {
+    btn.disabled = true;
+    btn.style.opacity = '0.45';
+    btn.style.cursor = 'not-allowed';
+    btn.title = 'Confirm the CUI/ITAR/NOFORN acknowledgment above before sending';
+  } else {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor = 'pointer';
+    btn.title = '';
+  }
+}
+
 function renderEmailContactModalBody(emailTemplates) {
   const projId = _emailModalProjId;
   const info = projectInfo[projId] || {};
@@ -3790,6 +3855,8 @@ function renderEmailContactModalBody(emailTemplates) {
         CC myself (${currentEmployee.email})
       </label>
 
+      ${_renderEmailWarningBanner(projId, _computeEmailWarningTier(projId))}
+
       <div style="font-size:11px;color:var(--muted);padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;line-height:1.5">
         <strong style="color:var(--text)">Available variables</strong> (switching template or recipient re-applies variables and clears manual edits):
         <code style="font-family:'JetBrains Mono',monospace;font-size:10.5px">{{contactFirstName}} {{contactLastName}} {{contactFullName}} {{contactEmail}} {{clientName}} {{projectName}} {{po}} {{quoteNumber}} {{testCompleteDate}} {{tentativeTestDate}} {{senderName}} {{senderEmail}}</code>
@@ -3803,6 +3870,11 @@ function renderEmailContactModalBody(emailTemplates) {
   } else {
     document.getElementById('emailSubjectInput').value = '';
     document.getElementById('emailBodyInput').value = '';
+  }
+
+  // Initialize Send button state based on warning tier (red tier disables until ack'd)
+  if (_computeEmailWarningTier(projId) === 'red') {
+    onEmailWarningAckChange();
   }
 }
 
@@ -3880,6 +3952,15 @@ async function sendEmailContactModal() {
   if (!subject) { toast('⚠ Subject is required'); return; }
   if (!body)    { toast('⚠ Body is required'); return; }
 
+  // Warning tier + acknowledgment (for both gating and audit log)
+  const warningTier = _computeEmailWarningTier(projId);
+  const ackChk = document.getElementById('emailWarnAckCheckbox');
+  const warningAck = (warningTier === 'red') ? !!(ackChk && ackChk.checked) : null;
+  if (warningTier === 'red' && !warningAck) {
+    toast('⚠ Confirm the CUI/ITAR/NOFORN acknowledgment above');
+    return;
+  }
+
   const sendBtn = document.getElementById('emailContactSendBtn');
   if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; sendBtn.style.opacity = '0.6'; }
 
@@ -3936,6 +4017,8 @@ async function sendEmailContactModal() {
       sent_by_email:currentEmployee.email || null,
       resend_id:    resendId,
       status:       status,
+      warning_tier: warningTier,
+      warning_acknowledged: warningAck,
     }]);
   } catch(e) {
     console.warn('sent_emails log failed (non-fatal):', e);
