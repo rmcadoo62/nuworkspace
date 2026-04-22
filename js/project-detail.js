@@ -197,7 +197,8 @@ function renderInfoSheet(projId) {
           </div>
           <div class="info-field">
             <div class="info-field-label">Contact Person</div>
-            <div class="client-picker-wrap" id="contactPickerWrap">
+            <div style="display:flex;align-items:stretch;gap:4px">
+            <div class="client-picker-wrap" id="contactPickerWrap" style="flex:1;min-width:0">
               ${(()=>{
                 const ct = contactStore.find(c => c.id === info.contactId);
                 const nm = ct ? ct.firstName+' '+ct.lastName : (info.clientContact || '<span style="color:var(--border)">—</span>');
@@ -215,6 +216,21 @@ function renderInfoSheet(projId) {
                   <div class="client-picker-clear" onclick="clearContactPicker('${projId}')">&#x2715; Clear</div>
                 </div>`;
               })()}
+            </div>
+            ${(()=>{
+              const ct = contactStore.find(c => c.id === info.contactId);
+              const hasEmail = !!(ct && ct.email);
+              const title = hasEmail
+                ? 'Send email to ' + ct.firstName + ' ' + ct.lastName + ' (' + ct.email + ')'
+                : (ct ? 'Contact has no email address' : 'Select a contact first');
+              return `<button type="button" class="contact-email-btn"
+                ${hasEmail ? '' : 'disabled'}
+                title="${title}"
+                onclick="event.stopPropagation(); openEmailContactModal('${projId}')"
+                style="background:transparent;border:1px solid ${hasEmail?'var(--border)':'transparent'};border-radius:6px;padding:0 10px;cursor:${hasEmail?'pointer':'not-allowed'};color:${hasEmail?'var(--amber)':'var(--border)'};opacity:${hasEmail?'1':'0.4'};font-size:16px;line-height:1;transition:all var(--transition);display:flex;align-items:center;justify-content:center;min-height:28px"
+                onmouseover="if(!this.disabled){this.style.background='var(--amber-glow)';this.style.borderColor='var(--amber-dim)'}"
+                onmouseout="if(!this.disabled){this.style.background='transparent';this.style.borderColor='var(--border)'}">&#x2709;</button>`;
+            })()}
             </div>
           </div>
           ${dateField('Created Date', fmtDate(info.startDate), 'startDate')}
@@ -290,8 +306,16 @@ async function inlineEditInfoDate(projId, key, el) {
   input.type = 'date';
   input.className = 'info-input';
   input.value = current;
-  input.style.cssText = 'width:100%;margin:0;color-scheme:dark';
+  input.style.cssText = 'width:170px;max-width:100%;margin:0;color-scheme:light';
   el.appendChild(input);
+  // Force the native calendar picker icon to render in black (default is white on dark color-scheme).
+  // Scoped by id so it only applies to this input instance.
+  if (!document.getElementById('date-picker-icon-style')) {
+    const styleEl = document.createElement('style');
+    styleEl.id = 'date-picker-icon-style';
+    styleEl.textContent = '.info-input[type="date"]::-webkit-calendar-picker-indicator{filter:invert(0);opacity:0.8;cursor:pointer}.info-input[type="date"]::-webkit-calendar-picker-indicator:hover{opacity:1}';
+    document.head.appendChild(styleEl);
+  }
   input.focus();
 
   const colMap = { startDate: 'start_date', endDate: 'end_date', tentativeTestDate: 'tentative_test_date', testcompleteDate: 'testcomplete_date' };
@@ -3581,3 +3605,314 @@ async function renderActivityPanel(projId) {
 
 
 
+
+
+// ===== EMAIL CONTACT MODAL =====
+// ===== EMAIL CONTACT MODAL =====
+// Lets a user send an email to the project's contact using a template
+// from Setup → Templates → Other Templates → Email Templates.
+let _emailModalProjId = null;
+
+async function openEmailContactModal(projId) {
+  _emailModalProjId = projId;
+  const info = projectInfo[projId] || {};
+  const proj = projects.find(p => p.id === projId);
+  const ct = contactStore.find(c => c.id === info.contactId);
+  if (!ct || !ct.email) { toast('Contact has no email address'); return; }
+  if (!currentEmployee || !currentEmployee.email) {
+    toast('⚠ Your employee profile has no email address. Contact admin.');
+    return;
+  }
+
+  // Lazy-load templates if not yet initialized
+  try {
+    if (typeof initializeTemplates === 'function' && !templatesInitialized) {
+      await initializeTemplates();
+    }
+  } catch(e) { console.warn('Template init in email modal failed:', e); }
+
+  // Filter to active email templates
+  const emailTemplates = (typeof templates !== 'undefined' ? templates : [])
+    .filter(t => t.type === 'email' && t.is_active !== false)
+    .sort((a,b) => (a.sort_order||0) - (b.sort_order||0));
+
+  // Build modal (first-open only)
+  if (!document.getElementById('emailContactModal')) {
+    const html = `
+    <div id="emailContactModal" class="modal-backdrop" onclick="if(event.target===this) closeEmailContactModal()">
+      <div class="modal" style="width:90%;max-width:720px;max-height:90vh;display:flex;flex-direction:column;">
+        <div class="modal-header">
+          <div class="modal-title">&#x1F4E7; Email Contact</div>
+          <button class="modal-close" onclick="closeEmailContactModal()">&#x2715;</button>
+        </div>
+        <div class="modal-body" id="emailContactBody" style="flex:1;overflow-y:auto;padding:20px 24px"></div>
+        <div class="modal-footer" style="display:flex;gap:8px;justify-content:flex-end">
+          <button onclick="closeEmailContactModal()"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer;color:var(--muted);font-family:'DM Sans',sans-serif">Cancel</button>
+          <button id="emailContactSendBtn" onclick="sendEmailContactModal()"
+            style="background:var(--amber);color:var(--bg);border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">&#x1F4E4; Send Email</button>
+        </div>
+      </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+
+  renderEmailContactModalBody(emailTemplates);
+  document.getElementById('emailContactModal').classList.add('open');
+}
+
+function renderEmailContactModalBody(emailTemplates) {
+  const projId = _emailModalProjId;
+  const info = projectInfo[projId] || {};
+  const proj = projects.find(p => p.id === projId) || {};
+  const ct = contactStore.find(c => c.id === info.contactId) || {};
+  const cl = clientStore.find(c => c.id === info.clientId);
+
+  const toLine = (ct.firstName||'') + ' ' + (ct.lastName||'') + ' <' + ct.email + '>';
+  const fromLine = (currentEmployee.name||'') + ' <' + currentEmployee.email + '>';
+
+  const templateOpts = emailTemplates.length
+    ? emailTemplates.map((t,i) =>
+        `<option value="${t.id}" ${i===0?'selected':''}>${(t.label||'Untitled').replace(/</g,'&lt;')}</option>`
+      ).join('')
+    : '<option value="">(No email templates — create one in Setup → Templates)</option>';
+
+  const body = document.getElementById('emailContactBody');
+  body.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:14px;font-family:'DM Sans',sans-serif">
+      <div style="display:grid;grid-template-columns:70px 1fr;gap:4px 10px;align-items:center;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-size:12px">
+        <div style="color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.5px">From</div>
+        <div style="color:var(--text)">${fromLine.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        <div style="color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.5px">To</div>
+        <div style="color:var(--text)">${toLine.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Template</div>
+        <select id="emailTemplateSelect" onchange="applyEmailTemplate(this.value)"
+          style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none">
+          ${templateOpts}
+        </select>
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Subject</div>
+        <input id="emailSubjectInput" type="text"
+          style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box" />
+      </div>
+
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">Body</div>
+        <textarea id="emailBodyInput"
+          style="width:100%;min-height:240px;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:10px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;resize:vertical;box-sizing:border-box;line-height:1.5"></textarea>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;color:var(--text)">
+        <input type="checkbox" id="emailCcMeCheckbox" checked style="margin:0">
+        CC myself (${currentEmployee.email})
+      </label>
+
+      <div style="font-size:11px;color:var(--muted);padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;line-height:1.5">
+        <strong style="color:var(--text)">Available variables</strong> (edit subject/body freely, these auto-fill when you select a template):
+        <code style="font-family:'JetBrains Mono',monospace;font-size:10.5px">{{contactFirstName}} {{contactLastName}} {{contactFullName}} {{contactEmail}} {{clientName}} {{projectName}} {{po}} {{quoteNumber}} {{testCompleteDate}} {{tentativeTestDate}} {{senderName}} {{senderEmail}}</code>
+      </div>
+    </div>
+  `;
+
+  // Auto-apply first template if available
+  if (emailTemplates.length > 0) {
+    applyEmailTemplate(emailTemplates[0].id);
+  } else {
+    document.getElementById('emailSubjectInput').value = '';
+    document.getElementById('emailBodyInput').value = '';
+  }
+}
+
+function emailTemplateVarMap() {
+  const projId = _emailModalProjId;
+  const info = projectInfo[projId] || {};
+  const proj = projects.find(p => p.id === projId) || {};
+  const ct = contactStore.find(c => c.id === info.contactId) || {};
+  const cl = clientStore.find(c => c.id === info.clientId);
+  const fmt = v => {
+    if (!v) return '';
+    const d = new Date(v + (v.length === 10 ? 'T00:00:00' : ''));
+    if (isNaN(d)) return v;
+    return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+  };
+  return {
+    contactFirstName: ct.firstName || '',
+    contactLastName:  ct.lastName  || '',
+    contactFullName:  ((ct.firstName||'') + ' ' + (ct.lastName||'')).trim(),
+    contactEmail:     ct.email || '',
+    clientName:       (cl && cl.name) || info.client || '',
+    projectName:      proj.name || '',
+    po:               info.po || '',
+    quoteNumber:      info.quoteNumber || '',
+    testCompleteDate: fmt(info.testcompleteDate),
+    tentativeTestDate:fmt(info.tentativeTestDate),
+    senderName:       (currentEmployee && currentEmployee.name) || '',
+    senderEmail:      (currentEmployee && currentEmployee.email) || '',
+  };
+}
+
+function substituteEmailVars(str) {
+  if (!str) return '';
+  const map = emailTemplateVarMap();
+  return str.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (match, key) => {
+    return map.hasOwnProperty(key) ? map[key] : '';
+  });
+}
+
+function applyEmailTemplate(templateId) {
+  const t = (typeof templates !== 'undefined' ? templates : []).find(x => x.id === templateId);
+  const subjInp = document.getElementById('emailSubjectInput');
+  const bodyInp = document.getElementById('emailBodyInput');
+  if (!subjInp || !bodyInp) return;
+  if (!t) { subjInp.value = ''; bodyInp.value = ''; return; }
+  subjInp.value = substituteEmailVars(t.subject || '');
+  bodyInp.value = substituteEmailVars(t.instructions || '');
+}
+
+function closeEmailContactModal() {
+  const m = document.getElementById('emailContactModal');
+  if (m) m.classList.remove('open');
+  _emailModalProjId = null;
+}
+
+async function sendEmailContactModal() {
+  const projId = _emailModalProjId;
+  if (!projId) return;
+  const info = projectInfo[projId] || {};
+  const proj = projects.find(p => p.id === projId) || {};
+  const ct = contactStore.find(c => c.id === info.contactId);
+  if (!ct || !ct.email) { toast('Contact has no email address'); return; }
+  if (!currentEmployee || !currentEmployee.email) { toast('⚠ Your employee profile has no email'); return; }
+
+  const subject = (document.getElementById('emailSubjectInput').value || '').trim();
+  const body = (document.getElementById('emailBodyInput').value || '').trim();
+  const ccMe = !!document.getElementById('emailCcMeCheckbox')?.checked;
+  const templateSelect = document.getElementById('emailTemplateSelect');
+  const templateId = templateSelect ? templateSelect.value : null;
+
+  if (!subject) { toast('⚠ Subject is required'); return; }
+  if (!body)    { toast('⚠ Body is required'); return; }
+
+  const sendBtn = document.getElementById('emailContactSendBtn');
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; sendBtn.style.opacity = '0.6'; }
+
+  const cc = ccMe ? [currentEmployee.email] : [];
+
+  let resendId = null;
+  let status = 'sent';
+  let errorMsg = null;
+
+  // Resend needs a verified domain. Until apps.nulabs.com is set up,
+  // we piggyback on Jordan's verified vibrato.nulabs.com subdomain.
+  // Rewrite the From username@nulabs.com → username@vibrato.nulabs.com,
+  // but set Reply-To to the real address so replies go to the right inbox.
+  const SEND_DOMAIN = 'vibrato.nulabs.com';
+  const realEmail = currentEmployee.email;
+  const localPart = realEmail.split('@')[0];
+  const fromEmail = localPart + '@' + SEND_DOMAIN;
+
+  // 1. Call edge function to send
+  try {
+    const { data, error } = await sb.functions.invoke('send-client-email', {
+      body: {
+        to: ct.email,
+        cc: cc,
+        subject: subject,
+        body: body,
+        fromName: currentEmployee.name || '',
+        fromEmail: fromEmail,
+        replyToEmail: realEmail,
+      }
+    });
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
+    resendId = data && data.id ? data.id : null;
+  } catch(e) {
+    console.error('send-client-email failed:', e);
+    status = 'failed';
+    errorMsg = (e && e.message) ? e.message : 'Unknown error';
+    // Still log the attempt for audit — continue to sent_emails insert below
+  }
+
+  // 2. Log to sent_emails audit table
+  try {
+    await sb.from('sent_emails').insert([{
+      project_id:   projId,
+      contact_id:   ct.id || null,
+      template_id:  (templateId || null) || null,
+      to_email:     ct.email,
+      cc_emails:    cc.join(', ') || null,
+      subject:      subject,
+      body:         body,
+      sent_by:      currentEmployee.id || null,
+      sent_by_name: currentEmployee.name || null,
+      sent_by_email:currentEmployee.email || null,
+      resend_id:    resendId,
+      status:       status,
+    }]);
+  } catch(e) {
+    console.warn('sent_emails log failed (non-fatal):', e);
+  }
+
+  // 3. Post chatter message on project (only on success)
+  if (status === 'sent') {
+    try {
+      const authorName = currentEmployee.name || 'Someone';
+      const authorInitials = currentEmployee.initials || (authorName.slice(0,2).toUpperCase());
+      const authorColor = currentEmployee.color || '#5b9cf6';
+      const contactName = (ct.firstName||'') + ' ' + (ct.lastName||'');
+      const chatterText = '\uD83D\uDCE7 Email sent to ' + contactName.trim() + ' — ' + subject;
+      const msg = {
+        proj_id:        projId,
+        author_id:      currentEmployee.id || null,
+        author_name:    authorName,
+        author_initials:authorInitials,
+        author_color:   authorColor,
+        text:           chatterText,
+        attachments:    [],
+        reply_to:       null,
+        notify_ids:     [],
+        created_at:     new Date().toISOString(),
+      };
+      const { data: chatRow } = await sb.from('chatter').insert([msg]).select().single();
+      // Update in-memory chatter if we're viewing this project
+      if (typeof chatterStore !== 'undefined' && chatRow) {
+        if (!chatterStore[projId]) chatterStore[projId] = [];
+        chatterStore[projId].unshift({
+          id: chatRow.id,
+          authorId: msg.author_id,
+          authorName: msg.author_name,
+          authorInitials: msg.author_initials,
+          authorColor: msg.author_color,
+          text: msg.text,
+          attachments: [],
+          replyTo: null,
+          notifyIds: [],
+          ts: msg.created_at,
+        });
+        if (typeof activeProjectId !== 'undefined' && activeProjectId === projId
+            && typeof renderChatter === 'function') {
+          try { renderChatter(projId); } catch(e) {}
+        }
+      }
+    } catch(e) {
+      console.warn('chatter post for email failed (non-fatal):', e);
+    }
+  }
+
+  // 4. UI feedback
+  if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '&#x1F4E4; Send Email'; sendBtn.style.opacity = '1'; }
+
+  if (status === 'sent') {
+    toast('\u2705 Email sent to ' + ct.email);
+    closeEmailContactModal();
+  } else {
+    toast('\u26A0 Send failed: ' + (errorMsg || 'Unknown error'));
+    // Leave modal open so user can retry or copy their text
+  }
+}

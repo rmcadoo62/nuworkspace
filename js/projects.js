@@ -504,15 +504,22 @@ function renderProjectsTable() {
           }).join('')}
         </tr>
         <tr id="projColFilterRow" class="proj-col-filter-row">
-          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="name" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
-          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="status" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
-          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="client" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
-          ${visibleOptCols.map(c => {
-            // Columns that don't make sense to filter get an empty cell
+          ${(() => {
+            // Helper: build input wrapped with a clear-button that appears when value is non-empty.
+            // Uses CSS ~ sibling selector driven by [data-filled] attribute which is maintained
+            // by setProjColFilter/clearProjColFilter, so no JS needed to show/hide the X.
+            const mkFilterCell = (field) =>
+              '<th style="padding:4px 6px"><div class="proj-col-filter-wrap">' +
+                '<input class="proj-col-filter-input" data-field="' + field + '" placeholder="🔍" oninput="setProjColFilter(this)">' +
+                '<button type="button" class="proj-col-filter-clear" tabindex="-1" title="Clear filter" onclick="clearProjColFilter(\'' + field + '\')">&times;</button>' +
+              '</div></th>';
+            let html = mkFilterCell('name') + mkFilterCell('status') + mkFilterCell('client');
             const unfilterable = new Set(['expected','billed','hours','remaining','inHouse','creditHold','needPo','dpas','noforn','testcomplete','tentativeTest']);
-            if (unfilterable.has(c.key)) return '<th></th>';
-            return '<th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="'+c.key+'" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>';
-          }).join('')}
+            visibleOptCols.forEach(c => {
+              html += unfilterable.has(c.key) ? '<th></th>' : mkFilterCell(c.key);
+            });
+            return html;
+          })()}
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -526,6 +533,8 @@ function renderProjectsTable() {
         inp.value = val;
         inp.style.borderColor = 'var(--amber-dim)';
         inp.style.background = 'rgba(192,122,26,0.08)';
+        const wrap = inp.closest('.proj-col-filter-wrap');
+        if (wrap) wrap.dataset.filled = '1';
       }
     });
   }, 0);
@@ -619,9 +628,23 @@ function setProjColFilter(input) {
   // Highlight active filter inputs
   input.style.borderColor = val.trim() ? 'var(--amber-dim)' : '';
   input.style.background  = val.trim() ? 'rgba(192,122,26,0.08)' : '';
+  // Toggle wrapper filled state so the × clear button shows/hides via CSS
+  const wrap = input.closest('.proj-col-filter-wrap');
+  if (wrap) {
+    if (val.trim()) wrap.dataset.filled = '1';
+    else delete wrap.dataset.filled;
+  }
   // Apply filter to existing rows without full re-render
   _applyProjColFiltersToDOM();
   renderSavedFiltersBar();
+}
+
+function clearProjColFilter(field) {
+  const inp = document.querySelector('.proj-col-filter-input[data-field="' + field + '"]');
+  if (!inp) return;
+  inp.value = '';
+  setProjColFilter(inp);
+  inp.focus();
 }
 
 function _applyProjColFiltersToDOM() {

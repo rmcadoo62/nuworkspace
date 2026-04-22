@@ -475,17 +475,20 @@ function renderTemplatesPanel() {
         } else if (category.name === 'Compliance Templates') {
           // Break down CMMC templates by domain
           const domains = [
-            { key: 'AC', name: 'Access Control', desc: 'User accounts, permissions, access management' },
-            { key: 'AU', name: 'Audit & Accountability', desc: 'Logging, monitoring, audit trails' },
-            { key: 'CM', name: 'Configuration Management', desc: 'System configurations, change control' },
-            { key: 'IR', name: 'Incident Response', desc: 'Security incidents, response procedures' },
-            { key: 'MA', name: 'Maintenance', desc: 'System maintenance, updates' },
-            { key: 'MP', name: 'Media Protection', desc: 'Data storage, media handling' },
-            { key: 'PE', name: 'Physical Protection', desc: 'Facility security, physical access' },
-            { key: 'PS', name: 'Personnel Security', desc: 'Background checks, training' },
-            { key: 'RA', name: 'Risk Assessment', desc: 'Risk analysis, vulnerability scanning' },
-            { key: 'SC', name: 'System Communications', desc: 'Network security, encryption' },
-            { key: 'SI', name: 'System Integrity', desc: 'Malware protection, system monitoring' }
+            { key: 'AC', name: 'Access Control',                  desc: 'User accounts, permissions, access management' },
+            { key: 'AT', name: 'Awareness & Training',            desc: 'Security awareness, CUI training' },
+            { key: 'AU', name: 'Audit & Accountability',          desc: 'Logging, monitoring, audit trails' },
+            { key: 'CA', name: 'Security Assessment',             desc: 'Self-assessment, POA&M, system security plan' },
+            { key: 'CM', name: 'Configuration Management',        desc: 'System configurations, change control' },
+            { key: 'IA', name: 'Identification & Authentication', desc: 'User identity, MFA, credentials' },
+            { key: 'IR', name: 'Incident Response',               desc: 'Security incidents, response procedures' },
+            { key: 'MA', name: 'Maintenance',                     desc: 'System maintenance, updates' },
+            { key: 'MP', name: 'Media Protection',                desc: 'Data storage, media handling' },
+            { key: 'PE', name: 'Physical Protection',             desc: 'Facility security, physical access' },
+            { key: 'PS', name: 'Personnel Security',              desc: 'Background checks, training' },
+            { key: 'RA', name: 'Risk Assessment',                 desc: 'Risk analysis, vulnerability scanning' },
+            { key: 'SC', name: 'System & Communications',         desc: 'Network security, encryption' },
+            { key: 'SI', name: 'System & Information Integrity',  desc: 'Malware protection, system monitoring' }
           ];
           
           return `
@@ -518,12 +521,55 @@ function renderTemplatesPanel() {
                     style="background:var(--blue);color:white;border:none;border-radius:6px;padding:6px 12px;font-size:11px;margin-top:8px;cursor:pointer;font-family:'DM Sans',sans-serif;">
                     Import from compliance.js
                   </button>
-                </div>` : ''}
+                </div>` : `
+                <div style="display:flex;justify-content:flex-end;margin-top:8px;padding-top:10px;border-top:1px solid var(--border);">
+                  <button onclick="migrateComplianceEvidence()"
+                    title="Re-import evidence strings from compliance.js (will prompt before overwriting)"
+                    style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                    ↻ Re-import from compliance.js
+                  </button>
+                </div>`}
             </div>
           </div>`;
           
+        } else if (category.name === 'Other Templates') {
+          // Other Templates — break down by subgroup (Email Templates, future: Forms, Content, etc.)
+          const emailTemplates = categoryTemplates.filter(t => t.type === 'email');
+          const otherMisc = categoryTemplates.filter(t => t.type !== 'email');
+
+          return `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+            <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+              <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">${category.icon} ${category.name}</div>
+              <div style="font-size:12px;color:var(--muted);">${category.description}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px;">${categoryTemplates.length} total templates</div>
+            </div>
+            <div style="padding:16px 20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
+                <div>
+                  <div style="font-size:13px;font-weight:600;color:var(--text);">📧 Email Templates</div>
+                  <div style="font-size:11px;color:var(--muted);">${emailTemplates.length} template${emailTemplates.length !== 1 ? 's' : ''} — used by the 📧 button on Project Info</div>
+                </div>
+                <button onclick="editTemplateSubgroup('${category.id}', 'email')"
+                  style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                  Edit
+                </button>
+              </div>
+              ${otherMisc.length > 0 ? `
+              <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:6px 10px;background:var(--surface2);border-radius:6px;font-size:12px;">
+                <div>
+                  <div style="font-weight:600;color:var(--text);">📄 Other / Misc</div>
+                  <div style="font-size:10px;color:var(--muted);">${otherMisc.length} template${otherMisc.length !== 1 ? 's' : ''}</div>
+                </div>
+                <button onclick="editCategoryTemplates('${category.id}')"
+                  style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:4px;padding:4px 10px;font-size:11px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                  Edit
+                </button>
+              </div>` : ''}
+            </div>
+          </div>`;
         } else {
-          // Other categories - keep existing behavior
+          // Other categories (future expansion)
           return `
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
             <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
@@ -531,9 +577,9 @@ function renderTemplatesPanel() {
               <div style="font-size:12px;color:var(--muted);">${category.description}</div>
             </div>
             <div style="padding:16px 20px;">
-              ${categoryTemplates.length > 0 
+              ${categoryTemplates.length > 0
                 ? `<div style="font-size:13px;color:var(--text);margin-bottom:8px;">${categoryTemplates.length} template${categoryTemplates.length !== 1 ? 's' : ''}</div>
-                   <button onclick="editCategoryTemplates('${category.id}')" 
+                   <button onclick="editCategoryTemplates('${category.id}')"
                      style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
                      Edit Templates
                    </button>`
@@ -588,6 +634,10 @@ function openTemplateEditModal(categoryId, subgroup = null) {
     } else if (category.name === 'Compliance Templates') {
       // Filter by domain for CMMC templates
       filteredTemplates = filteredTemplates.filter(t => (t.domain || '').toUpperCase() === subgroup.toUpperCase());
+    } else if (category.name === 'Other Templates') {
+      if (subgroup === 'email') {
+        filteredTemplates = filteredTemplates.filter(t => t.type === 'email');
+      }
     }
   }
   
@@ -661,13 +711,21 @@ function renderTemplateEditModal(category, subgroup = null) {
       }
     } else if (category.name === 'Compliance Templates') {
       const domainNames = {
-        'AC': 'Access Control', 'AU': 'Audit & Accountability', 'CM': 'Configuration Management',
-        'IR': 'Incident Response', 'MA': 'Maintenance', 'MP': 'Media Protection',
-        'PE': 'Physical Protection', 'PS': 'Personnel Security', 'RA': 'Risk Assessment',
-        'SC': 'System Communications', 'SI': 'System Integrity'
+        'AC': 'Access Control',          'AT': 'Awareness & Training',
+        'AU': 'Audit & Accountability',  'CA': 'Security Assessment',
+        'CM': 'Configuration Management','IA': 'Identification & Authentication',
+        'IR': 'Incident Response',       'MA': 'Maintenance',
+        'MP': 'Media Protection',        'PE': 'Physical Protection',
+        'PS': 'Personnel Security',      'RA': 'Risk Assessment',
+        'SC': 'System & Communications', 'SI': 'System & Information Integrity'
       };
       modalTitle = `Edit ${subgroup} - ${domainNames[subgroup] || subgroup} Templates`;
       modalDescription = `CMMC Level 2 evidence strings for ${domainNames[subgroup] || subgroup} domain`;
+    } else if (category.name === 'Other Templates') {
+      if (subgroup === 'email') {
+        modalTitle = 'Edit Email Templates';
+        modalDescription = 'Email templates used by the 📧 button on the Project Info page. Available variables: {{contactFirstName}}, {{contactFullName}}, {{contactEmail}}, {{clientName}}, {{projectName}}, {{po}}, {{quoteNumber}}, {{testCompleteDate}}, {{tentativeTestDate}}, {{senderName}}, {{senderEmail}}.';
+      }
     }
   }
   
@@ -677,12 +735,17 @@ function renderTemplateEditModal(category, subgroup = null) {
   
   body.innerHTML = `
     <div style="padding:24px;">
-      <div style="margin-bottom:20px;">
+      <div style="margin-bottom:16px;">
         <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px;">${category.icon} ${modalTitle}</div>
         <div style="font-size:13px;color:var(--muted);">${modalDescription}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:4px;">${editingTemplateData.length} template${editingTemplateData.length !== 1 ? 's' : ''}</div>
       </div>
-      
+
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:16px;background:var(--amber-glow);border:1px solid var(--amber-dim);border-radius:6px;font-size:12px;color:var(--text);">
+        <span style="font-size:14px;">💾</span>
+        <span><strong>Changes save automatically</strong> when you click or tab out of a field. Watch for the <em>"✓ Template updated"</em> confirmation at the bottom of the screen.</span>
+      </div>
+
       <div id="templateEditList">
         ${editingTemplateData.length === 0 
           ? '<div style="text-align:center;padding:40px;color:var(--muted);">No templates in this group yet.</div>'
@@ -726,14 +789,22 @@ async function addNewTemplate() {
     } else if (category.name === 'Compliance Templates') {
       defaultDomain = editingSubgroup;
       defaultType = 'compliance';
+    } else if (category.name === 'Other Templates') {
+      if (editingSubgroup === 'email') {
+        defaultType = 'email';
+        defaultTrack = null;
+      }
     }
   }
-  
+
   const newTemplate = {
     category_id: editingCategoryId,
     key: 'new_template_' + Date.now(),
-    label: 'New Template',
-    instructions: 'Enter template instructions here...',
+    label: defaultType === 'email' ? 'New Email Template' : 'New Template',
+    subject: defaultType === 'email' ? '{{projectName}}' : null,
+    instructions: defaultType === 'email'
+      ? 'Hi {{contactFirstName}},\n\n[Your message here]\n\nProject: {{projectName}}\nPO: {{po}}\nQuote: {{quoteNumber}}\n\nBest regards,\n{{senderName}}\nNU Laboratories, Inc.'
+      : 'Enter template instructions here...',
     notes_enabled: false,
     track: defaultTrack,
     domain: defaultDomain,
@@ -772,19 +843,94 @@ async function addNewTemplate() {
   }
 }
 
-// Placeholder function for CMMC migration
-function migrateComplianceEvidence() {
-  alert('CMMC Evidence Migration\n\nThis will import hardcoded evidence strings from compliance.js into the database-backed template system.\n\n(Feature coming next - need to build the migration tool)');
+// Import CMMC evidence strings from compliance.js into the templates table.
+// Reads window.POAM_PRACTICES (practice id + description) and window.ASSESSMENT_EVIDENCE (evidence strings)
+// exposed by compliance.js. Inserts as type='compliance_evidence' with domain = first 2 chars of practice id.
+async function migrateComplianceEvidence() {
+  // Guard: make sure compliance.js globals are loaded
+  if (typeof window.POAM_PRACTICES === 'undefined' || typeof window.ASSESSMENT_EVIDENCE === 'undefined') {
+    alert('Source data not found.\n\nMake sure compliance.js is loaded (open Compliance tab once, then come back).');
+    return;
+  }
+  const POAM_PRACTICES_SRC = window.POAM_PRACTICES;
+  const ASSESSMENT_EVIDENCE_SRC = window.ASSESSMENT_EVIDENCE;
+
+  // Find Compliance Templates category
+  const complianceCategory = templateCategories.find(c => c.name === 'Compliance Templates');
+  if (!complianceCategory) {
+    alert('Compliance Templates category not found. Reload the page and try again.');
+    return;
+  }
+
+  // Count existing compliance_evidence rows
+  const existing = templates.filter(t =>
+    t.type === 'compliance_evidence' && t.category_id === complianceCategory.id
+  );
+
+  let confirmMsg = `Import ${POAM_PRACTICES_SRC.length} CMMC evidence strings from compliance.js into the database?\n\n`;
+  if (existing.length > 0) {
+    confirmMsg += `⚠ This will DELETE ${existing.length} existing evidence template${existing.length === 1 ? '' : 's'} and replace with fresh data from compliance.js.\n\nAny edits made in Setup → Templates will be lost.\n\n`;
+  }
+  confirmMsg += 'Continue?';
+
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    // Delete existing first (if any)
+    if (existing.length > 0) {
+      const { error: delErr } = await sb.from('templates')
+        .delete()
+        .eq('type', 'compliance_evidence')
+        .eq('category_id', complianceCategory.id);
+      if (delErr) throw delErr;
+    }
+
+    // Build insert rows — sort_order matches POAM_PRACTICES order (AC.L1 before AC.L2, etc.)
+    const rows = POAM_PRACTICES_SRC.map((p, idx) => {
+      const domain = (p.id.split('.')[0] || '').toUpperCase(); // 'AC.L1-3.1.1' → 'AC'
+      return {
+        category_id:   complianceCategory.id,
+        key:           p.id,
+        label:         p.desc || p.id,
+        instructions:  ASSESSMENT_EVIDENCE_SRC[p.id] || '',
+        notes_enabled: false,
+        track:         null,
+        type:          'compliance_evidence',
+        domain:        domain,
+        sort_order:    idx,
+        is_active:     true
+      };
+    });
+
+    // Insert in batches of 50 to stay under Supabase payload limits
+    const batchSize = 50;
+    let inserted = 0;
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      const { error: insErr } = await sb.from('templates').insert(batch);
+      if (insErr) throw insErr;
+      inserted += batch.length;
+    }
+
+    // Reload and rerender
+    await loadTemplateData();
+    renderTemplatesPanel();
+
+    toast(`✓ Imported ${inserted} CMMC evidence templates`);
+  } catch (e) {
+    console.error('Compliance migration failed:', e);
+    alert('Import failed: ' + (e.message || e));
+  }
 }
 
 function renderTemplateEditRow(template, index) {
   const trackOptions = ['nulabs', 'ballantine', 'general'].map(track => 
     `<option value="${track}" ${template.track === track ? 'selected' : ''}>${track}</option>`).join('');
   
-  const typeOptions = ['onboarding', 'offboarding', 'compliance', 'general'].map(type => 
+  const typeOptions = ['onboarding', 'offboarding', 'compliance', 'general', 'email'].map(type => 
     `<option value="${type}" ${template.type === type ? 'selected' : ''}>${type}</option>`).join('');
   
-  const domainOptions = ['AC', 'AU', 'CM', 'IR', 'MA', 'MP', 'PE', 'PS', 'RA', 'SC', 'SI'].map(domain => 
+  const domainOptions = ['AC','AT','AU','CA','CM','IA','IR','MA','MP','PE','PS','RA','SC','SI'].map(domain => 
     `<option value="${domain}" ${(template.domain || '').toUpperCase() === domain ? 'selected' : ''}>${domain}</option>`).join('');
   
   return `
@@ -833,10 +979,19 @@ function renderTemplateEditRow(template, index) {
         </div>
       </div>
       
+      ${template.type === 'email' ? `
       <div style="margin-bottom:12px;">
-        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Instructions</div>
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Subject</div>
+        <input type="text" value="${(template.subject||'').replace(/"/g,'&quot;')}"
+          onchange="updateTemplateField('${template.id}', 'subject', this.value)"
+          placeholder="e.g. {{projectName}} — update"
+          style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;">
+      </div>` : ''}
+
+      <div style="margin-bottom:12px;">
+        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">${template.type === 'email' ? 'Body' : 'Instructions'}</div>
         <textarea onchange="updateTemplateField('${template.id}', 'instructions', this.value)"
-          style="width:100%;min-height:100px;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;resize:vertical;box-sizing:border-box;">${template.instructions}</textarea>
+          style="width:100%;min-height:${template.type === 'email' ? '180' : '100'}px;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;resize:vertical;box-sizing:border-box;">${template.instructions||''}</textarea>
       </div>
       
       <div style="display:flex;align-items:center;gap:8px;">

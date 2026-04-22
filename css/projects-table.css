@@ -90,3 +90,30 @@
 }
 .proj-col-filter-input:focus { border-color: var(--amber-dim); }
 .proj-col-filter-input::placeholder { color: var(--muted); opacity: 0.5; }
+
+/* Column filter wrapper — hosts input + clear (×) button */
+.proj-col-filter-wrap { position: relative; display: block; width: 100%; }
+.proj-col-filter-wrap .proj-col-filter-input { padding-right: 20px; }
+.proj-col-filter-clear {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  display: none;               /* shown only when wrapper has data-filled */
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 3px;
+  font-family: inherit;
+  transition: color .12s, background .12s;
+}
+.proj-col-filter-clear:hover { color: var(--text); background: var(--surface3, var(--surface2)); }
+.proj-col-filter-wrap[data-filled] .proj-col-filter-clear { display: flex; }
