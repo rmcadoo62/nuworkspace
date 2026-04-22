@@ -2127,7 +2127,7 @@ function setYnField(projId, key, val) {
   if (!projectInfo[projId]) return;
   projectInfo[projId][key] = val;
   if (sb) {
-    const colMap = {dcas:'dcas', customerWitness:'customer_witness', tpApproval:'tp_approval', dpas:'dpas', noforn:'noforn'};
+    const colMap = {dcas:'dcas', customerWitness:'customer_witness', tpApproval:'tp_approval', dpas:'dpas', cui:'cui'};
     const col = colMap[key];
     if (col) sb.from('project_info').upsert({project_id: projId, [col]: val||null},{onConflict:'project_id'}).then(({error})=>{ if(error) console.error('yn upsert',error); });
   }

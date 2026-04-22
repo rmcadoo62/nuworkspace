@@ -10,7 +10,7 @@ function defaultInfo(proj) {
     startDate: '', endDate: '', tentativeTestDate: '', client: '', clientContact: '', clientEmail: '',
     clientPhone: '', billingType: 'Fixed Fee', invoiced: '', remaining: '',
     notes: '', desc: proj.desc || '',
-    dcas: '', customerWitness: '', tpApproval: '', dpas: '', noforn: '',
+    dcas: '', customerWitness: '', tpApproval: '', dpas: '', cui: '',
     testDesc: '', testArticleDesc: '', quoteNumber: '',
     billedRevenue: 0, expectedRevenue: 0,
   };
@@ -234,7 +234,7 @@ function renderInfoSheet(projId) {
             {value:'DO', label:'DO', color:'var(--purple)'},
             {value:'DX', label:'DX', color:'var(--amber)'}
           ])}
-          ${pickField('NOFORN Dist C/D', info.noforn, 'noforn', projId, [
+          ${pickField('CUI', info.cui, 'cui', projId, [
             {value:'No',  label:'No',  color:'var(--muted)'},
             {value:'Yes', label:'Yes', color:'var(--red)'}
           ])}
@@ -477,7 +477,7 @@ async function collectAndSave(projId) {
     start_date: info.startDate||null, end_date: info.endDate||null, tentative_test_date: info.tentativeTestDate||null,
     phase: info.phase, status: info.status, notes: info.notes, description: info.desc,
     dcas: info.dcas||null, customer_witness: info.customerWitness||null, tp_approval: info.tpApproval||null,
-    dpas: info.dpas||null, noforn: info.noforn||null,
+    dpas: info.dpas||null, cui: info.cui||null,
     test_description: info.testDesc||null, test_article_description: info.testArticleDesc||null,
     quote_number: info.quoteNumber||null,
   };
@@ -2719,7 +2719,7 @@ function ittInitResizers(){
   });
 }
 
-const PTBL_MINS = {name:80,status:80,client:80,po:50,quote:50,desc:80,article:80,pm:60,tenttest:80,testcomp:80,dcas:50,witness:80,tpappr:60,dpas:50,noforn:50,credit:60,needpo:60,contact:80,exp:70,billed:70,hours:60,remain:70};
+const PTBL_MINS = {name:80,status:80,client:80,po:50,quote:50,desc:80,article:80,pm:60,tenttest:80,testcomp:80,dcas:50,witness:80,tpappr:60,dpas:50,cui:50,credit:60,needpo:60,contact:80,exp:70,billed:70,hours:60,remain:70};
 const PTBL_DEFAULTS = {name:'220px',status:'130px',client:'160px',po:'90px',quote:'90px',desc:'180px',article:'180px',exp:'100px',billed:'100px',hours:'90px',remain:'110px'};
 function ptblGetW() { try { return Object.assign({}, PTBL_DEFAULTS, JSON.parse(localStorage.getItem('ptblCols')||'{}')); } catch { return Object.assign({}, PTBL_DEFAULTS); } }
 function ptblSetW(w) { Object.entries(w).forEach(([k,v]) => document.documentElement.style.setProperty('--ptc-'+k, v)); }
@@ -3711,50 +3711,38 @@ function openAddContactFromEmailModal() {
   }
 }
 
-// Compute warning tier based on the project's export-control flags:
-//   RED   = DPAS is DO or DX (serious — export-controlled)
-//   AMBER = NOFORN=Yes (and not DPAS DO/DX)
-//   DEFAULT = neither flag set
+// Compute warning tier based on the project's CUI flag:
+//   RED     = this project is flagged CUI (info.cui === 'Yes')
+//   DEFAULT = not flagged CUI
 // This drives both the banner shown in the email modal and the audit log.
+// Note: the amber tier was removed when NOFORN was consolidated into CUI.
+// The DPAS field is intentionally NOT consulted — DPAS is a scheduling/priority
+// rating, not an information-sensitivity flag.
 function _computeEmailWarningTier(projId) {
   const info = projectInfo[projId] || {};
-  const dpas = (info.dpas || '').toUpperCase();
-  const noforn = (info.noforn || '').toLowerCase() === 'yes';
-  if (dpas === 'DO' || dpas === 'DX') return 'red';
-  if (noforn) return 'amber';
-  return 'default';
+  const cui = (info.cui || '').toLowerCase() === 'yes';
+  return cui ? 'red' : 'default';
 }
 
 // Build the warning banner HTML for a given tier.
 function _renderEmailWarningBanner(projId, tier) {
-  const info = projectInfo[projId] || {};
   if (tier === 'red') {
-    const flags = [];
-    if ((info.dpas||'').toUpperCase() === 'DO' || (info.dpas||'').toUpperCase() === 'DX') {
-      flags.push('DPAS ' + info.dpas.toUpperCase());
-    }
-    if ((info.noforn||'').toLowerCase() === 'yes') flags.push('NOFORN');
     return `<div style="background:rgba(208,64,64,0.08);border:1.5px solid rgba(208,64,64,0.5);border-radius:8px;padding:12px 14px">
       <div style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--red);margin-bottom:6px">
-        🛑 This project is flagged ${flags.join(' + ')}
+        🛑 This project is flagged CUI
       </div>
       <div style="font-size:12px;color:var(--text);line-height:1.5;margin-bottom:10px">
-        External email is not appropriate for CUI, ITAR-controlled technical data, or NOFORN content. Use <strong>Synology C2 Transfer</strong> for any communication containing this project's technical data, test results, drawings, or specs. General scheduling/logistics email is still fine.
+        External email is not appropriate for CUI, ITAR-controlled technical data, or export-restricted content. Use <strong>Synology C2 Transfer</strong> for any communication containing this project's technical data, test results, drawings, or specs. General scheduling/logistics email is still fine.
       </div>
       <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px;color:var(--text);line-height:1.4">
         <input type="checkbox" id="emailWarnAckCheckbox" onchange="onEmailWarningAckChange()" style="margin:2px 0 0 0;flex-shrink:0">
-        <span>I confirm this email contains <strong>no CUI, ITAR-controlled technical data, or NOFORN content</strong>.</span>
+        <span>I confirm this email contains <strong>no CUI, ITAR-controlled technical data, or export-restricted content</strong>.</span>
       </label>
-    </div>`;
-  }
-  if (tier === 'amber') {
-    return `<div style="background:var(--amber-glow);border:1.5px solid var(--amber-dim);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text);line-height:1.5">
-      <span style="color:var(--amber);font-weight:700">⚠ This project is flagged NOFORN</span> — do not send foreign-national-restricted content by email. Use <strong>Synology C2 Transfer</strong> for any NOFORN material.
     </div>`;
   }
   // default
   return `<div style="font-size:11.5px;color:var(--muted);padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;line-height:1.4">
-    ⚠ <strong style="color:var(--text)">Before you send:</strong> CUI, ITAR-controlled technical data, or NOFORN content must use <strong>Synology C2 Transfer</strong>, not this email.
+    ⚠ <strong style="color:var(--text)">Before you send:</strong> CUI, ITAR-controlled technical data, or export-restricted content must use <strong>Synology C2 Transfer</strong>, not this email.
   </div>`;
 }
 
@@ -3767,7 +3755,7 @@ function onEmailWarningAckChange() {
     btn.disabled = true;
     btn.style.opacity = '0.45';
     btn.style.cursor = 'not-allowed';
-    btn.title = 'Confirm the CUI/ITAR/NOFORN acknowledgment above before sending';
+    btn.title = 'Confirm the CUI acknowledgment above before sending';
   } else {
     btn.disabled = false;
     btn.style.opacity = '1';
@@ -3957,7 +3945,7 @@ async function sendEmailContactModal() {
   const ackChk = document.getElementById('emailWarnAckCheckbox');
   const warningAck = (warningTier === 'red') ? !!(ackChk && ackChk.checked) : null;
   if (warningTier === 'red' && !warningAck) {
-    toast('⚠ Confirm the CUI/ITAR/NOFORN acknowledgment above');
+    toast('⚠ Confirm the CUI acknowledgment above');
     return;
   }
 

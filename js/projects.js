@@ -64,7 +64,7 @@ const PROJ_COL_DEFS = [
   { key: 'tpApproval',    label: 'TP Approval',          ptc: 'tpappr',   default: false, width: '100px',
     colorRule: ynCnfColor },
   { key: 'dpas',          label: 'DPAS',                 ptc: 'dpas',     default: false, width: '70px'  },
-  { key: 'noforn',        label: 'NOFORN',               ptc: 'noforn',   default: false, width: '80px'  },
+  { key: 'cui',           label: 'CUI',                  ptc: 'cui',      default: false, width: '80px'  },
   { key: 'creditHold',    label: 'Credit Hold',          ptc: 'credit',   default: false, width: '90px'  },
   { key: 'needPo',        label: 'Need PO',              ptc: 'needpo',   default: false, width: '110px' },
   { key: 'contact',       label: 'Contact',              ptc: 'contact',  default: false, width: '130px' },
@@ -241,7 +241,7 @@ function renderProjectsTable() {
     else if (projSortCol === 'witness')       { va = ia.customerWitness||''; vb = ib.customerWitness||''; }
     else if (projSortCol === 'tpApproval')    { va = ia.tpApproval||''; vb = ib.tpApproval||''; }
     else if (projSortCol === 'dpas')          { va = ia.dpas||''; vb = ib.dpas||''; }
-    else if (projSortCol === 'noforn')        { va = ia.noforn||''; vb = ib.noforn||''; }
+    else if (projSortCol === 'cui')           { va = ia.cui||'';    vb = ib.cui||''; }
     else if (projSortCol === 'creditHold')    { va = String(ia.creditHold||false); vb = String(ib.creditHold||false); }
     else if (projSortCol === 'needPo')        { va = String(ia.needUpdatedPo||false); vb = String(ib.needUpdatedPo||false); }
     else if (projSortCol === 'contact')       { va = ia.clientContact||''; vb = ib.clientContact||''; }
@@ -417,8 +417,8 @@ function renderProjectsTable() {
       rawValue = info.tpApproval;
     } else if (c.key === 'dpas') {
       val = `<span style="font-size:11px;color:var(--muted)">${info.dpas||'—'}</span>`;
-    } else if (c.key === 'noforn') {
-      val = `<span style="font-size:11px;color:var(--muted)">${info.noforn||'—'}</span>`;
+    } else if (c.key === 'cui') {
+      val = `<span style="font-size:11px;color:var(--muted)">${info.cui||'—'}</span>`;
     } else if (c.key === 'creditHold') {
       val = info.creditHold
         ? `<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;background:rgba(208,64,64,0.15);color:var(--red)">YES</span>`
@@ -504,22 +504,15 @@ function renderProjectsTable() {
           }).join('')}
         </tr>
         <tr id="projColFilterRow" class="proj-col-filter-row">
-          ${(() => {
-            // Helper: build input wrapped with a clear-button that appears when value is non-empty.
-            // Uses CSS ~ sibling selector driven by [data-filled] attribute which is maintained
-            // by setProjColFilter/clearProjColFilter, so no JS needed to show/hide the X.
-            const mkFilterCell = (field) =>
-              '<th style="padding:4px 6px"><div class="proj-col-filter-wrap">' +
-                '<input class="proj-col-filter-input" data-field="' + field + '" placeholder="🔍" oninput="setProjColFilter(this)">' +
-                '<button type="button" class="proj-col-filter-clear" tabindex="-1" title="Clear filter" onclick="clearProjColFilter(\'' + field + '\')">&times;</button>' +
-              '</div></th>';
-            let html = mkFilterCell('name') + mkFilterCell('status') + mkFilterCell('client');
-            const unfilterable = new Set(['expected','billed','hours','remaining','inHouse','creditHold','needPo','dpas','noforn','testcomplete','tentativeTest']);
-            visibleOptCols.forEach(c => {
-              html += unfilterable.has(c.key) ? '<th></th>' : mkFilterCell(c.key);
-            });
-            return html;
-          })()}
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="name" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="status" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          <th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="client" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>
+          ${visibleOptCols.map(c => {
+            // Columns that don't make sense to filter get an empty cell
+            const unfilterable = new Set(['expected','billed','hours','remaining','inHouse','creditHold','needPo','dpas','cui','testcomplete','tentativeTest']);
+            if (unfilterable.has(c.key)) return '<th></th>';
+            return '<th style="padding:4px 6px"><input class="proj-col-filter-input" data-field="'+c.key+'" placeholder="🔍" oninput="setProjColFilter(this)" style="width:100%"></th>';
+          }).join('')}
         </tr>
       </thead>
       <tbody>${rows}</tbody>
@@ -533,8 +526,6 @@ function renderProjectsTable() {
         inp.value = val;
         inp.style.borderColor = 'var(--amber-dim)';
         inp.style.background = 'rgba(192,122,26,0.08)';
-        const wrap = inp.closest('.proj-col-filter-wrap');
-        if (wrap) wrap.dataset.filled = '1';
       }
     });
   }, 0);
@@ -628,23 +619,9 @@ function setProjColFilter(input) {
   // Highlight active filter inputs
   input.style.borderColor = val.trim() ? 'var(--amber-dim)' : '';
   input.style.background  = val.trim() ? 'rgba(192,122,26,0.08)' : '';
-  // Toggle wrapper filled state so the × clear button shows/hides via CSS
-  const wrap = input.closest('.proj-col-filter-wrap');
-  if (wrap) {
-    if (val.trim()) wrap.dataset.filled = '1';
-    else delete wrap.dataset.filled;
-  }
   // Apply filter to existing rows without full re-render
   _applyProjColFiltersToDOM();
   renderSavedFiltersBar();
-}
-
-function clearProjColFilter(field) {
-  const inp = document.querySelector('.proj-col-filter-input[data-field="' + field + '"]');
-  if (!inp) return;
-  inp.value = '';
-  setProjColFilter(inp);
-  inp.focus();
 }
 
 function _applyProjColFiltersToDOM() {
@@ -1239,7 +1216,7 @@ async function saveProject() {
   projectInfo[saved.id] = { pm:'', po:'', contract:'', phase:'Waiting on TP Approval', status:'jobprep',
     startDate: today, endDate: '', tentativeTestDate: '', client:'', clientContact:'', clientEmail:'',
     clientPhone:'', billingType:'Fixed Fee', invoiced:'', remaining:'', notes:'', desc,
-    dcas:'', customerWitness:'', tpApproval:'', dpas:'', noforn:'', testDesc:'', testArticleDesc:'', quoteNumber:'' };
+    dcas:'', customerWitness:'', tpApproval:'', dpas:'', cui:'', testDesc:'', testArticleDesc:'', quoteNumber:'' };
   renderProjectNav(); rebuildProjDropdown();
   closeProjectModal();
   toast(pEmoji + ' "' + name + '" created');

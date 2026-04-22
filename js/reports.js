@@ -1488,7 +1488,7 @@ async function loadClosedProjects(el) {
           billingType: r.billing_type||'Fixed Fee', invoiced: r.invoiced||'',
           remaining: r.remaining||'', notes: r.notes||'', desc: r.description||'',
           dcas: r.dcas||'', customerWitness: r.customer_witness||'', tpApproval: r.tp_approval||'',
-          dpas: r.dpas||'', noforn: r.noforn||'', quoteNumber: r.quote_number||'',
+          dpas: r.dpas||'', cui: r.cui||'', quoteNumber: r.quote_number||'',
           creditHold: r.credit_hold||false, needUpdatedPo: r.need_updated_po||false,
           testcompleteDate: r.testcomplete_date||'',
           testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'',
