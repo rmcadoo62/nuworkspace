@@ -197,8 +197,7 @@ function renderInfoSheet(projId) {
           </div>
           <div class="info-field">
             <div class="info-field-label">Contact Person</div>
-            <div style="display:flex;align-items:stretch;gap:4px">
-            <div class="client-picker-wrap" id="contactPickerWrap" style="flex:1;min-width:0">
+            <div class="client-picker-wrap" id="contactPickerWrap">
               ${(()=>{
                 const ct = contactStore.find(c => c.id === info.contactId);
                 const nm = ct ? ct.firstName+' '+ct.lastName : (info.clientContact || '<span style="color:var(--border)">—</span>');
@@ -216,21 +215,6 @@ function renderInfoSheet(projId) {
                   <div class="client-picker-clear" onclick="clearContactPicker('${projId}')">&#x2715; Clear</div>
                 </div>`;
               })()}
-            </div>
-            ${(()=>{
-              const ct = contactStore.find(c => c.id === info.contactId);
-              const hasEmail = !!(ct && ct.email);
-              const title = hasEmail
-                ? 'Send email to ' + ct.firstName + ' ' + ct.lastName + ' (' + ct.email + ')'
-                : (ct ? 'Contact has no email address' : 'Select a contact first');
-              return `<button type="button" class="contact-email-btn"
-                ${hasEmail ? '' : 'disabled'}
-                title="${title}"
-                onclick="event.stopPropagation(); openEmailContactModal('${projId}')"
-                style="background:transparent;border:1px solid ${hasEmail?'var(--border)':'transparent'};border-radius:6px;padding:0 10px;cursor:${hasEmail?'pointer':'not-allowed'};color:${hasEmail?'var(--amber)':'var(--border)'};opacity:${hasEmail?'1':'0.4'};font-size:16px;line-height:1;transition:all var(--transition);display:flex;align-items:center;justify-content:center;min-height:28px"
-                onmouseover="if(!this.disabled){this.style.background='var(--amber-glow)';this.style.borderColor='var(--amber-dim)'}"
-                onmouseout="if(!this.disabled){this.style.background='transparent';this.style.borderColor='var(--border)'}">&#x2709;</button>`;
-            })()}
             </div>
           </div>
           ${dateField('Created Date', fmtDate(info.startDate), 'startDate')}
@@ -2937,6 +2921,22 @@ function renderProjStickyHeader(projId) {
       '<div class="credit-hold-checkbox-wrap" onclick="toggleCreditHold(\''+projId+'\')"><span>Credit Hold</span></div>')+
     (info.needUpdatedPo ? '<div class="need-po-checkbox-wrap active" onclick="toggleNeedUpdatedPo(\''+projId+'\')" ><span>⚠ Need Updated PO</span></div>' :
       '<div class="need-po-checkbox-wrap" onclick="toggleNeedUpdatedPo(\''+projId+'\')" ><span>Need Updated PO</span></div>')+
+    (()=>{
+      // Email Contact button — enabled only if the project has a client with
+      // at least one contact that has an email address. Sends use a modal
+      // with a contact picker scoped to the client's contacts.
+      const clientContacts = info.clientId ? contactStore.filter(c => c.clientId === info.clientId) : [];
+      const sendable = clientContacts.filter(c => c.email && c.email.trim());
+      const enabled = sendable.length > 0;
+      const tip = enabled
+        ? 'Email a contact at ' + (info.client || 'this client')
+        : (info.clientId
+            ? (clientContacts.length ? 'No contacts at this client have an email address' : 'This client has no contacts yet')
+            : 'Set a client on this project first');
+      return '<div class="email-contact-btn'+(enabled?'':' disabled')+'" title="'+tip.replace(/"/g,'&quot;')+'" '
+        + (enabled ? 'onclick="openEmailContactModal(\''+projId+'\')"' : '')
+        + '><span>&#x2709; Email Contact</span></div>';
+    })()+
     '<div style="margin-left:auto;display:flex;gap:6px;flex-shrink:0">'+
     
     '<button class="info-edit-btn" onclick="confirmDeleteProject(\x27'+projId+'\x27)" style="color:var(--red);border-color:rgba(208,64,64,0.3)">&#x1F5D1; Delete</button>'+
@@ -3609,20 +3609,34 @@ async function renderActivityPanel(projId) {
 
 // ===== EMAIL CONTACT MODAL =====
 // ===== EMAIL CONTACT MODAL =====
-// Lets a user send an email to the project's contact using a template
-// from Setup → Templates → Other Templates → Email Templates.
+// Lets a user send an email to any contact at the project's client,
+// using a template from Setup → Templates → Other Templates → Email Templates.
+// Default recipient = project's saved Contact Person (if it has an email),
+// but user can swap to any other contact at the same client.
 let _emailModalProjId = null;
+let _emailModalContactId = null; // currently-selected recipient
 
 async function openEmailContactModal(projId) {
   _emailModalProjId = projId;
   const info = projectInfo[projId] || {};
-  const proj = projects.find(p => p.id === projId);
-  const ct = contactStore.find(c => c.id === info.contactId);
-  if (!ct || !ct.email) { toast('Contact has no email address'); return; }
+  if (!info.clientId) { toast('⚠ Set a client on this project first'); return; }
+  const clientContacts = contactStore.filter(c => c.clientId === info.clientId);
+  const sendable = clientContacts.filter(c => c.email && c.email.trim());
+  if (!sendable.length) {
+    toast(clientContacts.length
+      ? '⚠ No contacts at this client have an email address'
+      : '⚠ This client has no contacts yet');
+    return;
+  }
   if (!currentEmployee || !currentEmployee.email) {
     toast('⚠ Your employee profile has no email address. Contact admin.');
     return;
   }
+
+  // Default to project's Contact Person if it has an email; else first sendable contact
+  const defaultCt = (info.contactId && sendable.find(c => c.id === info.contactId))
+    || sendable[0];
+  _emailModalContactId = defaultCt.id;
 
   // Lazy-load templates if not yet initialized
   try {
@@ -3642,7 +3656,7 @@ async function openEmailContactModal(projId) {
     <div id="emailContactModal" class="modal-backdrop" onclick="if(event.target===this) closeEmailContactModal()">
       <div class="modal" style="width:90%;max-width:720px;max-height:90vh;display:flex;flex-direction:column;">
         <div class="modal-header">
-          <div class="modal-title">&#x1F4E7; Email Contact</div>
+          <div class="modal-title">&#x2709; Email Contact</div>
           <button class="modal-close" onclick="closeEmailContactModal()">&#x2715;</button>
         </div>
         <div class="modal-body" id="emailContactBody" style="flex:1;overflow-y:auto;padding:20px 24px"></div>
@@ -3650,7 +3664,7 @@ async function openEmailContactModal(projId) {
           <button onclick="closeEmailContactModal()"
             style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:8px 16px;font-size:13px;cursor:pointer;color:var(--muted);font-family:'DM Sans',sans-serif">Cancel</button>
           <button id="emailContactSendBtn" onclick="sendEmailContactModal()"
-            style="background:var(--amber);color:var(--bg);border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">&#x1F4E4; Send Email</button>
+            style="background:var(--amber);color:var(--bg);border:none;border-radius:6px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">&#x2709; Send Email</button>
         </div>
       </div>
     </div>`;
@@ -3661,15 +3675,67 @@ async function openEmailContactModal(projId) {
   document.getElementById('emailContactModal').classList.add('open');
 }
 
+// Called when user picks a different recipient from the dropdown.
+// Re-applies the currently-selected template with the new contact's variables.
+function onEmailRecipientChange(contactId) {
+  _emailModalContactId = contactId;
+  // Update the To line in the summary box
+  const ct = contactStore.find(c => c.id === contactId) || {};
+  const toLineEl = document.getElementById('emailToLine');
+  if (toLineEl) {
+    const nm = ((ct.firstName||'') + ' ' + (ct.lastName||'')).trim();
+    toLineEl.textContent = nm + ' <' + (ct.email||'') + '>';
+  }
+  // Re-apply the current template so {{contactFirstName}} etc. get updated
+  const tmplSelect = document.getElementById('emailTemplateSelect');
+  if (tmplSelect && tmplSelect.value) {
+    applyEmailTemplate(tmplSelect.value);
+  }
+}
+
+// Close email modal and launch the Add-Contact modal for this client.
+// Uses the existing _afterContactSaveProjId hook so after the user saves
+// the new contact, the email modal re-opens automatically.
+function openAddContactFromEmailModal() {
+  const projId = _emailModalProjId;
+  const info = projectInfo[projId] || {};
+  if (!info.clientId) { toast('⚠ Set a client first'); return; }
+  closeEmailContactModal();
+  // After contact save, this hook re-opens the email modal
+  window._afterContactSaveProjId = projId;
+  window._afterContactSaveReopenEmail = true;
+  if (typeof openContactModal === 'function') {
+    openContactModal(null, info.clientId);
+  } else {
+    toast('⚠ Add-contact unavailable');
+  }
+}
+
 function renderEmailContactModalBody(emailTemplates) {
   const projId = _emailModalProjId;
   const info = projectInfo[projId] || {};
   const proj = projects.find(p => p.id === projId) || {};
-  const ct = contactStore.find(c => c.id === info.contactId) || {};
-  const cl = clientStore.find(c => c.id === info.clientId);
 
-  const toLine = (ct.firstName||'') + ' ' + (ct.lastName||'') + ' <' + ct.email + '>';
+  // Contacts scoped to this project's client, filtered to those with emails
+  const clientContacts = info.clientId
+    ? contactStore.filter(c => c.clientId === info.clientId && c.email && c.email.trim())
+    : [];
+  // Sort: default contact first, then alpha
+  clientContacts.sort((a,b) => {
+    if (a.id === _emailModalContactId) return -1;
+    if (b.id === _emailModalContactId) return 1;
+    return ((a.firstName||'')+(a.lastName||'')).localeCompare((b.firstName||'')+(b.lastName||''));
+  });
+
+  const selectedCt = contactStore.find(c => c.id === _emailModalContactId) || clientContacts[0] || {};
+  const toLine = ((selectedCt.firstName||'') + ' ' + (selectedCt.lastName||'')).trim() + ' <' + (selectedCt.email||'') + '>';
   const fromLine = (currentEmployee.name||'') + ' <' + currentEmployee.email + '>';
+
+  const recipOpts = clientContacts.map(c => {
+    const nm = ((c.firstName||'') + ' ' + (c.lastName||'')).trim();
+    const sel = (c.id === _emailModalContactId) ? 'selected' : '';
+    return `<option value="${c.id}" ${sel}>${nm.replace(/</g,'&lt;')} — ${(c.email||'').replace(/</g,'&lt;')}</option>`;
+  }).join('');
 
   const templateOpts = emailTemplates.length
     ? emailTemplates.map((t,i) =>
@@ -3684,7 +3750,19 @@ function renderEmailContactModalBody(emailTemplates) {
         <div style="color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.5px">From</div>
         <div style="color:var(--text)">${fromLine.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
         <div style="color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.5px">To</div>
-        <div style="color:var(--text)">${toLine.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        <div style="color:var(--text)" id="emailToLine">${toLine.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+      </div>
+
+      <div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
+          <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Recipient (${info.client || 'client'} contacts)</div>
+          <button type="button" onclick="openAddContactFromEmailModal()"
+            style="background:transparent;border:1px dashed var(--amber-dim);border-radius:5px;padding:3px 10px;font-size:11px;color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif">+ Add new contact</button>
+        </div>
+        <select id="emailRecipientSelect" onchange="onEmailRecipientChange(this.value)"
+          style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none">
+          ${recipOpts}
+        </select>
       </div>
 
       <div>
@@ -3713,7 +3791,7 @@ function renderEmailContactModalBody(emailTemplates) {
       </label>
 
       <div style="font-size:11px;color:var(--muted);padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;line-height:1.5">
-        <strong style="color:var(--text)">Available variables</strong> (edit subject/body freely, these auto-fill when you select a template):
+        <strong style="color:var(--text)">Available variables</strong> (switching template or recipient re-applies variables and clears manual edits):
         <code style="font-family:'JetBrains Mono',monospace;font-size:10.5px">{{contactFirstName}} {{contactLastName}} {{contactFullName}} {{contactEmail}} {{clientName}} {{projectName}} {{po}} {{quoteNumber}} {{testCompleteDate}} {{tentativeTestDate}} {{senderName}} {{senderEmail}}</code>
       </div>
     </div>
@@ -3732,7 +3810,7 @@ function emailTemplateVarMap() {
   const projId = _emailModalProjId;
   const info = projectInfo[projId] || {};
   const proj = projects.find(p => p.id === projId) || {};
-  const ct = contactStore.find(c => c.id === info.contactId) || {};
+  const ct = contactStore.find(c => c.id === _emailModalContactId) || {};
   const cl = clientStore.find(c => c.id === info.clientId);
   const fmt = v => {
     if (!v) return '';
@@ -3778,6 +3856,7 @@ function closeEmailContactModal() {
   const m = document.getElementById('emailContactModal');
   if (m) m.classList.remove('open');
   _emailModalProjId = null;
+  _emailModalContactId = null;
 }
 
 async function sendEmailContactModal() {
@@ -3785,8 +3864,11 @@ async function sendEmailContactModal() {
   if (!projId) return;
   const info = projectInfo[projId] || {};
   const proj = projects.find(p => p.id === projId) || {};
-  const ct = contactStore.find(c => c.id === info.contactId);
-  if (!ct || !ct.email) { toast('Contact has no email address'); return; }
+  // Read the currently-selected recipient from the dropdown (falls back to modal state)
+  const recipSelect = document.getElementById('emailRecipientSelect');
+  const selectedContactId = (recipSelect && recipSelect.value) || _emailModalContactId;
+  const ct = contactStore.find(c => c.id === selectedContactId);
+  if (!ct || !ct.email) { toast('⚠ Pick a recipient with an email address'); return; }
   if (!currentEmployee || !currentEmployee.email) { toast('⚠ Your employee profile has no email'); return; }
 
   const subject = (document.getElementById('emailSubjectInput').value || '').trim();

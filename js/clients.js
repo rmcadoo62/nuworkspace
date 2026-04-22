@@ -787,10 +787,18 @@ async function saveContactRecord(id, clientId, firstName, lastName, email, phone
   // Refresh project contact picker if we were adding from a project
   if (window._afterContactSaveProjId) {
     const _pid = window._afterContactSaveProjId;
+    const _reopenEmail = window._afterContactSaveReopenEmail;
     window._afterContactSaveProjId = null;
-    renderContactPickerList(_pid, '');
-    const dd = document.getElementById('contactPickerDropdown');
-    if (dd) dd.style.display = 'block';
+    window._afterContactSaveReopenEmail = false;
+    // If this add-contact came from the Email Contact modal, re-open that modal
+    // (and don't bother refreshing the contact picker dropdown, which isn't visible).
+    if (_reopenEmail && typeof openEmailContactModal === 'function') {
+      openEmailContactModal(_pid);
+    } else {
+      renderContactPickerList(_pid, '');
+      const dd = document.getElementById('contactPickerDropdown');
+      if (dd) dd.style.display = 'block';
+    }
   }
 }
 
