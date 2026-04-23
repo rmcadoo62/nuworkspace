@@ -503,7 +503,19 @@ function renderTimesheet() {
     };
     const DONE = ['complete','billed','cancelled'];
 
-    const allTasks = taskStore.filter(t => t.proj === projId);
+    // Collect task_ids already picked on OTHER rows in this project for this week.
+    // Hiding them from this row's dropdown prevents the user from accidentally
+    // selecting the same task twice (which used to silently fail to save).
+    // The current row's own task stays visible so the selected value renders.
+    const usedTaskIds = new Set();
+    (tsData[key]||[]).forEach(otherRow => {
+      if (otherRow === row) return;
+      if (otherRow.isOverhead) return;
+      if (otherRow.projId !== projId) return;
+      if (otherRow.taskId) usedTaskIds.add(otherRow.taskId);
+    });
+
+    const allTasks = taskStore.filter(t => t.proj === projId && !usedTaskIds.has(t._id));
     const active = allTasks.filter(t => !DONE.includes(t.status||'new'))
       .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
     const done = allTasks.filter(t => DONE.includes(t.status))
@@ -688,15 +700,21 @@ function renderTimesheet() {
       ${fmtDay(d)}<span class="day-num">${d.getDate()}</span>
     </th>`).join('');
 
-  // Build proxy employee bar (for approvers entering on behalf)
-  // Only paper-TS employees assigned to the CURRENT user as their approver —
-  // non-approvers should never see the proxy dropdown.
+  // Build proxy employee bar (for approvers + engineers entering on behalf)
+  // Approvers see their own paper-TS reports. Engineers see all paper-TS employees
+  // (Scott is the only one currently — he consults on Robert Hoff's timesheet before
+  // submission). Non-approvers who aren't engineers see nothing.
+  const _role = (currentEmployee?.role || '').toLowerCase();
+  const isEngineer = _role.includes('engineer');
   const paperEmps = employees.filter(e => {
     if (!currentEmployee) return false;
     if (e.id === currentEmployee.id) return false;
     const isPaper = e.isPaperTs === true || e.isPaperTs === 1 || e.is_paper_ts === true;
     if (!isPaper) return false;
-    return e.approverId === currentEmployee.id;
+    // Approver sees only their own reports; engineer sees all paper-TS employees.
+    if (isApprover && e.approverId === currentEmployee.id) return true;
+    if (isEngineer) return true;
+    return false;
   });
   const showProxy = paperEmps.length > 0;
   const proxyBar = showProxy ?
