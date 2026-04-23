@@ -76,7 +76,15 @@ async function loadAllData() {
         // because Postgres is free to return rows in any order between pages.
         q = q.order(orderCol || 'id', { ascending: true });
         if (filterFn) q = filterFn(q);
-        const { data } = await q;
+        const { data, error } = await q;
+        if (error) {
+          // Previously errors were silently discarded, which is how an expired
+          // JWT overnight caused every table to load as [] and the app to look
+          // completely blank until Ctrl+Shift+R. Throwing here lets the startup
+          // catch block show a real error instead of a blank screen.
+          console.error('[loadAllData] ' + table + ' query failed:', error);
+          throw new Error('Load failed for ' + table + ': ' + (error.message||'unknown'));
+        }
         if (!data || data.length === 0) break;
         rows = rows.concat(data);
         if (data.length < 1000) break;

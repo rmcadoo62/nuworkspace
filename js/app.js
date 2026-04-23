@@ -146,9 +146,49 @@ function confirmDeleteTask() {
     // Previously loadAllData() ran before the session check, so an expired token
     // caused Supabase RLS to silently return empty data, leaving the app blank
     // until a hard refresh (Ctrl+Shift+R).
-    const { data: { session } } = await sb.auth.getSession();
+    //
+    // IMPORTANT: sb.auth.getSession() only reads the session from localStorage —
+    // it does NOT validate the token against the server. When the tab has been
+    // suspended overnight, the access token is typically expired but the library
+    // hasn't yet noticed (autoRefreshToken timer didn't fire while suspended).
+    // So the session "looks valid" here, but the very next query fails with
+    // JWT expired, data comes back null, and the app renders blank.
+    //
+    // Fix: if the access token is already expired or within 60s of expiring,
+    // force a refresh BEFORE loading data. That closes the morning-blank-app bug.
+    let { data: { session } } = await sb.auth.getSession();
+    if (session && session.expires_at) {
+      const msUntilExpiry = (session.expires_at * 1000) - Date.now();
+      if (msUntilExpiry < 60000) {
+        console.log('[startup] Access token expired or expiring soon, refreshing before data load');
+        const { data: refreshed, error: refreshErr } = await sb.auth.refreshSession();
+        if (refreshErr) {
+          // Refresh token itself is dead (user was away too long). Clean logout.
+          console.error('[startup] Session refresh failed:', refreshErr);
+          await sb.auth.signOut().catch(()=>{});
+          document.getElementById('appShell').style.display = 'none';
+          document.getElementById('loginScreen').style.display = 'flex';
+          showAppLoader(false);
+          return;
+        }
+        session = refreshed.session;
+      }
+    }
+
     if (session?.user) {
-      await loadAllData(); // load data with confirmed valid session
+      try {
+        await loadAllData(); // load data with confirmed valid session
+      } catch (loadErr) {
+        // Load failed AFTER a valid session — not a config problem, so don't
+        // drop the user to the admin setup screen. This is the failure mode
+        // that used to render an empty app; now we surface it clearly.
+        console.error('[startup] Initial data load failed:', loadErr);
+        showAppLoader(false);
+        const msg = 'Data failed to load: ' + (loadErr.message || 'unknown error') +
+                    '\n\nThis is usually fixed by reloading. Reload now?';
+        if (confirm(msg)) window.location.reload();
+        return;
+      }
       setTimeout(()=>{ if(typeof ittSetW==='function') ittSetW(ittGetW()); },200);
       await afterLogin(session.user);
       if (typeof initRouter === 'function') initRouter();
