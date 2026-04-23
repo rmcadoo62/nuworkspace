@@ -689,14 +689,16 @@ function renderTimesheet() {
     </th>`).join('');
 
   // Build proxy employee bar (for approvers entering on behalf)
-  // Paper employees: those flagged isPaperTs, OR those whose approverId matches current employee
+  // Only paper-TS employees assigned to the CURRENT user as their approver —
+  // non-approvers should never see the proxy dropdown.
   const paperEmps = employees.filter(e => {
     if (!currentEmployee) return false;
     if (e.id === currentEmployee.id) return false;
-    return e.isPaperTs === true || e.isPaperTs === 1 || e.is_paper_ts === true;
+    const isPaper = e.isPaperTs === true || e.isPaperTs === 1 || e.is_paper_ts === true;
+    if (!isPaper) return false;
+    return e.approverId === currentEmployee.id;
   });
-  // Show proxy bar if current user is approver/manager OR if there are paper employees assigned to them
-  const showProxy = (isApprover || paperEmps.length > 0) && paperEmps.length > 0;
+  const showProxy = paperEmps.length > 0;
   const proxyBar = showProxy ?
     '<div class="ts-proxy-bar">'+
       '<span class="ts-proxy-label">&#x1F4CB; Entering timesheet for:</span>'+

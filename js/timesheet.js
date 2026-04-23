@@ -201,36 +201,64 @@ async function autoApproveProxyTimesheet() {
   const weekDateAA = key.includes('|') ? key.split('|')[1] : key;
 
   // DELETE existing entries then INSERT fresh — avoids duplicate rows
-  await sb.from('timesheet_entries')
+  const { error: aaDelErr } = await sb.from('timesheet_entries')
     .delete()
     .eq('employee_id', emp.id)
     .eq('week_start', weekDateAA);
+  if (aaDelErr) {
+    console.error('[autoApprove] DELETE failed:', aaDelErr);
+    toast('⚠ Delete failed — aborting approval: ' + (aaDelErr.message||''));
+    return;
+  }
 
-  // INSERT project rows
+  const aaFailed = [];
+
+  // UPSERT project rows (project_id + task_id both non-null → unique constraint applies)
   for (const row of rows) {
+    if (row.isOverhead) continue; // overhead handled below
     const hasHours = Object.values(row.hours).some(h=>h>0);
     if (!hasHours) continue;
-    await sb.from('timesheet_entries').insert({
-      week_start: weekDateAA, project_id: row.isOverhead ? null : (row.projId||null),
-      task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName||null),
-      task_id: row.isOverhead ? null : (row.taskId||null),
+    const aaPayload = {
+      week_start: weekDateAA, project_id: row.projId||null,
+      task_name: row.taskName||null,
+      task_id: row.taskId||null,
       hours_json: JSON.stringify(row.hours),
       employee_id: emp.id,
-      is_overhead: row.isOverhead||false, overhead_cat: row.overheadCat||null,
-    });
+      is_overhead: false, overhead_cat: null,
+    };
+    const { error: aaErr } = await sb.from('timesheet_entries')
+      .upsert(aaPayload, { onConflict: 'week_start,employee_id,task_id,project_id' });
+    if (aaErr) {
+      console.error('[autoApprove] UPSERT project-row failed:', { payload: aaPayload, error: aaErr });
+      aaFailed.push({ kind:'project', payload: aaPayload, error: aaErr });
+    }
   }
-  // INSERT overhead rows
+  // INSERT overhead rows (unique constraint doesn't apply — DELETE above clears priors)
   const ohData = tsData['oh_' + key] || {};
   for (const cat of OVERHEAD_CATS) {
     const hours = ohData[cat] || {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
     if (!Object.values(hours).some(h=>h>0)) continue;
-    await sb.from('timesheet_entries').insert({
+    const aaOhPayload = {
       week_start: weekDateAA, project_id: null,
       task_name: '⬡ ' + cat,
       hours_json: JSON.stringify(hours),
       employee_id: emp.id,
       is_overhead: true, overhead_cat: cat,
-    });
+    };
+    const { error: aaOhErr } = await sb.from('timesheet_entries').insert(aaOhPayload);
+    if (aaOhErr) {
+      console.error('[autoApprove] INSERT overhead-row failed:', { payload: aaOhPayload, error: aaOhErr });
+      aaFailed.push({ kind:'overhead', payload: aaOhPayload, error: aaOhErr });
+    }
+  }
+
+  // Don't mark the week as approved if rows failed — that'd lock a broken timesheet.
+  if (aaFailed.length > 0) {
+    const first = aaFailed[0];
+    const code = first.error?.code || '';
+    const msg  = first.error?.message || 'unknown error';
+    toast('⚠ ' + aaFailed.length + ' row(s) did NOT save — approval aborted · ' + code + ' ' + msg);
+    return;
   }
 
   // Upsert as approved directly
@@ -364,40 +392,94 @@ async function saveTsWeekToSupabase(key) {
   const empId = (empIdFromKey && empIdFromKey !== '__me__') ? empIdFromKey : currentEmployee?.id;
   if (!empId) return;
 
-  // DELETE all existing entries for this employee+week first, then INSERT fresh.
-  // This is the only reliable approach — upsert requires a unique DB constraint
-  // that may not exist, causing duplicate rows on every submit.
-  await sb.from('timesheet_entries')
+  // --- Dedupe tsData rows by (isOverhead, overheadCat, projId, taskId) ---
+  // The DB has a unique constraint `timesheet_entries_week_employee_task_project_unique`
+  // on (week_start, employee_id, task_id, project_id). If the in-memory tsData has two
+  // rows with the same key (e.g. user added the same task twice under a project group),
+  // the second INSERT would 409 and that row's hours would silently vanish on refresh.
+  // Merge hours + keep the first non-empty comment per day so no data is lost.
+  const rawRows = tsData[key] || [];
+  const dedupMap = new Map();
+  let dedupMerged = 0;
+  for (const row of rawRows) {
+    const k = row.isOverhead
+      ? 'OH|' + (row.overheadCat||'')
+      : 'PR|' + (row.projId||'') + '|' + (row.taskId||'');
+    if (!dedupMap.has(k)) {
+      dedupMap.set(k, {
+        ...row,
+        hours: { ...(row.hours||{}) },
+        comments: { ...(row.comments||{}) }
+      });
+    } else {
+      const ex = dedupMap.get(k);
+      for (let d = 0; d < 7; d++) {
+        ex.hours[d] = (ex.hours[d]||0) + ((row.hours||{})[d]||0);
+      }
+      if (row.comments) {
+        for (let d = 0; d < 7; d++) {
+          if (!ex.comments[d] && row.comments[d]) ex.comments[d] = row.comments[d];
+        }
+      }
+      dedupMerged++;
+    }
+  }
+  const rows = Array.from(dedupMap.values());
+  if (dedupMerged > 0) {
+    console.warn('[timesheet save] merged ' + dedupMerged + ' duplicate row(s) in tsData before save');
+  }
+
+  // DELETE all existing entries for this employee+week first, then UPSERT fresh.
+  // UPSERT (not INSERT) so that if the DELETE silently misses any row (e.g. RLS,
+  // timing), we UPDATE instead of colliding on the unique constraint.
+  const { error: delErr } = await sb.from('timesheet_entries')
     .delete()
     .eq('employee_id', empId)
     .eq('week_start', weekDate);
+  if (delErr) {
+    console.error('[timesheet save] DELETE failed for', empId, weekDate, delErr);
+    // Don't abort — upsert below is our safety net. Log and continue.
+  }
 
-  // INSERT project rows
-  const rows = tsData[key] || [];
+  // Track per-row failures so the UI can surface them instead of the old
+  // silent-failure behaviour that showed "✓ saved" while rows never landed.
+  const failed = [];
+
+  // UPSERT project rows (project_id + task_id both non-null → unique constraint applies)
   for (const row of rows) {
+    if (row.isOverhead) continue; // overhead handled below
     const hasHours = Object.values(row.hours).some(h=>h>0);
     if (!hasHours) continue;
-    const { data } = await sb.from('timesheet_entries').insert({
+    const payload = {
       week_start: weekDate,
       project_id: row.projId || null,
-      task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName || ''),
-      task_id: row.isOverhead ? null : (row.taskId || null),
+      task_name: row.taskName || '',
+      task_id: row.taskId || null,
       hours_json: JSON.stringify(row.hours),
       notes_json: row.comments ? JSON.stringify(row.comments) : null,
       employee_id: empId,
-      is_overhead: row.isOverhead || false,
-      overhead_cat: row.overheadCat || null
-    }).select().single();
+      is_overhead: false,
+      overhead_cat: null
+    };
+    const { data, error } = await sb.from('timesheet_entries')
+      .upsert(payload, { onConflict: 'week_start,employee_id,task_id,project_id' })
+      .select().single();
+    if (error) {
+      console.error('[timesheet save] UPSERT project-row failed:', { payload, error });
+      failed.push({ kind:'project', payload, error });
+      continue;
+    }
     if (data) row._id = data.id;
   }
 
-  // INSERT overhead rows
+  // INSERT overhead rows — overhead has project_id=null AND task_id=null, so the
+  // unique constraint on those columns doesn't apply. DELETE above clears prior rows.
   const ohData = tsData['oh_' + key] || {};
   for (const cat of OVERHEAD_CATS) {
     const hours = ohData[cat] || {0:0,1:0,2:0,3:0,4:0,5:0,6:0};
     if (!Object.values(hours).some(h=>h>0)) continue;
     const ohComments = (tsData['oh_comments_' + key] && tsData['oh_comments_' + key][cat]) || null;
-    await sb.from('timesheet_entries').insert({
+    const ohPayload = {
       week_start: weekDate,
       project_id: null,
       task_name: '⬡ ' + cat,
@@ -406,13 +488,29 @@ async function saveTsWeekToSupabase(key) {
       employee_id: empId,
       is_overhead: true,
       overhead_cat: cat
-    });
+    };
+    const { error: ohErr } = await sb.from('timesheet_entries').insert(ohPayload);
+    if (ohErr) {
+      console.error('[timesheet save] INSERT overhead-row failed:', { payload: ohPayload, error: ohErr });
+      failed.push({ kind:'overhead', payload: ohPayload, error: ohErr });
+    }
   }
 
   // Sync actual_hours on project_info
   const affectedProjIds = [...new Set((tsData[key]||[]).map(r => r.projId).filter(Boolean))];
   for (const projId of affectedProjIds) {
     if (typeof syncProjActualHours === 'function') await syncProjActualHours(projId);
+  }
+
+  // Surface silent failures — the original code swallowed every insert error,
+  // which is how rows could "disappear" on hard refresh (saved UX, no DB write).
+  if (failed.length > 0) {
+    const first = failed[0];
+    const code = first.error?.code || '';
+    const msg  = first.error?.message || 'unknown error';
+    const hint = first.error?.hint ? (' · hint: ' + first.error.hint) : '';
+    toast('⚠ ' + failed.length + ' row(s) did NOT save — ' + code + ' ' + msg + hint);
+    throw new Error('[timesheet] ' + failed.length + ' insert failure(s); first: ' + msg);
   }
 }
 
@@ -423,8 +521,14 @@ async function saveTsNow(key) {
     clearTimeout(_tsAutoSaveTimers[key]);
     delete _tsAutoSaveTimers[key];
   }
-  await saveTsWeekToSupabase(key);
-  toast('✅ Timesheet saved');
+  try {
+    await saveTsWeekToSupabase(key);
+    toast('✅ Timesheet saved');
+  } catch (e) {
+    // Error already logged + toasted inside saveTsWeekToSupabase.
+    // Suppress the misleading success toast so the user sees the real failure.
+    console.warn('[saveTsNow] save completed with errors — see earlier console output:', e?.message||e);
+  }
 }
 
 
@@ -738,31 +842,59 @@ async function saveAndApproveForEmployee() {
   toast('Saving…');
 
   // Delete existing entries and insert corrected ones
-  await sb.from('timesheet_entries').delete().eq('employee_id', empId).eq('week_start', weekKey);
+  const { error: saDelErr } = await sb.from('timesheet_entries').delete().eq('employee_id', empId).eq('week_start', weekKey);
+  if (saDelErr) {
+    console.error('[saveAndApprove] DELETE failed:', saDelErr);
+    toast('⚠ Delete failed — aborting: ' + (saDelErr.message||''));
+    return;
+  }
+
+  const saFailed = [];
 
   const rows = tsData[key] || [];
   for (const row of rows) {
+    if (row.isOverhead) continue; // overhead handled below
     if (!Object.values(row.hours).some(h=>h>0)) continue;
-    await sb.from('timesheet_entries').insert({
+    const saPayload = {
       week_start: weekKey,
       project_id: row.projId || null,
-      task_name: row.isOverhead ? ('⬡ ' + row.overheadCat) : (row.taskName || ''),
-      task_id: row.isOverhead ? null : (row.taskId || null),
+      task_name: row.taskName || '',
+      task_id: row.taskId || null,
       hours_json: JSON.stringify(row.hours),
       employee_id: empId,
-      is_overhead: row.isOverhead || false,
-      overhead_cat: row.overheadCat || null,
-    });
+      is_overhead: false,
+      overhead_cat: null,
+    };
+    const { error: saErr } = await sb.from('timesheet_entries')
+      .upsert(saPayload, { onConflict: 'week_start,employee_id,task_id,project_id' });
+    if (saErr) {
+      console.error('[saveAndApprove] UPSERT project-row failed:', { payload: saPayload, error: saErr });
+      saFailed.push({ kind:'project', payload: saPayload, error: saErr });
+    }
   }
   const ohData = tsData['oh_' + key] || {};
   for (const cat of OVERHEAD_CATS) {
     const hours = ohData[cat] || {};
     if (!Object.values(hours).some(h=>h>0)) continue;
-    await sb.from('timesheet_entries').insert({
+    const saOhPayload = {
       week_start: weekKey, project_id: null,
       task_name: '⬡ ' + cat, hours_json: JSON.stringify(hours),
       employee_id: empId, is_overhead: true, overhead_cat: cat,
-    });
+    };
+    const { error: saOhErr } = await sb.from('timesheet_entries').insert(saOhPayload);
+    if (saOhErr) {
+      console.error('[saveAndApprove] INSERT overhead-row failed:', { payload: saOhPayload, error: saOhErr });
+      saFailed.push({ kind:'overhead', payload: saOhPayload, error: saOhErr });
+    }
+  }
+
+  // Don't approve a broken timesheet — surface the errors and bail.
+  if (saFailed.length > 0) {
+    const first = saFailed[0];
+    const code = first.error?.code || '';
+    const msg  = first.error?.message || 'unknown error';
+    toast('⚠ ' + saFailed.length + ' row(s) did NOT save — approval aborted · ' + code + ' ' + msg);
+    return;
   }
 
   // Mark as approved
