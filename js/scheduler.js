@@ -1127,11 +1127,11 @@ function renderSched() {
     bar.addEventListener('mouseenter', e => showSchedTooltip(block, e));
     bar.addEventListener('mousemove',  e => moveSchedTooltip(e));
     bar.addEventListener('mouseleave', ()  => hideSchedTooltip());
-    if (!schedReadOnly) attachBarDrag(bar, block, rows, range, dayW);
+    if (!schedReadOnly) attachBarDrag(bar, block, rows, range, dayW, rowTops, rowHeights);
   });
 
   // ---- Click-drag to create new block ----
-  if (!schedReadOnly) attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week, is2Week, rangeStartStr);
+  if (!schedReadOnly) attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week, is2Week, rangeStartStr, rowTops, rowHeights);
 
   syncSchedScroll();
   renderSchedLegend();
@@ -1247,8 +1247,21 @@ function renderSchedStats() {
     bubble(nextMonthName, nextMonthBooked, nextMonthAvail, nextMonthPct);
 }
 
+// ---- Helper: resolve a canvas Y coordinate to a row index, honoring variable row heights ----
+// Rows can be taller than rowH when blocks stack in multiple lanes, or when a room
+// row has been custom-resized. Uniform-height math (Math.floor(y / rowH)) is wrong
+// any time a row above the cursor is taller than rowH, and the error accumulates.
+function yToRowIndex(y, rowTops, rowHeights) {
+  if (!rowTops || !rowTops.length) return 0;
+  if (y < 0) return 0;
+  for (let i = 0; i < rowTops.length; i++) {
+    if (y < rowTops[i] + rowHeights[i]) return i;
+  }
+  return rowTops.length - 1;
+}
+
 // ---- Canvas drag-to-create ----
-function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week, is2Week, rangeStartStr) {
+function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week, is2Week, rangeStartStr, rowTops, rowHeights) {
   let drag = null;
   let ghost = null;
 
@@ -1271,8 +1284,8 @@ function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week,
     const localX = e.clientX - containerRect.left + scrollLeft;
     const localY = e.clientY - containerRect.top  + scrollTop;
 
-    // Which row?
-    const ri = Math.floor(localY / rowH);
+    // Which row? Use variable-height lookup (accounts for stacked lanes and custom row heights)
+    const ri = yToRowIndex(localY, rowTops, rowHeights);
     if (ri < 0 || ri >= rows.length) return;
     const row = rows[ri];
     if (!row || row.section === 'divider') return;
@@ -1320,7 +1333,9 @@ function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week,
     // Calculate ghost bar position
     const x1 = Math.min(drag.startX, localX);
     const x2 = Math.max(drag.startX, localX);
-    const ri  = Math.floor(drag.startY / rowH);
+    const ri = yToRowIndex(drag.startY, rowTops, rowHeights);
+    const rTop = rowTops[ri] || 0;
+    const rH   = rowHeights[ri] || rowH;
 
     if (!ghost) {
       ghost = document.createElement('div');
@@ -1330,8 +1345,8 @@ function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week,
     }
     ghost.style.left   = x1 + 'px';
     ghost.style.width  = Math.max(x2 - x1, 4) + 'px';
-    ghost.style.top    = (ri * rowH + 4) + 'px';
-    ghost.style.height = (rowH - 8) + 'px';
+    ghost.style.top    = (rTop + 4) + 'px';
+    ghost.style.height = (rH - 8) + 'px';
   });
 
   const finishDrag = e => {
@@ -1369,7 +1384,7 @@ function attachCanvasCreateDrag(canvas, rows, range, dayW, hourW, rowH, is1Week,
 }
 
 // ---- Drag ----
-function attachBarDrag(bar, block, rows, range, dayW) {
+function attachBarDrag(bar, block, rows, range, dayW, rowTops, rowHeights) {
   let drag = null;
 
   bar.addEventListener('mousedown', e => {
@@ -1415,8 +1430,7 @@ function attachBarDrag(bar, block, rows, range, dayW) {
         const _csRowD = document.getElementById('schedCanvasScroll');
         const _crRowD = _csRowD ? _csRowD.getBoundingClientRect() : null;
         const currentCanvasY = _crRowD ? (e.clientY - _crRowD.top + (_csRowD ? _csRowD.scrollTop : 0)) : e.clientY;
-        const rowDelta = Math.floor((currentCanvasY - drag.startCanvasY + ROW_H_FIXED * 0.5) / ROW_H_FIXED);
-        let targetRi = drag.origRowIdx + rowDelta;
+        let targetRi = yToRowIndex(currentCanvasY, rowTops, rowHeights);
         targetRi = Math.max(0, Math.min(targetRi, rows.length - 1));
         while (targetRi < rows.length && rows[targetRi].section === 'divider') targetRi++;
         if (targetRi !== drag.lastRowIdx && targetRi < rows.length) {
@@ -1426,8 +1440,10 @@ function attachBarDrag(bar, block, rows, range, dayW) {
             drag.currentRowId = hoverRow.rowId;
             block.rowId = hoverRow.rowId;
             block.cat   = hoverRow.cat || hoverRow.rowId;
-            const barTop = schedZoom === '1week' ? 4 : Math.floor((ROW_H_FIXED - BAR_H_FIXED) / 2);
-            drag.bar.style.top = (targetRi * ROW_H_FIXED + barTop) + 'px';
+            const rTop = rowTops[targetRi] || 0;
+            const rH   = rowHeights[targetRi] || ROW_H_FIXED;
+            const barTop = schedZoom === '1week' ? 4 : Math.floor((rH - BAR_H_FIXED) / 2);
+            drag.bar.style.top = (rTop + barTop) + 'px';
             drag.bar.style.background = getCatColor(hoverRow.cat || hoverRow.rowId);
             drag.bar.style.boxShadow = '0 2px 8px ' + getCatColor(hoverRow.cat || hoverRow.rowId) + '66';
           }
@@ -1511,7 +1527,7 @@ function attachBarDrag(bar, block, rows, range, dayW) {
           if (_cv2) {
             const _cr2 = _cv2.getBoundingClientRect();
             const localY2 = e.clientY - _cr2.top + (_cs2 ? _cs2.scrollTop : 0);
-            const ri2 = Math.max(0, Math.min(Math.floor(localY2 / ROW_H_FIXED), rows.length - 1));
+            const ri2 = Math.max(0, Math.min(yToRowIndex(localY2, rowTops, rowHeights), rows.length - 1));
             const hoverRow2 = rows[ri2];
             if (hoverRow2 && hoverRow2.section !== 'divider') {
               block.rowId = hoverRow2.rowId;
@@ -1579,7 +1595,7 @@ function attachBarDrag(bar, block, rows, range, dayW) {
           if (_cv) {
             const _cr = _cv.getBoundingClientRect();
             const localY = e.clientY - _cr.top + (_cs ? _cs.scrollTop : 0);
-            const ri = Math.max(0, Math.min(Math.floor(localY / ROW_H_FIXED), rows.length - 1));
+            const ri = Math.max(0, Math.min(yToRowIndex(localY, rowTops, rowHeights), rows.length - 1));
             const hoverRow = rows[ri];
             if (hoverRow && hoverRow.section !== 'divider' && hoverRow.rowId !== drag.currentRowId) {
               drag.currentRowId = hoverRow.rowId;
@@ -1635,10 +1651,28 @@ function syncSchedScroll() {
   const cScroll = document.getElementById('schedCanvasScroll');
   const labels  = document.getElementById('schedRowLabels');
   if (!hScroll || !cScroll) return;
-  cScroll.onscroll = () => {
-    hScroll.scrollLeft = cScroll.scrollLeft;
-    labels.scrollTop   = cScroll.scrollTop;
+
+  // Two-way scroll sync between sidebar (labels) and main canvas.
+  // Guard prevents feedback loops: when we programmatically set scrollTop on
+  // one element, its onscroll fires async — the flag swallows that echo.
+  let _syncing = false;
+  const withSync = (fn) => {
+    if (_syncing) return;
+    _syncing = true;
+    fn();
+    requestAnimationFrame(() => { _syncing = false; });
   };
+
+  cScroll.onscroll = () => withSync(() => {
+    hScroll.scrollLeft = cScroll.scrollLeft;
+    if (labels) labels.scrollTop = cScroll.scrollTop;
+  });
+
+  if (labels) {
+    labels.onscroll = () => withSync(() => {
+      cScroll.scrollTop = labels.scrollTop;
+    });
+  }
   const range = getSchedRange();
   const dayW  = getEffectiveDayW(schedZoom, getSchedRange().days);
   const todayOff = diffDays(toDateStr(range.start), todayStr());
