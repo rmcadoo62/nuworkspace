@@ -7,6 +7,7 @@ let chatterMentionQuery = '';
 let chatterMentionActive = false;
 let chatterMentionSel = 0;
 let chatterReplyTo = null; // { id, authorName, text }
+let chatterEditingId = null; // id of message currently being edited (null = none)
 let chatterNotifySelected = []; // array of employee ids chosen in notify dropdown
 let notifStore = []; // { id, projId, projName, msgId, fromName, fromColor, fromInitials, text, ts, read }
 
@@ -76,26 +77,51 @@ function chatterMsgHtml(m, isReply) {
   const sameYear = d.getFullYear() === now.getFullYear();
   const timeStr = d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' }) +
     (sameYear ? '' : ', ' + d.getFullYear());
-  const textHtml = (m.text || '').replace(/\n/g,'<br>').replace(/@([\w][\w ]*?)(?=\s|$|<br>)/g, '<span class="mention">@$1</span>');
+  const isOwn = currentEmployee && (m.authorName === currentEmployee.name || m.authorId === currentUser?.id);
+  const isEditing = chatterEditingId === m.id;
+  const avatarClass = isReply ? 'chatter-reply-avatar' : 'chatter-msg-avatar';
+  const msgClass = isReply ? 'chatter-reply-msg' : 'chatter-msg';
+
+  // Attachments and notify chips render whether or not we're editing
   const attachHtml = m.attachments && m.attachments.length
     ? '<div class="chatter-msg-attachments">' + m.attachments.map(a =>
         '<div class="chatter-attach-chip" onclick="chatterOpenAttach(this)" data-url="' + (a.dataUrl||'') + '" data-name="' + a.name + '">\uD83D\uDCCE ' + a.name + ' <span style="color:var(--muted);font-size:10px">(' + a.size + ')</span></div>'
       ).join('') + '</div>' : '';
   const notifyHtml = m.notifyIds && m.notifyIds.length
     ? '<div style="font-size:11px;color:var(--muted);margin-top:3px">\uD83D\uDD14 ' + m.notifyIds.map(id => { const e = employees.find(x => x.id === id); return e ? '@'+e.name : ''; }).filter(Boolean).join(', ') + '</div>' : '';
-  const isOwn = currentEmployee && (m.authorName === currentEmployee.name || m.authorId === currentUser?.id);
-  const deleteBtn = isOwn && !isReply ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterDelete(\x27' + m.id + '\x27)">🗑 Delete</button>' : '';
-  const replyBtn = !isReply ? '<button class="chatter-action-btn" onclick="chatterStartReply(\x27' + m.id + '\x27,\x27' + (m.authorName||'').replace(/'/g,"\x27") + '\x27)">↩ Reply</button>' : '';
-  const avatarClass = isReply ? 'chatter-reply-avatar' : 'chatter-msg-avatar';
-  const msgClass = isReply ? 'chatter-reply-msg' : 'chatter-msg';
+
+  // Body: either editor (when editing) OR rendered text + actions
+  let bodyContent;
+  if (isEditing) {
+    // Raw text in a textarea so the user edits the source, not the styled HTML
+    const rawText = (m.text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    bodyContent =
+      '<textarea id="chatterEditArea_' + m.id + '" class="chatter-edit-area" ' +
+        'style="width:100%;min-height:60px;background:var(--surface2);color:var(--text);' +
+        'border:1px solid var(--amber-dim);border-radius:6px;padding:8px 10px;font-family:inherit;' +
+        'font-size:13px;resize:vertical;box-sizing:border-box">' + rawText + '</textarea>' +
+      attachHtml + notifyHtml +
+      '<div class="chatter-msg-actions" style="margin-top:6px">' +
+        '<button class="chatter-action-btn" style="color:var(--amber);font-weight:600" onclick="chatterSaveEdit(\x27' + m.id + '\x27)">\u2714 Save</button>' +
+        '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterCancelEdit()">\u2715 Cancel</button>' +
+      '</div>';
+  } else {
+    const textHtml = (m.text || '').replace(/\n/g,'<br>').replace(/@([\w][\w ]*?)(?=\s|$|<br>)/g, '<span class="mention">@$1</span>');
+    const replyBtn  = !isReply ? '<button class="chatter-action-btn" onclick="chatterStartReply(\x27' + m.id + '\x27,\x27' + (m.authorName||'').replace(/'/g,"\x27") + '\x27)">\u21A9 Reply</button>' : '';
+    const editBtn   = isOwn  ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterEdit(\x27' + m.id + '\x27)">\u270E Edit</button>' : '';
+    const deleteBtn = isOwn  ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterDelete(\x27' + m.id + '\x27)">\uD83D\uDDD1 Delete</button>' : '';
+    bodyContent =
+      '<div class="chatter-msg-text">' + textHtml + '</div>' +
+      attachHtml +
+      notifyHtml +
+      '<div class="chatter-msg-actions">' + replyBtn + editBtn + deleteBtn + '</div>';
+  }
+
   return '<div class="' + msgClass + '" data-msg-id="' + m.id + '">' +
     '<div class="' + avatarClass + '" style="background:' + (m.authorColor||'#888') + ';color:#fff">' + (m.authorInitials||'?') + '</div>' +
     '<div class="chatter-msg-body">' +
       '<div class="chatter-msg-header"><span class="chatter-msg-name">' + m.authorName + '</span><span class="chatter-msg-time">' + timeStr + '</span></div>' +
-      '<div class="chatter-msg-text">' + textHtml + '</div>' +
-      attachHtml +
-      notifyHtml +
-      '<div class="chatter-msg-actions">' + replyBtn + deleteBtn + '</div>' +
+      bodyContent +
     '</div></div>';
 }
 
@@ -125,6 +151,50 @@ async function chatterDelete(msgId) {
   }
   renderChatter(activeProjectId);
   toast('Message deleted');
+}
+
+// ── Edit ───────────────────────────────────────────────────────────────
+function chatterEdit(msgId) {
+  // Cancel any other in-progress edit before starting a new one
+  chatterEditingId = msgId;
+  renderChatter(activeProjectId);
+  setTimeout(() => {
+    const ta = document.getElementById('chatterEditArea_' + msgId);
+    if (ta) {
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+    }
+  }, 30);
+}
+
+function chatterCancelEdit() {
+  chatterEditingId = null;
+  renderChatter(activeProjectId);
+}
+
+async function chatterSaveEdit(msgId) {
+  const ta = document.getElementById('chatterEditArea_' + msgId);
+  if (!ta) return;
+  const newText = ta.value.trim();
+  if (!newText) { toast('⚠ Message cannot be empty'); return; }
+
+  // Find the message in local store
+  const msgs = chatterStore[activeProjectId] || [];
+  const msg = msgs.find(m => m.id === msgId);
+  if (!msg) { chatterEditingId = null; renderChatter(activeProjectId); return; }
+  if (msg.text === newText) { chatterEditingId = null; renderChatter(activeProjectId); return; }
+
+  // Persist to Supabase (skip for unsynced local messages)
+  if (sb && !msgId.startsWith('local_')) {
+    const { error } = await sb.from('chatter').update({ text: newText }).eq('id', msgId);
+    if (error) { console.warn('chatterSaveEdit', error); toast('⚠ Could not save edit'); return; }
+  }
+
+  // Update local store and exit edit mode
+  msg.text = newText;
+  chatterEditingId = null;
+  renderChatter(activeProjectId);
+  toast('Message updated');
 }
 
 
