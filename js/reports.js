@@ -239,7 +239,7 @@ async function bulkMarkBilled() {
   }
   bqSelected.clear();
   renderBillingQueue();
-  renderReportsOverview();
+  renderInProgressReport();
   renderDashboard();
 }
 
@@ -272,6 +272,7 @@ function switchReportsTab(el) {
   el.classList.add('active');
   document.getElementById(el.dataset.tab).classList.add('active');
   if (el.dataset.tab === 'tab-billing') renderBillingQueue();
+  if (el.dataset.tab === 'tab-overview') renderInProgressReport();
   if (el.dataset.tab === 'tab-timesheets') renderTimesheetsReport();
   if (el.dataset.tab === 'tab-employees') renderReportsEmployees();
   if (el.dataset.tab === 'tab-stale') renderStaleProjects();
@@ -671,83 +672,189 @@ function printBallantinePayrollWeek(weekKey) {
 }
 window.printBallantinePayrollWeek = printBallantinePayrollWeek;
 
-// ── Overview Report ──────────────────────────────────────────────────────
-function renderReportsOverview() {
+// ── In Progress Tasks Report ─────────────────────────────────────────────
+// Hard-coded report listing every in-progress task across all open projects.
+// Replaces the old Overview tab. Includes a separate subsection for sales
+// categories 41–44 (reports & procedures) — these are duplicated from the
+// main list, surfaced separately for quick scanning.
+function renderInProgressReport() {
   const el = document.getElementById('tab-overview');
   if (!el) return;
 
-  // Only include non-closed projects in all calculations
-  const openProjIds = new Set(projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').map(p => p.id));
-  const openTasks   = taskStore.filter(t => openProjIds.has(t.proj));
+  const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  const REPORT_CATS = new Set(['41','42','43','44']);
 
-  const totalProj  = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').length;
-  const activeProj = projects.filter(p => (projectInfo[p.id]||{}).status === 'active').length;
-  const totalTasks = openTasks.length;
-  const doneTasks  = openTasks.filter(t => t.done || t.status === 'complete' || t.status === 'billed').length;
-  const overdue    = openTasks.filter(t => t.overdue && !t.done).length;
-  const totalRev   = [...openProjIds].reduce((s,id) => s + (projectInfo[id]?.contractValue||0), 0);
-  const billedRev  = openTasks.filter(t => t.status==='billed').reduce((s,t) => s+(t.fixedPrice||0), 0);
-  const readyRev   = openTasks.filter(t => t.status==='complete').reduce((s,t) => s+(t.fixedPrice||0), 0);
-  const fmt$ = n => '$' + n.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  // Open (non-closed) projects only
+  const openProjIds = new Set(
+    projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').map(p => p.id)
+  );
 
-  // Status breakdown for pie chart (exclude closed)
-  const statusCounts = {};
-  projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').forEach(p => {
-    const s = (projectInfo[p.id]||{}).status || 'unknown';
-    statusCounts[s] = (statusCounts[s]||0) + 1;
-  });
-  const statusLabels = { active:'Active', pending:'Pending', onhold:'On Hold', complete:'Complete', closed:'Closed', jobprep:'Job Prep', pendretest:'Pend-Retest', testcomplete:'Test Complete' };
-  const statusColors = ['#4caf7d','#e8a234','#7a7a85','#888899','#5b9cf6','#a78bfa','#fb923c','#2dd4bf'];
+  // All in-progress tasks across open projects, decorated with project/client info
+  const ipTasks = taskStore
+    .filter(t => t.status === 'inprogress' && openProjIds.has(t.proj))
+    .map(t => {
+      const proj = projects.find(p => p.id === t.proj) || {};
+      const info = projectInfo[t.proj] || {};
+      const emp  = employees.find(e => e.initials === t.assign) || {};
+      return {
+        ...t,
+        projName:   proj.name || '—',
+        projId:     t.proj,
+        clientName: info.clientName || info.client || '—',
+        pm:         info.pm || '',
+        empName:    emp.name || t.assign || '—',
+        catKey:     (t.salesCat || '').toString().trim(),
+      };
+    });
+
+  // Summary stats
+  const totalCount = ipTasks.length;
+  const overdueCount = ipTasks.filter(t => t.overdue && !t.done).length;
+  const totalValue = ipTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
+  const projectCount = new Set(ipTasks.map(t => t.projId)).size;
+
+  // Reports & Procedures subset (cat 41-44)
+  const repTasks = ipTasks.filter(t => REPORT_CATS.has(t.catKey));
+  const repValue = repTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
+
+  // ---- Helper: render a grouped-by-project table for a given task list ----
+  function renderGroupedTable(tasks, emptyMsg) {
+    if (tasks.length === 0) {
+      return `<div style="text-align:center;padding:32px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:10px;font-size:13px">${emptyMsg}</div>`;
+    }
+
+    // Group by project, preserving order by project name
+    const groups = {};
+    tasks.forEach(t => {
+      if (!groups[t.projId]) {
+        groups[t.projId] = {
+          projId:     t.projId,
+          projName:   t.projName,
+          clientName: t.clientName,
+          pm:         t.pm,
+          tasks:      [],
+          subtotal:   0,
+        };
+      }
+      groups[t.projId].tasks.push(t);
+      groups[t.projId].subtotal += (t.fixedPrice || 0);
+    });
+    const ordered = Object.values(groups).sort((a,b) => (a.projName||'').localeCompare(b.projName||''));
+
+    let rows = '';
+    ordered.forEach(g => {
+      // Project header row
+      rows += `
+        <tr style="background:var(--surface2);border-top:1px solid var(--border);cursor:pointer" onclick="ipOpenProject('${g.projId}')" title="Open project">
+          <td colspan="4" style="padding:10px 14px">
+            <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+              <div style="font-weight:600;font-size:13.5px;color:var(--text)">📁 ${escapeHtml(g.projName)}</div>
+              <div style="font-size:11.5px;color:var(--muted)">${escapeHtml(g.clientName)}</div>
+              ${g.pm ? `<div style="font-size:11px;color:var(--muted)">PM: ${escapeHtml(g.pm)}</div>` : ''}
+              <div style="font-size:11px;color:var(--muted)">${g.tasks.length} task${g.tasks.length!==1?'s':''}</div>
+            </div>
+          </td>
+          <td style="padding:10px 14px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12.5px;color:var(--green);font-weight:600">${fmt$(g.subtotal)}</td>
+        </tr>
+      `;
+
+      // Task rows under this project
+      g.tasks.forEach(t => {
+        rows += `
+          <tr style="border-top:1px solid var(--border)">
+            <td style="padding:9px 14px 9px 32px;font-size:12.5px;color:var(--text)">↳ ${escapeHtml(t.name||'Untitled')}</td>
+            <td style="padding:9px 14px;font-size:11.5px;color:var(--muted);font-family:'JetBrains Mono',monospace">${escapeHtml(t.catKey || '—')}</td>
+            <td style="padding:9px 14px;font-size:12px;color:var(--muted)">${escapeHtml(t.empName)}</td>
+            <td style="padding:9px 14px;font-size:11px;color:var(--muted)">${escapeHtml(t.revenueType==='nocharge' ? 'No Charge' : 'Fixed')}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.fixedPrice>0?'var(--text)':'var(--muted)'}">${t.fixedPrice ? fmt$(t.fixedPrice) : '—'}</td>
+          </tr>
+        `;
+      });
+    });
+
+    return `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead>
+            <tr style="background:var(--surface2)">
+              <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Task / Project</th>
+              <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>
+              <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Assignee</th>
+              <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Type</th>
+              <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `;
+  }
 
   el.innerHTML = `
-    <div class="report-stat-grid">
-      <div class="report-stat"><div class="report-stat-label">Total Projects</div><div class="report-stat-val" style="color:var(--blue)">${totalProj}</div></div>
-      <div class="report-stat"><div class="report-stat-label">Active Projects</div><div class="report-stat-val" style="color:var(--green)">${activeProj}</div></div>
-      <div class="report-stat"><div class="report-stat-label">Total Tasks</div><div class="report-stat-val" style="color:var(--text)">${totalTasks}</div></div>
-      <div class="report-stat"><div class="report-stat-label">Tasks Complete</div><div class="report-stat-val" style="color:var(--green)">${doneTasks}</div></div>
-      <div class="report-stat"><div class="report-stat-label">Overdue Tasks</div><div class="report-stat-val" style="color:var(--red)">${overdue}</div></div>
-      <div class="report-stat"><div class="report-stat-label">Billed Revenue</div><div class="report-stat-val" style="color:#c084fc">${fmt$(billedRev)}</div></div>
-      <div class="report-stat"><div class="report-stat-label">Ready to Bill</div><div class="report-stat-val" style="color:var(--amber)">${fmt$(readyRev)}</div></div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:4px">
-      <div class="report-card">
-        <div class="report-card-title">&#x1F4C1; Projects by Status</div>
-        <canvas id="chartProjStatus" height="220"></canvas>
+    <div style="max-width:1180px">
+      <!-- Header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--text)">⏳ In-Progress Tasks</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">All tasks currently in progress across open projects</div>
+        </div>
+        <button class="btn btn-ghost" style="font-size:12px" onclick="renderInProgressReport()">↻ Refresh</button>
       </div>
-      <div class="report-card">
-        <div class="report-card-title">&#x2705; Task Completion</div>
-        <canvas id="chartTaskStatus" height="220"></canvas>
+
+      <!-- Summary stats -->
+      <div class="report-stat-grid">
+        <div class="report-stat">
+          <div class="report-stat-label">In-Progress Tasks</div>
+          <div class="report-stat-val" style="color:#4caf7d">${totalCount}</div>
+        </div>
+        <div class="report-stat">
+          <div class="report-stat-label">Overdue</div>
+          <div class="report-stat-val" style="color:var(--red)">${overdueCount}</div>
+        </div>
+        <div class="report-stat">
+          <div class="report-stat-label">Active Projects</div>
+          <div class="report-stat-val" style="color:var(--blue)">${projectCount}</div>
+        </div>
+        <div class="report-stat">
+          <div class="report-stat-label">Total Value</div>
+          <div class="report-stat-val" style="color:var(--amber);font-size:18px">${fmt$(totalValue)}</div>
+        </div>
+      </div>
+
+      <!-- Main: All In-Progress Tasks -->
+      <div style="margin-top:8px">
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px">
+          <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text)">All In-Progress Tasks</div>
+          <div style="font-size:11.5px;color:var(--muted)">${totalCount} task${totalCount!==1?'s':''} across ${projectCount} project${projectCount!==1?'s':''} • ${fmt$(totalValue)}</div>
+        </div>
+        ${renderGroupedTable(ipTasks, 'No in-progress tasks. Everything is either new, complete, or billed.')}
+      </div>
+
+      <!-- Subsection: Reports & Procedures (Cat 41-44) -->
+      <div style="margin-top:28px">
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px">
+          <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text)">📄 Reports & Procedures <span style="font-size:13px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41–44)</span></div>
+          <div style="font-size:11.5px;color:var(--muted)">${repTasks.length} task${repTasks.length!==1?'s':''} • ${fmt$(repValue)}</div>
+        </div>
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;font-style:italic">Subset of the list above — in-progress tasks in sales categories 41, 42, 43, and 44.</div>
+        ${renderGroupedTable(repTasks, 'No in-progress reports or procedures.')}
       </div>
     </div>
   `;
+}
 
-  // Chart 1: Projects by status (doughnut)
-  setTimeout(() => {
-    const keys = Object.keys(statusCounts);
-    new Chart(document.getElementById('chartProjStatus'), {
-      type: 'doughnut',
-      data: {
-        labels: keys.map(k => statusLabels[k]||k),
-        datasets: [{ data: keys.map(k => statusCounts[k]), backgroundColor: statusColors, borderWidth: 2, borderColor: 'var(--surface)' }]
-      },
-      options: { responsive:true, plugins:{ legend:{ position:'right', labels:{ color:'#9a9aaa', font:{size:11} } } } }
-    });
+// Helper to navigate from a project header row into the project detail view
+function ipOpenProject(id) {
+  var n = document.getElementById('navProjects');
+  if (n) n.click();
+  setTimeout(function(){ if (typeof selectProject === 'function') selectProject(id); }, 50);
+}
 
-    // Chart 2: Task status breakdown (bar)
-    const tStatusCounts = {};
-    taskStore.forEach(t => { const s = t.status||'new'; tStatusCounts[s]=(tStatusCounts[s]||0)+1; });
-    const tKeys = ['new','inprogress','prohold','accthold','complete','cancelled','billed'];
-    const tLabels = { new:'New', inprogress:'In Progress', prohold:'Prod Hold', accthold:'Acct Hold', complete:'Complete', cancelled:'Cancelled', billed:'Billed' };
-    const tColors = { new:'#7a7a85', inprogress:'#4caf7d', prohold:'#e8a234', accthold:'#e05c5c', complete:'#888899', cancelled:'#5b7fa6', billed:'#c084fc' };
-    new Chart(document.getElementById('chartTaskStatus'), {
-      type: 'bar',
-      data: {
-        labels: tKeys.map(k => tLabels[k]),
-        datasets: [{ data: tKeys.map(k => tStatusCounts[k]||0), backgroundColor: tKeys.map(k => tColors[k]+'cc'), borderColor: tKeys.map(k => tColors[k]), borderWidth:1.5, borderRadius:5 }]
-      },
-      options: { responsive:true, plugins:{ legend:{display:false} }, scales:{ x:{ ticks:{color:'#9a9aaa',font:{size:10}} ,grid:{display:false}}, y:{ ticks:{color:'#9a9aaa',font:{size:10},stepSize:1}, grid:{color:'rgba(255,255,255,0.05)'} } } }
-    });
-  }, 50);
+// HTML-escape helper (defined locally so this report can stand alone if moved)
+function escapeHtml(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 // ── Tasks Report ─────────────────────────────────────────────────────────
