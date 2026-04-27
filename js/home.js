@@ -338,22 +338,40 @@ function renderHolidaysCard(holidays) {
 }
 
 // ---- Recent Chatter ----
+// Email follow-ups posted via the 📧 button on Project Info land in chatter
+// with a "📍 Email sent to ..." prefix. We exclude those from the home page
+// card so it stays focused on team conversation; managers can still review
+// them in Audit Log → Chatter Activity.
+function _isEmailFollowUp(text) {
+  if (!text) return false;
+  // Strip leading whitespace and any leading non-letter characters
+  // (emoji, pin glyph, punctuation) before checking the prefix.
+  const stripped = String(text).replace(/^[\s\W]+/, '');
+  return /^email\s+sent\s+to/i.test(stripped);
+}
+
 async function fetchRecentChatter(limit) {
   if (!sb) return [];
   try {
+    // Pull more than `limit` so that after filtering follow-ups we still
+    // have enough left to fill the card.
+    const fetchSize = Math.max(limit * 4, 30);
     const { data } = await sb.from('chatter')
       .select('id, proj_id, author_id, author_name, author_initials, author_color, text, created_at')
       .order('created_at', { ascending: false })
-      .limit(limit);
-    return (data || []).map(r => ({
-      id:             r.id,
-      projId:         r.proj_id,
-      authorName:     r.author_name,
-      authorInitials: r.author_initials,
-      authorColor:    r.author_color,
-      text:           r.text,
-      ts:             r.created_at,
-    }));
+      .limit(fetchSize);
+    return (data || [])
+      .filter(r => !_isEmailFollowUp(r.text))
+      .slice(0, limit)
+      .map(r => ({
+        id:             r.id,
+        projId:         r.proj_id,
+        authorName:     r.author_name,
+        authorInitials: r.author_initials,
+        authorColor:    r.author_color,
+        text:           r.text,
+        ts:             r.created_at,
+      }));
   } catch(e) { console.error('fetchRecentChatter:', e); return []; }
 }
 
