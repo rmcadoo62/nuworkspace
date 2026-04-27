@@ -1101,86 +1101,166 @@ function setBacklogView(view) {
     setTimeout(() => { if (typeof _drawBacklogGauge === 'function') _drawBacklogGauge(); }, 50);
   }
   if (view === 'category') {
-    setTimeout(() => {
-      const COLORS = ['#5b9cf6','#a78bfa','#e8a234','#4caf7d','#e05c5c','#f472b6',
-                      '#34d399','#fb923c','#60a5fa','#c084fc','#facc15','#2dd4bf'];
-      const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
-      const byCat = window._backlogByCat || {};
-      const tasks = window._backlogDetailTasks || [];
-      const cats  = Object.keys(byCat).sort((a,b) => byCat[b] - byCat[a]);
-
-      // Draw bar chart
-      const canv = document.getElementById('backlogByCatChart');
-      if (canv && typeof Chart !== 'undefined') {
-        const existing = Chart.getChart(canv);
-        if (existing) existing.destroy();
-        if (cats.length) {
-          new Chart(canv, {
-            type: 'bar',
-            data: {
-              labels: cats,
-              datasets: [{ data: cats.map(c => byCat[c]),
-                backgroundColor: cats.map((_,i) => COLORS[i%COLORS.length]+'cc'),
-                borderColor:     cats.map((_,i) => COLORS[i%COLORS.length]),
-                borderWidth:1, borderRadius:4 }]
-            },
-            options: {
-              responsive:true,
-              plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: ctx => ' '+fmt$(ctx.parsed.y) } } },
-              scales:{
-                x:{ ticks:{color:'var(--muted)',font:{size:11}}, grid:{color:'rgba(128,128,128,0.1)'} },
-                y:{ ticks:{color:'var(--muted)',font:{size:11}, callback: v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v)}, grid:{color:'rgba(128,128,128,0.1)'} }
-              }
-            }
-          });
-        }
-      }
-
-      // Build table grouped by category
-      const tableEl = document.getElementById('backlogCatTable');
-      if (!tableEl) return;
-      if (!cats.length) { tableEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">No backlog.</div>'; return; }
-
-      const tasksByCat = {};
-      tasks.forEach(t => {
-        const cat = t.salesCat || 'Uncategorized';
-        if (!tasksByCat[cat]) tasksByCat[cat] = [];
-        tasksByCat[cat].push(t);
-      });
-      const statusColors = {new:'var(--muted)',inprogress:'var(--green)',complete:'var(--blue)',cancelled:'var(--amber)',prohold:'var(--amber)',accthold:'var(--red)'};
-      const grandTotal = tasks.reduce((s,t) => s+(t.fixedPrice||0), 0);
-
-      tableEl.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
-        '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
-        '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Category / Task</th>'+
-        '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>'+
-        '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>'+
-        '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>'+
-        '</tr></thead><tbody>'+
-        cats.map(cat => {
-          const ctasks = tasksByCat[cat] || [];
-          const total  = byCat[cat];
-          return '<tr style="background:var(--surface2);border-bottom:1px solid var(--border)">'+
-            '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--amber)">'+cat+'</td>'+
-            '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--amber)">'+fmt$(total)+'</td>'+
-            '</tr>'+
-            ctasks.map(t => {
-              const p = (typeof projects !== 'undefined') ? projects.find(x=>x.id===t.proj) : null;
-              return '<tr style="border-bottom:1px solid var(--border)">'+
-                '<td style="padding:5px 12px 5px 24px;color:var(--text);font-size:11px">'+t.name+'</td>'+
-                '<td style="padding:5px 12px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
-                '<td style="padding:5px 12px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+t.status+'</span></td>'+
-                '<td style="padding:5px 12px;text-align:right;font-family:monospace;color:var(--green);font-size:11px">'+(t.fixedPrice>0?fmt$(t.fixedPrice):'—')+'</td>'+
-              '</tr>';
-            }).join('');
-        }).join('')+
-        '<tr style="border-top:2px solid var(--border);background:var(--surface2)">'+
-        '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--text)">Total</td>'+
-        '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--green)">'+fmt$(grandTotal)+'</td>'+
-        '</tr></tbody></table>';
-    }, 50);
+    // Reset any previous category filter when entering this view
+    window._backlogCatFilter = null;
+    setTimeout(() => _renderBacklogCategory(), 50);
   }
 }
+
+// ── Backlog By Category — chart with click-to-filter drill-down ─────────
+function _renderBacklogCategory() {
+  const COLORS = ['#5b9cf6','#a78bfa','#e8a234','#4caf7d','#e05c5c','#f472b6',
+                  '#34d399','#fb923c','#60a5fa','#c084fc','#facc15','#2dd4bf'];
+  const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  const byCat = window._backlogByCat || {};
+  const tasks = window._backlogDetailTasks || [];
+  const cats  = Object.keys(byCat).sort((a,b) => byCat[b] - byCat[a]);
+  const filterCat = window._backlogCatFilter || null;
+
+  // Draw bar chart with onClick handler
+  const canv = document.getElementById('backlogByCatChart');
+  if (canv && typeof Chart !== 'undefined') {
+    const existing = Chart.getChart(canv);
+    if (existing) existing.destroy();
+    if (cats.length) {
+      // Per-bar styling: dim non-selected bars when a filter is active
+      const bgColors = cats.map((c,i) => {
+        const base = COLORS[i % COLORS.length];
+        if (!filterCat) return base + 'cc';
+        return c === filterCat ? base + 'ff' : base + '33';
+      });
+      const borderColors = cats.map((c,i) => {
+        const base = COLORS[i % COLORS.length];
+        return (!filterCat || c === filterCat) ? base : base + '55';
+      });
+      const borderWidths = cats.map(c => c === filterCat ? 3 : 1);
+
+      new Chart(canv, {
+        type: 'bar',
+        data: {
+          labels: cats,
+          datasets: [{ data: cats.map(c => byCat[c]),
+            backgroundColor: bgColors,
+            borderColor: borderColors,
+            borderWidth: borderWidths,
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          onClick: (evt, els) => {
+            if (!els.length) return;
+            const i = els[0].index;
+            if (typeof window._setBacklogCatFilter === 'function') {
+              window._setBacklogCatFilter(cats[i]);
+            }
+          },
+          onHover: (evt, els) => {
+            if (evt && evt.native && evt.native.target) {
+              evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: ctx => ' ' + fmt$(ctx.parsed.y) } }
+          },
+          scales: {
+            x: { ticks:{color:'var(--muted)',font:{size:11}}, grid:{color:'rgba(128,128,128,0.1)'} },
+            y: { ticks:{color:'var(--muted)',font:{size:11}, callback: v=>'$'+(v>=1000?(v/1000).toFixed(0)+'k':v)}, grid:{color:'rgba(128,128,128,0.1)'} }
+          }
+        }
+      });
+    }
+  }
+
+  // Build / re-render table beneath the chart
+  const tableEl = document.getElementById('backlogCatTable');
+  if (!tableEl) return;
+  if (!cats.length) {
+    tableEl.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted)">No backlog.</div>';
+    return;
+  }
+
+  // Group tasks by category
+  const tasksByCat = {};
+  tasks.forEach(t => {
+    const cat = t.salesCat || 'Uncategorized';
+    if (!tasksByCat[cat]) tasksByCat[cat] = [];
+    tasksByCat[cat].push(t);
+  });
+  const statusColors = {new:'var(--muted)',inprogress:'var(--green)',complete:'var(--blue)',cancelled:'var(--amber)',prohold:'var(--amber)',accthold:'var(--red)'};
+
+  // Filter pill (shown when a category is selected)
+  const pillHtml = filterCat
+    ? '<div style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:8px;background:var(--amber-glow);border:1px solid var(--amber-dim);border-radius:6px">'+
+        '<span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Filtered</span>'+
+        '<span style="font-size:13px;color:var(--amber);font-weight:700">'+filterCat+'</span>'+
+        '<span style="font-size:11px;color:var(--muted)">'+(tasksByCat[filterCat]||[]).length+' task'+((tasksByCat[filterCat]||[]).length!==1?'s':'')+' • '+fmt$(byCat[filterCat]||0)+'</span>'+
+        '<button onclick="_clearBacklogCatFilter()" style="margin-left:auto;font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid var(--amber-dim);background:transparent;color:var(--amber);cursor:pointer;font-family:\'DM Sans\',sans-serif;font-weight:600">✕ Clear</button>'+
+      '</div>'
+    : '<div style="font-size:11px;color:var(--muted);margin-bottom:6px;font-style:italic">Click a bar above to filter to one category.</div>';
+
+  // Pick which categories to display in the table
+  const visibleCats  = filterCat ? [filterCat] : cats;
+  const visibleTotal = visibleCats.reduce((s,c) => s + (byCat[c]||0), 0);
+
+  const taskRow = t => {
+    const p = (typeof projects !== 'undefined') ? projects.find(x => x.id === t.proj) : null;
+    const projLabel = p ? (p.emoji + ' ' + p.name) : '—';
+    const projCell = p
+      ? '<td style="padding:5px 12px;font-size:11px"><span onclick="_openProjectFromDash(\''+p.id+'\')" style="color:var(--blue);cursor:pointer;text-decoration:underline;text-decoration-color:transparent;transition:text-decoration-color .15s" onmouseover="this.style.textDecorationColor=\'var(--blue)\'" onmouseout="this.style.textDecorationColor=\'transparent\'">'+projLabel+'</span></td>'
+      : '<td style="padding:5px 12px;color:var(--muted);font-size:11px">—</td>';
+    return '<tr style="border-bottom:1px solid var(--border)">'+
+      '<td style="padding:5px 12px 5px 24px;color:var(--text);font-size:11px">'+t.name+'</td>'+
+      projCell+
+      '<td style="padding:5px 12px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+t.status+'</span></td>'+
+      '<td style="padding:5px 12px;text-align:right;font-family:monospace;color:var(--green);font-size:11px">'+(t.fixedPrice>0?fmt$(t.fixedPrice):'—')+'</td>'+
+    '</tr>';
+  };
+
+  const tableHtml = '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+    '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
+    '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Category / Task</th>'+
+    '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>'+
+    '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>'+
+    '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>'+
+    '</tr></thead><tbody>'+
+    visibleCats.map(cat => {
+      const ctasks = tasksByCat[cat] || [];
+      const total  = byCat[cat] || 0;
+      return '<tr style="background:var(--surface2);border-bottom:1px solid var(--border)">'+
+        '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--amber)">'+cat+'</td>'+
+        '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--amber)">'+fmt$(total)+'</td>'+
+        '</tr>'+
+        ctasks.map(taskRow).join('');
+    }).join('')+
+    '<tr style="border-top:2px solid var(--border);background:var(--surface2)">'+
+    '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--text)">'+(filterCat?'Filtered Total':'Total')+'</td>'+
+    '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--green)">'+fmt$(visibleTotal)+'</td>'+
+    '</tr></tbody></table>';
+
+  tableEl.innerHTML = pillHtml + tableHtml;
+}
+
+// Toggle filter (click same bar twice to clear)
+window._setBacklogCatFilter = function(cat) {
+  window._backlogCatFilter = (window._backlogCatFilter === cat) ? null : cat;
+  _renderBacklogCategory();
+};
+
+// Clear filter (used by the ✕ button on the filter pill)
+window._clearBacklogCatFilter = function() {
+  window._backlogCatFilter = null;
+  _renderBacklogCategory();
+};
+
+// Navigate to a project from a dashboard table cell
+window._openProjectFromDash = function(id) {
+  const n = document.getElementById('navProjects');
+  if (n) n.click();
+  setTimeout(() => { if (typeof selectProject === 'function') selectProject(id); }, 50);
+};
 
 function setBkView(view) {
   window._bkCurrentView = view;
