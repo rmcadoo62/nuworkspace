@@ -505,6 +505,7 @@ function openNewClientDrawer() {
   document.getElementById('clientSaveBar').style.display = 'flex';
   const delBtn = document.getElementById('clientDeleteBtn');
   if (delBtn) delBtn.style.display = 'none';
+  _ensureQuotesTabButton();
   switchClientDrawerTab(document.querySelector('.client-dtab[data-dtab="dtab-info"]'), true);
   renderClientDrawerBody();
   document.getElementById('clientDrawer').classList.add('open');
@@ -521,6 +522,7 @@ function openClientDrawer(id) {
   document.getElementById('clientSaveBar').style.display = 'flex';
   const delBtn = document.getElementById('clientDeleteBtn');
   if (delBtn) delBtn.style.display = can('delete_clients') ? 'inline-flex' : 'none';
+  _ensureQuotesTabButton();
   document.querySelectorAll('.client-dtab').forEach(t => t.classList.remove('active'));
   document.querySelector('.client-dtab[data-dtab="dtab-info"]').classList.add('active');
   renderClientDrawerBody();
@@ -678,7 +680,229 @@ function renderClientDrawerBody() {
       ${jobs.length === 0
         ? `<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No projects linked yet</div>`
         : table + summary}`;
+
+  } else if (_clientDrawerTab === 'dtab-quotes') {
+    // Server-side filtered query — only this client's quotes come back, so
+    // we don't choke on the full quotes table. We snapshot drawer state at
+    // call time so a slow load doesn't overwrite a tab/client switch.
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">Loading quotes…</div>';
+    const reqClientId = _clientDrawerId;
+    const reqClientName = c?.name || '';
+    _loadQuotesForClient(reqClientId, reqClientName).then(myQuotes => {
+      if (_clientDrawerTab !== 'dtab-quotes') return;
+      if (_clientDrawerId !== reqClientId)    return;
+      body.innerHTML = _renderClientQuotesTab(myQuotes);
+    }).catch(err => {
+      console.error('Quotes load error:', err);
+      if (_clientDrawerTab !== 'dtab-quotes') return;
+      if (_clientDrawerId !== reqClientId)    return;
+      body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--red);font-size:13px">Could not load quotes. ' +
+        (err.message ? '<br><span style="color:var(--muted);font-size:12px">'+err.message+'</span>' : '') +
+        '<br><button onclick="renderClientDrawerBody()" style="margin-top:12px;padding:6px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);cursor:pointer">Retry</button></div>';
+    });
   }
+}
+
+// ===== CLIENT DRAWER → QUOTES TAB =====
+// ===== CLIENT DRAWER → QUOTES TAB =====
+
+// Discover the client column name once, then cache per-client quote results.
+// Loading every quote in the system (with line_items JSON) was timing out on
+// large databases, so we now query filtered by client name at the DB level.
+let _clientQuotesField = null;     // resolved client column on the quotes table
+let _clientQuotesCache = {};       // clientId -> array of that client's quotes
+
+// Inject the "💰 Quotes" tab button into the existing tab bar if it isn't
+// already there. Idempotent — safe to call on every drawer open.
+function _ensureQuotesTabButton() {
+  if (document.querySelector('.client-dtab[data-dtab="dtab-quotes"]')) return;
+  const jobsBtn = document.querySelector('.client-dtab[data-dtab="dtab-jobs"]');
+  if (!jobsBtn || !jobsBtn.parentNode) return;
+  const btn = document.createElement('div');
+  btn.className = 'client-dtab';
+  btn.setAttribute('data-dtab', 'dtab-quotes');
+  btn.textContent = '💰 Quotes';
+  btn.onclick = function() { switchClientDrawerTab(this); };
+  jobsBtn.parentNode.insertBefore(btn, jobsBtn.nextSibling);
+}
+
+// One-row probe to find which column on the quotes table holds the client
+// name. Vibrato writes free-text into different field names depending on the
+// schema generation, so we have to discover it. Result is cached for the
+// session; an empty string means "probed but no candidate matched."
+async function _resolveClientQuotesField() {
+  if (_clientQuotesField !== null) return _clientQuotesField || null;
+  if (!sb) return null;
+  const { data, error } = await sb.from('quotes').select('*').limit(1);
+  if (error || !data || !data.length) {
+    _clientQuotesField = '';
+    return null;
+  }
+  const cols = Object.keys(data[0]);
+  const candidates = ['client', 'client_name', 'customer', 'company', 'account'];
+  for (const c of candidates) {
+    if (cols.includes(c)) {
+      _clientQuotesField = c;
+      return c;
+    }
+  }
+  _clientQuotesField = '';
+  return null;
+}
+
+async function _loadQuotesForClient(clientId, clientName) {
+  if (!clientId || !clientName) return [];
+  if (_clientQuotesCache[clientId]) return _clientQuotesCache[clientId];
+  if (!sb) return [];
+
+  const field = await _resolveClientQuotesField();
+  if (!field) {
+    _clientQuotesCache[clientId] = [];
+    return [];
+  }
+
+  // Server-side filter on the resolved column. ilike with no wildcards =
+  // case-insensitive exact match. Trims whitespace defensively.
+  const target = String(clientName).trim();
+  if (!target) return [];
+
+  let all = [], page = 0;
+  while (true) {
+    const { data, error } = await sb.from('quotes').select('*')
+      .ilike(field, target)
+      .order('created_at', { ascending: false })
+      .range(page * 1000, page * 1000 + 999);
+    if (error) throw error;
+    if (!data || !data.length) break;
+    all = all.concat(data);
+    if (data.length < 1000) break;
+    page++;
+  }
+  _clientQuotesCache[clientId] = all;
+  return all;
+}
+
+// Pull the first non-empty value across a list of candidate field names.
+// Quotes from Vibrato don't have a fixed schema — fields drift over time.
+function _quoteField(row, candidates) {
+  for (const k of candidates) {
+    const v = row[k];
+    if (v != null && v !== '') return v;
+  }
+  return null;
+}
+
+function _renderClientQuotesTab(quotes) {
+  if (!quotes.length) {
+    return '<div style="font-size:12px;color:var(--muted);margin-bottom:10px">0 quotes linked to this client</div>' +
+           '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No quotes found for this client.<div style="font-size:11px;margin-top:6px">Quotes are matched by client name. If a quote in Vibrato uses a different spelling, it won\'t appear here.</div></div>';
+  }
+
+  // Sort: newest first by best-available date. We try several candidate date
+  // columns because Vibrato schemas drift; rows with no parseable date sink
+  // to the bottom and tiebreak alphabetically by opportunity name. This
+  // avoids the "random order" symptom when date fields are inconsistent.
+  const _bestDate = q => {
+    const v = _quoteField(q, ['created_at', 'created', 'date', 'issue_date', 'updated_at']);
+    if (!v) return null;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const _oppName = q => String(_quoteField(q, ['opportunity', 'opportunity_name', 'name', 'title', 'subject']) || '').toLowerCase();
+  const sorted = [...quotes].sort((a, b) => {
+    const da = _bestDate(a), db = _bestDate(b);
+    if (da && db) return db - da;          // both dated: newest first
+    if (da) return -1;                     // only a dated: a wins
+    if (db) return 1;                      // only b dated: b wins
+    return _oppName(a).localeCompare(_oppName(b));
+  });
+
+  // Stage normalization for consistent classification
+  const normStage = v => String(v || '').toLowerCase().replace(/[\s-]+/g, '_');
+
+  // Totals
+  const totalValue = sorted.reduce((s, q) => {
+    const t = parseFloat(_quoteField(q, ['total', 'amount', 'total_amount', 'quote_total', 'price'])) || 0;
+    return s + t;
+  }, 0);
+  const wonValue = sorted.reduce((s, q) => {
+    const stg = normStage(_quoteField(q, ['stage', 'status', 'phase']));
+    if (stg === 'won' || stg === 'closed_won' || stg === 'approved') {
+      const t = parseFloat(_quoteField(q, ['total', 'amount', 'total_amount', 'quote_total', 'price'])) || 0;
+      return s + t;
+    }
+    return s;
+  }, 0);
+  const wonCount = sorted.filter(q => {
+    const stg = normStage(_quoteField(q, ['stage', 'status', 'phase']));
+    return stg === 'won' || stg === 'closed_won' || stg === 'approved';
+  }).length;
+
+  const fmt$ = n => n > 0 ? '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
+  const esc = s => String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  const th = (label, align='left') =>
+    `<th style="padding:6px 8px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);text-align:${align};white-space:nowrap;border-bottom:2px solid var(--border)">${label}</th>`;
+
+  const rows = sorted.map(q => {
+    const opp   = _quoteField(q, ['opportunity', 'opportunity_name', 'name', 'title', 'subject']) || '(unnamed)';
+    const stage = _quoteField(q, ['stage', 'status', 'phase']);
+    const created = _quoteField(q, ['created_at', 'created', 'date', 'issue_date']);
+    const total = parseFloat(_quoteField(q, ['total', 'amount', 'total_amount', 'quote_total', 'price'])) || 0;
+
+    // stageBadge and fmtDate are global helpers from quotes.js
+    const badge = (typeof stageBadge === 'function')
+      ? stageBadge(stage)
+      : (stage ? '<span style="font-size:11px;color:var(--muted)">'+esc(stage)+'</span>' : '<span style="color:var(--muted)">—</span>');
+    const dateStr = (created && typeof fmtDate === 'function')
+      ? fmtDate(created)
+      : (created ? new Date(created).toLocaleDateString('en-US',{year:'numeric',month:'short',day:'numeric'}) : '—');
+
+    return `<tr style="transition:background .12s" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''">
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(opp)}">${esc(opp)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border)">${badge}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-size:11px;color:var(--muted);white-space:nowrap">${esc(dateStr)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border);font-size:11px;color:${total>0?'var(--green)':'var(--muted)'};text-align:right;font-family:'JetBrains Mono',monospace;white-space:nowrap">${fmt$(total)}</td>
+    </tr>`;
+  }).join('');
+
+  const table = `
+    <div style="border:1px solid var(--border);border-radius:10px;overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse">
+        <thead style="background:var(--surface2)">
+          <tr>${th('Opportunity')}${th('Stage')}${th('Created')}${th('Total','right')}</tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+  // Capture rate by dollars: won / quoted. Guard against divide-by-zero.
+  const captureRate = totalValue > 0 ? (wonValue / totalValue) * 100 : 0;
+
+  const summary = `
+    <div style="margin-top:14px;border:1px solid var(--border);border-radius:10px;padding:14px 18px;background:var(--surface2);display:grid;grid-template-columns:1fr 1fr;gap:12px 18px">
+      <div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Total Quoted</div>
+        <div style="font-size:18px;font-family:'JetBrains Mono',monospace;font-weight:600;color:#5b9cf6">${fmt$(totalValue)}</div>
+      </div>
+      <div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Won Value</div>
+        <div style="font-size:18px;font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--green)">${fmt$(wonValue)}</div>
+      </div>
+      <div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Capture Rate</div>
+        <div style="font-size:18px;font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--amber)">${totalValue > 0 ? captureRate.toFixed(1) + '%' : '—'}</div>
+      </div>
+      <div>
+        <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Won / Total</div>
+        <div style="font-size:18px;font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--text)">${wonCount} / ${sorted.length}</div>
+      </div>
+    </div>`;
+
+  return `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">${sorted.length} quote${sorted.length!==1?'s':''} linked to this client</div>
+    ${table}
+    ${summary}`;
 }
 
 async function saveClientDrawer() {
