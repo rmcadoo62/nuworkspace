@@ -86,8 +86,9 @@ function renderDashboard() {
   // billedMonthlyData is the source of truth — it covers ALL projects including closed.
   // It is kept current by the billed_revenue_monthly table in Supabase.
   const totalBilledAllProjects = Object.values(projectInfo).reduce((s, p) => s + (p.billedRevenue||0), 0);
+  const BILLED_CHART_MONTHS = 24; // rolling window — adjust here if it gets too crowded
   const monthMap = {};
-  for (let i = 11; i >= 0; i--) {
+  for (let i = BILLED_CHART_MONTHS - 1; i >= 0; i--) {
     const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i);
     const key = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
     monthMap[key] = { label: d.toLocaleDateString('en-US',{month:'short', year:'2-digit'}), val: window.billedMonthlyData?.[key] || 0 };
@@ -97,6 +98,13 @@ function renderDashboard() {
   const chartLabels  = Object.values(monthMap).map(m => m.label);
   const chartData    = Object.values(monthMap).map(m => m.val);
   const chartKeys    = Object.keys(monthMap); // e.g. ['2025-03', ...]
+  // Trailing 3-month moving average (includes current month).
+  // Month 1 = itself, Month 2 = avg of months 1-2, Month 3+ = full 3-mo avg.
+  const movingAvg = chartData.map((_, i) => {
+    const start = Math.max(0, i - 2);
+    const slice = chartData.slice(start, i + 1);
+    return slice.reduce((s, v) => s + v, 0) / slice.length;
+  });
   const totalBilled  = chartData[chartData.length - 1] || 0; // current month from chart
   // Note: totalBilledAllProjects is the accurate all-time total across all projects
   // Sum ALL billed tasks directly — not just those with a date
@@ -730,6 +738,22 @@ function renderDashboard() {
           borderWidth: 1.5,
           borderRadius: 5,
           borderSkipped: false,
+          order: 1,
+        },{
+          type: 'line',
+          label: '3-mo Moving Avg',
+          data: movingAvg,
+          borderColor: '#c07a1a',
+          backgroundColor: 'rgba(192,122,26,0.15)',
+          borderWidth: 2.5,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          pointBackgroundColor: '#c07a1a',
+          pointBorderColor: '#c07a1a',
+          fill: false,
+          tension: 0.3,
+          spanGaps: false,
+          order: 0,
         }]
       },
       options: {
@@ -741,10 +765,29 @@ function renderDashboard() {
           showBilledAuditModal(chartKeys[idx], chartLabels[idx]);
         },
         plugins: {
-          legend: { display: false },
+          legend: {
+            display: true,
+            position: 'top',
+            align: 'end',
+            labels: {
+              color: '#9a9aaa',
+              font: { size: 10, family: 'DM Sans, sans-serif' },
+              boxWidth: 12,
+              boxHeight: 8,
+              padding: 10,
+              usePointStyle: false,
+            }
+          },
           tooltip: {
+            mode: 'index',
+            intersect: false,
+            filter: (item) => item.parsed.y !== null && item.parsed.y !== undefined,
             callbacks: {
-              label: ctx => ' $' + ctx.parsed.y.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})
+              label: ctx => {
+                const v = ctx.parsed.y;
+                const prefix = ctx.dataset.label === 'Billed Revenue' ? ' Billed: ' : ' 3-mo Avg: ';
+                return prefix + '$' + (v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+              }
             }
           }
         },
@@ -765,6 +808,7 @@ function renderDashboard() {
         afterDatasetsDraw(chart) {
           const ctx = chart.ctx;
           chart.data.datasets.forEach((dataset, i) => {
+            if (dataset.type === 'line') return; // skip line points
             const meta = chart.getDatasetMeta(i);
             meta.data.forEach((bar, idx) => {
               const val = dataset.data[idx];
