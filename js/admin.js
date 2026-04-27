@@ -1337,12 +1337,87 @@ function openAuditLogPanel(el) {
   renderAuditLogPanel();
 }
 
+// ── Audit Log tab state ──────────────────────────────────────────────
+// Persists across re-renders so filter inputs / active tab survive re-paint.
+let _auditActiveTab = 'field-changes';   // 'field-changes' | 'chatter'
+let _auditChatterFilters = {
+  empId:    '',
+  projId:   '',
+  dateFrom: '',
+  dateTo:   '',
+  keyword:  '',
+};
+
+// Small HTML escape — used for any user-supplied string we render.
+function _auditEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Navigate to a project from the audit log. If jumpToChatter is true,
+// switch to the project's Chatter sub-tab (used by the Chatter Activity
+// rows). Otherwise the project opens on its default Info tab.
+function navToProjectFromAudit(projId, jumpToChatter) {
+  if (!projId) return;
+  if (typeof selectProjectById === 'function') {
+    selectProjectById(projId);
+  } else if (typeof selectProject === 'function') {
+    selectProject(projId, null);
+  }
+  document.getElementById('navProjects')?.classList.add('active');
+  if (jumpToChatter) {
+    setTimeout(() => {
+      if (typeof switchProjTab === 'function') switchProjTab('sub-chatter');
+    }, 200);
+  }
+}
+
 async function renderAuditLogPanel() {
   const el = document.getElementById('auditLogContent');
   if (!el) return;
-  el.innerHTML = '<div style="color:var(--muted);font-size:13px">Loading...</div>';
 
-  // Fetch recent activity
+  // Header + tab bar (same on both tabs)
+  const tabBtn = (key, label) => {
+    const active = _auditActiveTab === key;
+    return '<button onclick="_switchAuditTab(\x27'+key+'\x27)" '+
+      'style="padding:10px 20px;background:transparent;border:none;'+
+      'border-bottom:2.5px solid '+(active?'var(--amber)':'transparent')+';'+
+      'font-family:\x27DM Sans\x27,sans-serif;font-size:13px;'+
+      'font-weight:'+(active?'600':'500')+';'+
+      'color:'+(active?'var(--amber)':'var(--muted)')+';'+
+      'cursor:pointer;transition:color .12s">'+label+'</button>';
+  };
+
+  el.innerHTML =
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">'+
+      '<div><div style="font-family:DM Serif Display,serif;font-size:24px;color:var(--text)">📋 Audit Log</div>'+
+        '<div style="font-size:12px;color:var(--muted);margin-top:2px">Investigate field changes and chatter activity</div></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:0;border-bottom:1.5px solid var(--border);margin-bottom:24px;background:var(--bg);position:sticky;top:0;z-index:10">'+
+      tabBtn('field-changes', '🔧 Field Changes') +
+      tabBtn('chatter', '💬 Chatter Activity') +
+    '</div>'+
+    '<div id="auditTabBody"><div style="color:var(--muted);font-size:13px">Loading…</div></div>';
+
+  if (_auditActiveTab === 'chatter') {
+    await _renderAuditChatterTab();
+  } else {
+    await _renderAuditFieldChangesTab();
+  }
+}
+
+function _switchAuditTab(tab) {
+  _auditActiveTab = tab;
+  renderAuditLogPanel();
+}
+
+// ── Tab 1: Field Changes (existing behavior, with clickable Project) ──
+async function _renderAuditFieldChangesTab() {
+  const body = document.getElementById('auditTabBody');
+  if (!body) return;
+  body.innerHTML = '<div style="color:var(--muted);font-size:13px">Loading…</div>';
+
   let logs = [];
   if (sb) {
     const { data } = await sb.from('activity_log')
@@ -1354,13 +1429,12 @@ async function renderAuditLogPanel() {
 
   const settings = getAuditSettings();
   const fmtDate = d => new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
-
-  // Field label lookup
   const fieldLabel = (type, key) => {
     const def = (AUDIT_FIELD_DEFS[type]||[]).find(f => f.key === key);
     return def ? def.label : key;
   };
 
+  // Tracked-fields settings card (unchanged, only shown on this tab)
   const settingsHtml = () => {
     let html = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:24px">';
     html += '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">⚙ Tracked Fields</div>';
@@ -1380,6 +1454,28 @@ async function renderAuditLogPanel() {
     return html;
   };
 
+  // Build a clickable project cell. Looks like a link, opens the project on its
+  // default Info tab. Falls back to "—" when no project context applies.
+  const projectCell = (l) => {
+    let proj = null;
+    if (l.record_type === 'projects') {
+      proj = projects.find(p => p.id === l.record_id);
+    } else if (l.record_type === 'tasks') {
+      const t = taskStore.find(t => t._id === l.record_id);
+      if (t) proj = projects.find(p => p.id === t.proj);
+    }
+    if (!proj) {
+      return '<td style="padding:9px 14px;font-size:12px;color:var(--muted);white-space:nowrap;max-width:140px">—</td>';
+    }
+    const label = _auditEsc((proj.emoji ? proj.emoji + ' ' : '') + proj.name);
+    return '<td style="padding:9px 14px;font-size:12px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">'+
+      '<span onclick="event.stopPropagation();navToProjectFromAudit(\x27'+proj.id+'\x27,false)" '+
+      'style="color:var(--amber);cursor:pointer;text-decoration:none" '+
+      'onmouseover="this.style.textDecoration=\x27underline\x27" '+
+      'onmouseout="this.style.textDecoration=\x27none\x27" '+
+      'title="Open project">'+label+'</span></td>';
+  };
+
   const logsHtml = logs.length === 0
     ? '<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">📋</div><div>No activity logged yet.</div></div>'
     : '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
@@ -1395,21 +1491,20 @@ async function renderAuditLogPanel() {
       '</tr></thead><tbody>'+
       logs.map(l => '<tr style="border-bottom:1px solid var(--border);transition:background .12s" onmouseover="this.style.background=\x27var(--surface2)\x27" onmouseout="this.style.background=\x27\x27">'+
         '<td style="padding:9px 14px;font-size:11px;color:var(--muted);white-space:nowrap">'+fmtDate(l.created_at)+'</td>'+
-        '<td style="padding:9px 14px;font-size:13px;font-weight:500;color:var(--text)">'+( l.employee_name||'—')+'</td>'+
-        (()=>{ let proj = null; if(l.record_type==='projects') { proj=projects.find(p=>p.id===l.record_id); } else if(l.record_type==='tasks') { const t=taskStore.find(t=>t._id===l.record_id); if(t) proj=projects.find(p=>p.id===t.proj); } return '<td style="padding:9px 14px;font-size:12px;color:var(--muted);white-space:nowrap;max-width:140px;overflow:hidden;text-overflow:ellipsis">'+(proj ? proj.emoji+' '+proj.name : '—')+'</td>'; })()+
+        '<td style="padding:9px 14px;font-size:13px;font-weight:500;color:var(--text)">'+_auditEsc(l.employee_name||'—')+'</td>'+
+        projectCell(l)+
         '<td style="padding:9px 14px;font-size:12px;color:var(--text)">'+
-          '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface2);color:var(--muted);margin-right:6px">'+l.record_type+'</span>'+
-          (l.record_label||l.record_id||'—')+'</td>'+
-        '<td style="padding:9px 14px;font-size:12px;color:var(--text)">'+fieldLabel(l.record_type, l.field_changed)+'</td>'+
-        '<td style="padding:9px 14px;font-size:12px;color:var(--red);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(l.old_value||'—')+'</td>'+
-        '<td style="padding:9px 14px;font-size:12px;color:var(--green);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+(l.new_value||'—')+'</td>'+
+          '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface2);color:var(--muted);margin-right:6px">'+_auditEsc(l.record_type)+'</span>'+
+          _auditEsc(l.record_label||l.record_id||'—')+'</td>'+
+        '<td style="padding:9px 14px;font-size:12px;color:var(--text)">'+_auditEsc(fieldLabel(l.record_type, l.field_changed))+'</td>'+
+        '<td style="padding:9px 14px;font-size:12px;color:var(--red);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_auditEsc(l.old_value||'—')+'</td>'+
+        '<td style="padding:9px 14px;font-size:12px;color:var(--green);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_auditEsc(l.new_value||'—')+'</td>'+
         '</tr>'
       ).join('')+
       '</tbody></table></div>';
 
-  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:10px">'+
-    '<div><div style="font-family:DM Serif Display,serif;font-size:24px;color:var(--text)">📋 Audit Log</div>'+
-    '<div style="font-size:12px;color:var(--muted);margin-top:2px">'+logs.length+' recent changes</div></div></div>'+
+  body.innerHTML =
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">'+logs.length+' recent changes</div>'+
     settingsHtml() + logsHtml;
 }
 
@@ -1419,6 +1514,223 @@ function toggleAuditField(type, key, checked) {
   if (checked) { if (!settings[type].includes(key)) settings[type].push(key); }
   else { settings[type] = settings[type].filter(k => k !== key); }
   saveAuditSettings(settings);
+}
+
+// ── Tab 2: Chatter Activity ───────────────────────────────────────────
+// "Show me everything Corrine posted." Queries the chatter table directly
+// with server-side filtering for employee, project, date range, and keyword.
+// Click the project label on any row to jump to that project's Chatter tab.
+async function _renderAuditChatterTab() {
+  const body = document.getElementById('auditTabBody');
+  if (!body) return;
+
+  // Render filter bar immediately so it's responsive while data loads.
+  body.innerHTML = _auditChatterFiltersHtml() + '<div id="auditChatterList" style="color:var(--muted);font-size:13px">Loading messages…</div>';
+  await _loadAndRenderAuditChatterList();
+}
+
+function _auditChatterFiltersHtml() {
+  const f = _auditChatterFilters;
+
+  // Employee dropdown — active employees only (matches scheduler.js / employees.js
+  // convention: isActive !== false && no terminationDate). Skip the
+  // historical-import sentinel.
+  // Note: we do NOT require e.userId — the in-memory employee record (built
+  // in supabase-client.js loadAllData) doesn't currently carry user_id, so
+  // checking it would exclude everyone. The actual filter query below falls
+  // back to author_name matching, which is reliable since chatter.author_name
+  // is stored denormalized.
+  const sortedEmps = [...employees]
+    .filter(e =>
+      e.isActive !== false &&
+      !e.terminationDate &&
+      e.id !== 'aaaaaaaa-0000-0000-0000-000000000001'
+    )
+    .sort((a,b) => (a.name||'').localeCompare(b.name||''));
+  const empOpts = '<option value="">All active employees</option>' +
+    sortedEmps.map(e =>
+      '<option value="'+e.id+'"'+(f.empId===e.id?' selected':'')+'>'+_auditEsc(e.name)+'</option>'
+    ).join('');
+
+  // Project dropdown — exclude closed projects (matches the projects.js
+  // "Show Closed" convention: projectInfo[id].status !== 'closed'). If a
+  // closed project is currently selected, keep it visible so the user can
+  // see what they're filtering on.
+  const projInfoLookup = (typeof projectInfo === 'object' && projectInfo) ? projectInfo : {};
+  const sortedProjs = [...projects]
+    .filter(p => {
+      if (p.id === f.projId) return true;   // keep current selection visible
+      return (projInfoLookup[p.id] || {}).status !== 'closed';
+    })
+    .sort((a,b) => (a.name||'').localeCompare(b.name||''));
+  const projOpts = '<option value="">All open projects</option>' +
+    sortedProjs.map(p =>
+      '<option value="'+p.id+'"'+(f.projId===p.id?' selected':'')+'>'+_auditEsc((p.emoji?p.emoji+' ':'')+p.name)+'</option>'
+    ).join('');
+
+  const fieldStyle = 'background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;color:var(--text);font-family:\x27DM Sans\x27,sans-serif';
+  const labelStyle = 'font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;display:block';
+
+  return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:20px">'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;align-items:end">'+
+      '<div><label style="'+labelStyle+'">Employee</label>'+
+        '<select onchange="_updateAuditChatterFilter(\x27empId\x27,this.value)" style="'+fieldStyle+';width:100%">'+empOpts+'</select></div>'+
+      '<div><label style="'+labelStyle+'">Project</label>'+
+        '<select onchange="_updateAuditChatterFilter(\x27projId\x27,this.value)" style="'+fieldStyle+';width:100%">'+projOpts+'</select></div>'+
+      '<div><label style="'+labelStyle+'">From</label>'+
+        '<input type="date" value="'+_auditEsc(f.dateFrom)+'" onchange="_updateAuditChatterFilter(\x27dateFrom\x27,this.value)" style="'+fieldStyle+';width:100%"></div>'+
+      '<div><label style="'+labelStyle+'">To</label>'+
+        '<input type="date" value="'+_auditEsc(f.dateTo)+'" onchange="_updateAuditChatterFilter(\x27dateTo\x27,this.value)" style="'+fieldStyle+';width:100%"></div>'+
+      '<div style="grid-column:1/-1;display:flex;gap:10px;align-items:end">'+
+        '<div style="flex:1"><label style="'+labelStyle+'">Search text</label>'+
+          '<input type="text" value="'+_auditEsc(f.keyword)+'" placeholder="Find a word or phrase…" '+
+            'onkeydown="if(event.key===\x27Enter\x27){_updateAuditChatterFilter(\x27keyword\x27,this.value);}" '+
+            'onblur="_updateAuditChatterFilter(\x27keyword\x27,this.value)" style="'+fieldStyle+';width:100%"></div>'+
+        '<button onclick="_clearAuditChatterFilters()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:12px;color:var(--muted);cursor:pointer;font-family:\x27DM Sans\x27,sans-serif">Clear</button>'+
+      '</div>'+
+    '</div></div>';
+}
+
+function _updateAuditChatterFilter(field, value) {
+  if (_auditChatterFilters[field] === value) return;   // no-op (avoids onblur spam)
+  _auditChatterFilters[field] = value;
+  _loadAndRenderAuditChatterList();
+}
+
+function _clearAuditChatterFilters() {
+  _auditChatterFilters = { empId:'', projId:'', dateFrom:'', dateTo:'', keyword:'' };
+  _renderAuditChatterTab();
+}
+
+async function _loadAndRenderAuditChatterList() {
+  const list = document.getElementById('auditChatterList');
+  if (!list) return;
+  list.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:20px 0">Loading messages…</div>';
+
+  if (!sb) { list.innerHTML = '<div style="color:var(--red);font-size:13px">Not connected.</div>'; return; }
+
+  const f = _auditChatterFilters;
+  let q = sb.from('chatter').select('*').order('created_at', { ascending: false }).limit(200);
+
+  // Employee filter — chatter.author_id stores the auth userId, so we
+  // translate empId → userId. Fall back to author_name if userId is missing.
+  if (f.empId) {
+    const emp = employees.find(e => e.id === f.empId);
+    if (emp && emp.userId) {
+      q = q.eq('author_id', emp.userId);
+    } else if (emp && emp.name) {
+      q = q.eq('author_name', emp.name);
+    }
+  }
+  if (f.projId)   q = q.eq('proj_id', f.projId);
+  if (f.dateFrom) q = q.gte('created_at', f.dateFrom + 'T00:00:00');
+  if (f.dateTo) {
+    // Inclusive end-of-day: add 1 day, use less-than.
+    const end = new Date(f.dateTo + 'T00:00:00');
+    end.setDate(end.getDate() + 1);
+    q = q.lt('created_at', end.toISOString());
+  }
+  if (f.keyword && f.keyword.trim()) {
+    // Escape PostgREST wildcards in user input, then ilike-wrap.
+    const safe = f.keyword.trim().replace(/[%_\\]/g, m => '\\' + m);
+    q = q.ilike('text', '%' + safe + '%');
+  }
+
+  const { data, error } = await q;
+  if (error) {
+    list.innerHTML = '<div style="color:var(--red);font-size:13px;padding:20px 0">Error loading chatter: '+_auditEsc(error.message||'unknown')+'</div>';
+    return;
+  }
+  const rows = data || [];
+  list.innerHTML = _renderAuditChatterRows(rows);
+}
+
+function _renderAuditChatterRows(rows) {
+  if (!rows.length) {
+    return '<div style="text-align:center;padding:48px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:12px">'+
+      '<div style="font-size:32px;margin-bottom:12px">💬</div>'+
+      '<div style="font-size:14px">No chatter messages match these filters.</div>'+
+      '<div style="font-size:12px;margin-top:6px">Try clearing filters or widening the date range.</div></div>';
+  }
+
+  const fmtTs = d => {
+    const dt = new Date(d);
+    return dt.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) +
+      ' · ' + dt.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
+  };
+
+  // Cache employee lookup by userId for speed (mentions / author resolution)
+  const empByUserId = {};
+  const empById     = {};
+  employees.forEach(e => {
+    if (e.userId) empByUserId[e.userId] = e;
+    empById[e.id] = e;
+  });
+  const projById = {};
+  projects.forEach(p => { projById[p.id] = p; });
+
+  const header = '<div style="font-size:12px;color:var(--muted);margin-bottom:12px">'+rows.length+' message'+(rows.length===1?'':'s')+(rows.length===200?' (limit reached — narrow your filters)':'')+'</div>';
+
+  const list = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
+    rows.map((m, i) => {
+      const isLast = i === rows.length - 1;
+      const emp = empByUserId[m.author_id] || null;
+      const initials = m.author_initials || (emp ? emp.initials : '?');
+      const color    = m.author_color    || (emp ? emp.color    : '#888');
+      const authorName = m.author_name || (emp ? emp.name : 'Unknown');
+
+      // Project pill — clickable. Falls back to "—" when proj_id missing.
+      const proj = projById[m.proj_id];
+      let projHtml = '<span style="font-size:12px;color:var(--muted)">—</span>';
+      if (proj) {
+        const label = _auditEsc((proj.emoji ? proj.emoji+' ' : '') + proj.name);
+        projHtml = '<span onclick="navToProjectFromAudit(\x27'+proj.id+'\x27,true)" '+
+          'style="font-size:12px;color:var(--amber);cursor:pointer;font-weight:500" '+
+          'onmouseover="this.style.textDecoration=\x27underline\x27" '+
+          'onmouseout="this.style.textDecoration=\x27none\x27" '+
+          'title="Open project chatter">'+label+'</span>';
+      }
+
+      // Build badges row (attachments, reply, mentions)
+      const badges = [];
+      const atts = Array.isArray(m.attachments) ? m.attachments : [];
+      if (atts.length) {
+        badges.push('<span style="font-size:11px;padding:2px 8px;background:var(--surface2);color:var(--muted);border-radius:6px">📎 '+atts.length+' attachment'+(atts.length===1?'':'s')+'</span>');
+      }
+      if (m.reply_to) {
+        badges.push('<span style="font-size:11px;padding:2px 8px;background:var(--surface2);color:var(--muted);border-radius:6px">↩ Reply</span>');
+      }
+      const notifyIds = Array.isArray(m.notify_ids) ? m.notify_ids : [];
+      if (notifyIds.length) {
+        const names = notifyIds.map(id => empById[id]?.name).filter(Boolean).slice(0,4);
+        if (names.length) {
+          badges.push('<span style="font-size:11px;padding:2px 8px;background:var(--surface2);color:var(--muted);border-radius:6px">@ '+_auditEsc(names.join(', '))+(notifyIds.length>4?' +'+(notifyIds.length-4):'')+'</span>');
+        }
+      }
+      const badgesHtml = badges.length
+        ? '<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">'+badges.join('')+'</div>'
+        : '';
+
+      const text = _auditEsc(m.text || '').replace(/\n/g, '<br>');
+
+      return '<div style="display:flex;gap:12px;padding:14px 16px'+(isLast?'':';border-bottom:1px solid var(--border)')+';transition:background .12s" '+
+        'onmouseover="this.style.background=\x27var(--surface2)\x27" onmouseout="this.style.background=\x27\x27">'+
+        '<div style="background:'+_auditEsc(color)+';color:#fff;width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0">'+_auditEsc(initials)+'</div>'+
+        '<div style="flex:1;min-width:0">'+
+          '<div style="display:flex;align-items:baseline;gap:10px;margin-bottom:4px;flex-wrap:wrap">'+
+            '<span style="font-size:13px;font-weight:600;color:var(--text)">'+_auditEsc(authorName)+'</span>'+
+            '<span style="color:var(--muted);font-size:11px">·</span>'+
+            projHtml+
+            '<span style="font-size:11px;color:var(--muted);margin-left:auto;white-space:nowrap">'+fmtTs(m.created_at)+'</span>'+
+          '</div>'+
+          '<div style="font-size:13px;line-height:1.55;color:var(--text);word-break:break-word">'+text+'</div>'+
+          badgesHtml+
+        '</div>'+
+      '</div>';
+    }).join('')+
+    '</div>';
+
+  return header + list;
 }
 
 
