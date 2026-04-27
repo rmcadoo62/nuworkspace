@@ -4019,10 +4019,15 @@ async function sendEmailContactModal() {
       const authorInitials = currentEmployee.initials || (authorName.slice(0,2).toUpperCase());
       const authorColor = currentEmployee.color || '#5b9cf6';
       const contactName = (ct.firstName||'') + ' ' + (ct.lastName||'');
-      const chatterText = '\uD83D\uDCE7 Email sent to ' + contactName.trim() + ' — ' + subject;
+      // Look up the template label so it appears in the chatter feed
+      const tplLabel = (typeof templates !== 'undefined' && templateId)
+        ? (templates.find(t => t.id === templateId)?.label || null)
+        : null;
+      const chatterText = '\uD83D\uDCE7 Email sent to ' + contactName.trim() + ' \u2014 ' + subject
+        + (tplLabel ? '  \u2022  Template: ' + tplLabel : '');
       const msg = {
         proj_id:        projId,
-        author_id:      currentEmployee.id || null,
+        author_id:      currentUser?.id || null,    // ← auth user id (matches My Chatter query)
         author_name:    authorName,
         author_initials:authorInitials,
         author_color:   authorColor,
