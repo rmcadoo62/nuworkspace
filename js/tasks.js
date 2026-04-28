@@ -379,6 +379,16 @@ function renderTasksPanel(projId) {
     .filter(s => s.projId === projId)
     .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
 
+  // ── Section color stripes ────────────────────────────────────────────
+  // Each section gets a stripe color by position. Cycles after 5 sections.
+  // Colors chosen to be distinct from status colors (green, amber, red, gray,
+  // blue-gray, purple) so the stripe never gets confused with row status.
+  const SECTION_PALETTE = ['#1D9E75', '#D4537E', '#534AB7', '#D85A30', '#378ADD'];
+  const sectionColorMap = {};
+  sections.forEach((s, i) => {
+    sectionColorMap[s._id] = SECTION_PALETTE[i % SECTION_PALETTE.length];
+  });
+
   // Count duplicate task names within this project so hours can be split evenly
   const taskNameCount = {};
   tasks.forEach(t => {
@@ -460,7 +470,9 @@ function renderTasksPanel(projId) {
         </span>
       ` : '';
 
+      const _secStripe = sectionColorMap[s._id] || 'transparent';
       return `<div class="itt-section-header" data-section-id="${s._id}" draggable="true"
+          style="box-shadow: inset 3px 0 0 0 ${_secStripe};"
           ondragstart="sectionDragStart(event,'${s._id}')"
           ondragover="taskDragOver(event)"
           ondragleave="taskDragLeave(event)"
@@ -497,8 +509,12 @@ function renderTasksPanel(projId) {
     const budgetH = t.budgetHours || 0;
     const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : '#000';
 
+    // Section stripe — appended to inline style, doesn't shift layout
+    const _stripeColor = (t.sectionId && sectionColorMap[t.sectionId]) ? sectionColorMap[t.sectionId] : null;
+    const _stripeCss   = _stripeColor ? `box-shadow:inset 3px 0 0 0 ${_stripeColor};` : '';
+
     return `
-      <div class="itt-row" data-task-id="${t._id}" draggable="true" style="${t.status==='billed'?'background:rgba(192,132,252,0.50);border-color:rgba(192,132,252,0.70);':t.status==='cancelled'?'background:rgba(232,162,52,0.50);border-color:rgba(232,162,52,0.70);border-left:3px solid #e8a234;':t.status==='complete'||t.done?'background:rgba(120,120,130,0.50);border-color:rgba(120,120,130,0.70);':t.status==='inprogress'?'background:rgba(46,158,98,0.50);border-color:rgba(46,158,98,0.70);':''}"
+      <div class="itt-row" data-task-id="${t._id}" draggable="true" style="${t.status==='billed'?'background:rgba(192,132,252,0.50);border-color:rgba(192,132,252,0.70);':t.status==='cancelled'?'background:rgba(232,162,52,0.50);border-color:rgba(232,162,52,0.70);border-left:3px solid #e8a234;':t.status==='complete'||t.done?'background:rgba(120,120,130,0.50);border-color:rgba(120,120,130,0.70);':t.status==='inprogress'?'background:rgba(46,158,98,0.50);border-color:rgba(46,158,98,0.70);':''}${_stripeCss}"
         ondragstart="taskDragStart(event,'${t._id}')"
         ondragover="taskDragOver(event)"
         ondragleave="taskDragLeave(event)"
