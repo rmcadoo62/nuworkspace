@@ -717,6 +717,12 @@ function renderInProgressReport() {
   const repTasks = ipTasks.filter(t => REPORT_CATS.has(t.catKey));
   const repValue = repTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
 
+  // Everything else (excludes cat 41-44 — those live in their own subsection)
+  const mainTasks = ipTasks.filter(t => !REPORT_CATS.has(t.catKey));
+  const mainCount = mainTasks.length;
+  const mainValue = mainTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
+  const mainProjectCount = new Set(mainTasks.map(t => t.projId)).size;
+
   // ---- Helper: render a grouped-by-project table for a given task list ----
   function renderGroupedTable(tasks, emptyMsg) {
     if (tasks.length === 0) {
@@ -821,13 +827,14 @@ function renderInProgressReport() {
         </div>
       </div>
 
-      <!-- Main: All In-Progress Tasks -->
+      <!-- Main: Other In-Progress Tasks (excludes Cat 41-44) -->
       <div style="margin-top:8px">
         <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px">
-          <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text)">All In-Progress Tasks</div>
-          <div style="font-size:11.5px;color:var(--muted)">${totalCount} task${totalCount!==1?'s':''} across ${projectCount} project${projectCount!==1?'s':''} • ${fmt$(totalValue)}</div>
+          <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text)">In-Progress Tasks</div>
+          <div style="font-size:11.5px;color:var(--muted)">${mainCount} task${mainCount!==1?'s':''} across ${mainProjectCount} project${mainProjectCount!==1?'s':''} • ${fmt$(mainValue)}</div>
         </div>
-        ${renderGroupedTable(ipTasks, 'No in-progress tasks. Everything is either new, complete, or billed.')}
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;font-style:italic">Excludes reports &amp; procedures (cat 41–44) — those are listed separately below.</div>
+        ${renderGroupedTable(mainTasks, 'No in-progress tasks outside of reports &amp; procedures.')}
       </div>
 
       <!-- Subsection: Reports & Procedures (Cat 41-44) -->
@@ -836,7 +843,6 @@ function renderInProgressReport() {
           <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text)">📄 Reports & Procedures <span style="font-size:13px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41–44)</span></div>
           <div style="font-size:11.5px;color:var(--muted)">${repTasks.length} task${repTasks.length!==1?'s':''} • ${fmt$(repValue)}</div>
         </div>
-        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;font-style:italic">Subset of the list above — in-progress tasks in sales categories 41, 42, 43, and 44.</div>
         ${renderGroupedTable(repTasks, 'No in-progress reports or procedures.')}
       </div>
     </div>
