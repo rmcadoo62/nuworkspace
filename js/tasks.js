@@ -316,6 +316,33 @@ emptyStyle.textContent = `
 `;
 document.head.appendChild(emptyStyle);
 
+// ===== SECTION SUBTOTAL PILLS — eager injection so they style on first paint =====
+const sectionTotalsStyle = document.createElement('style');
+sectionTotalsStyle.id = 'sectionTotalsStyle';
+sectionTotalsStyle.textContent = `
+  .itt-section-totals{
+    display:inline-flex;align-items:center;gap:6px;margin-left:6px;
+    font-family:'JetBrains Mono',monospace;font-size:10.5px;
+  }
+  .itt-section-totals .ist-pill{
+    display:inline-flex;align-items:center;
+    padding:2px 7px;border-radius:4px;
+    font-weight:700;letter-spacing:0.2px;line-height:1.4;
+  }
+  .ist-pill.ist-price{background:rgba(192,122,26,0.14);color:var(--amber,#c07a1a);}
+  .ist-pill.ist-budget{background:rgba(46,158,98,0.14);color:#2e9e62;}
+  .ist-pill.ist-logged{background:rgba(91,156,246,0.14);color:#5b9cf6;}
+
+  .itt-section-divider{
+    padding:14px 16px 6px;
+    font-size:10px;font-weight:700;letter-spacing:1.4px;
+    text-transform:uppercase;color:var(--muted);
+    border-top:1px dashed var(--border);
+    margin-top:10px;
+  }
+`;
+document.head.appendChild(sectionTotalsStyle);
+
 
 
 // ===== TASKS PANEL =====
@@ -359,16 +386,80 @@ function renderTasksPanel(projId) {
     taskNameCount[key] = (taskNameCount[key] || 0) + 1;
   });
 
-  // Build a flat ordered list of {type, item, num}
-  const allItems = [
-    ...sections.map(s => ({type:'section', item:s, num: s.taskNum||0})),
-    ...tasks.map(t => ({type:'task', item:t, num: t.taskNum||0})),
-  ].sort((a,b) => a.num - b.num);
+  // Build a flat ordered list of {type, item, num} using STRICT section membership.
+  // - When sections exist: each section header is followed by ONLY its members
+  //   (sorted by taskNum within the section). Tasks whose sectionId is null OR
+  //   points to a deleted section render in an "Unsectioned" group at the bottom.
+  // - When no sections exist: flat by taskNum (original behavior preserved).
+  // This prevents stray tasks from rendering inside a section they don't belong to.
+  let allItems;
+  if (sections.length === 0) {
+    allItems = tasks.slice()
+      .sort((a,b) => (a.taskNum||0) - (b.taskNum||0))
+      .map(t => ({type:'task', item:t, num: t.taskNum||0}));
+  } else {
+    const _validSecIds = new Set(sections.map(s => s._id));
+    const _tasksBySec = new Map();
+    const _unsectionedTasks = [];
+    tasks.forEach(t => {
+      if (t.sectionId && _validSecIds.has(t.sectionId)) {
+        if (!_tasksBySec.has(t.sectionId)) _tasksBySec.set(t.sectionId, []);
+        _tasksBySec.get(t.sectionId).push(t);
+      } else {
+        _unsectionedTasks.push(t);
+      }
+    });
+    _tasksBySec.forEach(arr => arr.sort((a,b) => (a.taskNum||0) - (b.taskNum||0)));
+    _unsectionedTasks.sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+
+    allItems = [];
+    sections.forEach(s => {
+      allItems.push({type:'section', item:s, num: s.taskNum||0});
+      (_tasksBySec.get(s._id) || []).forEach(t => {
+        allItems.push({type:'task', item:t, num: t.taskNum||0});
+      });
+    });
+    if (_unsectionedTasks.length > 0) {
+      allItems.push({type:'divider', label:`Unsectioned (${_unsectionedTasks.length})`});
+      _unsectionedTasks.forEach(t => {
+        allItems.push({type:'task', item:t, num: t.taskNum||0});
+      });
+    }
+  }
 
   const taskRows = allItems.map(entry => {
+    if (entry.type === 'divider') {
+      return `<div class="itt-section-divider">— ${entry.label} —</div>`;
+    }
     if (entry.type === 'section') {
       const s = entry.item;
-      const taskCount = tasks.filter(t => t.sectionId === s._id).length;
+      const sectionTasks = tasks.filter(t => t.sectionId === s._id);
+      const taskCount = sectionTasks.length;
+
+      // ── Section subtotals ────────────────────────────────────────────
+      // Price total excludes cancelled (matches expected-revenue logic)
+      const sumPrice = sectionTasks
+        .filter(t => t.status !== 'cancelled')
+        .reduce((acc, t) => acc + (parseFloat(t.fixedPrice) || 0), 0);
+      const sumBudget = sectionTasks
+        .reduce((acc, t) => acc + (parseFloat(t.budgetHours) || 0), 0);
+      const sumLogged = sectionTasks.reduce((acc, t) => {
+        const dup = taskNameCount[(t.name||'').trim().toLowerCase()] || 1;
+        const h = (typeof getHoursForTask === 'function')
+          ? getHoursForTask(t.name, t.proj, t._id) / (t._id ? 1 : dup)
+          : 0;
+        return acc + h;
+      }, 0);
+
+      const _fmtMoney = n => '$' + n.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0});
+      const totalsHtml = taskCount > 0 ? `
+        <span class="itt-section-totals">
+          ${sumPrice  > 0 ? `<span class="ist-pill ist-price"  title="Total price (excludes cancelled)">${_fmtMoney(sumPrice)}</span>` : ''}
+          ${sumBudget > 0 ? `<span class="ist-pill ist-budget" title="Total budget hours">${sumBudget.toFixed(0)}h budget</span>` : ''}
+          ${sumLogged > 0 ? `<span class="ist-pill ist-logged" title="Total hours logged">${sumLogged.toFixed(1)}h logged</span>` : ''}
+        </span>
+      ` : '';
+
       return `<div class="itt-section-header" data-section-id="${s._id}" draggable="true"
           ondragstart="sectionDragStart(event,'${s._id}')"
           ondragover="taskDragOver(event)"
@@ -378,8 +469,11 @@ function renderTasksPanel(projId) {
           <span class="itt-section-chevron ${s.collapsed?'':'open'}" onclick="toggleSection('${s._id}','${projId}');event.stopPropagation()">▶</span>
           <span class="itt-section-name" ondblclick="startEditSectionName('${s._id}','${projId}');event.stopPropagation()">${s.name}</span>
           <span class="itt-section-count">${taskCount} task${taskCount!==1?'s':''}</span>
+          ${totalsHtml}
           <div class="itt-section-actions">
             <button class="itt-section-action-btn itt-section-add-btn" onclick="openTaskModalForSection('${s._id}','${projId}');event.stopPropagation()">+ Task</button>
+            <button class="itt-section-action-btn itt-section-bulk-btn" onclick="openBulkAddModal('${projId}','${s._id}');event.stopPropagation()">+ Bulk</button>
+            <button class="itt-section-action-btn itt-section-movein-btn" onclick="openManageSectionTasksModal('${s._id}','${projId}');event.stopPropagation()" title="Move existing tasks into this section">Move In</button>
             <button class="itt-section-action-btn" onclick="deleteSectionHeader('${s._id}','${projId}');event.stopPropagation()">✕</button>
           </div>
         </div>`;
@@ -458,7 +552,7 @@ function renderTasksPanel(projId) {
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
-        ${isManager() ? `<button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="addSectionHeader('${projId}')">+ Section</button>` : ''}
+        ${isManager() ? `<button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="addSectionHeader('${projId}')">+ Section</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="openBulkAddModal('${projId}',null)" title="Add multiple tasks at once">+ Bulk</button>` : ''}
         <button class="btn btn-ghost" style="font-size:12px;border:1px solid var(--border)" onclick="copyTasksToClipboard('${projId}')" title="Copy task list to clipboard for pasting into Word">&#x1F4CB; Copy List</button>
       </div>
     </div>
@@ -1203,33 +1297,65 @@ async function taskDrop(event, projId) {
   const dropTaskId = dropRow.dataset.taskId;
   const dropSectionId = dropRow.dataset.sectionId;
 
-  // Build the flat ordered list of all items
+  // Build allItems in STRICT render order (matches what the user sees in the table).
+  // Without this, dropping a task between two visually-adjacent rows could land at
+  // the "wrong" position because the underlying taskNum order disagrees with the
+  // rendered order (especially for stray tasks in the unsectioned region).
   const projTasks = taskStore.filter(t => t.proj === projId);
-  const projSections = sectionStore.filter(s => s.projId === projId);
-  let allItems = [
-    ...projSections.map(s => ({type:'section', item:s, num: s.taskNum||0})),
-    ...projTasks.map(t => ({type:'task', item:t, num: t.taskNum||0})),
-  ].sort((a,b) => a.num - b.num);
+  const projSections = sectionStore.filter(s => s.projId === projId)
+    .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
 
-  // Find drag and drop indices
+  const _validSecIds = new Set(projSections.map(s => s._id));
+  const _tasksBySec = new Map();
+  const _unsectionedTasks = [];
+  projTasks.forEach(t => {
+    if (t.sectionId && _validSecIds.has(t.sectionId)) {
+      if (!_tasksBySec.has(t.sectionId)) _tasksBySec.set(t.sectionId, []);
+      _tasksBySec.get(t.sectionId).push(t);
+    } else {
+      _unsectionedTasks.push(t);
+    }
+  });
+  _tasksBySec.forEach(arr => arr.sort((a,b) => (a.taskNum||0) - (b.taskNum||0)));
+  _unsectionedTasks.sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+
+  let allItems = [];
+  if (projSections.length === 0) {
+    allItems = projTasks.slice()
+      .sort((a,b) => (a.taskNum||0) - (b.taskNum||0))
+      .map(t => ({type:'task', item:t}));
+  } else {
+    projSections.forEach(s => {
+      allItems.push({type:'section', item:s});
+      (_tasksBySec.get(s._id) || []).forEach(t => {
+        allItems.push({type:'task', item:t});
+      });
+    });
+    // Unsectioned tasks at the bottom (no divider in this list — handled by renderer)
+    _unsectionedTasks.forEach(t => {
+      allItems.push({type:'task', item:t, _unsectioned: true});
+    });
+  }
+
+  // Find drag and drop indices in the strict-order list
   const dragId = _dragTaskId || _dragSectionId;
   const dropId = dropTaskId || dropSectionId;
   if (!dragId || dragId === dropId) return;
 
-  const dragIdx = allItems.findIndex(x => (x.item._id === dragId));
-  const dropIdx = allItems.findIndex(x => (x.item._id === dropId));
+  const dragIdx = allItems.findIndex(x => x.item._id === dragId);
+  const dropIdx = allItems.findIndex(x => x.item._id === dropId);
   if (dragIdx === -1 || dropIdx === -1) return;
 
-  // If dragging a section, also move its tasks with it
+  // If dragging a section, also move its members with it
   if (_dragSectionId) {
     const sec = projSections.find(s => s._id === _dragSectionId);
     if (!sec) return;
-    // Get indices of all tasks belonging to this section in the ordered list
-    const sectionItemIndices = [dragIdx, ...allItems.map((x,i) => (x.type==='task' && x.item.sectionId===_dragSectionId) ? i : -1).filter(i=>i>=0)];
+    const sectionItemIndices = [
+      dragIdx,
+      ...allItems.map((x,i) => (x.type==='task' && x.item.sectionId===_dragSectionId) ? i : -1).filter(i => i >= 0),
+    ];
     const sectionItems = sectionItemIndices.map(i => allItems[i]);
-    // Remove them all
     const remaining = allItems.filter((_,i) => !sectionItemIndices.includes(i));
-    // Find drop position in remaining
     const newDropIdx = remaining.findIndex(x => x.item._id === dropId);
     if (newDropIdx === -1) return;
     remaining.splice(newDropIdx, 0, ...sectionItems);
@@ -1240,16 +1366,26 @@ async function taskDrop(event, projId) {
     const newDropIdx = allItems.findIndex(x => x.item._id === dropId);
     allItems.splice(newDropIdx, 0, moved);
 
-    // Update sectionId: task takes the section of whatever section header precedes it
-    let currentSecId = null;
-    allItems.forEach(x => {
-      if (x.type === 'section') currentSecId = x.item._id;
-      else if (x.item._id === moved.item._id) moved.item.sectionId = currentSecId;
-    });
-    if (sb) await sb.from('tasks').update({ section_id: moved.item.sectionId||null }).eq('id', moved.item._id);
+    // Determine new sectionId from drop target directly, not from "last section seen"
+    // (the latter gives wrong answers for drops in the unsectioned region).
+    let newSectionId = null;
+    if (dropTaskId) {
+      const dropTaskObj = projTasks.find(t => t._id === dropTaskId);
+      if (dropTaskObj) {
+        // If the drop target is itself unsectioned (or has a stale sectionId), inherit that
+        newSectionId = dropTaskObj.sectionId && _validSecIds.has(dropTaskObj.sectionId)
+          ? dropTaskObj.sectionId
+          : null;
+      }
+    } else if (dropSectionId) {
+      // Dropped on a section header → join that section
+      newSectionId = dropSectionId;
+    }
+    moved.item.sectionId = newSectionId;
+    if (sb) await sb.from('tasks').update({ section_id: newSectionId || null }).eq('id', moved.item._id);
   }
 
-  // Reassign taskNum 1..n for all items
+  // Reassign taskNum 1..n for all items in their new strict order
   allItems.forEach((x, i) => { x.item.taskNum = i + 1; });
 
   // Save to Supabase
@@ -1510,3 +1646,826 @@ function copyTasksToClipboard(projId) {
     toast('✓ Task list copied — paste into Word to create a table');
   });
 }
+
+// ===== BULK ADD TASKS =====
+// ===== BULK ADD TASKS =====
+// Lets the user add many tasks at once to a section (or to a project).
+// Supports tab-separated columns: Name [TAB] Budget Hrs [TAB] Price.
+// Also strips list markers (- * • 1.) and parses simple markdown tables.
+
+let _bulkAddContext = { projId: null, sectionId: null };
+
+function ensureBulkAddModal() {
+  if (document.getElementById('bulkAddOverlay')) return;
+
+  // Inject modal styles once
+  if (!document.getElementById('bulkAddStyles')) {
+    const st = document.createElement('style');
+    st.id = 'bulkAddStyles';
+    st.textContent = `
+      /* Bulk add modal */
+      .bulk-add-overlay{
+        position:fixed;inset:0;z-index:10000;
+        background:rgba(0,0,0,0.55);
+        display:flex;align-items:center;justify-content:center;
+        opacity:0;pointer-events:none;
+        transition:opacity 0.18s ease;
+      }
+      .bulk-add-overlay.open{opacity:1;pointer-events:auto;}
+      .bulk-add-modal{
+        width:680px;max-width:94vw;max-height:90vh;
+        background:var(--surface);
+        border:1.5px solid var(--border);border-radius:12px;
+        display:flex;flex-direction:column;
+        box-shadow:0 18px 56px rgba(0,0,0,0.45);
+        font-family:'DM Sans',sans-serif;
+      }
+      .bulk-add-header{
+        display:flex;align-items:center;justify-content:space-between;
+        padding:14px 20px;border-bottom:1px solid var(--border);
+      }
+      .bulk-add-title{font-size:15px;font-weight:700;color:var(--text);}
+      .bulk-add-close{
+        background:none;border:none;color:var(--muted);
+        font-size:18px;cursor:pointer;padding:2px 8px;border-radius:4px;
+      }
+      .bulk-add-close:hover{background:var(--surface2);color:var(--text);}
+      .bulk-add-body{padding:16px 20px;flex:1;overflow-y:auto;}
+      .bulk-add-help{
+        font-size:11.5px;color:var(--muted);
+        margin-bottom:8px;line-height:1.55;
+      }
+      .bulk-add-help code{
+        background:var(--surface2);
+        padding:1px 5px;border-radius:3px;
+        font-size:10.5px;font-family:'JetBrains Mono',monospace;color:var(--text);
+      }
+      .bulk-add-textarea{
+        width:100%;min-height:200px;box-sizing:border-box;
+        font-family:'JetBrains Mono',monospace;font-size:12.5px;line-height:1.5;
+        padding:10px 12px;
+        border:1.5px solid var(--border);border-radius:8px;
+        background:var(--bg);color:var(--text);
+        resize:vertical;outline:none;
+      }
+      .bulk-add-textarea:focus{border-color:var(--amber,#c07a1a);}
+      .bulk-add-defaults{
+        display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
+        margin-top:14px;padding-top:14px;
+        border-top:1px dashed var(--border);
+      }
+      .bulk-add-defaults label{
+        display:flex;flex-direction:column;gap:4px;
+        font-size:10px;color:var(--muted);font-weight:600;
+        text-transform:uppercase;letter-spacing:0.6px;
+      }
+      .bulk-add-defaults select{
+        font-size:12.5px;padding:5px 8px;min-width:120px;
+        border:1px solid var(--border);border-radius:6px;
+        background:var(--bg);color:var(--text);
+        font-family:'DM Sans',sans-serif;
+      }
+      .bulk-add-preview{
+        margin-top:14px;padding:10px 14px;
+        background:var(--surface2);border-radius:8px;
+        font-size:12px;color:var(--muted);
+        display:flex;justify-content:space-between;align-items:center;gap:10px;
+      }
+      .bulk-add-preview .bap-count{font-weight:700;color:var(--text);}
+      .bulk-add-preview .bap-totals{
+        font-family:'JetBrains Mono',monospace;color:var(--text);font-weight:700;
+      }
+      .bulk-add-footer{
+        display:flex;justify-content:flex-end;gap:10px;
+        padding:12px 20px;border-top:1px solid var(--border);
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'bulkAddOverlay';
+  overlay.className = 'bulk-add-overlay';
+
+  const _salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99']
+    .map(v => `<option value="${v}">${v||'—'}</option>`).join('');
+
+  overlay.innerHTML = `
+    <div class="bulk-add-modal" onclick="event.stopPropagation()">
+      <div class="bulk-add-header">
+        <div class="bulk-add-title" id="bulkAddTitle">Bulk Add Tasks</div>
+        <button class="bulk-add-close" onclick="closeBulkAddModal()" title="Close">✕</button>
+      </div>
+      <div class="bulk-add-body">
+        <div class="bulk-add-help">
+          One task per line. Optional <code>TAB</code>-separated columns: <code>Name</code> · <code>Budget Hrs</code> · <code>Price</code>.<br>
+          Pastes from Excel / Word tables / markdown work. Lines starting with <code>#</code> or empty lines are skipped.
+        </div>
+        <textarea id="bulkAddTextarea" class="bulk-add-textarea" placeholder="Calibrate sensor&#10;Run pressure test&#10;Documentation&#9;8&#9;1500" oninput="updateBulkAddPreview()"></textarea>
+        <div class="bulk-add-defaults">
+          <label>Sales Cat
+            <select id="bulkSalesCat">${_salesOpts}</select>
+          </label>
+          <label>Assignee
+            <select id="bulkAssignee"><option value="">—</option></select>
+          </label>
+          <label>Status
+            <select id="bulkStatus">
+              <option value="new">New</option>
+              <option value="inprogress">In Progress</option>
+              <option value="prohold">Production Hold</option>
+              <option value="accthold">Accounting Hold</option>
+            </select>
+          </label>
+          <label>Revenue Type
+            <select id="bulkRevenueType">
+              <option value="fixed">Fixed</option>
+              <option value="th">T&amp;M</option>
+              <option value="nocharge">No Charge</option>
+            </select>
+          </label>
+        </div>
+        <div class="bulk-add-preview">
+          <span class="bap-count" id="bapCount">0 tasks ready</span>
+          <span class="bap-totals" id="bapTotals">—</span>
+        </div>
+      </div>
+      <div class="bulk-add-footer">
+        <button class="btn btn-ghost" style="border:1px solid var(--border)" onclick="closeBulkAddModal()">Cancel</button>
+        <button class="btn btn-primary" id="bulkAddSaveBtn" onclick="saveBulkTasks()">Add Tasks</button>
+      </div>
+    </div>
+  `;
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeBulkAddModal(); });
+  document.body.appendChild(overlay);
+}
+
+function openBulkAddModal(projId, sectionId) {
+  if (typeof can === 'function' && !can('edit_tasks')) { toast('Permission denied'); return; }
+  ensureBulkAddModal();
+  _bulkAddContext = { projId, sectionId: sectionId || null };
+
+  // Title — include section name if applicable
+  const sec = sectionId ? sectionStore.find(s => s._id === sectionId) : null;
+  document.getElementById('bulkAddTitle').textContent = sec
+    ? `Bulk Add Tasks → ${sec.name}`
+    : 'Bulk Add Tasks';
+
+  // Populate assignee dropdown
+  const assignSel = document.getElementById('bulkAssignee');
+  assignSel.innerHTML = '<option value="">—</option>' +
+    employees
+      .filter(e => e.isActive !== false && e.dept !== 'Ballantine')
+      .sort((a,b) => (a.name||'').localeCompare(b.name||''))
+      .map(e => `<option value="${e.initials}">${e.name}</option>`).join('');
+
+  // Reset form
+  document.getElementById('bulkAddTextarea').value = '';
+  document.getElementById('bulkSalesCat').value = '';
+  document.getElementById('bulkAssignee').value = '';
+  document.getElementById('bulkStatus').value = 'new';
+  document.getElementById('bulkRevenueType').value = 'fixed';
+  updateBulkAddPreview();
+
+  document.getElementById('bulkAddOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('bulkAddTextarea').focus(), 100);
+}
+
+function closeBulkAddModal() {
+  document.getElementById('bulkAddOverlay')?.classList.remove('open');
+}
+
+function parseBulkTaskLines(text) {
+  if (!text) return [];
+  return text.split(/\r?\n/)
+    .filter(line => {
+      const trimmed = line.trim();
+      if (!trimmed) return false;
+      if (trimmed.startsWith('#')) return false;
+      // Skip markdown table separator rows like |---|---|
+      if (/^[\s|:\-]+$/.test(trimmed)) return false;
+      return true;
+    })
+    .map(line => {
+      // Strip leading list markers: "- ", "* ", "• ", "1. ", "1) "
+      let cleaned = line.replace(/^\s*([-*•]|\d+[.)])\s+/, '');
+      let parts;
+      const trimmedCleaned = cleaned.trim();
+      if (trimmedCleaned.startsWith('|') && trimmedCleaned.endsWith('|') && trimmedCleaned.length > 2) {
+        // Markdown table row
+        parts = trimmedCleaned.slice(1, -1).split('|').map(p => p.trim());
+      } else if (cleaned.includes('\t')) {
+        parts = cleaned.split('\t').map(p => p.trim());
+      } else {
+        parts = [cleaned.trim()];
+      }
+      const name    = parts[0] || '';
+      const hrsStr  = parts[1] || '';
+      const priceStr = parts[2] || '';
+
+      // Skip header rows like "Task | Hrs | Price" or "# | Task | Budget Hrs"
+      if (/^(#|task|name|description)$/i.test(name) && (hrsStr || priceStr)) return null;
+
+      return {
+        name,
+        budgetHours: parseFloat(hrsStr) || 0,
+        fixedPrice: parseFloat((priceStr).replace(/[$,\s]/g,'')) || 0,
+      };
+    })
+    .filter(t => t && t.name);
+}
+
+function updateBulkAddPreview() {
+  const ta = document.getElementById('bulkAddTextarea');
+  if (!ta) return;
+  const tasks = parseBulkTaskLines(ta.value);
+  const totalH = tasks.reduce((s,t) => s + t.budgetHours, 0);
+  const totalP = tasks.reduce((s,t) => s + t.fixedPrice, 0);
+
+  const cnt = document.getElementById('bapCount');
+  const tot = document.getElementById('bapTotals');
+  if (cnt) cnt.textContent = `${tasks.length} task${tasks.length!==1?'s':''} ready`;
+
+  const parts = [];
+  if (totalH > 0) parts.push(`${totalH.toFixed(0)}h`);
+  if (totalP > 0) parts.push('$' + totalP.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}));
+  if (tot) tot.textContent = parts.length > 0 ? parts.join(' · ') : '—';
+
+  const btn = document.getElementById('bulkAddSaveBtn');
+  if (btn) {
+    btn.disabled = tasks.length === 0;
+    btn.textContent = tasks.length === 0 ? 'Add Tasks' : `Add ${tasks.length} Task${tasks.length!==1?'s':''}`;
+    btn.style.opacity = tasks.length === 0 ? '0.5' : '1';
+    btn.style.cursor = tasks.length === 0 ? 'not-allowed' : 'pointer';
+  }
+}
+
+async function saveBulkTasks() {
+  const ta = document.getElementById('bulkAddTextarea');
+  if (!ta) return;
+  const parsedTasks = parseBulkTaskLines(ta.value);
+  if (parsedTasks.length === 0) { toast('No tasks to add'); return; }
+
+  const { projId, sectionId } = _bulkAddContext;
+  if (!projId) { toast('⚠ No project context'); return; }
+
+  const defaults = {
+    salesCat:    document.getElementById('bulkSalesCat').value || '',
+    assign:      document.getElementById('bulkAssignee').value || '',
+    status:      document.getElementById('bulkStatus').value || 'new',
+    revenueType: document.getElementById('bulkRevenueType').value || 'fixed',
+  };
+  const assignEmp = employees.find(e => e.initials === defaults.assign);
+
+  const btn = document.getElementById('bulkAddSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; btn.style.cursor = 'wait'; }
+
+  // ── Calculate insertion point ────────────────────────────────────────
+  // Build flat ordered list of items in this project
+  const allItems = [
+    ...taskStore.filter(t => t.proj === projId).map(t => ({ type:'task',    id: t._id, num: t.taskNum||0, obj: t })),
+    ...sectionStore.filter(s => s.projId === projId).map(s => ({ type:'section', id: s._id, num: s.taskNum||0, obj: s })),
+  ].sort((a,b) => a.num - b.num);
+
+  let insertAfterNum;
+  if (sectionId) {
+    const secItem = allItems.find(x => x.type === 'section' && x.id === sectionId);
+    const secNum = secItem ? secItem.num : 0;
+    const nextSec = allItems.find(x => x.type === 'section' && x.num > secNum);
+    const boundary = nextSec ? nextSec.num : Infinity;
+    const itemsInSection = allItems.filter(x => x.num > secNum && x.num < boundary);
+    insertAfterNum = itemsInSection.length > 0
+      ? itemsInSection[itemsInSection.length - 1].num
+      : secNum;
+  } else {
+    insertAfterNum = allItems.length > 0 ? allItems[allItems.length - 1].num : 0;
+  }
+
+  // Shift items after insertion point by N
+  const N = parsedTasks.length;
+  const itemsToShift = allItems.filter(x => x.num > insertAfterNum);
+  if (itemsToShift.length > 0) {
+    itemsToShift.forEach(x => { x.obj.taskNum = x.num + N; });
+    if (sb) {
+      try {
+        await Promise.all(itemsToShift.map(x =>
+          x.type === 'task'
+            ? sb.from('tasks').update({ task_num: x.obj.taskNum }).eq('id', x.id)
+            : sb.from('task_sections').update({ task_num: x.obj.taskNum }).eq('id', x.id)
+        ));
+      } catch (e) { console.error('Bulk shift failed:', e); }
+    }
+  }
+  if (window._projTaskNums) delete window._projTaskNums[projId];
+
+  // ── Insert each task in order ────────────────────────────────────────
+  const today = new Date().toISOString().split('T')[0];
+  const _proj = projects.find(p => p.id === projId);
+  let savedCount = 0;
+  const noPriceTasks = [];
+
+  for (let i = 0; i < parsedTasks.length; i++) {
+    const pt = parsedTasks[i];
+    const taskNum = insertAfterNum + 1 + i;
+
+    const row = {
+      name: pt.name,
+      description: '',
+      project_id: projId,
+      assignee: defaults.assign || '',
+      completed_date: null,
+      due_date: null,
+      status: defaults.status,
+      priority: 'low',
+      section: 'sprint',
+      done: false,
+      sales_category: defaults.salesCat || null,
+      fixed_price: pt.fixedPrice || null,
+      budget_hours: pt.budgetHours || null,
+      revenue_type: defaults.revenueType,
+      task_num: taskNum,
+      section_id: sectionId || null,
+      created_at: new Date().toISOString(),
+    };
+
+    const saved = await dbInsert('tasks', row);
+    if (!saved) {
+      toast(`⚠ Failed at row ${i+1}: "${pt.name}"`);
+      break;
+    }
+
+    // Mark as locally inserted so realtime subscription skips it
+    if (!window._localInsertIds) window._localInsertIds = new Set();
+    window._localInsertIds.add(saved.id);
+    setTimeout(() => window._localInsertIds?.delete(saved.id), 8000);
+
+    taskStore.push({
+      _id: saved.id,
+      taskNum,
+      name: pt.name,
+      assign: defaults.assign || '',
+      assignId: assignEmp ? assignEmp.id : '',
+      due: '',
+      due_raw: '',
+      completedDate: '',
+      salesCat: defaults.salesCat,
+      fixedPrice: pt.fixedPrice,
+      budgetHours: pt.budgetHours,
+      sectionId: sectionId || null,
+      overdue: false,
+      done: false,
+      proj: projId,
+      status: defaults.status,
+      priority: 'low',
+      section: 'sprint',
+      createdAt: today,
+      revenueType: defaults.revenueType,
+    });
+
+    if (typeof logActivity === 'function') {
+      logActivity('tasks', saved.id, pt.name, 'Task Created (Bulk)' + (_proj ? ' on ' + _proj.name : ''));
+    }
+    if (!pt.fixedPrice && defaults.revenueType !== 'nocharge') {
+      noPriceTasks.push({ id: saved.id, name: pt.name });
+    }
+    savedCount++;
+  }
+
+  // Notify Linda about no-price tasks (one chatter per task — matches existing pattern)
+  for (const np of noPriceTasks) {
+    notifyLindaNoPriceTask(np.id, np.name, projId);
+  }
+
+  if (typeof syncProjBilledRevenue === 'function') syncProjBilledRevenue(projId);
+
+  closeBulkAddModal();
+  if (savedCount === parsedTasks.length) {
+    toast(`✓ Added ${savedCount} task${savedCount!==1?'s':''}`);
+  } else if (savedCount > 0) {
+    toast(`⚠ Added ${savedCount} of ${parsedTasks.length} task${parsedTasks.length!==1?'s':''}`);
+  }
+
+  // Re-render
+  if (activeProjectId) {
+    renderTasksPanel(activeProjectId);
+    const subInfo = document.getElementById('sub-info');
+    if (subInfo && subInfo.classList.contains('active') && typeof renderInfoTasks === 'function') {
+      renderInfoTasks(activeProjectId, currentTaskFilter);
+    }
+    if (typeof renderProjSummary === 'function') renderProjSummary(activeProjectId);
+  }
+}
+
+// Esc-to-close handler for the bulk add modal
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const ov = document.getElementById('bulkAddOverlay');
+    if (ov && ov.classList.contains('open')) closeBulkAddModal();
+  }
+});
+
+
+// ===== MOVE EXISTING TASKS INTO A SECTION =====
+// ===== MOVE EXISTING TASKS INTO A SECTION =====
+// Opens a modal listing every project task that ISN'T already in the target
+// section. User checks the ones to move, clicks Apply. Each selected task
+// gets section_id updated and its task_num reordered so it physically appears
+// at the end of the section's region.
+
+let _manageSecContext = { projId: null, sectionId: null };
+let _manageSelectedIds = new Set();
+
+function ensureManageSectionModal() {
+  if (document.getElementById('manageSecOverlay')) return;
+
+  if (!document.getElementById('manageSecStyles')) {
+    const st = document.createElement('style');
+    st.id = 'manageSecStyles';
+    st.textContent = `
+      .ms-overlay{
+        position:fixed;inset:0;z-index:10000;
+        background:rgba(0,0,0,0.55);
+        display:flex;align-items:center;justify-content:center;
+        opacity:0;pointer-events:none;
+        transition:opacity 0.18s ease;
+      }
+      .ms-overlay.open{opacity:1;pointer-events:auto;}
+      .ms-modal{
+        width:600px;max-width:94vw;height:78vh;max-height:680px;
+        background:var(--surface);
+        border:1.5px solid var(--border);border-radius:12px;
+        display:flex;flex-direction:column;
+        box-shadow:0 18px 56px rgba(0,0,0,0.45);
+        font-family:'DM Sans',sans-serif;
+      }
+      .ms-header{
+        display:flex;align-items:center;justify-content:space-between;
+        padding:14px 20px;border-bottom:1px solid var(--border);
+      }
+      .ms-title{font-size:15px;font-weight:700;color:var(--text);}
+      .ms-close{
+        background:none;border:none;color:var(--muted);
+        font-size:18px;cursor:pointer;padding:2px 8px;border-radius:4px;
+      }
+      .ms-close:hover{background:var(--surface2);color:var(--text);}
+      .ms-search{position:relative;margin:14px 20px 6px;}
+      .ms-search input{
+        width:100%;box-sizing:border-box;
+        padding:9px 12px 9px 32px;
+        font-size:13px;font-family:'DM Sans',sans-serif;
+        border:1.5px solid var(--border);border-radius:8px;
+        background:var(--bg);color:var(--text);outline:none;
+      }
+      .ms-search input:focus{border-color:var(--amber,#c07a1a);}
+      .ms-search::before{
+        content:"🔍";position:absolute;left:10px;top:50%;
+        transform:translateY(-50%);font-size:12px;opacity:0.6;pointer-events:none;
+      }
+      .ms-actions-bar{
+        display:flex;align-items:center;justify-content:space-between;
+        padding:0 20px 8px;
+        font-size:11.5px;color:var(--muted);
+      }
+      .ms-actions-bar button{
+        background:none;border:none;color:var(--amber,#c07a1a);
+        font-size:11.5px;font-weight:600;cursor:pointer;
+        padding:2px 8px;border-radius:4px;
+      }
+      .ms-actions-bar button:hover{background:var(--surface2);}
+      .ms-body{flex:1;overflow-y:auto;padding:0 20px 8px;}
+      .ms-task-row{
+        display:flex;align-items:center;gap:10px;
+        padding:8px 10px;border-radius:6px;
+        cursor:pointer;
+        border:1px solid transparent;
+        margin-bottom:2px;
+      }
+      .ms-task-row:hover{background:var(--surface2);}
+      .ms-task-row.ms-checked{
+        background:rgba(192,122,26,0.10);
+        border-color:rgba(192,122,26,0.30);
+      }
+      .ms-task-row input[type="checkbox"]{
+        width:16px;height:16px;cursor:pointer;flex-shrink:0;
+        accent-color:var(--amber,#c07a1a);
+      }
+      .ms-task-num{
+        font-family:'JetBrains Mono',monospace;font-size:10.5px;
+        color:var(--muted);width:22px;flex-shrink:0;text-align:right;
+      }
+      .ms-task-name{
+        flex:1;font-size:13px;color:var(--text);
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      }
+      .ms-task-meta{
+        font-size:10.5px;font-family:'JetBrains Mono',monospace;
+        color:var(--muted);flex-shrink:0;
+      }
+      .ms-task-badge{
+        font-size:10px;font-weight:600;letter-spacing:0.3px;
+        padding:2px 8px;border-radius:4px;
+        flex-shrink:0;max-width:140px;
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      }
+      .ms-badge-unsec{background:rgba(120,120,130,0.14);color:var(--muted);}
+      .ms-badge-other{background:rgba(91,156,246,0.14);color:#5b9cf6;}
+      .ms-empty{
+        padding:40px 20px;text-align:center;
+        color:var(--muted);font-size:13px;line-height:1.6;
+      }
+      .ms-footer{
+        display:flex;justify-content:space-between;align-items:center;gap:10px;
+        padding:12px 20px;border-top:1px solid var(--border);
+      }
+      .ms-footer-info{font-size:12px;color:var(--muted);}
+      .ms-footer-info b{color:var(--text);font-weight:700;}
+      .ms-footer-actions{display:flex;gap:10px;}
+
+      .itt-section-movein-btn{}
+    `;
+    document.head.appendChild(st);
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'manageSecOverlay';
+  overlay.className = 'ms-overlay';
+  overlay.innerHTML = `
+    <div class="ms-modal" onclick="event.stopPropagation()">
+      <div class="ms-header">
+        <div class="ms-title" id="manageSecTitle">Move Tasks Into Section</div>
+        <button class="ms-close" onclick="closeManageSectionModal()">✕</button>
+      </div>
+      <div class="ms-search">
+        <input id="manageSecSearch" type="text" placeholder="Filter tasks by name…" oninput="filterManageList()">
+      </div>
+      <div class="ms-actions-bar">
+        <span id="manageSecAvail">0 tasks available</span>
+        <div>
+          <button onclick="manageSelectAllVisible()">Select all visible</button>
+          <button onclick="manageDeselectAll()">Clear</button>
+        </div>
+      </div>
+      <div class="ms-body" id="manageSecBody"></div>
+      <div class="ms-footer">
+        <div class="ms-footer-info" id="manageSecCount"><b>0</b> selected</div>
+        <div class="ms-footer-actions">
+          <button class="btn btn-ghost" style="border:1px solid var(--border)" onclick="closeManageSectionModal()">Cancel</button>
+          <button class="btn btn-primary" id="manageSecSaveBtn" onclick="saveManageSection()">Move Tasks</button>
+        </div>
+      </div>
+    </div>
+  `;
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeManageSectionModal(); });
+  document.body.appendChild(overlay);
+}
+
+function openManageSectionTasksModal(sectionId, projId) {
+  if (typeof can === 'function' && !can('edit_tasks')) { toast('Permission denied'); return; }
+
+  const section = sectionStore.find(s => s._id === sectionId);
+  if (!section) { toast('Section not found'); return; }
+
+  ensureManageSectionModal();
+
+  _manageSecContext = { projId, sectionId };
+  _manageSelectedIds = new Set();
+
+  document.getElementById('manageSecTitle').textContent = `Move Tasks → ${section.name}`;
+
+  // Get all tasks in this project that aren't already in this section
+  const projSections = sectionStore.filter(s => s.projId === projId);
+  const sectionNameMap = {};
+  projSections.forEach(s => sectionNameMap[s._id] = s.name);
+
+  const availableTasks = taskStore
+    .filter(t => t.proj === projId && t.sectionId !== sectionId)
+    .sort((a,b) => {
+      // Unsectioned first, then by section, then by taskNum
+      const aSec = a.sectionId || '';
+      const bSec = b.sectionId || '';
+      if (aSec === bSec) return (a.taskNum||0) - (b.taskNum||0);
+      if (!aSec) return -1;
+      if (!bSec) return 1;
+      return (sectionNameMap[aSec]||'').localeCompare(sectionNameMap[bSec]||'');
+    });
+
+  const body = document.getElementById('manageSecBody');
+  if (availableTasks.length === 0) {
+    body.innerHTML = `<div class="ms-empty">No other tasks in this project.<br>All existing tasks are already in <b>${section.name}</b>, or there are no other tasks yet.</div>`;
+  } else {
+    body.innerHTML = availableTasks.map(t => {
+      const priceStr  = t.fixedPrice  ? '$' + t.fixedPrice.toLocaleString('en-US', {minimumFractionDigits:0, maximumFractionDigits:0}) : '';
+      const budgetStr = t.budgetHours ? `${t.budgetHours}h` : '';
+      const meta = [budgetStr, priceStr].filter(Boolean).join(' · ');
+      const badge = t.sectionId
+        ? `<span class="ms-task-badge ms-badge-other" title="Currently in section">${(sectionNameMap[t.sectionId] || 'unknown').replace(/[<>]/g,'')}</span>`
+        : `<span class="ms-task-badge ms-badge-unsec">no section</span>`;
+      const taskNameLower = (t.name||'').toLowerCase().replace(/"/g,'&quot;');
+      const safeName = (t.name||'').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      return `
+        <label class="ms-task-row" data-task-id="${t._id}" data-task-name="${taskNameLower}">
+          <input type="checkbox" class="ms-task-cb" data-task-id="${t._id}" onchange="toggleManageTask('${t._id}', this)">
+          <span class="ms-task-num">${t.taskNum||''}</span>
+          <span class="ms-task-name">${safeName}</span>
+          ${meta ? `<span class="ms-task-meta">${meta}</span>` : ''}
+          ${badge}
+        </label>
+      `;
+    }).join('');
+  }
+
+  document.getElementById('manageSecAvail').textContent =
+    `${availableTasks.length} task${availableTasks.length!==1?'s':''} available`;
+  document.getElementById('manageSecSearch').value = '';
+  updateManageSelectionInfo();
+
+  document.getElementById('manageSecOverlay').classList.add('open');
+  setTimeout(() => document.getElementById('manageSecSearch').focus(), 100);
+}
+
+function closeManageSectionModal() {
+  document.getElementById('manageSecOverlay')?.classList.remove('open');
+}
+
+function toggleManageTask(taskId, cb) {
+  const row = document.querySelector(`.ms-task-row[data-task-id="${taskId}"]`);
+  if (cb.checked) {
+    _manageSelectedIds.add(taskId);
+    if (row) row.classList.add('ms-checked');
+  } else {
+    _manageSelectedIds.delete(taskId);
+    if (row) row.classList.remove('ms-checked');
+  }
+  updateManageSelectionInfo();
+}
+
+function manageSelectAllVisible() {
+  document.querySelectorAll('.ms-task-row').forEach(row => {
+    if (row.style.display === 'none') return;
+    const cb = row.querySelector('input[type="checkbox"]');
+    const id = row.dataset.taskId;
+    if (cb && !cb.checked) {
+      cb.checked = true;
+      _manageSelectedIds.add(id);
+      row.classList.add('ms-checked');
+    }
+  });
+  updateManageSelectionInfo();
+}
+
+function manageDeselectAll() {
+  document.querySelectorAll('.ms-task-row input[type="checkbox"]').forEach(cb => {
+    cb.checked = false;
+    cb.closest('.ms-task-row')?.classList.remove('ms-checked');
+  });
+  _manageSelectedIds.clear();
+  updateManageSelectionInfo();
+}
+
+function filterManageList() {
+  const q = (document.getElementById('manageSecSearch').value || '').trim().toLowerCase();
+  document.querySelectorAll('.ms-task-row').forEach(row => {
+    const name = row.dataset.taskName || '';
+    row.style.display = (!q || name.includes(q)) ? '' : 'none';
+  });
+}
+
+function updateManageSelectionInfo() {
+  const n = _manageSelectedIds.size;
+  const cntEl = document.getElementById('manageSecCount');
+  if (cntEl) cntEl.innerHTML = `<b>${n}</b> selected`;
+  const btn = document.getElementById('manageSecSaveBtn');
+  if (btn) {
+    btn.disabled = n === 0;
+    btn.textContent = n === 0 ? 'Move Tasks' : `Move ${n} Task${n!==1?'s':''}`;
+    btn.style.opacity = n === 0 ? '0.5' : '1';
+    btn.style.cursor = n === 0 ? 'not-allowed' : 'pointer';
+  }
+}
+
+async function saveManageSection() {
+  const { projId, sectionId } = _manageSecContext;
+  if (!projId || !sectionId) return;
+  if (_manageSelectedIds.size === 0) { toast('Select tasks to move'); return; }
+
+  const selectedIds = [..._manageSelectedIds];
+  const btn = document.getElementById('manageSecSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Moving…'; btn.style.cursor = 'wait'; }
+
+  // ── Build new ordering ──────────────────────────────────────────────
+  // Get all items in project sorted by current taskNum
+  const allItems = [
+    ...taskStore.filter(t => t.proj === projId).map(t => ({ type:'task',    id: t._id, obj: t, num: t.taskNum||0 })),
+    ...sectionStore.filter(s => s.projId === projId).map(s => ({ type:'section', id: s._id, obj: s, num: s.taskNum||0 })),
+  ].sort((a,b) => a.num - b.num);
+
+  // Locate the target section and the next section header after it
+  const secIdx = allItems.findIndex(x => x.type === 'section' && x.id === sectionId);
+  if (secIdx < 0) { toast('Section not found'); return; }
+  const nextSecIdxOriginal = allItems.findIndex((x,i) => i > secIdx && x.type === 'section');
+  const nextSecId = nextSecIdxOriginal >= 0 ? allItems[nextSecIdxOriginal].id : null;
+
+  // Pull moved items out of the original ordering
+  const selSet = new Set(selectedIds);
+  const movedItems = [];
+  const remaining = [];
+  allItems.forEach(x => {
+    if (x.type === 'task' && selSet.has(x.id)) movedItems.push(x);
+    else remaining.push(x);
+  });
+
+  // Insert moved items just before the next section in `remaining`
+  // (or at the very end of `remaining` if there's no next section)
+  let insertAt;
+  if (nextSecId) {
+    insertAt = remaining.findIndex(x => x.type === 'section' && x.id === nextSecId);
+    if (insertAt < 0) insertAt = remaining.length;
+  } else {
+    insertAt = remaining.length;
+  }
+
+  const newOrder = [
+    ...remaining.slice(0, insertAt),
+    ...movedItems,
+    ...remaining.slice(insertAt),
+  ];
+
+  // Reassign taskNum 1..N for everything (track which actually changed)
+  const taskUpdates = []; // {id, task_num, section_id?}
+  const sectionUpdates = []; // {id, task_num}
+  newOrder.forEach((x, i) => {
+    const newNum = i + 1;
+    const oldNum = x.obj.taskNum || 0;
+    if (x.type === 'task') {
+      const isMoved = selSet.has(x.id);
+      if (newNum !== oldNum || isMoved) {
+        x.obj.taskNum = newNum;
+        if (isMoved) x.obj.sectionId = sectionId;
+        const update = { id: x.id, task_num: newNum };
+        if (isMoved) update.section_id = sectionId;
+        taskUpdates.push(update);
+      }
+    } else {
+      if (newNum !== oldNum) {
+        x.obj.taskNum = newNum;
+        sectionUpdates.push({ id: x.id, task_num: newNum });
+      }
+    }
+  });
+
+  // Persist to Supabase
+  if (sb) {
+    try {
+      const updates = [
+        ...taskUpdates.map(u => {
+          const patch = { task_num: u.task_num };
+          if ('section_id' in u) patch.section_id = u.section_id;
+          return sb.from('tasks').update(patch).eq('id', u.id);
+        }),
+        ...sectionUpdates.map(u => sb.from('task_sections').update({ task_num: u.task_num }).eq('id', u.id)),
+      ];
+      const results = await Promise.all(updates);
+      const failed = results.filter(r => r && r.error);
+      if (failed.length > 0) {
+        console.error('Move-in errors:', failed);
+        toast(`⚠ ${failed.length} update${failed.length!==1?'s':''} failed — refresh to verify`);
+      }
+    } catch (e) {
+      console.error('Bulk move failed:', e);
+      toast('⚠ Move failed — please refresh');
+      if (btn) { btn.disabled = false; btn.textContent = 'Move Tasks'; btn.style.cursor = 'pointer'; }
+      return;
+    }
+  }
+
+  // Activity log
+  const _proj = projects.find(p => p.id === projId);
+  const _sec  = sectionStore.find(s => s._id === sectionId);
+  if (typeof logActivity === 'function') {
+    logActivity('tasks', sectionId, _sec?.name || 'section',
+      `Moved ${selectedIds.length} task${selectedIds.length!==1?'s':''} into "${_sec?.name||''}"` + (_proj ? ' on ' + _proj.name : ''));
+  }
+
+  // Invalidate any cached task num maps
+  if (window._projTaskNums) delete window._projTaskNums[projId];
+
+  closeManageSectionModal();
+  toast(`✓ Moved ${selectedIds.length} task${selectedIds.length!==1?'s':''} into ${_sec?.name||'section'}`);
+
+  if (activeProjectId) {
+    renderTasksPanel(activeProjectId);
+    const subInfo = document.getElementById('sub-info');
+    if (subInfo && subInfo.classList.contains('active') && typeof renderInfoTasks === 'function') {
+      renderInfoTasks(activeProjectId, currentTaskFilter);
+    }
+    if (typeof renderProjSummary === 'function') renderProjSummary(activeProjectId);
+  }
+}
+
+// Esc-to-close handler for the move-in modal
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const ov = document.getElementById('manageSecOverlay');
+    if (ov && ov.classList.contains('open')) closeManageSectionModal();
+  }
+});
