@@ -1105,10 +1105,13 @@ async function renderStaleProjects() {
 
       (logRows || []).forEach(r => {
         if (!lastActivity[r.record_id] || r.created_at > lastActivity[r.record_id].date) {
+          const isSnooze = (r.field_changed || '').toLowerCase() === 'reviewed - snoozed';
           lastActivity[r.record_id] = {
             date: r.created_at,
-            desc: (r.employee_name || 'Unknown') + ' updated ' + (r.field_changed || 'field') + (r.new_value ? ' to "' + String(r.new_value).slice(0, 40) + '"' : ''),
-            type: 'log'
+            desc: isSnooze
+              ? (r.employee_name || 'Unknown') + ' snoozed this project'
+              : (r.employee_name || 'Unknown') + ' updated ' + (r.field_changed || 'field') + (r.new_value ? ' to "' + String(r.new_value).slice(0, 40) + '"' : ''),
+            type: isSnooze ? 'snooze' : 'log'
           };
         }
       });
@@ -1165,7 +1168,7 @@ async function renderStaleProjects() {
   const now = new Date();
   const daysSince = date => Math.floor((now - new Date(date)) / 86400000);
   const fmtDate = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  const typeIcon = t => t === 'chatter' ? '&#x1F4AC;' : t === 'task' ? '&#x2705;' : '&#x1F4CB;';
+  const typeIcon = t => t === 'chatter' ? '&#x1F4AC;' : t === 'task' ? '&#x2705;' : t === 'snooze' ? '&#x1F515;' : '&#x1F4CB;';
 
   // Build stale list
   const staleRows = openProjects.map(p => {
@@ -1194,7 +1197,7 @@ async function renderStaleProjects() {
 
   let rows = '';
   if (staleRows.length === 0) {
-    rows = '<tr><td colspan="6" style="padding:48px;text-align:center;color:var(--muted)">' +
+    rows = '<tr><td colspan="7" style="padding:48px;text-align:center;color:var(--muted)">' +
       '<div style="font-size:32px;margin-bottom:12px">&#x2705;</div>' +
       '<div style="font-size:14px;font-weight:600;color:var(--text)">All projects have recent activity!</div>' +
       '<div style="font-size:12px;margin-top:4px">No projects found without activity in the last ' + days + ' days.</div>' +
@@ -1222,6 +1225,9 @@ async function renderStaleProjects() {
         '</td>' +
         '<td style="padding:11px 14px;font-size:11px;color:var(--muted);max-width:260px">' +
           (r.act ? typeIcon(r.act.type) + ' ' + r.act.desc : '<span style="color:var(--border)">No activity recorded</span>') +
+        '</td>' +
+        '<td style="padding:11px 14px;text-align:center;cursor:default" onclick="event.stopPropagation()">' +
+          '<button onclick="staleSnooze(\'' + r.p.id + '\', \'' + (r.p.name||'').replace(/'/g, "\\\'") + '\', event)" title="Mark as reviewed - hides from list until next stale check" style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--muted);font-family:DM Sans,sans-serif;font-size:11px;padding:4px 10px;cursor:pointer;font-weight:600;white-space:nowrap" onmouseover="this.style.borderColor=\'var(--blue)\';this.style.color=\'var(--blue)\'" onmouseout="this.style.borderColor=\'var(--border)\';this.style.color=\'var(--muted)\'">&#x1F515; Snooze</button>' +
         '</td>' +
       '</tr>';
     });
@@ -1254,6 +1260,7 @@ async function renderStaleProjects() {
             '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Days Silent</th>' +
             '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Last Activity</th>' +
             '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">What Happened</th>' +
+            '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Action</th>' +
           '</tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table>' +
@@ -1274,6 +1281,24 @@ function staleToggleNJobs() {
   const current = el.dataset.hideNJobs !== 'false';
   el.dataset.hideNJobs = String(!current);
   renderStaleProjects();
+}
+
+async function staleSnooze(projId, projName, ev) {
+  if (ev) ev.stopPropagation();
+  if (!sb || !currentEmployee) {
+    alert('Not signed in.');
+    return;
+  }
+  // Use the existing logActivity helper from admin.js — same activity_log
+  // schema as everything else, ensures the entry will be picked up by the
+  // stale-projects activity scan and reset the clock for this project.
+  try {
+    await logActivity('project', projId, projName || '(unnamed)', 'reviewed - snoozed');
+    renderStaleProjects();
+  } catch(e) {
+    console.warn('Snooze error:', e);
+    alert('Could not snooze project: ' + (e.message || e));
+  }
 }
 
 
