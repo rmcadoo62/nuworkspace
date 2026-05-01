@@ -389,12 +389,9 @@ function renderTasksPanel(projId) {
     sectionColorMap[s._id] = SECTION_PALETTE[i % SECTION_PALETTE.length];
   });
 
-  // Count duplicate task names within this project so hours can be split evenly
-  const taskNameCount = {};
-  tasks.forEach(t => {
-    const key = (t.name||'').trim().toLowerCase();
-    taskNameCount[key] = (taskNameCount[key] || 0) + 1;
-  });
+  // Note: the old "duplicate task name" hours-splitting logic was removed when
+  // getHoursForTask switched to strict-UUID matching. Tasks always have an _id,
+  // so the (t._id ? 1 : dup) divisor was always 1; the count is no longer needed.
 
   // Build a flat ordered list of {type, item, num} using STRICT section membership.
   // - When sections exist: each section header is followed by ONLY its members
@@ -454,9 +451,8 @@ function renderTasksPanel(projId) {
       const sumBudget = sectionTasks
         .reduce((acc, t) => acc + (parseFloat(t.budgetHours) || 0), 0);
       const sumLogged = sectionTasks.reduce((acc, t) => {
-        const dup = taskNameCount[(t.name||'').trim().toLowerCase()] || 1;
         const h = (typeof getHoursForTask === 'function')
-          ? getHoursForTask(t.name, t.proj, t._id) / (t._id ? 1 : dup)
+          ? getHoursForTask(t.name, t.proj, t._id)
           : 0;
         return acc + h;
       }, 0);
@@ -504,8 +500,7 @@ function renderTasksPanel(projId) {
       }).join('');
     const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
       `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
-    const dupCount = taskNameCount[(t.name||'').trim().toLowerCase()] || 1;
-    const loggedH = getHoursForTask(t.name, t.proj, t._id) / (t._id ? 1 : dupCount);
+    const loggedH = getHoursForTask(t.name, t.proj, t._id);
     const budgetH = t.budgetHours || 0;
     const hColor  = budgetH > 0 && loggedH > budgetH ? 'var(--red)' : '#000';
 
@@ -648,14 +643,16 @@ function renderHoursPanel(projId) {
   let grandTotal = 0;
   let html = '';
 
-  // Sort in taskStore order, deduplicated by taskKey
+  // Sort in taskStore order, deduplicated by taskKey.
+  // Tasks list strictly by their own _id bucket; orphan name-buckets are appended
+  // at the end (no longer mistakenly attributed to a task that happens to share
+  // the same name).
   const seenKeys = new Set();
   const orderedKeys = [];
   tasks.forEach(task => {
-    const taskKey = data[task._id] ? task._id : ('name:' + task.name);
-    if (data[taskKey] && !seenKeys.has(taskKey)) {
-      seenKeys.add(taskKey);
-      orderedKeys.push(taskKey);
+    if (data[task._id] && !seenKeys.has(task._id)) {
+      seenKeys.add(task._id);
+      orderedKeys.push(task._id);
     }
   });
   taskKeys.forEach(k => { if (!seenKeys.has(k)) orderedKeys.push(k); });
@@ -666,10 +663,19 @@ function renderHoursPanel(projId) {
     const taskTotal = sorted.reduce((s,e)=>s+e.hrs,0);
     grandTotal += taskTotal;
 
-    html += `<div style="margin-bottom:24px;border:1px solid var(--border);border-radius:10px;overflow:hidden">`;
-    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--surface2);border-bottom:1px solid var(--border)">`;
-    html += `<div style="font-size:13px;font-weight:700;color:var(--text)">📋 ${taskName}</div>`;
-    html += `<div style="font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--blue)">${taskTotal.toFixed(1)}h total</div>`;
+    // Orphan buckets are keys starting with "name:" — these are timesheet rows
+    // with task_id IS NULL, attributed only by name. Render them with a clear
+    // warning label so they're not mistaken for a real task.
+    const isOrphan = typeof taskKey === 'string' && taskKey.startsWith('name:');
+    const headerLeft = isOrphan
+      ? `<div style="font-size:13px;font-weight:700;color:var(--amber)">⚠ ${taskName} <span style="font-size:11px;font-weight:500;color:var(--muted)">— unattributed (no task ID)</span></div>`
+      : `<div style="font-size:13px;font-weight:700;color:var(--text)">📋 ${taskName}</div>`;
+    const borderColor = isOrphan ? 'var(--amber)' : 'var(--border)';
+
+    html += `<div style="margin-bottom:24px;border:1px solid ${borderColor};border-radius:10px;overflow:hidden">`;
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 16px;background:var(--surface2);border-bottom:1px solid ${borderColor}">`;
+    html += headerLeft;
+    html += `<div style="font-size:12px;font-weight:700;font-family:'JetBrains Mono',monospace;color:${isOrphan?'var(--amber)':'var(--blue)'}">${taskTotal.toFixed(1)}h total</div>`;
     html += `</div>`;
 
     // Entries table

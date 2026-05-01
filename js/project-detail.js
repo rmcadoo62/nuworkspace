@@ -2668,8 +2668,8 @@ function renderInfoTasks(projId, filter) {
           <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" title="Click to edit price" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);cursor:text">
             ${t.fixedPrice ? '$' + t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
           </div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${getHoursForTask(t.name,t.proj) > 0 ? 'var(--blue)' : 'var(--muted)'}">
-            ${getHoursForTask(t.name,t.proj) > 0 ? getHoursForTask(t.name,t.proj).toFixed(1) + 'h' : '—'}
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${getHoursForTask(t.name,t.proj,t._id) > 0 ? 'var(--blue)' : 'var(--muted)'}">
+            ${getHoursForTask(t.name,t.proj,t._id) > 0 ? getHoursForTask(t.name,t.proj,t._id).toFixed(1) + 'h' : '—'}
           </div>
           <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px">
             <div class="itt-av" style="background:${empM.color}">${t.assign||'?'}</div>
@@ -3267,18 +3267,21 @@ async function markTaskBilled(taskId, projId) {
 
 // ===== HOURS CHARGED PER TASK =====
 // ===== HOURS CHARGED PER TASK =====
+// STRICT-UUID: only timesheet rows whose task_id matches are attributed to this task.
+// Name-based fallback was removed — it caused legacy orphan rows (task_id IS NULL on
+// pre-April-15 imports) to be double- or triple-counted on projects with same-named
+// tasks (e.g. multiple "MW Shock test" rounds). Orphan rows are now visible only on
+// the Hours tab in their own bucket; they no longer inflate Tasks-tab subtotals.
+// taskName is kept as a parameter for backward compatibility with older call sites
+// but is no longer used.
 function getHoursForTask(taskName, projId, taskId) {
-  if (!taskName && !taskId) return 0;
+  if (!taskId) return 0;
   let total = 0;
   Object.entries(tsData).forEach(([k, rows]) => {
     if (k.startsWith('oh_') || !Array.isArray(rows)) return;
     rows.forEach(row => {
       if (projId && row.projId !== projId) return;
-      // Match by taskId when both sides have it, otherwise fall back to name
-      const matched = (taskId && row.taskId)
-        ? row.taskId === taskId
-        : (row.taskName && row.taskName.trim().toLowerCase() === (taskName||'').trim().toLowerCase());
-      if (matched) {
+      if (row.taskId === taskId) {
         total += Object.values(row.hours).reduce((a, b) => a + b, 0);
       }
     });
