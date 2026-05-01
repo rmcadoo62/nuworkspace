@@ -26,6 +26,7 @@
   <link rel="stylesheet" href="css/jobpack.css">
   <link rel="stylesheet" href="css/compliance.css">
   <link rel="stylesheet" href="css/feedback.css">
+  <link rel="stylesheet" href="css/surveys.css">
 </head>
 <body>
 
@@ -664,6 +665,19 @@
       <div class="emp-panel" id="myInfoBody" style="flex:1;overflow-y:auto;"></div>
     </div>
 
+    <!-- SURVEY QUEUE PANEL -->
+    <div class="view-panel" id="panel-survey-queue" style="flex-direction:column;overflow:hidden;">
+      <div style="flex:1;overflow-y:auto;padding:28px 36px;">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
+          <button onclick="openSetupPanel(document.getElementById('navSetup'))" style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:13px;padding:0;font-family:'DM Sans',sans-serif;">&#x2190; Setup</button>
+          <span style="color:var(--border)">|</span>
+          <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);">&#x2709;&#xFE0F; Customer Surveys</div>
+        </div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:28px;">Send queued customer satisfaction surveys, monitor responses.</div>
+        <div id="surveyQueueBody"></div>
+      </div>
+    </div>
+
     <!-- PROJECT CONTAINER — Info, Tasks, Expenses, Invoicing share this -->
     <div class="view-panel active" id="panel-project" style="flex-direction:column;overflow:hidden">
 
@@ -1182,6 +1196,7 @@
   <script src="js/quotes.js"></script>
   <script src="js/compliance.js"></script>
   <script src="js/feedback.js"></script>
+  <script src="js/surveys.js"></script>
 
 </div><!-- /appShell -->
 
@@ -1329,6 +1344,54 @@
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeConfirmModal()">Cancel</button>
       <button class="btn" id="confirmDeleteBtn" style="margin-left:auto">Yes, Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- SURVEY EMAIL PREVIEW MODAL -->
+<div class="modal-backdrop" id="surveyPreviewModal" onclick="if(event.target===this)surveysClosePreview()" style="z-index:1100">
+  <div class="modal" style="width:680px;max-width:94vw">
+    <div class="modal-header">
+      <div class="modal-title">&#x2709;&#xFE0F; Email Preview</div>
+      <button class="modal-close" onclick="surveysClosePreview()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <div class="survey-preview-meta">
+        <div class="survey-preview-meta-label">From</div>     <div id="surveyPreviewFrom"></div>
+        <div class="survey-preview-meta-label">To</div>       <div id="surveyPreviewTo"></div>
+        <div class="survey-preview-meta-label">Reply-to</div> <div id="surveyPreviewReplyTo"></div>
+        <div class="survey-preview-meta-label">Subject</div>  <div id="surveyPreviewSubject" style="font-weight:500"></div>
+      </div>
+      <div class="survey-preview-body" id="surveyPreviewBody"></div>
+    </div>
+    <div class="modal-footer" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;margin-right:auto">
+        <input type="checkbox" id="surveyPreviewSkipChk">
+        Don't show preview again
+      </label>
+      <button class="btn btn-ghost" onclick="surveysClosePreview()">Cancel</button>
+      <button class="btn" onclick="surveysConfirmSend()" style="background:var(--amber);border-color:var(--amber);color:#fff">Send</button>
+    </div>
+  </div>
+</div>
+
+<!-- SURVEY EDIT RECIPIENT MODAL -->
+<div class="modal-backdrop" id="surveyEditModal" onclick="if(event.target===this)surveysCloseEditModal()" style="z-index:1100">
+  <div class="modal" style="width:480px;max-width:94vw">
+    <div class="modal-header">
+      <div class="modal-title">Edit recipient</div>
+      <button class="modal-close" onclick="surveysCloseEditModal()">&#x2715;</button>
+    </div>
+    <div class="modal-body">
+      <label class="f-label">Contact name</label>
+      <input type="text" id="surveyEditName" class="f-input">
+      <label class="f-label" style="margin-top:14px">Email address</label>
+      <input type="email" id="surveyEditEmail" class="f-input">
+      <div style="font-size:12px;color:var(--muted);margin-top:10px;line-height:1.5">Updates this invitation only — does not change the project's primary contact.</div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="surveysCloseEditModal()">Cancel</button>
+      <button class="btn" onclick="surveysSaveRecipient()" style="margin-left:auto;background:var(--amber);border-color:var(--amber);color:#fff">Save</button>
     </div>
   </div>
 </div>

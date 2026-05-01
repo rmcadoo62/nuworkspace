@@ -63,6 +63,7 @@ function routerNavigate(hash) {
       case 'approvals':   if (typeof openApprovalsPanel     === 'function') openApprovalsPanel();     break;
       case 'quotes':      if (typeof openQuotesPanel        === 'function') openQuotesPanel();        break;
       case 'closingreport': if (typeof openClosingReport    === 'function') openClosingReport();      break;
+      case 'surveys':       if (typeof openSurveyQueuePanel === 'function') openSurveyQueuePanel();   break;
       default:
         if (typeof openHomePanel === 'function') openHomePanel(document.getElementById('navHome'));
     }
@@ -108,6 +109,7 @@ function routerHookFunctions() {
     ['openApprovalsPanel',      'approvals'],
     ['openQuotesPanel',         'quotes'],
     ['openClosingReport',       'closingreport'],
+    ['openSurveyQueuePanel',    'surveys'],
     ['openMergeClientsPanel',   'clients'],
     ['openSfImportPanel',       'clients'],
     ['openSchedSettingsPanel',  'scheduler'],

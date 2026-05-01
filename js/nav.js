@@ -319,6 +319,7 @@ document.addEventListener('DOMContentLoaded', function () {
     { name: 'openClosingReport',      label: 'Closing Report'      },
     { name: 'openCompliancePanel',    label: 'CMMC Compliance'     },
     { name: 'openIssueTrackerPanel', label: 'Issue Tracker'       },
+    { name: 'openSurveyQueuePanel',  label: 'Customer Surveys'    },
   ];
 
   NAV_FNS.forEach(({ name, label }) => {
