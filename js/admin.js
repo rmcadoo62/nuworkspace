@@ -159,7 +159,8 @@ function openSetupPanel(el) {
   // Line 3: Audit Log, Approvals
   if (can('view_audit_log')) tiles.push(tile('&#x1F4DD;','Audit Log','View recent changes and configure tracked fields.',"openAuditLogPanel(document.getElementById('navSetup'))"));
   if (can('view_setup') || isManager()) tiles.push(tile('&#x2705;','Approvals','Review and approve pending timesheet submissions.',"openApprovalsPanel(document.getElementById('navSetup'))"));
-  // Line 4: Merge Duplicate Clients
+  // Line 4: Customer Surveys, Merge Duplicate Clients
+  if (can('manage_employees') || isManager()) tiles.push(tile('&#x2709;&#xFE0F;','Customer Surveys','Send queued surveys, monitor customer responses.',"openSurveyQueuePanel()"));
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F9F9;','Merge Duplicate Clients','Find and merge client records with similar names.',"openMergeClientsPanel(document.getElementById('navSetup'))"));
 
   const grid = document.getElementById('setupTilesGrid');

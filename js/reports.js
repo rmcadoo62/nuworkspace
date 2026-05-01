@@ -1896,6 +1896,8 @@ function markProjectComplete(projId) {
   }
   info.status = 'complete';
   if (sb) dbUpdate('project_info', projId, { status: 'complete' });
+  // Auto-queue customer satisfaction survey (90-day per-contact dedup applied internally)
+  if (typeof surveysMaybeQueue === 'function') surveysMaybeQueue(projId);
   toast('Project marked Complete — ready to generate closing PDF.');
   renderClosingReport();
 }
