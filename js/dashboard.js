@@ -112,6 +112,30 @@ function renderDashboard() {
   const readyToBill  = taskStore.filter(t => t.status === 'complete' && _openProjIds.has(t.proj)).reduce((s,t) => s + (t.fixedPrice||0), 0);
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 
+  // ── Quarterly billed data (Jan 2024 → current year) — used by Quarterly view ──
+  // Sums billedMonthlyData into Q1–Q4 buckets per year.
+  const _qStartYear = 2024;
+  const _qEndYear   = new Date().getFullYear();
+  const _qYears = [];
+  for (let y = _qStartYear; y <= _qEndYear; y++) _qYears.push(y);
+  const _qBuckets = { q1: [], q2: [], q3: [], q4: [] };
+  _qYears.forEach(y => {
+    const sumQ = (m1, m2, m3) =>
+      (window.billedMonthlyData?.[y + '-' + String(m1).padStart(2,'0')] || 0) +
+      (window.billedMonthlyData?.[y + '-' + String(m2).padStart(2,'0')] || 0) +
+      (window.billedMonthlyData?.[y + '-' + String(m3).padStart(2,'0')] || 0);
+    _qBuckets.q1.push(sumQ(1,  2,  3));
+    _qBuckets.q2.push(sumQ(4,  5,  6));
+    _qBuckets.q3.push(sumQ(7,  8,  9));
+    _qBuckets.q4.push(sumQ(10, 11, 12));
+  });
+  // Stash on window so the chart-draw helpers (called from setBilledView too) can read it.
+  window._billedChartMonthly   = { labels: chartLabels, data: chartData, keys: chartKeys, movingAvg };
+  window._billedChartQuarterly = { years: _qYears, q1: _qBuckets.q1, q2: _qBuckets.q2, q3: _qBuckets.q3, q4: _qBuckets.q4 };
+
+  // Preserve view choice across full re-renders.
+  const _savedBilledView = window._billedView || 'monthly';
+
   // ── Booking Report — yearly grid with cross-month reversal tracking ────────
   const _now = new Date();
   const _curYear  = _now.getFullYear();
@@ -463,7 +487,12 @@ function renderDashboard() {
   wrap.innerHTML = `
     <div class="dash-charts-row">
       <div class="dash-chart-card">
-        <div class="dash-chart-title"><span>💰</span> Billed Revenue <span style="margin-left:auto;font-size:13px;font-family:monospace;color:var(--green);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(totalBilled)} this month</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#c084fc;letter-spacing:0;text-transform:none;font-weight:600;margin-left:12px">${fmt$(readyToBill)} ready to bill</span></div>
+        <div class="dash-chart-title"><span>💰</span> Billed Revenue
+          <div style="display:flex;gap:4px;margin-left:auto">
+            <button id="billedBtnMonthly"   onclick="setBilledView('monthly')"   style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Monthly</button>
+            <button id="billedBtnQuarterly" onclick="setBilledView('quarterly')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Quarterly</button>
+          </div>
+          <span style="margin-left:12px;font-size:13px;font-family:monospace;color:var(--green);letter-spacing:0;text-transform:none;font-weight:700">${fmt$(totalBilled)} this month</span><span style="font-size:11px;font-family:'JetBrains Mono',monospace;color:#c084fc;letter-spacing:0;text-transform:none;font-weight:600;margin-left:12px">${fmt$(readyToBill)} ready to bill</span></div>
         <canvas id="billedByMonthChart" height="110"></canvas>
       </div>
     </div>
@@ -726,106 +755,10 @@ function renderDashboard() {
     const existing = Chart.getChart(canv);
     if (existing) existing.destroy();
 
-    new Chart(canv, {
-      type: 'bar',
-      data: {
-        labels: chartLabels,
-        datasets: [{
-          label: 'Billed Revenue',
-          data: chartData,
-          backgroundColor: chartData.map(v => v > 0 ? 'rgba(76,175,125,0.7)' : 'rgba(122,122,133,0.2)'),
-          borderColor:     chartData.map(v => v > 0 ? '#4caf7d' : 'rgba(122,122,133,0.3)'),
-          borderWidth: 1.5,
-          borderRadius: 5,
-          borderSkipped: false,
-          order: 1,
-        },{
-          type: 'line',
-          label: '3-mo Moving Avg',
-          data: movingAvg,
-          borderColor: '#c07a1a',
-          backgroundColor: 'rgba(192,122,26,0.15)',
-          borderWidth: 2.5,
-          pointRadius: 3,
-          pointHoverRadius: 5,
-          pointBackgroundColor: '#c07a1a',
-          pointBorderColor: '#c07a1a',
-          fill: false,
-          tension: 0.3,
-          spanGaps: false,
-          order: 0,
-        }]
-      },
-      options: {
-        responsive: true,
-        onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
-        onClick: (e, els) => {
-          if (!els.length) return;
-          const idx = els[0].index;
-          showBilledAuditModal(chartKeys[idx], chartLabels[idx]);
-        },
-        plugins: {
-          legend: {
-            display: true,
-            position: 'top',
-            align: 'end',
-            labels: {
-              color: '#9a9aaa',
-              font: { size: 10, family: 'DM Sans, sans-serif' },
-              boxWidth: 12,
-              boxHeight: 8,
-              padding: 10,
-              usePointStyle: false,
-            }
-          },
-          tooltip: {
-            mode: 'index',
-            intersect: false,
-            filter: (item) => item.parsed.y !== null && item.parsed.y !== undefined,
-            callbacks: {
-              label: ctx => {
-                const v = ctx.parsed.y;
-                const prefix = ctx.dataset.label === 'Billed Revenue' ? ' Billed: ' : ' 3-mo Avg: ';
-                return prefix + '$' + (v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-              }
-            }
-          }
-        },
-        scales: {
-          x: { ticks: { color: '#9a9aaa', font: { size: 10 } }, grid: { display: false } },
-          y: {
-            ticks: {
-              color: '#9a9aaa', font: { size: 10 },
-              callback: v => v >= 1000 ? '$' + (v/1000).toFixed(0) + 'k' : '$' + v
-            },
-            grid: { color: 'rgba(255,255,255,0.05)' },
-            beginAtZero: true
-          }
-        }
-      },
-      plugins: [{
-        id: 'barValueLabels',
-        afterDatasetsDraw(chart) {
-          const ctx = chart.ctx;
-          chart.data.datasets.forEach((dataset, i) => {
-            if (dataset.type === 'line') return; // skip line points
-            const meta = chart.getDatasetMeta(i);
-            meta.data.forEach((bar, idx) => {
-              const val = dataset.data[idx];
-              if (!val || val <= 0) return;
-              const label = val >= 1000 ? '$' + (val/1000).toFixed(1) + 'k' : '$' + val.toFixed(0);
-              ctx.save();
-              ctx.fillStyle = '#c8c8d8';
-              ctx.font = '600 10px DM Sans, sans-serif';
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'bottom';
-              ctx.fillText(label, bar.x, bar.y - 3);
-              ctx.restore();
-            });
-          });
-        }
-      }]
-    });
+    // Dispatch to the right chart-draw helper based on saved view (Monthly default).
+    // Helper functions defined at module scope below.
+    setBilledView(_savedBilledView);
+
   ////// ── Sales by Category — stacked by month, category on X axis ──
   setTimeout(() => {
     const catCanv = document.getElementById('salesByCatChart');
@@ -1372,3 +1305,212 @@ function selectProjectById(id) {
 }
 
 
+
+// ── Billed Revenue: Monthly / Quarterly view toggle ───────────────────────
+// Both helpers read prepared data from window._billedChartMonthly / _billedChartQuarterly
+// (populated each time renderDashboard() runs). setBilledView is the single entry point —
+// called on toggle click and on dashboard re-render to restore the saved view.
+
+function setBilledView(view) {
+  if (view !== 'monthly' && view !== 'quarterly') view = 'monthly';
+  window._billedView = view;
+
+  // Button styling — match the amber-glow pattern used elsewhere on the dashboard
+  const btnM = document.getElementById('billedBtnMonthly');
+  const btnQ = document.getElementById('billedBtnQuarterly');
+  if (btnM && btnQ) {
+    const isM = view === 'monthly';
+    btnM.style.background  = isM ? 'var(--amber-glow)' : 'transparent';
+    btnM.style.color       = isM ? 'var(--amber)' : 'var(--muted)';
+    btnM.style.borderColor = isM ? 'var(--amber-dim)' : 'var(--border)';
+    btnQ.style.background  = !isM ? 'var(--amber-glow)' : 'transparent';
+    btnQ.style.color       = !isM ? 'var(--amber)' : 'var(--muted)';
+    btnQ.style.borderColor = !isM ? 'var(--amber-dim)' : 'var(--border)';
+  }
+
+  const canv = document.getElementById('billedByMonthChart');
+  if (!canv || typeof Chart === 'undefined') return;
+  const existing = Chart.getChart(canv);
+  if (existing) existing.destroy();
+
+  if (view === 'quarterly') _drawBilledQuarterly(canv);
+  else                       _drawBilledMonthly(canv);
+}
+
+// Shared bar value-label plugin — also handles grouped bars correctly
+const _billedBarValueLabels = {
+  id: 'barValueLabels',
+  afterDatasetsDraw(chart) {
+    const ctx = chart.ctx;
+    chart.data.datasets.forEach((dataset, i) => {
+      if (dataset.type === 'line') return;
+      const meta = chart.getDatasetMeta(i);
+      meta.data.forEach((bar, idx) => {
+        const val = dataset.data[idx];
+        if (!val || val <= 0) return;
+        const label = val >= 1000 ? '$' + (val/1000).toFixed(1) + 'k' : '$' + val.toFixed(0);
+        ctx.save();
+        ctx.fillStyle = '#c8c8d8';
+        ctx.font = '600 10px DM Sans, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(label, bar.x, bar.y - 3);
+        ctx.restore();
+      });
+    });
+  }
+};
+
+function _drawBilledMonthly(canv) {
+  const m = window._billedChartMonthly;
+  if (!m) return;
+  new Chart(canv, {
+    type: 'bar',
+    data: {
+      labels: m.labels,
+      datasets: [{
+        label: 'Billed Revenue',
+        data: m.data,
+        backgroundColor: m.data.map(v => v > 0 ? 'rgba(76,175,125,0.7)' : 'rgba(122,122,133,0.2)'),
+        borderColor:     m.data.map(v => v > 0 ? '#4caf7d' : 'rgba(122,122,133,0.3)'),
+        borderWidth: 1.5, borderRadius: 5, borderSkipped: false, order: 1,
+      },{
+        type: 'line',
+        label: '3-mo Moving Avg',
+        data: m.movingAvg,
+        borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)',
+        borderWidth: 2.5, pointRadius: 3, pointHoverRadius: 5,
+        pointBackgroundColor: '#c07a1a', pointBorderColor: '#c07a1a',
+        fill: false, tension: 0.3, spanGaps: false, order: 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      onClick: (e, els) => {
+        if (!els.length) return;
+        const idx = els[0].index;
+        showBilledAuditModal(m.keys[idx], m.labels[idx]);
+      },
+      plugins: {
+        legend: {
+          display: true, position: 'top', align: 'end',
+          labels: { color: '#9a9aaa', font: { size: 10, family: 'DM Sans, sans-serif' }, boxWidth: 12, boxHeight: 8, padding: 10, usePointStyle: false }
+        },
+        tooltip: {
+          mode: 'index', intersect: false,
+          filter: (item) => item.parsed.y !== null && item.parsed.y !== undefined,
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              const prefix = ctx.dataset.label === 'Billed Revenue' ? ' Billed: ' : ' 3-mo Avg: ';
+              return prefix + '$' + (v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#9a9aaa', font: { size: 10 } }, grid: { display: false } },
+        y: {
+          ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$' + (v/1000).toFixed(0) + 'k' : '$' + v },
+          grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true
+        }
+      }
+    },
+    plugins: [_billedBarValueLabels]
+  });
+}
+
+function _drawBilledQuarterly(canv) {
+  const q = window._billedChartQuarterly;
+  if (!q) return;
+
+  // Dashboard-palette colors per quarter
+  const Q_COLORS = {
+    q1: { bg: 'rgba(232,162,52,0.78)',  border: '#e8a234' }, // amber
+    q2: { bg: 'rgba(76,175,125,0.78)',  border: '#4caf7d' }, // green
+    q3: { bg: 'rgba(91,140,196,0.78)',  border: '#5b8cc4' }, // blue
+    q4: { bg: 'rgba(192,132,252,0.78)', border: '#c084fc' }, // purple
+  };
+  const mkDataset = (label, key) => ({
+    label,
+    data: q[key],
+    backgroundColor: Q_COLORS[key].bg,
+    borderColor:     Q_COLORS[key].border,
+    borderWidth: 1,
+    borderSkipped: false,
+    stack: 'year', // single stack per year
+  });
+
+  // Stacked-bar value-label plugin — centers each segment's dollar value
+  // inside the segment, and skips labels for segments too short to read.
+  const stackedSegmentLabels = {
+    id: 'stackedSegmentLabels',
+    afterDatasetsDraw(chart) {
+      const ctx = chart.ctx;
+      chart.data.datasets.forEach((dataset, i) => {
+        const meta = chart.getDatasetMeta(i);
+        meta.data.forEach((bar, idx) => {
+          const val = dataset.data[idx];
+          if (!val || val <= 0) return;
+          const segH = Math.abs(bar.base - bar.y);
+          if (segH < 16) return; // too tight — skip
+          const label = val >= 1000 ? '$' + (val/1000).toFixed(1) + 'k' : '$' + val.toFixed(0);
+          const cy = (bar.y + bar.base) / 2;
+          ctx.save();
+          ctx.fillStyle = '#fff';
+          ctx.font = '700 10px DM Sans, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.shadowColor = 'rgba(0,0,0,0.45)';
+          ctx.shadowBlur = 2;
+          ctx.fillText(label, bar.x, cy);
+          ctx.restore();
+        });
+      });
+    }
+  };
+
+  new Chart(canv, {
+    type: 'bar',
+    data: {
+      labels: q.years.map(String),
+      datasets: [
+        mkDataset('Q1', 'q1'),
+        mkDataset('Q2', 'q2'),
+        mkDataset('Q3', 'q3'),
+        mkDataset('Q4', 'q4'),
+      ]
+    },
+    options: {
+      responsive: true,
+      // Per Russ: no-op click in this view (audits are done from Monthly)
+      plugins: {
+        legend: {
+          display: true, position: 'top', align: 'end',
+          labels: { color: '#9a9aaa', font: { size: 10, family: 'DM Sans, sans-serif' }, boxWidth: 12, boxHeight: 8, padding: 10, usePointStyle: false }
+        },
+        tooltip: {
+          mode: 'index', intersect: false,
+          filter: (item) => item.parsed.y !== null && item.parsed.y !== undefined && item.parsed.y > 0,
+          callbacks: {
+            label: ctx => ' ' + ctx.dataset.label + ': $' + (ctx.parsed.y||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}),
+            footer: items => {
+              const total = items.reduce((s, it) => s + (it.parsed.y || 0), 0);
+              return ' Total: $' + total.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+            }
+          }
+        }
+      },
+      scales: {
+        x: { stacked: true, ticks: { color: '#9a9aaa', font: { size: 11, weight: '600' } }, grid: { display: false } },
+        y: {
+          stacked: true,
+          ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$' + (v/1000).toFixed(0) + 'k' : '$' + v },
+          grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true
+        }
+      }
+    },
+    plugins: [stackedSegmentLabels]
+  });
+}
