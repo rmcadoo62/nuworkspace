@@ -524,9 +524,9 @@ function renderTasksPanel(projId) {
           <select class="status-pill-select" style="color:#000;background:${(t.status||'new')==='new'?'#fff':statusColor(t.status||'new')+('80')};border-color:${(t.status||'new')==='new'?'#bbb':statusColor(t.status||'new')+('99')}"
             onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'" ${canEditTask ? '' : 'disabled'}>${statusOpts}</select>
         </div>
-        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#000;${canEditTask?'cursor:text':''}">${t.quoteNum||'—'}</div>
-        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);${canEditTask?'cursor:text':''}"> ${t.poNumber||'—'}</div>
-        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled' ? 'var(--red)' : 'var(--green)'};font-weight:700;${canEditTask?'cursor:text':''}">
+        <div class="itt-quote ${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#000;${canEditTask?'cursor:text':''}">${t.quoteNum||'—'}</div>
+        <div class="itt-po ${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);${canEditTask?'cursor:text':''}"> ${t.poNumber||'—'}</div>
+        <div class="itt-price ${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled' ? 'var(--red)' : 'var(--green)'};font-weight:700;${canEditTask?'cursor:text':''}">
           ${t.fixedPrice ? (t.status==='cancelled' ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})) : '—'}
         </div>
         <div style="font-size:12px;color:#000">${fmtShortDate(t.createdAt)}</div>
@@ -942,9 +942,8 @@ async function inlineEditQuoteNum(taskId, projId) {
   if (!row) return;
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
-  // Quote cell (index 6: drag,num,check,cat,name,status,quote)
-  const cells = row.children;
-  const cell = cells[6];
+  const cell = row.querySelector('.itt-quote');
+  if (!cell) return;
   if (cell.querySelector('input')) return;
   const prev = cell.innerHTML;
   cell.innerHTML = '';
@@ -959,7 +958,10 @@ async function inlineEditQuoteNum(taskId, projId) {
     const val = inp.value.trim();
     t.quoteNum = val;
     if (sb) await sb.from('tasks').update({ quote_number: val||null }).eq('id', taskId);
-    renderTasksPanel(projId);
+    // Update cell text in-place; avoid a panel re-render so a click that
+    // moved focus to another inline-edit cell isn't clobbered when this
+    // async save resolves ~100ms later.
+    if (cell.isConnected) cell.innerHTML = t.quoteNum || '—';
   };
   inp.addEventListener('blur', save);
   inp.addEventListener('keydown', e => { if (e.key==='Enter') inp.blur(); if (e.key==='Escape') { cell.innerHTML=prev; } });
@@ -971,16 +973,26 @@ function inlineEditPoNum(taskId, projId) {
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
-  const cells = [...row.children];
-  const cell = cells[7]; // PO # cell
+  const cell = row.querySelector('.itt-po');
   if (!cell) return;
+  if (cell.querySelector('input')) return;
+  const prev = cell.innerHTML;
   const orig = t.poNumber || '';
-  cell.innerHTML = `<input class="inline-edit-input" type="text" value="${orig}" placeholder="PO #" style="width:80px" />`;
+  cell.innerHTML = `<input class="inline-edit-input" type="text" value="${orig.replace(/"/g,'&quot;')}" placeholder="PO #" style="width:100%;font-family:'JetBrains Mono',monospace;font-size:11px" />`;
   const inp = cell.querySelector('input');
   inp.focus(); inp.select();
-  const commit = () => { inlineSave(taskId, projId, 'poNumber', inp.value); };
+  const commit = async () => {
+    const val = inp.value.trim();
+    t.poNumber = val;
+    if (sb) await sb.from('tasks').update({ po_number: val||null }).eq('id', taskId);
+    // In-place display update — see note in inlineEditQuoteNum re: not re-rendering.
+    if (cell.isConnected) cell.innerHTML = t.poNumber || '—';
+  };
   inp.addEventListener('blur', commit);
-  inp.addEventListener('keydown', e => { if(e.key==='Enter'){e.preventDefault();inp.blur();} if(e.key==='Escape'){renderTasksPanel(projId);} });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+    if (e.key === 'Escape') { cell.innerHTML = prev; }
+  });
 }
 
 function inlineEditPrice(taskId, projId) {
@@ -989,12 +1001,11 @@ function inlineEditPrice(taskId, projId) {
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
-  const cells = row.querySelectorAll('div');
-  // Price is the 5th cell (index 4 after check, name, status, cat)
-  const priceCell = [...row.children].find(el => el.classList.contains('itt-cell-edit') && el.style.color.includes('green') || el.getAttribute('onclick')?.includes('inlineEditPrice'));
+  const priceCell = row.querySelector('.itt-price');
   if (!priceCell) return;
+  if (priceCell.querySelector('input')) return;
   const orig = t.fixedPrice || 0;
-  priceCell.innerHTML = `<input class="inline-edit-input" type="number" value="${orig||''}" step="0.01" placeholder="0.00" style="font-family:'JetBrains Mono',monospace;width:80px" />`;
+  priceCell.innerHTML = `<input class="inline-edit-input" type="number" value="${orig||''}" step="0.01" placeholder="0.00" style="font-family:'JetBrains Mono',monospace;width:100%" />`;
   const inp = priceCell.querySelector('input');
   inp.focus(); inp.select();
   const commit = () => {
