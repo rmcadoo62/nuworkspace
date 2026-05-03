@@ -444,10 +444,9 @@ function buildBlockDisplayLines(block, opts) {
   if (block.projId) {
     const pi = getProjInfo(block.projId);
     if (pi) {
-      // Line 1: project name (contains number) · customer
-      lines.push([pi.proj.name, pi.info.client].filter(Boolean).join('  \u00B7  '));
-      // Line 2 (tooltip only): block label on its own line when set
-      if (includeLabel && block.label) lines.push(block.label);
+      // Line 1: project name (contains number) · client [· block label]
+      // Label is appended here so it shows on every bar (compact + expanded + tooltip)
+      lines.push([pi.proj.name, pi.info.client, block.label].filter(Boolean).join('  \u00B7  '));
       // Next line: time · task name
       const task = block.taskId
         ? (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === block.taskId) : null;
