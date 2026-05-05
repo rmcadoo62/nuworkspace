@@ -123,7 +123,7 @@ window.openAnnouncementEditor = function() {
   editor.style.display = 'block';
   editor.innerHTML = `
     <div class="home-ann-form">
-      <textarea class="home-ann-textarea" id="homeAnnText" placeholder="Type your announcement..." rows="2"></textarea>
+      <textarea class="home-ann-textarea" id="homeAnnText" placeholder="Type your announcement..." rows="4"></textarea>
       <div class="home-ann-form-row">
         <label class="home-ann-label">Expires:
           <input type="date" class="home-ann-date" id="homeAnnExpiry" value="${tomorrowStr}" />
@@ -145,23 +145,46 @@ window.saveAnnouncement = async function() {
   try {
     // Delete any existing active announcements first
     const today = new Date().toISOString().slice(0, 10);
-    await sb.from('announcements').delete().gte('expires_at', today);
+    const { error: delErr } = await sb.from('announcements').delete().gte('expires_at', today);
+    if (delErr) {
+      console.error('saveAnnouncement delete:', delErr);
+      if (typeof toast === 'function') toast('⚠ Could not clear old announcement: ' + (delErr.message || delErr.code || ''));
+      return;
+    }
     // Insert new
-    await sb.from('announcements').insert({
+    const { error: insErr } = await sb.from('announcements').insert({
       message: msg,
       posted_by: currentEmployee.id,
       expires_at: expiry,
     });
+    if (insErr) {
+      console.error('saveAnnouncement insert:', insErr);
+      if (typeof toast === 'function') toast('⚠ Could not post announcement: ' + (insErr.message || insErr.code || ''));
+      return;
+    }
+    if (typeof toast === 'function') toast('✓ Announcement posted');
     renderHomePage();
-  } catch(e) { console.error('saveAnnouncement:', e); }
+  } catch(e) {
+    console.error('saveAnnouncement:', e);
+    if (typeof toast === 'function') toast('⚠ Could not post announcement');
+  }
 };
 
 window.clearAnnouncement = async function(id) {
   if (!sb) return;
   try {
-    await sb.from('announcements').delete().eq('id', id);
+    const { error } = await sb.from('announcements').delete().eq('id', id);
+    if (error) {
+      console.error('clearAnnouncement:', error);
+      if (typeof toast === 'function') toast('⚠ Could not clear announcement: ' + (error.message || error.code || ''));
+      return;
+    }
+    if (typeof toast === 'function') toast('✓ Announcement cleared');
     renderHomePage();
-  } catch(e) { console.error('clearAnnouncement:', e); }
+  } catch(e) {
+    console.error('clearAnnouncement:', e);
+    if (typeof toast === 'function') toast('⚠ Could not clear announcement');
+  }
 };
 
 // ---- Weather ----
