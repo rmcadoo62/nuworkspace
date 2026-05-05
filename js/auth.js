@@ -1051,7 +1051,23 @@ async function doLogin() {
     });
   } catch (_) {}
 
+  // Load app data BEFORE afterLogin runs, so currentEmployee matching has a
+  // populated employees[] to look up against. Without this, email/password
+  // logins land in a broken "User" state with currentEmployee=null, which
+  // silently breaks every can()-gated permission check across the app
+  // (add_projects, edit_tasks, view_setup, etc. all return false).
+  // Mirrors the same pattern startup() uses on the SSO path.
+  try {
+    await loadAllData();
+  } catch (loadErr) {
+    console.error('[doLogin] loadAllData failed:', loadErr);
+    err.textContent = 'Signed in, but data load failed. Please refresh the page.';
+    btn.disabled = false; btn.textContent = 'Sign In';
+    return;
+  }
+
   await afterLogin(data.user);
+  if (typeof initRouter === 'function') initRouter();
 }
 
 function applyPermissions() {
