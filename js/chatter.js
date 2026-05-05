@@ -341,7 +341,7 @@ function renderNotifPanel() {
   list.innerHTML = notifStore.map(n => {
     const proj = projects.find(p => p.id === n.projId);
     const timeStr = new Date(n.ts).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|empHr:[a-f0-9-]+|myinfo:hrrecords|issueTracker)$/, '');
+    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|empHr:[a-f0-9-]+|myinfo:hrrecords|issueTracker|closingReport)$/, '');
     return '<div class="notif-item' + (n.read ? '' : ' unread') + '" onclick="notifClick(\x27' + n.id + '\x27,\x27' + (n.projId||'') + '\x27)">' +
       '<div class="notif-item-avatar" style="background:' + (n.fromColor||'#888') + ';color:#fff">' + (n.fromInitials||'?') + '</div>' +
       '<div class="notif-item-body">' +
@@ -409,6 +409,15 @@ function notifClick(notifId, projId) {
       const navItem = document.getElementById('navHome');
       if (typeof openHomePanel === 'function') openHomePanel(navItem);
     }
+    return;
+  }
+
+  // Check for closing report notification — preview ends with ||closingReport
+  // Routes Jordan to the Closing Report panel where he can approve/reject
+  // projects pending his review.
+  if (preview.endsWith('||closingReport')) {
+    const navItem = document.getElementById('navClosingReport');
+    if (typeof openClosingReport === 'function') openClosingReport(navItem);
     return;
   }
 

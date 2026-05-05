@@ -357,6 +357,9 @@ function bootApp() {
   renderProjectNav();
   rebuildProjDropdown();
   renderAllViews();
+  // Show pending-approval count on Closing Report nav item (visible to Jordan only).
+  // Recomputed in-memory; no DB lookup. Hidden for non-Jordan and at zero.
+  if (typeof updateClosingBadge === 'function') updateClosingBadge();
   if (activeProjectId && projects.find(p => p.id === activeProjectId)) {
     selectProjectById(activeProjectId);
   } else {
@@ -586,6 +589,10 @@ function setupRealtime() {
       } else {
         delete projectInfo[r.project_id];
       }
+      // Closing-Report sidebar badge depends on projectInfo[].status — refresh
+      // it on every project_info change so Jordan sees pending-approval count
+      // update live when Linda flips a project to "closing" on her machine.
+      if (typeof updateClosingBadge === 'function') updateClosingBadge();
       refreshCurrentView();
     })
     .subscribe();
@@ -668,7 +675,41 @@ function setupRealtime() {
       .subscribe();
   }
 
-  console.log('✓ Realtime subscriptions active (projects, project_info, tasks, schedule_blocks, chatter_notifs)');
+  // ── FEEDBACK_SUBMISSIONS (live Issue Tracker badge for Russ) ──────────────
+  // Fixes the bug where the Issue Tracker badge stayed at the value it had at
+  // login because nothing pushed updates. Now any insert/update/delete on
+  // feedback_submissions mutates the in-memory issueTrackerData array in place
+  // and refreshes the badge — no need to open the panel for the count to
+  // update. Scoped to Russ since that's the only role that sees the badge.
+  if (currentUser?.email === 'rmcadoo@nulabs.com') {
+    sb.channel('rt-feedback-submissions')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'feedback_submissions' }, payload => {
+        if (typeof issueTrackerData === 'undefined') return;
+        if (payload.eventType === 'INSERT') {
+          const r = payload.new;
+          if (r && !issueTrackerData.find(i => i.id === r.id)) {
+            issueTrackerData.unshift(r);
+          }
+        } else if (payload.eventType === 'UPDATE') {
+          const r = payload.new;
+          const idx = issueTrackerData.findIndex(i => i.id === r.id);
+          if (idx >= 0) issueTrackerData[idx] = r;
+          else issueTrackerData.unshift(r);
+        } else if (payload.eventType === 'DELETE') {
+          const oldId = payload.old?.id;
+          if (oldId) issueTrackerData = issueTrackerData.filter(i => i.id !== oldId);
+        }
+        if (typeof updateIssueBadge === 'function') updateIssueBadge();
+        // Re-render the panel if it's currently open
+        const panel = document.getElementById('panel-issue-tracker');
+        if (panel?.classList.contains('active') && typeof renderIssueTracker === 'function') {
+          renderIssueTracker();
+        }
+      })
+      .subscribe();
+  }
+
+  console.log('\u2713 Realtime subscriptions active (projects, project_info, tasks, schedule_blocks, chatter_notifs, feedback_submissions)');
 }
 
 // Re-render the scheduler if it's currently visible

@@ -1691,6 +1691,76 @@ async function loadClosedProjects(el) {
 
 
 // ===== CLOSING REPORT =====
+
+// ── Find Jordan from in-memory employees ──────────────────────────────
+// Returns the Jordan McAdoo employee record, or null if not found.
+function _findJordan() {
+  if (typeof employees === 'undefined' || !Array.isArray(employees)) return null;
+  return employees.find(e => e.name === 'Jordan McAdoo') || null;
+}
+
+// ── Insert a chatter_notifs row for Jordan ────────────────────────────
+// Called when a project status flips to 'closing'. Skips if the actor IS
+// Jordan (no self-notify) or if Jordan can't be found in the employee list.
+// Returns true on success, false otherwise. Errors are logged, not thrown.
+async function notifyJordanOfClosing(projId) {
+  if (!sb) return false;
+  const jordan = _findJordan();
+  if (!jordan) { console.warn('notifyJordanOfClosing: Jordan not found in employees'); return false; }
+  // Skip self-notify
+  if (currentEmployee && currentEmployee.id === jordan.id) return false;
+
+  const proj = (typeof projects !== 'undefined') ? projects.find(p => p.id === projId) : null;
+  const projName = proj ? proj.name : 'A project';
+  const fromName     = currentEmployee?.name     || 'System';
+  const fromInitials = currentEmployee?.initials || '?';
+  const fromColor    = currentEmployee?.color    || '#5b9cf6';
+
+  try {
+    const { error } = await sb.from('chatter_notifs').insert([{
+      employee_id:   jordan.id,
+      msg_id:        null,
+      proj_id:       null,
+      from_name:     fromName,
+      from_initials: fromInitials,
+      from_color:    fromColor,
+      preview:       `\u{1F4CB} ${projName} is ready for closing approval||closingReport`,
+      is_read:       false,
+    }]);
+    if (error) { console.error('notifyJordanOfClosing insert:', error); return false; }
+    return true;
+  } catch(e) {
+    console.error('notifyJordanOfClosing:', e);
+    return false;
+  }
+}
+
+// ── Closing Report sidebar badge ──────────────────────────────────────
+// Shows a count of projects pending Jordan's approval (status === 'closing')
+// on the navClosingReport sidebar item. Visible only to Jordan; hidden for
+// everyone else and at zero. Called on initial load, after status changes,
+// and from the rt-project-info realtime handler so it updates live.
+function updateClosingBadge() {
+  const navItem = document.getElementById('navClosingReport');
+  const badge   = document.getElementById('closingBadge');
+  if (!navItem || !badge) return;
+
+  const isJordan = currentEmployee && currentEmployee.name === 'Jordan McAdoo';
+  if (!isJordan) { badge.style.display = 'none'; return; }
+
+  const count = (typeof projects !== 'undefined' ? projects : [])
+    .filter(p => (typeof projectInfo !== 'undefined') && projectInfo[p.id] && projectInfo[p.id].status === 'closing')
+    .length;
+
+  badge.textContent = count;
+  badge.style.display = count > 0 ? 'inline-block' : 'none';
+}
+// Expose globally so other files (supabase-client.js, project-detail.js)
+// can call it without import gymnastics.
+window.updateClosingBadge   = updateClosingBadge;
+window.notifyJordanOfClosing = notifyJordanOfClosing;
+
+
 function openClosingReport(el) {
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -1995,7 +2065,12 @@ function generateClosingPdf(projId) {
   // ── Mark as Closing in DB and memory ──
   info.status = 'closing';
   if (sb) dbUpdate('project_info', projId, { status: 'closing' });
-  toast('PDF downloaded — project marked Closing. Jordan has been notified for approval.');
+  // Real notification (replaces the old fake "has been notified" toast)
+  notifyJordanOfClosing(projId).then(ok => {
+    if (ok) toast('PDF downloaded — project marked Closing. Jordan has been notified for approval.');
+    else    toast('PDF downloaded — project marked Closing.');
+  });
+  if (typeof updateClosingBadge === 'function') updateClosingBadge();
   renderClosingReport();
 }
 
@@ -2009,6 +2084,7 @@ function approveClosing(projId) {
   if (!info.endDate || info.endDate === today) payload.end_date = today;
   if (sb) dbUpdate('project_info', projId, payload);
   toast('✓ Project approved and closed. Closed date set to today.');
+  if (typeof updateClosingBadge === 'function') updateClosingBadge();
   renderClosingReport();
 }
 
@@ -2020,5 +2096,6 @@ function rejectClosing(projId) {
   info.status = 'complete';
   if (sb) dbUpdate('project_info', projId, { status: 'complete' });
   toast('Closing rejected — project returned to Ready to Close.' + (reason ? ' Reason: ' + reason : ''));
+  if (typeof updateClosingBadge === 'function') updateClosingBadge();
   renderClosingReport();
 }

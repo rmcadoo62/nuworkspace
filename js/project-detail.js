@@ -601,10 +601,18 @@ async function changeProjectStatus(projId, selectEl) {
 
   // Notify Jordan when status goes to closing
   if (newStatus === 'closing') {
-    toast('Project marked as Closing — Jordan has been notified for approval.');
-    // TODO: create notification for Jordan (phase 2)
+    if (typeof notifyJordanOfClosing === 'function') {
+      notifyJordanOfClosing(projId).then(ok => {
+        if (ok) toast('Project marked as Closing — Jordan has been notified for approval.');
+        else    toast('Project marked as Closing.');
+      });
+    } else {
+      toast('Project marked as Closing.');
+    }
+    if (typeof updateClosingBadge === 'function') updateClosingBadge();
   } else if (newStatus === 'closed') {
     toast('Project closed successfully.');
+    if (typeof updateClosingBadge === 'function') updateClosingBadge();
   } else {
     toast('Status updated');
   }
