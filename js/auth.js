@@ -57,6 +57,7 @@ function can(capability) {
     view_schedule: true, edit_schedule: true, view_cmmc: true,
     view_hours: true, view_expenses: mgr, view_invoicing: mgr,
     view_proj_shipping: true, view_clients: mgr, view_quotes: mgr,
+    view_surveys: mgr,
   };
   return !!(fallbacks[capability]);
 }
@@ -1083,6 +1084,8 @@ function applyPermissions() {
   if (navRep) navRep.style.display = can('view_reports') ? 'flex' : 'none';
   const navClosing = document.getElementById('navClosingReport');
   if (navClosing) navClosing.style.display = can('view_reports') ? 'flex' : 'none';
+  const navSurveys = document.getElementById('navCustomerSurveys');
+  if (navSurveys) navSurveys.style.display = can('view_surveys') ? 'flex' : 'none';
   const navCmmc = document.getElementById('navCompliance');
   if (navCmmc) navCmmc.style.display = can('view_cmmc') ? 'flex' : 'none';
 
@@ -1153,6 +1156,11 @@ function applyPermissions() {
   if (navQuotes) navQuotes.style.display = can('view_quotes') ? 'flex' : 'none';
 
   applySchedAccessToNav();
+
+  // Initialize the Customer Surveys eligible-count badge. Function in
+  // surveys.js bails fast if the user lacks view_surveys, so this is safe
+  // to call unconditionally.
+  if (typeof refreshSurveysBadge === 'function') refreshSurveysBadge();
 }
 
 function applySchedAccessToNav() {

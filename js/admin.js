@@ -1793,6 +1793,7 @@ const CAPABILITY_DEFS = [
   { key: 'view_reports',       label: 'View Reports',          group: 'Reports' },
   { key: 'view_billing',       label: 'View Billing Queue',    group: 'Reports' },
   { key: 'view_quotes',        label: 'View Quotes (Vibrato)', group: 'Reports' },
+  { key: 'view_surveys',       label: 'View Customer Surveys', group: 'Reports' },
   { key: 'view_audit_log',     label: 'View Audit Log',        group: 'Admin' },
   { key: 'view_setup',         label: 'View Setup',            group: 'Admin' },
   { key: 'manage_employees',   label: 'Manage Employees',      group: 'Admin' },
