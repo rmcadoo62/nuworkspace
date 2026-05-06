@@ -336,7 +336,7 @@
 
     return `
       <tr>
-        <td><strong>${escapeHtml(e.project.name)}</strong></td>
+        <td><a onclick="selectProjectById('${e.project.id}')" style="color:var(--blue);cursor:pointer;text-decoration:none;font-weight:600" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" title="Open project">${escapeHtml(e.project.name)}</a></td>
         <td>${escapeHtml(e.contactName)}</td>
         <td>${escapeHtml(e.contactEmail || '—')}</td>
         <td>${fmtDate(e.info?.testcompleteDate)}</td>
@@ -351,7 +351,7 @@
     if (!_sent.length) return '';
     const rows = _sent.map(r => `
       <tr>
-        <td><strong>${escapeHtml(r.project_name)}</strong></td>
+        <td><a onclick="selectProjectById('${r.project_id}')" style="color:var(--blue);cursor:pointer;text-decoration:none;font-weight:600" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" title="Open project">${escapeHtml(r.project_name)}</a></td>
         <td>${escapeHtml(r.contact_name || '—')}</td>
         <td>${escapeHtml(r.contact_email || '')}</td>
         <td>${fmtDate(r.sent_at)}</td>
@@ -398,7 +398,7 @@
     const fu  = resp.follow_up_requested ? '<span style="color:var(--amber);font-weight:600">Yes</span>' : '—';
     return `
       <tr style="cursor:pointer" onclick="surveysOpenResponse('${r.id}')" title="Click to view full response">
-        <td><strong>${escapeHtml(r.project_name)}</strong></td>
+        <td><a onclick="event.stopPropagation();selectProjectById('${r.project_id}')" style="color:var(--blue);cursor:pointer;text-decoration:none;font-weight:600" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" title="Open project">${escapeHtml(r.project_name)}</a></td>
         <td>${escapeHtml(r.contact_name || '—')}</td>
         <td>${fmtDate(r.completed_at)}</td>
         <td>${nps}</td>
