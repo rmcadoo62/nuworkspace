@@ -373,7 +373,7 @@
             <span>Eligible Projects
               <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(0)</span>
             </span>
-            <button class="btn-small" onclick="openSurveyTemplateEditor('questions')" style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;padding:3px 8px">✏ Edit Templates</button>
+            ${(typeof can === 'function' && can('manage_templates')) ? `<button class="btn-small" onclick="openSurveyTemplateEditor('questions')" style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;padding:3px 8px">✏ Edit Templates</button>` : ''}
           </div>
           <div style="padding:24px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
             No eligible projects right now. A project becomes eligible once it's marked test-complete and all tasks are done.
@@ -386,7 +386,9 @@
     const previewLink = previewDisabled
       ? `<button class="btn-small" onclick="surveysReenablePreview()" style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;padding:3px 8px">🔍 Re-enable preview</button>`
       : '';
-    const editTplBtn = `<button class="btn-small" onclick="openSurveyTemplateEditor('questions')" style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;padding:3px 8px">✏ Edit Templates</button>`;
+    const editTplBtn = (typeof can === 'function' && can('manage_templates'))
+      ? `<button class="btn-small" onclick="openSurveyTemplateEditor('questions')" style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;padding:3px 8px">✏ Edit Templates</button>`
+      : '';
     return `
       <div class="surveys-section">
         <div class="surveys-section-header">
@@ -1102,6 +1104,14 @@
   let _currentSubgroup  = 'questions';
 
   window.openSurveyTemplateEditor = async function (subgroup) {
+    // Defense in depth: even if the button is hidden, refuse to open the
+    // editor for users without the manage_templates permission. RLS on the
+    // template tables is the ultimate gate, but failing fast here gives a
+    // cleaner error than a save that silently 403s.
+    if (typeof can === 'function' && !can('manage_templates')) {
+      if (typeof toast === 'function') toast('You don\'t have permission to edit survey templates');
+      return;
+    }
     _currentSubgroup = (subgroup === 'email') ? 'email' : 'questions';
     _currentTplId = null;  // reset so loadSurveyTplData picks the active one
     if (!document.getElementById('surveyTplModal')) {
