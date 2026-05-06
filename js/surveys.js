@@ -21,15 +21,22 @@
 
   // ── Module state ──────────────────────────────────────────────────────────
 
-  let _eligible  = [];   // [{ project, info, contactName, contactEmail, hasEmail }]
-  let _sent      = [];   // [{ id, status, contact_*, sent_at, ..., project_name }]
+  let _eligible  = [];   // [{ project, info, contactName, contactEmail, hasEmail, priorAttempt, recentWarning }]
+  let _sent      = [];   // [{ id, status, contact_*, sent_at, ..., project_name }]  status='sent', within 30 days
   let _completed = [];   // [{ ...invitation, project_name, response }]
   let _skipped   = [];   // [{ project, info }]
   let _showSkipped = false;
+  let _expandedYears = new Set();   // years user has manually expanded in Completed section
   let _stats     = { avgScore: null, responseRate: null, eligibleCount: 0 };
   let _pendingSend = null;  // { invitationId, eligible } while preview modal is open
 
   const PREVIEW_SKIP_KEY = 'nuworkspace_survey_skip_preview';
+
+  // Sent invitations older than this drop out of the active "Sent" section
+  // and the project becomes re-eligible (no response after this window means
+  // we can resurvey). The original invitation row stays in the DB for audit
+  // history but isn't shown in the UI.
+  const SENT_EXPIRY_DAYS = 30;
 
 
   // ── Panel routing ─────────────────────────────────────────────────────────
@@ -53,13 +60,13 @@
     body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">Loading…</div>';
 
     try {
-      // 1. Pull invitations with status 'sent' or 'completed'. The new model
-      //    doesn't surface 'queued' or 'skipped' invitation rows — those are
-      //    transient (queued during a Send call) or leftover from the old
-      //    auto-queue model.
+      const now = Date.now();
+      const expiryCutoffIso = new Date(now - SENT_EXPIRY_DAYS * 24 * 60 * 60 * 1000).toISOString();
+
+      // 1. Pull invitations with status 'sent' or 'completed', newest first.
       const { data: invs, error: invErr } = await sb
         .from('survey_invitations')
-        .select('id, status, contact_email, contact_name, sent_at, completed_at, expires_at, send_error, project_id, template_snapshot')
+        .select('id, status, contact_email, contact_name, contact_id, sent_at, completed_at, expires_at, send_error, project_id, template_snapshot')
         .in('status', ['sent', 'completed'])
         .order('sent_at', { ascending: false, nullsFirst: false });
       if (invErr) throw invErr;
@@ -75,33 +82,70 @@
         (resps || []).forEach(r => { respMap[r.invitation_id] = r; });
       }
 
-      // 3. Build a project lookup from the in-memory store. Decorates rows
-      //    with project_name without an extra round trip.
+      // 3. Build a project lookup from the in-memory store.
       const projMap = {};
       (typeof projects !== 'undefined' ? projects : []).forEach(p => { projMap[p.id] = p; });
 
-      // 4. Identify projects that already have any surfaced invitation (for
-      //    filtering out of the Eligible list).
-      const projectsWithInvitation = new Set(invs.map(r => r.project_id));
+      // 4. Group by project to find the LATEST invitation per project. Older
+      //    historical invitations (e.g. an expired sent followed by a re-sent
+      //    one) are kept in DB for audit but don't surface in the UI.
+      const latestByProject = {};
+      invs.forEach(inv => {
+        if (!latestByProject[inv.project_id]) latestByProject[inv.project_id] = inv;
+      });
+      const latests = Object.values(latestByProject);
 
-      // 5. Build the four display lists.
-      _sent = invs.filter(r => r.status === 'sent').map(r => ({
-        ...r,
-        project_name: projMap[r.project_id]?.name || '—',
-      }));
-      _completed = invs.filter(r => r.status === 'completed').map(r => ({
-        ...r,
-        project_name: projMap[r.project_id]?.name || '—',
-        response:     respMap[r.id] || null,
-      }));
+      // 5. Build the eligibility-blocking project set:
+      //    - completed invitations always block (we got feedback)
+      //    - sent invitations within the 30-day window block (still waiting)
+      //    - sent invitations older than 30 days do NOT block — project is
+      //      re-eligible to resurvey.
+      const projectsBlocking = new Set();
+      const expiredByProject = {};   // project_id → expired sent invitation row
+      latests.forEach(inv => {
+        if (inv.status === 'completed') {
+          projectsBlocking.add(inv.project_id);
+        } else if (inv.status === 'sent') {
+          if (inv.sent_at && inv.sent_at >= expiryCutoffIso) {
+            projectsBlocking.add(inv.project_id);
+          } else {
+            expiredByProject[inv.project_id] = inv;
+          }
+        }
+      });
+
+      // 6. Build the recent-by-contact map for the ✋ "same contact recently
+      //    surveyed" warning. Keyed by contact_id, value is the most recent
+      //    sent invitation within the 30-day window.
+      const recentByContact = {};
+      invs.forEach(inv => {
+        if (inv.contact_id && inv.sent_at && inv.sent_at >= expiryCutoffIso) {
+          if (!recentByContact[inv.contact_id]) recentByContact[inv.contact_id] = inv;
+        }
+      });
+
+      // 7. Build the four display lists.
+      //    Sent: latest sent within 30 days
+      //    Completed: latest is completed (per-project, since we filter to latest)
+      _sent = latests
+        .filter(r => r.status === 'sent' && r.sent_at && r.sent_at >= expiryCutoffIso)
+        .map(r => ({ ...r, project_name: projMap[r.project_id]?.name || '—' }));
+
+      _completed = latests
+        .filter(r => r.status === 'completed')
+        .map(r => ({
+          ...r,
+          project_name: projMap[r.project_id]?.name || '—',
+          response:     respMap[r.id] || null,
+        }));
 
       _skipped = computeSkippedProjects(projMap);
 
-      // 6. Eligible needs a fetch of project_info + contacts to display
-      //    contact name/email per row.
-      _eligible = await computeEligibleProjects(projectsWithInvitation);
+      // 8. Eligible includes projects where the latest invitation is expired
+      //    sent (re-eligible). Decorated with priorAttempt/recentWarning.
+      _eligible = await computeEligibleProjects(projectsBlocking, expiredByProject, recentByContact);
 
-      // 7. Compute the three top-of-panel stats.
+      // 9. Compute the three top-of-panel stats.
       _stats = computeStats(_sent, _completed, _eligible);
 
       renderAll();
@@ -117,17 +161,21 @@
   // Eligibility: project_info.status is 'testcomplete' or 'complete', AND
   // no tasks with status outside {complete, billed, cancelled}, AND
   // projects.skip_survey is not true, AND
-  // no existing survey_invitations row for the project.
+  // no blocking invitation (active sent within 30 days, or completed).
+  //
+  // A project whose latest invitation is "expired sent" (>30 days old, no
+  // response) IS eligible — we treat it as a fresh send opportunity. The row
+  // gets a priorAttempt note so the user knows there was a previous try.
   //
   // The first three checks run against in-memory data. Contact-info
   // enrichment (for display) requires DB queries against project_info and
   // contacts.
-  async function computeEligibleProjects(projectsWithInvitation) {
+  async function computeEligibleProjects(projectsBlocking, expiredByProject, recentByContact) {
     if (typeof projects === 'undefined' || !projects.length) return [];
 
     const candidates = projects.filter(p => {
       if (p.skip_survey) return false;
-      if (projectsWithInvitation.has(p.id)) return false;
+      if (projectsBlocking.has(p.id)) return false;
 
       const info = (typeof projectInfo !== 'undefined') ? projectInfo[p.id] : null;
       if (!info) return false;
@@ -165,8 +213,10 @@
       (contacts || []).forEach(c => { contactMap[c.id] = c; });
     }
 
-    // Resolve each candidate's contact name + email. Contacts table wins
-    // when contact_id is set; fall back to project_info.client_email.
+    const now = Date.now();
+    const dayMs = 86400000;
+
+    // Resolve each candidate's contact name + email + warnings.
     return candidates.map(p => {
       const info = projectInfo[p.id];
       const pi   = piMap[p.id] || {};
@@ -182,12 +232,34 @@
 
       const hasEmail = contactEmail && contactEmail.includes('@');
 
+      // Prior-attempt note: this project's latest invitation was expired sent
+      // (we tried before; no reply within 30 days). User should know.
+      let priorAttempt = null;
+      const expiredInv = expiredByProject ? expiredByProject[p.id] : null;
+      if (expiredInv && expiredInv.sent_at) {
+        const days = Math.floor((now - new Date(expiredInv.sent_at).getTime()) / dayMs);
+        priorAttempt = { days, sentAt: expiredInv.sent_at };
+      }
+
+      // Recent-contact warning: same contact got a survey within 30 days for
+      // another project. (For this project to be eligible, its own active sent
+      // can't be in recentByContact — so this only fires for cross-project
+      // recency.)
+      let recentWarning = null;
+      if (pi.contact_id && recentByContact && recentByContact[pi.contact_id]) {
+        const inv = recentByContact[pi.contact_id];
+        const days = Math.floor((now - new Date(inv.sent_at).getTime()) / dayMs);
+        recentWarning = { days, otherProjectId: inv.project_id };
+      }
+
       return {
         project: p,
         info,
         contactName: contactName || '—',
         contactEmail,
         hasEmail,
+        priorAttempt,
+        recentWarning,
       };
     }).sort((a, b) => {
       // Sort by test complete date descending (most recently complete first).
@@ -334,9 +406,24 @@
       ? `<button class="btn-small btn-primary" onclick="surveysSendForProject('${e.project.id}')" style="margin-left:6px">Send</button>`
       : `<button class="btn-small" disabled title="No contact email on file — edit the project first" style="margin-left:6px;opacity:0.5;cursor:not-allowed">Send</button>`;
 
+    // Optional notice line(s) under project name.
+    const notices = [];
+    if (e.priorAttempt) {
+      notices.push(`<span style="color:var(--muted);font-size:10.5px" title="A previous survey was sent ${e.priorAttempt.days} days ago and never completed">↺ Previously sent ${e.priorAttempt.days} days ago, no reply</span>`);
+    }
+    if (e.recentWarning) {
+      notices.push(`<span style="color:var(--amber);font-size:10.5px;font-weight:500" title="The same contact received a survey for a different project ${e.recentWarning.days} days ago — review before sending">✋ Same contact surveyed ${e.recentWarning.days} days ago</span>`);
+    }
+    const noticesHtml = notices.length
+      ? `<div style="margin-top:3px;line-height:1.4">${notices.join(' &nbsp;·&nbsp; ')}</div>`
+      : '';
+
     return `
       <tr>
-        <td><a onclick="selectProjectById('${e.project.id}')" style="color:var(--blue);cursor:pointer;text-decoration:none;font-weight:600" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" title="Open project">${escapeHtml(e.project.name)}</a></td>
+        <td>
+          <a onclick="selectProjectById('${e.project.id}')" style="color:var(--blue);cursor:pointer;text-decoration:none;font-weight:600" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'" title="Open project">${escapeHtml(e.project.name)}</a>
+          ${noticesHtml}
+        </td>
         <td>${escapeHtml(e.contactName)}</td>
         <td>${escapeHtml(e.contactEmail || '—')}</td>
         <td>${fmtDate(e.info?.testcompleteDate)}</td>
@@ -372,17 +459,54 @@
 
   function renderCompletedHTML() {
     if (!_completed.length) return '';
-    const rows = _completed.map(renderCompletedRow).join('');
+
+    // Group by year of completed_at (newest first).
+    const byYear = {};
+    _completed.forEach(r => {
+      const y = r.completed_at ? new Date(r.completed_at).getFullYear() : 'Unknown';
+      if (!byYear[y]) byYear[y] = [];
+      byYear[y].push(r);
+    });
+    const years = Object.keys(byYear).sort((a, b) => String(b).localeCompare(String(a)));
+    const currentYear = String(new Date().getFullYear());
+
+    const tableHeader = `
+      <thead><tr><th>Job</th><th>Contact</th><th>Completed</th><th>NPS</th><th>Avg</th><th>Follow-up</th></tr></thead>`;
+
+    let groupsHtml = '';
+    if (years.length === 1) {
+      // Single year — render the table without a year header.
+      const rows = byYear[years[0]].map(renderCompletedRow).join('');
+      groupsHtml = `<table class="surveys-table">${tableHeader}<tbody>${rows}</tbody></table>`;
+    } else {
+      // Multiple years — collapsible section per year. Current year expanded;
+      // older years require a click to expand (unless previously toggled).
+      groupsHtml = years.map(y => {
+        const items = byYear[y];
+        const isCurrent = String(y) === currentYear;
+        const expanded = isCurrent || _expandedYears.has(String(y));
+        const arrow = expanded ? '▾' : '▸';
+        const tableHtml = expanded
+          ? `<table class="surveys-table" style="margin-top:6px">${tableHeader}<tbody>${items.map(renderCompletedRow).join('')}</tbody></table>`
+          : '';
+        return `
+          <div style="margin-bottom:14px">
+            <button onclick="surveysToggleYear('${y}')"
+                    style="background:none;border:none;color:var(--muted);font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;padding:6px 0;cursor:pointer;font-family:inherit">
+              ${arrow} ${escapeHtml(String(y))} <span style="color:var(--muted);font-weight:400;letter-spacing:0">(${items.length})</span>
+            </button>
+            ${tableHtml}
+          </div>`;
+      }).join('');
+    }
+
     return `
       <div class="surveys-section">
         <div class="surveys-section-header">
           Completed
           <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(${_completed.length})</span>
         </div>
-        <table class="surveys-table">
-          <thead><tr><th>Job</th><th>Contact</th><th>Completed</th><th>NPS</th><th>Avg</th><th>Follow-up</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
+        ${groupsHtml}
       </div>`;
   }
 
@@ -889,6 +1013,13 @@
 
   window.surveysToggleShowSkipped = function () {
     _showSkipped = !_showSkipped;
+    renderAll();
+  };
+
+  window.surveysToggleYear = function (year) {
+    const y = String(year);
+    if (_expandedYears.has(y)) _expandedYears.delete(y);
+    else                        _expandedYears.add(y);
     renderAll();
   };
 

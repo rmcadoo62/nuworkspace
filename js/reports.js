@@ -1866,13 +1866,30 @@ async function renderClosingReport() {
   // Computes the survey-state icon for a single closing-report row.
   // Returns { icon, color, tip, action } where action is one of:
   //   - 'panel'   → click opens the Surveys panel
+  //   - 'response'→ click opens the response detail modal directly
   //   - null      → not clickable
+  //
+  // Expiry behavior: a sent invitation older than 30 days with no response
+  // is treated as if no invitation exists (project is re-eligible). The
+  // tooltip notes the prior attempt for context.
   function surveyStateFor(p, info) {
     const inv = _invByProject[p.id];
+    const sentExpiryMs = 30 * 24 * 60 * 60 * 1000;
+    const expiryCutoffIso = new Date(now.getTime() - sentExpiryMs).toISOString();
+
+    let priorContext = '';
     if (inv) {
       if (inv.status === 'completed') return { icon: '\u2713',  color: '#4caf7d',     tip: 'Survey completed — click to view response', action: 'response', invId: inv.id };
-      if (inv.status === 'sent')      return { icon: '\u2709',  color: 'var(--blue)', tip: 'Survey sent — awaiting response', action: 'panel' };
-      if (inv.status === 'queued')    return { icon: '\u23F3',  color: 'var(--muted)',tip: 'Survey queued', action: 'panel' };
+      if (inv.status === 'sent' && inv.sent_at && inv.sent_at >= expiryCutoffIso) {
+        return { icon: '\u2709', color: 'var(--blue)', tip: 'Survey sent — awaiting response', action: 'panel' };
+      }
+      if (inv.status === 'queued') return { icon: '\u23F3', color: 'var(--muted)', tip: 'Survey queued', action: 'panel' };
+      // Expired sent (>30 days, no reply) falls through to the eligibility
+      // check below. We note the prior attempt in the tooltip.
+      if (inv.status === 'sent' && inv.sent_at) {
+        const days = Math.floor((now.getTime() - new Date(inv.sent_at).getTime()) / 86400000);
+        priorContext = ` (previously sent ${days} days ago, no reply)`;
+      }
     }
     if (p.skip_survey) {
       return { icon: '\u2298', color: 'var(--muted)', tip: 'Survey skipped', action: 'panel' };
@@ -1890,10 +1907,10 @@ async function renderClosingReport() {
     if (contactKey && _recentByContact[contactKey]) {
       const otherRecent = _recentByContact[contactKey].find(r => r.project_id !== p.id);
       if (otherRecent) {
-        return { icon: '\u270B', color: '#e8a234', tip: 'Same contact was surveyed within the last 90 days — review before sending', action: 'panel' };
+        return { icon: '\u270B', color: '#e8a234', tip: 'Same contact was surveyed within the last 90 days — review before sending' + priorContext, action: 'panel' };
       }
     }
-    return { icon: '\u23F3', color: 'var(--blue)', tip: 'Eligible to send — click to open Surveys panel', action: 'panel' };
+    return { icon: '\u23F3', color: 'var(--blue)', tip: 'Eligible to send' + priorContext + ' — click to open Surveys panel', action: 'panel' };
   }
 
   // Renders the survey icon cell HTML for a project row.
