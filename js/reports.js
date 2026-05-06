@@ -1771,7 +1771,7 @@ function openClosingReport(el) {
   renderClosingReport();
 }
 
-function renderClosingReport() {
+async function renderClosingReport() {
   const el = document.getElementById('closingReportBody');
   if (!el) return;
 
@@ -1821,6 +1821,96 @@ function renderClosingReport() {
     })
     .sort((a, b) => (a.p.name || '').localeCompare(b.p.name || ''));
 
+  // ── Survey state lookup ─────────────────────────────────────────────────
+  // For each project in the report, determine its survey state (eligible /
+  // sent / completed / skipped / not-eligible / recent-warning) for display
+  // as an inline icon. One query for invitations, one for project_info so we
+  // can look up contact_id for the 90-day recent-survey warning.
+  const allReportProjectIds = [
+    ...tcRows.map(r => r.p.id),
+    ...readyRows.map(r => r.p.id),
+    ...pendingRows.map(r => r.p.id),
+  ];
+  let _invByProject = {};
+  let _recentByContact = {};
+  let _piByProject = {};
+  if (sb && allReportProjectIds.length) {
+    try {
+      const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString();
+      const [{ data: allInvs }, { data: pis }] = await Promise.all([
+        sb.from('survey_invitations')
+          .select('id, project_id, contact_id, contact_email, status, sent_at')
+          .order('sent_at', { ascending: false, nullsFirst: false }),
+        sb.from('project_info')
+          .select('project_id, contact_id, client_email')
+          .in('project_id', allReportProjectIds),
+      ]);
+      (allInvs || []).forEach(inv => {
+        // First entry per project wins (sorted by sent_at desc above).
+        if (!_invByProject[inv.project_id]) _invByProject[inv.project_id] = inv;
+        // Build contact-level recency map for the 90-day warning.
+        if (inv.sent_at && inv.sent_at >= ninetyDaysAgo) {
+          const key = inv.contact_id || inv.contact_email;
+          if (key) {
+            if (!_recentByContact[key]) _recentByContact[key] = [];
+            _recentByContact[key].push(inv);
+          }
+        }
+      });
+      (pis || []).forEach(pi => { _piByProject[pi.project_id] = pi; });
+    } catch (e) {
+      console.warn('[closingReport] survey state load failed', e);
+    }
+  }
+
+  // Computes the survey-state icon for a single closing-report row.
+  // Returns { icon, color, tip, action } where action is one of:
+  //   - 'panel'   → click opens the Surveys panel
+  //   - null      → not clickable
+  function surveyStateFor(p, info) {
+    const inv = _invByProject[p.id];
+    if (inv) {
+      if (inv.status === 'completed') return { icon: '\u2713',  color: '#4caf7d',     tip: 'Survey completed — click to view response', action: 'response', invId: inv.id };
+      if (inv.status === 'sent')      return { icon: '\u2709',  color: 'var(--blue)', tip: 'Survey sent — awaiting response', action: 'panel' };
+      if (inv.status === 'queued')    return { icon: '\u23F3',  color: 'var(--muted)',tip: 'Survey queued', action: 'panel' };
+    }
+    if (p.skip_survey) {
+      return { icon: '\u2298', color: 'var(--muted)', tip: 'Survey skipped', action: 'panel' };
+    }
+    const projTasks = taskStore.filter(t => t.proj === p.id);
+    const hasOpen = projTasks.some(t => !['complete', 'billed', 'cancelled'].includes(t.status));
+    if (hasOpen || projTasks.length === 0) {
+      return { icon: '\u00B7', color: 'var(--border)', tip: 'Not eligible (open tasks remain)', action: null };
+    }
+    if (info.status !== 'testcomplete' && info.status !== 'complete') {
+      return { icon: '\u00B7', color: 'var(--border)', tip: 'Not eligible', action: null };
+    }
+    const pi = _piByProject[p.id];
+    const contactKey = pi?.contact_id || pi?.client_email;
+    if (contactKey && _recentByContact[contactKey]) {
+      const otherRecent = _recentByContact[contactKey].find(r => r.project_id !== p.id);
+      if (otherRecent) {
+        return { icon: '\u270B', color: '#e8a234', tip: 'Same contact was surveyed within the last 90 days — review before sending', action: 'panel' };
+      }
+    }
+    return { icon: '\u23F3', color: 'var(--blue)', tip: 'Eligible to send — click to open Surveys panel', action: 'panel' };
+  }
+
+  // Renders the survey icon cell HTML for a project row.
+  function surveyIconCell(p, info) {
+    const s = surveyStateFor(p, info);
+    const cursor = s.action ? 'pointer' : 'default';
+    let onClick = '';
+    if (s.action === 'response' && s.invId) {
+      onClick = `event.stopPropagation();surveysOpenResponse('${s.invId}')`;
+    } else if (s.action === 'panel') {
+      onClick = `event.stopPropagation();openSurveyQueuePanel()`;
+    }
+    return '<td style="padding:11px 14px;text-align:center" onclick="' + onClick + '" title="' + s.tip + '">' +
+      '<span style="font-size:14px;color:' + s.color + ';cursor:' + cursor + ';display:inline-block;width:24px;text-align:center">' + s.icon + '</span>' +
+      '</td>';
+  }
+
   // ── Table builder for testcomplete rows ─────────────────────────────────
   function buildTcTable(list) {
     if (list.length === 0) return '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">None</div>';
@@ -1833,6 +1923,7 @@ function renderClosingReport() {
         '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Days</th>' +
         '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Open Tasks</th>' +
         '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Ready to Bill</th>' +
+        '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Survey</th>' +
       '</tr></thead><tbody>' +
       list.map(function(r) {
         const ageBg = (r.days || 0) >= 120 ? 'var(--red)' : (r.days || 0) >= 90 ? '#e8a234' : (r.days || 0) >= 60 ? '#5b9cf6' : 'var(--muted)';
@@ -1844,6 +1935,7 @@ function renderClosingReport() {
           '<td style="padding:11px 14px;text-align:center"><span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:' + ageBg + '">' + (r.days !== null ? r.days + 'd' : '—') + '</span></td>' +
           '<td style="padding:11px 14px;text-align:center;font-size:13px;font-weight:600;color:' + (r.openTasks.length > 0 ? 'var(--red)' : 'var(--muted)') + '">' + (r.openTasks.length || '—') + '</td>' +
           '<td style="padding:11px 14px;text-align:right;font-size:13px;font-weight:600;color:' + (r.readyToBill > 0 ? '#c084fc' : 'var(--muted)') + '">' + fmt$(r.readyToBill) + '</td>' +
+          surveyIconCell(r.p, r.info) +
         '</tr>';
       }).join('') +
       '</tbody></table>';
@@ -1859,6 +1951,7 @@ function renderClosingReport() {
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
         '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Open Tasks</th>' +
         '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Ready to Bill</th>' +
+        '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Survey</th>' +
         '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Action</th>' +
       '</tr></thead><tbody>' +
       list.map(function(r) {
@@ -1874,6 +1967,7 @@ function renderClosingReport() {
           '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '—') + '</td>' +
           '<td style="padding:11px 14px;text-align:center;font-size:13px;font-weight:600;color:' + (r.openTasks.length > 0 ? 'var(--red)' : 'var(--muted)') + '">' + (r.openTasks.length || '—') + '</td>' +
           '<td style="padding:11px 14px;text-align:right;font-size:13px;font-weight:600;color:' + (r.readyToBill > 0 ? '#c084fc' : 'var(--muted)') + '">' + fmt$(r.readyToBill) + '</td>' +
+          surveyIconCell(r.p, r.info) +
           '<td style="padding:11px 14px;text-align:right">' + actionBtn + '</td>' +
         '</tr>';
       }).join('') +
@@ -1889,6 +1983,7 @@ function renderClosingReport() {
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Client</th>' +
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
         '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Ready to Bill</th>' +
+        '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Survey</th>' +
         '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Action</th>' +
       '</tr></thead><tbody>' +
       list.map(function(r) {
@@ -1901,6 +1996,7 @@ function renderClosingReport() {
           '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.client || '—') + '</td>' +
           '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '—') + '</td>' +
           '<td style="padding:11px 14px;text-align:right;font-size:13px;font-weight:600;color:' + (r.readyToBill > 0 ? '#c084fc' : 'var(--muted)') + '">' + fmt$(r.readyToBill) + '</td>' +
+          surveyIconCell(r.p, r.info) +
           '<td style="padding:11px 14px;text-align:right">' + approveReject + '</td>' +
         '</tr>';
       }).join('') +
@@ -1966,8 +2062,6 @@ function markProjectComplete(projId) {
   }
   info.status = 'complete';
   if (sb) dbUpdate('project_info', projId, { status: 'complete' });
-  // Auto-queue customer satisfaction survey (90-day per-contact dedup applied internally)
-  if (typeof surveysMaybeQueue === 'function') surveysMaybeQueue(projId);
   toast('Project marked Complete — ready to generate closing PDF.');
   renderClosingReport();
 }

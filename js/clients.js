@@ -506,6 +506,7 @@ function openNewClientDrawer() {
   const delBtn = document.getElementById('clientDeleteBtn');
   if (delBtn) delBtn.style.display = 'none';
   _ensureQuotesTabButton();
+  _ensureFeedbackTabButton();
   switchClientDrawerTab(document.querySelector('.client-dtab[data-dtab="dtab-info"]'), true);
   renderClientDrawerBody();
   document.getElementById('clientDrawer').classList.add('open');
@@ -523,6 +524,7 @@ function openClientDrawer(id) {
   const delBtn = document.getElementById('clientDeleteBtn');
   if (delBtn) delBtn.style.display = can('delete_clients') ? 'inline-flex' : 'none';
   _ensureQuotesTabButton();
+  _ensureFeedbackTabButton();
   document.querySelectorAll('.client-dtab').forEach(t => t.classList.remove('active'));
   document.querySelector('.client-dtab[data-dtab="dtab-info"]').classList.add('active');
   renderClientDrawerBody();
@@ -700,6 +702,26 @@ function renderClientDrawerBody() {
         (err.message ? '<br><span style="color:var(--muted);font-size:12px">'+err.message+'</span>' : '') +
         '<br><button onclick="renderClientDrawerBody()" style="margin-top:12px;padding:6px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);cursor:pointer">Retry</button></div>';
     });
+
+  } else if (_clientDrawerTab === 'dtab-feedback') {
+    // Customer feedback section. Pulls all survey_invitations for this
+    // client's projects (sent and completed only — skipped intentionally
+    // hidden). Snapshot drawer state so a slow load doesn't overwrite a
+    // tab/client switch.
+    body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">Loading feedback…</div>';
+    const reqClientId = _clientDrawerId;
+    _loadSurveysForClient(reqClientId).then(payload => {
+      if (_clientDrawerTab !== 'dtab-feedback') return;
+      if (_clientDrawerId !== reqClientId)      return;
+      body.innerHTML = _renderClientFeedbackTab(payload);
+    }).catch(err => {
+      console.error('Feedback load error:', err);
+      if (_clientDrawerTab !== 'dtab-feedback') return;
+      if (_clientDrawerId !== reqClientId)      return;
+      body.innerHTML = '<div style="text-align:center;padding:40px;color:var(--red);font-size:13px">Could not load feedback. ' +
+        (err.message ? '<br><span style="color:var(--muted);font-size:12px">'+err.message+'</span>' : '') +
+        '<br><button onclick="renderClientDrawerBody()" style="margin-top:12px;padding:6px 14px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;font-size:12px;color:var(--text);cursor:pointer">Retry</button></div>';
+    });
   }
 }
 
@@ -724,6 +746,21 @@ function _ensureQuotesTabButton() {
   btn.textContent = '💰 Quotes';
   btn.onclick = function() { switchClientDrawerTab(this); };
   jobsBtn.parentNode.insertBefore(btn, jobsBtn.nextSibling);
+}
+
+// Inject the "💬 Feedback" tab button into the client drawer tab bar.
+// Idempotent. Inserts after the Quotes tab if present, else after Jobs.
+function _ensureFeedbackTabButton() {
+  if (document.querySelector('.client-dtab[data-dtab="dtab-feedback"]')) return;
+  const anchor = document.querySelector('.client-dtab[data-dtab="dtab-quotes"]')
+              || document.querySelector('.client-dtab[data-dtab="dtab-jobs"]');
+  if (!anchor || !anchor.parentNode) return;
+  const btn = document.createElement('div');
+  btn.className = 'client-dtab';
+  btn.setAttribute('data-dtab', 'dtab-feedback');
+  btn.textContent = '💬 Feedback';
+  btn.onclick = function() { switchClientDrawerTab(this); };
+  anchor.parentNode.insertBefore(btn, anchor.nextSibling);
 }
 
 // One-row probe to find which column on the quotes table holds the client
@@ -904,6 +941,185 @@ function _renderClientQuotesTab(quotes) {
     ${table}
     ${summary}`;
 }
+
+
+// ===== CLIENT DRAWER → FEEDBACK TAB =====
+// ===== CLIENT DRAWER → FEEDBACK TAB =====
+
+// Load all survey invitations + responses for projects belonging to this
+// client. Returns { sent, completed } where sent = invitations awaiting
+// reply (status='sent') and completed = invitations with a response.
+// Skipped surveys are intentionally not surfaced here — they're an
+// internal operational concern, not customer-relationship data.
+async function _loadSurveysForClient(clientId) {
+  if (!clientId || !sb) return { sent: [], completed: [] };
+
+  // Resolve which projects belong to this client. project_info.clientId
+  // is the link field in the in-memory store.
+  const clientProjectIds = projects
+    .filter(p => (projectInfo[p.id] || {}).clientId === clientId)
+    .map(p => p.id);
+  if (!clientProjectIds.length) return { sent: [], completed: [] };
+
+  // Fetch invitations for those projects in 'sent' or 'completed' status.
+  const { data: invs, error: invErr } = await sb
+    .from('survey_invitations')
+    .select('id, status, contact_email, contact_name, sent_at, completed_at, project_id, template_snapshot')
+    .in('project_id', clientProjectIds)
+    .in('status', ['sent', 'completed'])
+    .order('sent_at', { ascending: false, nullsFirst: false });
+  if (invErr) throw invErr;
+  if (!invs || !invs.length) return { sent: [], completed: [] };
+
+  // Fetch responses for completed ones to get the score/NPS data.
+  const completedIds = invs.filter(r => r.status === 'completed').map(r => r.id);
+  const respMap = {};
+  if (completedIds.length) {
+    const { data: resps } = await sb
+      .from('survey_responses')
+      .select('invitation_id, nps_score, avg_likert, follow_up_requested')
+      .in('invitation_id', completedIds);
+    (resps || []).forEach(r => { respMap[r.invitation_id] = r; });
+  }
+
+  // Decorate with project name from in-memory store.
+  const projMap = {};
+  projects.forEach(p => { projMap[p.id] = p; });
+
+  const decorate = inv => ({
+    ...inv,
+    project_name: projMap[inv.project_id]?.name || '—',
+    response:     respMap[inv.id] || null,
+  });
+
+  return {
+    sent:      invs.filter(r => r.status === 'sent').map(decorate),
+    completed: invs.filter(r => r.status === 'completed').map(decorate),
+  };
+}
+
+// Render the Feedback tab body. Two sections:
+//  1. Awaiting Response — surveys sent but not yet completed (greyed out)
+//  2. Customer Feedback — completed responses, click row to view detail
+function _renderClientFeedbackTab(payload) {
+  const { sent, completed } = payload;
+  const total = sent.length + completed.length;
+
+  if (total === 0) {
+    return `
+      <div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">
+        No surveys have been sent to this client yet.
+      </div>`;
+  }
+
+  const fmtD = d => d
+    ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : '—';
+
+  // ── Awaiting (sent but not completed) ──
+  let awaitingHtml = '';
+  if (sent.length) {
+    const rows = sent.map(r => `
+      <tr style="opacity:0.55">
+        <td style="padding:9px 12px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border)">${(r.project_name||'').replace(/</g,'&lt;')}</td>
+        <td style="padding:9px 12px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace">${(r.contact_name||'').replace(/</g,'&lt;') || '—'}</td>
+        <td style="padding:9px 12px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace">${fmtD(r.sent_at)}</td>
+        <td style="padding:9px 12px;font-size:10px;color:var(--muted);border-bottom:1px solid var(--border);text-align:right;font-style:italic">Awaiting reply</td>
+      </tr>`).join('');
+    awaitingHtml = `
+      <div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin:18px 0 8px">Awaiting Response (${sent.length})</div>
+      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead style="background:var(--surface2)">
+            <tr>
+              <th style="text-align:left;padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border)">Project</th>
+              <th style="text-align:left;padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border)">Contact</th>
+              <th style="text-align:left;padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border)">Sent</th>
+              <th style="text-align:right;padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border)">Status</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  // ── Completed (clickable to open detail modal) ──
+  let completedHtml = '';
+  let avgScore = null;
+  let scaleMax = null;
+  if (completed.length) {
+    let scoreSum = 0, scoreCount = 0;
+    completed.forEach(r => {
+      if (r.response && r.response.avg_likert != null) {
+        scoreSum += Number(r.response.avg_likert);
+        scoreCount += 1;
+      }
+      if (scaleMax == null && r.template_snapshot && r.template_snapshot.scale_max != null) {
+        scaleMax = Number(r.template_snapshot.scale_max);
+      }
+    });
+    if (scoreCount > 0) avgScore = scoreSum / scoreCount;
+
+    const rows = completed.map(r => {
+      const resp = r.response || {};
+      const npsCls = resp.nps_score >= 9 ? 'nps-promoter'
+                   : resp.nps_score <= 6 ? 'nps-detractor'
+                   : 'nps-passive';
+      const nps = resp.nps_score != null
+        ? `<span class="nps-pill ${npsCls}">${resp.nps_score}</span>`
+        : '—';
+      const avg = resp.avg_likert != null ? Number(resp.avg_likert).toFixed(2) : '—';
+      const fu  = resp.follow_up_requested ? '<span style="color:var(--amber);font-weight:600">●</span>' : '';
+      return `
+        <tr style="cursor:pointer;transition:background .12s"
+            onclick="(window.openSurveyResponseDetail || window.surveysOpenResponse)('${r.id}')"
+            onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''"
+            title="Click to view full response">
+          <td style="padding:10px 12px;font-size:12px;color:var(--text);border-bottom:1px solid var(--border)"><strong>${(r.project_name||'').replace(/</g,'&lt;')}</strong></td>
+          <td style="padding:10px 12px;font-size:11px;color:var(--muted);border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace">${fmtD(r.completed_at)}</td>
+          <td style="padding:10px 12px;text-align:center;border-bottom:1px solid var(--border)">${nps}</td>
+          <td style="padding:10px 12px;text-align:center;font-size:12px;font-weight:600;color:var(--text);border-bottom:1px solid var(--border)">${avg}</td>
+          <td style="padding:10px 12px;text-align:center;border-bottom:1px solid var(--border)">${fu}</td>
+        </tr>`;
+    }).join('');
+
+    const summary = (avgScore != null) ? `
+      <div style="margin-top:12px;border:1px solid var(--border);border-radius:10px;padding:14px 18px;background:var(--surface2);display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Avg Score</div>
+          <div style="font-size:18px;font-family:'DM Serif Display',serif;color:var(--text)">${avgScore.toFixed(2)}${scaleMax != null ? ` <span style="font-size:12px;color:var(--muted);font-family:inherit">/ ${scaleMax}</span>` : ''}</div>
+        </div>
+        <div>
+          <div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Responses</div>
+          <div style="font-size:18px;font-family:'DM Serif Display',serif;color:var(--text)">${completed.length}</div>
+        </div>
+      </div>` : '';
+
+    completedHtml = `
+      <div style="font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin:18px 0 8px">Customer Feedback (${completed.length})</div>
+      <div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          <thead style="background:var(--surface2)">
+            <tr>
+              <th style="text-align:left;padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border)">Project</th>
+              <th style="text-align:left;padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border)">Completed</th>
+              <th style="text-align:center;padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border)">NPS</th>
+              <th style="text-align:center;padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border)">Avg</th>
+              <th style="text-align:center;padding:8px 12px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);border-bottom:2px solid var(--border)" title="Follow-up requested">F/U</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      ${summary}`;
+  }
+
+  return `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${total} survey${total!==1?'s':''} for this client</div>
+    ${completedHtml}
+    ${awaitingHtml}`;
+}
+
 
 async function saveClientDrawer() {
   const name = document.getElementById('cdName')?.value.trim();

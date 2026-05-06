@@ -629,31 +629,42 @@
 
   // Click a Completed row → fetch the full survey_responses row + the
   // invitation's template_snapshot, render answers next to question text.
+  // Designed to be callable from anywhere (Surveys panel, client card,
+  // closing report) — fetches all data fresh rather than relying on this
+  // module's local _completed cache.
   window.surveysOpenResponse = async function (invitationId) {
     if (!invitationId) return;
-    const completed = _completed.find(r => r.id === invitationId);
-    if (!completed) {
-      toast('Response not found.');
-      return;
-    }
 
     try {
-      // Fetch the full response row (all columns) and the invitation's
-      // template_snapshot for question text/structure.
-      const [{ data: resp, error: respErr }, { data: inv, error: invErr }] = await Promise.all([
-        sb.from('survey_responses').select('*').eq('invitation_id', invitationId).maybeSingle(),
-        sb.from('survey_invitations').select('template_snapshot, sent_at, contact_email').eq('id', invitationId).maybeSingle(),
+      // Fetch invitation + response in parallel.
+      const [{ data: inv, error: invErr }, { data: resp, error: respErr }] = await Promise.all([
+        sb.from('survey_invitations')
+          .select('id, status, contact_email, contact_name, sent_at, completed_at, expires_at, project_id, template_snapshot')
+          .eq('id', invitationId).maybeSingle(),
+        sb.from('survey_responses')
+          .select('*')
+          .eq('invitation_id', invitationId).maybeSingle(),
       ]);
-      if (respErr) throw respErr;
       if (invErr)  throw invErr;
+      if (respErr) throw respErr;
+      if (!inv)    { toast('Survey not found.'); return; }
       if (!resp)   { toast('No response data found.'); return; }
 
-      showResponseModal(completed, resp, inv);
+      // Decorate with project_name from in-memory store.
+      const proj = (typeof projects !== 'undefined' ? projects : [])
+        .find(p => p.id === inv.project_id);
+      const invitation = { ...inv, project_name: proj?.name || '—' };
+
+      showResponseModal(invitation, resp, inv);
     } catch (e) {
       console.error('[surveys] open response failed', e);
       toast('Could not load response: ' + (e.message || String(e)));
     }
   };
+
+  // Public alias — reports.js (closing report) and clients.js (Feedback tab)
+  // call this name to avoid coupling to the "surveys*" naming convention.
+  window.openSurveyResponseDetail = window.surveysOpenResponse;
 
   function showResponseModal(invitation, resp, inv) {
     const tpl = inv?.template_snapshot || {};
