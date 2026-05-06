@@ -397,7 +397,7 @@
     const avg = resp.avg_likert != null ? Number(resp.avg_likert).toFixed(2) : '—';
     const fu  = resp.follow_up_requested ? '<span style="color:var(--amber);font-weight:600">Yes</span>' : '—';
     return `
-      <tr>
+      <tr style="cursor:pointer" onclick="surveysOpenResponse('${r.id}')" title="Click to view full response">
         <td><strong>${escapeHtml(r.project_name)}</strong></td>
         <td>${escapeHtml(r.contact_name || '—')}</td>
         <td>${fmtDate(r.completed_at)}</td>
@@ -623,6 +623,154 @@
     toast('Preview re-enabled for next send.');
     renderAll();
   };
+
+
+  // ── Response detail modal ─────────────────────────────────────────────────
+
+  // Click a Completed row → fetch the full survey_responses row + the
+  // invitation's template_snapshot, render answers next to question text.
+  window.surveysOpenResponse = async function (invitationId) {
+    if (!invitationId) return;
+    const completed = _completed.find(r => r.id === invitationId);
+    if (!completed) {
+      toast('Response not found.');
+      return;
+    }
+
+    try {
+      // Fetch the full response row (all columns) and the invitation's
+      // template_snapshot for question text/structure.
+      const [{ data: resp, error: respErr }, { data: inv, error: invErr }] = await Promise.all([
+        sb.from('survey_responses').select('*').eq('invitation_id', invitationId).maybeSingle(),
+        sb.from('survey_invitations').select('template_snapshot, sent_at, contact_email').eq('id', invitationId).maybeSingle(),
+      ]);
+      if (respErr) throw respErr;
+      if (invErr)  throw invErr;
+      if (!resp)   { toast('No response data found.'); return; }
+
+      showResponseModal(completed, resp, inv);
+    } catch (e) {
+      console.error('[surveys] open response failed', e);
+      toast('Could not load response: ' + (e.message || String(e)));
+    }
+  };
+
+  function showResponseModal(invitation, resp, inv) {
+    const tpl = inv?.template_snapshot || {};
+    const questions = Array.isArray(tpl.questions) ? tpl.questions : [];
+    const scaleMax = tpl.scale_max != null ? tpl.scale_max : null;
+
+    // Survey responses store per-question answers under various possible keys.
+    // We try common shapes: resp.answers (object keyed by question id) or the
+    // response columns directly. Fall back to "no answer recorded" gracefully.
+    const answersMap = (resp.answers && typeof resp.answers === 'object') ? resp.answers : {};
+
+    const npsCls = resp.nps_score >= 9 ? 'nps-promoter'
+                 : resp.nps_score <= 6 ? 'nps-detractor'
+                 : 'nps-passive';
+    const nps = resp.nps_score != null
+      ? `<span class="nps-pill ${npsCls}">${resp.nps_score}</span>`
+      : '—';
+    const avg = resp.avg_likert != null
+      ? Number(resp.avg_likert).toFixed(2) + (scaleMax != null ? ` <span style="color:var(--muted);font-size:11px">/ ${scaleMax}</span>` : '')
+      : '—';
+
+    // Render the per-question Q&A. Looks up each answer in resp.answers by
+    // the question's id, falls back to checking top-level resp[id].
+    const questionRows = questions.length ? questions.map(q => {
+      const qid = q.id || q.key || '';
+      let answer = answersMap[qid];
+      if (answer == null) answer = resp[qid];
+      const display = (answer == null || answer === '')
+        ? '<span style="color:var(--muted);font-style:italic">No answer</span>'
+        : (typeof answer === 'object'
+            ? `<pre style="margin:0;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:pre-wrap">${escapeHtml(JSON.stringify(answer, null, 2))}</pre>`
+            : escapeHtml(String(answer)));
+      return `
+        <div style="padding:14px 0;border-bottom:1px solid var(--border)">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${escapeHtml(q.text || q.label || qid)}</div>
+          <div style="font-size:14px;color:var(--text);line-height:1.5">${display}</div>
+        </div>`;
+    }).join('') : '<div style="padding:14px 0;color:var(--muted);font-style:italic">No question data on file for this response.</div>';
+
+    // Render any "extra" fields on the response that aren't the headline
+    // metrics or the questions/answers map. Things like nps_comment,
+    // department_worked_with, free-text feedback — whatever your schema has.
+    const knownKeys = new Set([
+      'id', 'invitation_id', 'created_at', 'submitted_at',
+      'nps_score', 'avg_likert', 'follow_up_requested', 'answers',
+      ...questions.map(q => q.id || q.key || ''),
+    ]);
+    const extras = Object.keys(resp)
+      .filter(k => !knownKeys.has(k) && resp[k] != null && resp[k] !== '')
+      .map(k => {
+        const val = typeof resp[k] === 'object'
+          ? JSON.stringify(resp[k])
+          : String(resp[k]);
+        const label = k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+        return `
+          <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+            <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">${escapeHtml(label)}</div>
+            <div style="font-size:13px;color:var(--text);line-height:1.5">${escapeHtml(val)}</div>
+          </div>`;
+      }).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'surveyResponseOverlay';
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;' +
+      'display:flex;align-items:center;justify-content:center;padding:24px';
+    overlay.onclick = (e) => { if (e.target === overlay) closeResponseModal(); };
+
+    const modal = document.createElement('div');
+    modal.style.cssText =
+      'background:var(--surface);border:1px solid var(--border);border-radius:12px;' +
+      'width:100%;max-width:700px;max-height:90vh;display:flex;flex-direction:column;' +
+      'overflow:hidden;font-family:"DM Sans",sans-serif';
+
+    modal.innerHTML = `
+      <div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <div style="font-size:16px;font-weight:600;color:var(--text)">${escapeHtml(invitation.project_name)}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">${escapeHtml(invitation.contact_name || '—')} · ${escapeHtml(inv?.contact_email || invitation.contact_email || '')}</div>
+        </div>
+        <button class="btn-small" onclick="surveysCloseResponse()" style="font-size:11px">Close</button>
+      </div>
+
+      <div style="padding:16px 24px;background:var(--surface2);border-bottom:1px solid var(--border);display:grid;grid-template-columns:repeat(4,1fr);gap:14px">
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">NPS</div>
+          <div style="font-size:18px;font-weight:600">${nps}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Avg Score</div>
+          <div style="font-size:18px;font-weight:600">${avg}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Follow-up</div>
+          <div style="font-size:14px;font-weight:600;color:${resp.follow_up_requested ? 'var(--amber)' : 'var(--muted)'}">${resp.follow_up_requested ? 'Yes' : 'No'}</div>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px">Completed</div>
+          <div style="font-size:13px;font-weight:500">${fmtDate(invitation.completed_at)}</div>
+        </div>
+      </div>
+
+      <div style="padding:6px 24px 24px;overflow-y:auto;flex:1">
+        ${questionRows}
+        ${extras ? `<div style="margin-top:18px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Other Fields</div>${extras}</div>` : ''}
+      </div>`;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+  }
+
+  function closeResponseModal() {
+    const el = document.getElementById('surveyResponseOverlay');
+    if (el) el.remove();
+  }
+
+  window.surveysCloseResponse = closeResponseModal;
 
 
   // Build the row to insert into survey_invitations for a Send action.
