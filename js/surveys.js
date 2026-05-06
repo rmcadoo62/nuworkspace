@@ -1,18 +1,35 @@
 // js/surveys.js
-// Customer Satisfaction Surveys — admin queue panel.
-// Lives at Setup → Customer Surveys.
 //
-// Sends queued invitations via the survey-send edge function, displays sent
-// and completed responses. Single-send opens an email preview modal first
-// (with a "don't show again" toggle); batch send confirms count then fires.
+// Customer Surveys admin panel.
+//
+// Workflow:
+//   • Eligible Projects   — projects with status testcomplete/complete + no
+//                           open tasks + not skipped + no existing invitation.
+//                           Each row has a Send and Skip button.
+//   • Sent                — invitations awaiting response (read-only).
+//   • Completed           — invitations with a response, expandable.
+//   • Show Skipped toggle — projects flagged skip_survey=true, with Unskip.
+//
+// On Send: insert a survey_invitations row for the project, immediately
+// invoke the survey-send edge function. On failure we DELETE the row so the
+// project returns to the Eligible list (no orphan queued rows).
+//
+// On Skip: sets projects.skip_survey = true.  Project disappears from the
+// Eligible list permanently unless unskipped via the Show Skipped panel.
 
 (function () {
 
-  const PREVIEW_SKIP_KEY = 'nuworkspace_survey_skip_preview';
+  // ── Module state ──────────────────────────────────────────────────────────
 
-  let _queue        = null;   // [{ id, status, contact_email, project_name, response, ... }]
-  let _previewState = null;   // { ids, rendered }
-  let _editState    = null;   // { invId }
+  let _eligible  = [];   // [{ project, info, contactName, contactEmail, hasEmail }]
+  let _sent      = [];   // [{ id, status, contact_*, sent_at, ..., project_name }]
+  let _completed = [];   // [{ ...invitation, project_name, response }]
+  let _skipped   = [];   // [{ project, info }]
+  let _showSkipped = false;
+  let _stats     = { avgScore: null, responseRate: null, eligibleCount: 0 };
+  let _pendingSend = null;  // { invitationId, eligible } while preview modal is open
+
+  const PREVIEW_SKIP_KEY = 'nuworkspace_survey_skip_preview';
 
 
   // ── Panel routing ─────────────────────────────────────────────────────────
@@ -36,17 +53,18 @@
     body.innerHTML = '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">Loading…</div>';
 
     try {
-      const { data: invs, error } = await sb
+      // 1. Pull invitations with status 'sent' or 'completed'. The new model
+      //    doesn't surface 'queued' or 'skipped' invitation rows — those are
+      //    transient (queued during a Send call) or leftover from the old
+      //    auto-queue model.
+      const { data: invs, error: invErr } = await sb
         .from('survey_invitations')
-        .select('id, status, contact_email, contact_name, sent_at, queued_at, completed_at, expires_at, send_error, project_id')
-        .order('queued_at', { ascending: false });
-      if (error) throw error;
+        .select('id, status, contact_email, contact_name, sent_at, completed_at, expires_at, send_error, project_id, template_snapshot')
+        .in('status', ['sent', 'completed'])
+        .order('sent_at', { ascending: false, nullsFirst: false });
+      if (invErr) throw invErr;
 
-      // Decorate with project name from in-memory store
-      const projMap = {};
-      (typeof projects !== 'undefined' ? projects : []).forEach(p => { projMap[p.id] = p; });
-
-      // Pull responses for completed invitations
+      // 2. Pull responses for completed invitations.
       const completedIds = invs.filter(r => r.status === 'completed').map(r => r.id);
       const respMap = {};
       if (completedIds.length) {
@@ -57,118 +75,315 @@
         (resps || []).forEach(r => { respMap[r.invitation_id] = r; });
       }
 
-      _queue = invs.map(r => ({
+      // 3. Build a project lookup from the in-memory store. Decorates rows
+      //    with project_name without an extra round trip.
+      const projMap = {};
+      (typeof projects !== 'undefined' ? projects : []).forEach(p => { projMap[p.id] = p; });
+
+      // 4. Identify projects that already have any surfaced invitation (for
+      //    filtering out of the Eligible list).
+      const projectsWithInvitation = new Set(invs.map(r => r.project_id));
+
+      // 5. Build the four display lists.
+      _sent = invs.filter(r => r.status === 'sent').map(r => ({
+        ...r,
+        project_name: projMap[r.project_id]?.name || '—',
+      }));
+      _completed = invs.filter(r => r.status === 'completed').map(r => ({
         ...r,
         project_name: projMap[r.project_id]?.name || '—',
         response:     respMap[r.id] || null,
       }));
 
-      renderQueue();
+      _skipped = computeSkippedProjects(projMap);
+
+      // 6. Eligible needs a fetch of project_info + contacts to display
+      //    contact name/email per row.
+      _eligible = await computeEligibleProjects(projectsWithInvitation);
+
+      // 7. Compute the three top-of-panel stats.
+      _stats = computeStats(_sent, _completed, _eligible);
+
+      renderAll();
     } catch (e) {
-      console.error('loadQueue', e);
-      body.innerHTML = `<div style="padding:24px;color:var(--red);font-size:13px">Error loading queue: ${escapeHtml(e.message || String(e))}</div>`;
+      console.error('[surveys] load failed', e);
+      body.innerHTML = `<div style="padding:24px;color:var(--red);font-size:13px">Error loading: ${escapeHtml(e.message || String(e))}</div>`;
     }
+  }
+
+
+  // ── Eligible / Skipped computation ────────────────────────────────────────
+
+  // Eligibility: project_info.status is 'testcomplete' or 'complete', AND
+  // no tasks with status outside {complete, billed, cancelled}, AND
+  // projects.skip_survey is not true, AND
+  // no existing survey_invitations row for the project.
+  //
+  // The first three checks run against in-memory data. Contact-info
+  // enrichment (for display) requires DB queries against project_info and
+  // contacts.
+  async function computeEligibleProjects(projectsWithInvitation) {
+    if (typeof projects === 'undefined' || !projects.length) return [];
+
+    const candidates = projects.filter(p => {
+      if (p.skip_survey) return false;
+      if (projectsWithInvitation.has(p.id)) return false;
+
+      const info = (typeof projectInfo !== 'undefined') ? projectInfo[p.id] : null;
+      if (!info) return false;
+      if (info.status !== 'testcomplete' && info.status !== 'complete') return false;
+
+      const projTasks = (typeof taskStore !== 'undefined' ? taskStore : [])
+        .filter(t => t.proj === p.id);
+      if (!projTasks.length) return false;
+      const hasOpen = projTasks.some(t =>
+        !['complete', 'billed', 'cancelled'].includes(t.status));
+      if (hasOpen) return false;
+
+      return true;
+    });
+
+    if (!candidates.length) return [];
+
+    // Batch-fetch project_info contact data for all candidates in one query.
+    const ids = candidates.map(p => p.id);
+    const { data: pis } = await sb.from('project_info')
+      .select('project_id, contact_id, client_email')
+      .in('project_id', ids);
+    const piMap = {};
+    (pis || []).forEach(pi => { piMap[pi.project_id] = pi; });
+
+    // Batch-fetch contacts for any candidates that have a contact_id.
+    const contactIds = (pis || [])
+      .map(pi => pi.contact_id)
+      .filter(id => !!id);
+    let contactMap = {};
+    if (contactIds.length) {
+      const { data: contacts } = await sb.from('contacts')
+        .select('id, first_name, last_name, email')
+        .in('id', contactIds);
+      (contacts || []).forEach(c => { contactMap[c.id] = c; });
+    }
+
+    // Resolve each candidate's contact name + email. Contacts table wins
+    // when contact_id is set; fall back to project_info.client_email.
+    return candidates.map(p => {
+      const info = projectInfo[p.id];
+      const pi   = piMap[p.id] || {};
+      const ct   = pi.contact_id ? contactMap[pi.contact_id] : null;
+
+      let contactName = '';
+      let contactEmail = '';
+      if (ct) {
+        contactName  = `${ct.first_name || ''} ${ct.last_name || ''}`.trim();
+        contactEmail = ct.email || '';
+      }
+      if (!contactEmail) contactEmail = pi.client_email || '';
+
+      const hasEmail = contactEmail && contactEmail.includes('@');
+
+      return {
+        project: p,
+        info,
+        contactName: contactName || '—',
+        contactEmail,
+        hasEmail,
+      };
+    }).sort((a, b) => {
+      // Sort by test complete date descending (most recently complete first).
+      const ad = a.info.testcompleteDate || '';
+      const bd = b.info.testcompleteDate || '';
+      return bd.localeCompare(ad);
+    });
+  }
+
+  function computeSkippedProjects(projMap) {
+    if (typeof projects === 'undefined') return [];
+    return projects
+      .filter(p => p.skip_survey === true)
+      .map(p => ({
+        project: p,
+        info: (typeof projectInfo !== 'undefined') ? projectInfo[p.id] : null,
+      }))
+      .sort((a, b) => (b.project.name || '').localeCompare(a.project.name || ''));
+  }
+
+
+  // ── Stats ─────────────────────────────────────────────────────────────────
+
+  function computeStats(sent, completed, eligible) {
+    // Average score across all completed responses' avg_likert.
+    let scoreSum = 0, scoreCount = 0;
+    let scaleMax = null;
+    completed.forEach(r => {
+      if (r.response && r.response.avg_likert != null) {
+        scoreSum += Number(r.response.avg_likert);
+        scoreCount += 1;
+      }
+      // Pick up scale_max from the template snapshot stored on the invitation.
+      // Snapshots are immutable per-send so this stays accurate even if the
+      // active template's scale changes later.
+      if (scaleMax == null && r.template_snapshot && r.template_snapshot.scale_max != null) {
+        scaleMax = Number(r.template_snapshot.scale_max);
+      }
+    });
+    const avgScore = scoreCount > 0 ? scoreSum / scoreCount : null;
+
+    // Response rate = completed / (sent + completed).
+    // 'sent' here means awaiting response (status='sent'); once they respond
+    // they move to status='completed'. Total-sent denominator = sent+completed.
+    const totalSent = sent.length + completed.length;
+    const responseRate = totalSent > 0
+      ? (completed.length / totalSent) * 100
+      : null;
+
+    return {
+      avgScore,
+      scaleMax,
+      responseRate,
+      eligibleCount: eligible.length,
+    };
   }
 
 
   // ── Render ────────────────────────────────────────────────────────────────
 
-  function renderQueue() {
-    const body      = document.getElementById('surveyQueueBody');
-    const queued    = _queue.filter(r => r.status === 'queued');
-    const sent      = _queue.filter(r => r.status === 'sent');
-    const completed = _queue.filter(r => r.status === 'completed');
-    const sendable  = queued.filter(r => r.contact_email && r.contact_email.includes('@'));
+  function renderAll() {
+    const body = document.getElementById('surveyQueueBody');
+    if (!body) return;
 
-    let html = `
-      <div class="surveys-summary">
-        <div class="surveys-stat">
-          <div class="surveys-stat-label">Queued</div>
-          <div class="surveys-stat-value">${queued.length}</div>
-        </div>
-        <div class="surveys-stat">
-          <div class="surveys-stat-label">Sent</div>
-          <div class="surveys-stat-value">${sent.length}</div>
-        </div>
-        <div class="surveys-stat">
-          <div class="surveys-stat-label">Responses</div>
-          <div class="surveys-stat-value">${completed.length}</div>
-        </div>
-      </div>`;
-
-    if (queued.length) {
-      html += `
-        <div class="surveys-section">
-          <div class="surveys-section-header">
-            <span>Queued — ready to send</span>
-            ${sendable.length ? `<button class="btn btn-primary" style="font-size:12px;padding:5px 14px" onclick="surveysSendAll()">Send all (${sendable.length})</button>` : ''}
-          </div>
-          <table class="surveys-table">
-            <thead><tr><th>Job</th><th>Contact</th><th>Email</th><th>Queued</th><th></th></tr></thead>
-            <tbody>${queued.map(renderQueuedRow).join('')}</tbody>
-          </table>
-        </div>`;
-    }
-
-    if (sent.length) {
-      html += `
-        <div class="surveys-section">
-          <div class="surveys-section-header">Sent — awaiting response</div>
-          <table class="surveys-table">
-            <thead><tr><th>Job</th><th>Contact</th><th>Email</th><th>Sent</th><th>Expires</th></tr></thead>
-            <tbody>${sent.map(renderSentRow).join('')}</tbody>
-          </table>
-        </div>`;
-    }
-
-    if (completed.length) {
-      html += `
-        <div class="surveys-section">
-          <div class="surveys-section-header">Completed</div>
-          <table class="surveys-table">
-            <thead><tr><th>Job</th><th>Contact</th><th>Submitted</th><th>NPS</th><th>Avg</th><th>Follow-up</th></tr></thead>
-            <tbody>${completed.map(renderCompletedRow).join('')}</tbody>
-          </table>
-        </div>`;
-    }
-
-    if (!queued.length && !sent.length && !completed.length) {
-      html += `<div style="padding:48px;text-align:center;color:var(--muted)">No surveys yet.</div>`;
-    }
+    let html = '';
+    html += renderStatsHTML();
+    html += renderEligibleHTML();
+    html += renderSentHTML();
+    html += renderCompletedHTML();
+    html += renderSkippedToggleHTML();
 
     body.innerHTML = html;
   }
 
-  function renderQueuedRow(r) {
-    const hasEmail = r.contact_email && r.contact_email.includes('@');
-    const emailDisplay = hasEmail
-      ? escapeHtml(r.contact_email)
-      : `<span style="color:var(--red)">— missing —</span>`;
-    const errBadge = r.send_error
-      ? `<div style="color:var(--red);font-size:11px;margin-top:2px">⚠ ${escapeHtml(r.send_error)}</div>`
+  function renderStatsHTML() {
+    const denom = _stats.scaleMax != null ? `/ ${_stats.scaleMax}` : '';
+    const avg = _stats.avgScore != null
+      ? `${_stats.avgScore.toFixed(2)}${denom ? ` <span style="font-size:14px;color:var(--muted);font-family:'DM Sans',sans-serif">${denom}</span>` : ''}`
+      : '—';
+    const rate = _stats.responseRate != null
+      ? `${_stats.responseRate.toFixed(0)}<span style="font-size:14px;color:var(--muted);font-family:'DM Sans',sans-serif">%</span>`
+      : '—';
+
+    return `
+      <div class="surveys-summary">
+        <div class="surveys-stat">
+          <div class="surveys-stat-label">Avg Score</div>
+          <div class="surveys-stat-value">${avg}</div>
+        </div>
+        <div class="surveys-stat">
+          <div class="surveys-stat-label">Response Rate</div>
+          <div class="surveys-stat-value">${rate}</div>
+        </div>
+        <div class="surveys-stat">
+          <div class="surveys-stat-label">Eligible</div>
+          <div class="surveys-stat-value">${_stats.eligibleCount}</div>
+        </div>
+      </div>`;
+  }
+
+  function renderEligibleHTML() {
+    if (!_eligible.length) {
+      return `
+        <div class="surveys-section">
+          <div class="surveys-section-header">
+            Eligible Projects
+            <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(0)</span>
+          </div>
+          <div style="padding:24px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+            No eligible projects right now. A project becomes eligible once it's marked test-complete and all tasks are done.
+          </div>
+        </div>`;
+    }
+
+    const rows = _eligible.map(renderEligibleRow).join('');
+    const previewDisabled = localStorage.getItem(PREVIEW_SKIP_KEY) === '1';
+    const previewLink = previewDisabled
+      ? `<button class="btn-small" onclick="surveysReenablePreview()" style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;padding:3px 8px">🔍 Re-enable preview</button>`
       : '';
     return `
+      <div class="surveys-section">
+        <div class="surveys-section-header">
+          <span>
+            Eligible Projects
+            <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(${_eligible.length})</span>
+          </span>
+          ${previewLink}
+        </div>
+        <table class="surveys-table">
+          <thead><tr>
+            <th>Job</th>
+            <th>Contact</th>
+            <th>Email</th>
+            <th>Test Complete</th>
+            <th></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function renderEligibleRow(e) {
+    const sendBtn = e.hasEmail
+      ? `<button class="btn-small btn-primary" onclick="surveysSendForProject('${e.project.id}')" style="margin-left:6px">Send</button>`
+      : `<button class="btn-small" disabled title="No contact email on file — edit the project first" style="margin-left:6px;opacity:0.5;cursor:not-allowed">Send</button>`;
+
+    return `
       <tr>
-        <td><strong>${escapeHtml(r.project_name)}</strong></td>
-        <td>${escapeHtml(r.contact_name || '—')}</td>
-        <td>${emailDisplay}${errBadge}</td>
-        <td>${fmtDate(r.queued_at)}</td>
+        <td><strong>${escapeHtml(e.project.name)}</strong></td>
+        <td>${escapeHtml(e.contactName)}</td>
+        <td>${escapeHtml(e.contactEmail || '—')}</td>
+        <td>${fmtDate(e.info?.testcompleteDate)}</td>
         <td style="text-align:right;white-space:nowrap">
-          <button class="btn-small" onclick="surveysEditRecipient('${r.id}')">Edit</button>
-          ${hasEmail ? `<button class="btn-small btn-primary" onclick="surveysSendOne('${r.id}')" style="margin-left:6px">Send</button>` : ''}
+          <button class="btn-small" onclick="surveysSkipProject('${e.project.id}')">Skip</button>
+          ${sendBtn}
         </td>
       </tr>`;
   }
 
-  function renderSentRow(r) {
-    return `
+  function renderSentHTML() {
+    if (!_sent.length) return '';
+    const rows = _sent.map(r => `
       <tr>
         <td><strong>${escapeHtml(r.project_name)}</strong></td>
         <td>${escapeHtml(r.contact_name || '—')}</td>
         <td>${escapeHtml(r.contact_email || '')}</td>
         <td>${fmtDate(r.sent_at)}</td>
-        <td>${fmtDate(r.expires_at)}</td>
-      </tr>`;
+        <td>${daysSince(r.sent_at)} days</td>
+      </tr>`).join('');
+    return `
+      <div class="surveys-section">
+        <div class="surveys-section-header">
+          Sent
+          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(${_sent.length})</span>
+        </div>
+        <table class="surveys-table">
+          <thead><tr><th>Job</th><th>Contact</th><th>Email</th><th>Sent</th><th>Awaiting</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function renderCompletedHTML() {
+    if (!_completed.length) return '';
+    const rows = _completed.map(renderCompletedRow).join('');
+    return `
+      <div class="surveys-section">
+        <div class="surveys-section-header">
+          Completed
+          <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(${_completed.length})</span>
+        </div>
+        <table class="surveys-table">
+          <thead><tr><th>Job</th><th>Contact</th><th>Completed</th><th>NPS</th><th>Avg</th><th>Follow-up</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
   }
 
   function renderCompletedRow(r) {
@@ -192,56 +407,139 @@
       </tr>`;
   }
 
+  function renderSkippedToggleHTML() {
+    const count = _skipped.length;
+    const label = _showSkipped ? 'Hide skipped' : 'Show skipped';
+    const arrow = _showSkipped ? '▾' : '▸';
 
-  // ── Send actions ──────────────────────────────────────────────────────────
+    let html = `
+      <div class="surveys-section" style="margin-top:8px">
+        <div style="text-align:right">
+          <button class="btn-small" onclick="surveysToggleShowSkipped()">
+            ${arrow} ${label}${count ? ` (${count})` : ''}
+          </button>
+        </div>`;
 
-  window.surveysSendOne = async function (invId) {
-    const skipPreview = localStorage.getItem(PREVIEW_SKIP_KEY) === '1';
-    if (skipPreview) {
-      await actuallySend([invId]);
+    if (_showSkipped) {
+      if (!count) {
+        html += `<div style="padding:16px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-top:10px">
+          No skipped projects.
+        </div>`;
+      } else {
+        const rows = _skipped.map(s => `
+          <tr>
+            <td><strong>${escapeHtml(s.project.name)}</strong></td>
+            <td>${fmtDate(s.info?.testcompleteDate)}</td>
+            <td style="text-align:right">
+              <button class="btn-small" onclick="surveysUnskipProject('${s.project.id}')">Unskip</button>
+            </td>
+          </tr>`).join('');
+        html += `
+          <table class="surveys-table" style="margin-top:10px">
+            <thead><tr><th>Job</th><th>Test Complete</th><th></th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>`;
+      }
+    }
+
+    html += `</div>`;
+    return html;
+  }
+
+
+  // ── Actions: Send ─────────────────────────────────────────────────────────
+
+  // Click Send on an Eligible row.
+  // 1. Build payload + INSERT a 'queued' invitation row.
+  // 2. If preview is enabled (default), call edge function preview action and
+  //    show the modal with rendered email content. User confirms or cancels.
+  //    If preview is disabled (user opted out), skip straight to send.
+  // 3. On confirmed send: call edge function send action. Success → status
+  //    flips to 'sent', refresh. Failure → DELETE the row, refresh.
+  // 4. On cancel: DELETE the inserted row, refresh.
+  window.surveysSendForProject = async function (projectId) {
+    if (!projectId) return;
+    const eligible = _eligible.find(e => e.project.id === projectId);
+    if (!eligible) {
+      toast('Project no longer eligible — refreshing.');
+      loadAndRender();
       return;
     }
+    if (!eligible.hasEmail) {
+      toast('No valid contact email on file. Edit the project first.');
+      return;
+    }
+
+    let newInvitationId = null;
     try {
-      const { data, error } = await sb.functions.invoke('survey-send', {
-        body: { action: 'preview', invitation_id: invId }
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      _previewState = { ids: [invId], rendered: data };
-      showPreviewModal(data);
+      // Build the invitation payload.
+      const payload = await buildInvitationPayload(eligible);
+      if (!payload) {
+        toast('Could not build invitation — missing active template?');
+        return;
+      }
+
+      // Insert the row.
+      const { data: inserted, error: insErr } = await sb
+        .from('survey_invitations')
+        .insert(payload)
+        .select('id')
+        .single();
+      if (insErr) throw insErr;
+      newInvitationId = inserted.id;
+
+      // Branch on preview preference.
+      const skipPreview = localStorage.getItem(PREVIEW_SKIP_KEY) === '1';
+      if (skipPreview) {
+        await actuallySend(newInvitationId, eligible);
+      } else {
+        // Fetch the rendered email and pop the preview modal.
+        const { data: prev, error: prevErr } = await sb.functions.invoke('survey-send', {
+          body: { action: 'preview', invitation_id: newInvitationId },
+        });
+        if (prevErr) throw prevErr;
+        if (prev?.error) throw new Error(prev.error);
+
+        _pendingSend = { invitationId: newInvitationId, eligible };
+        showPreviewModal(prev);
+      }
+
     } catch (e) {
-      console.error(e);
-      toast('Preview failed: ' + (e.message || e));
+      console.error('[surveys] send failed', e);
+      // Roll back the inserted row so the project returns to Eligible.
+      if (newInvitationId) {
+        await sb.from('survey_invitations').delete().eq('id', newInvitationId);
+      }
+      _pendingSend = null;
+      toast('Send failed: ' + (e.message || String(e)));
+      loadAndRender();
     }
   };
 
-  window.surveysSendAll = function () {
-    const sendable = _queue.filter(r => r.status === 'queued' && r.contact_email && r.contact_email.includes('@'));
-    if (!sendable.length) return;
-    showConfirmModal(
-      `Send ${sendable.length} survey email${sendable.length === 1 ? '' : 's'}? Each customer will receive their personalized survey link.`,
-      () => actuallySend(sendable.map(r => r.id)),
-      { title: 'Send all surveys', btnTxt: `Send ${sendable.length}`, color: 'var(--amber)', icon: '✉' }
-    );
-  };
-
-  async function actuallySend(ids) {
-    toast(`Sending ${ids.length} email${ids.length === 1 ? '' : 's'}…`);
+  // Called either directly (when preview is skipped) or from the modal's
+  // Send Now button (after user confirmation).
+  async function actuallySend(invitationId, eligible) {
+    toast('Sending survey…');
     try {
-      const { data, error } = await sb.functions.invoke('survey-send', {
-        body: { action: 'send', invitation_ids: ids }
+      const { data: sendResp, error: sendErr } = await sb.functions.invoke('survey-send', {
+        body: { action: 'send', invitation_ids: [invitationId] },
       });
-      if (error) throw error;
-      const results = data?.results || [];
-      const ok   = results.filter(r => r.success).length;
-      const fail = results.length - ok;
-      if (fail === 0)      toast(`✓ Sent ${ok} survey${ok === 1 ? '' : 's'}`);
-      else if (ok === 0)   toast(`⚠ All ${fail} sends failed`);
-      else                 toast(`✓ Sent ${ok}, ${fail} failed`);
+      if (sendErr) throw sendErr;
+
+      const result = sendResp?.results?.[0];
+      if (!result || !result.success) {
+        const msg = result?.error || 'unknown error';
+        throw new Error(msg);
+      }
+
+      toast(`✓ Survey sent to ${eligible.contactEmail}`);
       loadAndRender();
     } catch (e) {
-      console.error(e);
-      toast('Send failed: ' + (e.message || e));
+      console.error('[surveys] send-confirm failed', e);
+      // Roll back the row.
+      await sb.from('survey_invitations').delete().eq('id', invitationId);
+      toast('Send failed: ' + (e.message || String(e)));
+      loadAndRender();
     }
   }
 
@@ -249,66 +547,190 @@
   // ── Preview modal ─────────────────────────────────────────────────────────
 
   function showPreviewModal(rendered) {
-    document.getElementById('surveyPreviewSubject').textContent = rendered.subject;
-    document.getElementById('surveyPreviewFrom').textContent    = rendered.from;
-    document.getElementById('surveyPreviewTo').textContent      = rendered.to;
-    document.getElementById('surveyPreviewReplyTo').textContent = rendered.replyTo;
-    document.getElementById('surveyPreviewBody').textContent    = rendered.body;
-    document.getElementById('surveyPreviewSkipChk').checked     = false;
-    document.getElementById('surveyPreviewModal')?.classList.add('open');
+    // Build the modal markup dynamically and inject into body. Removed on
+    // confirm or cancel.
+    const overlay = document.createElement('div');
+    overlay.id = 'surveyPreviewOverlay';
+    overlay.style.cssText =
+      'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;' +
+      'display:flex;align-items:center;justify-content:center;padding:24px';
+
+    const modal = document.createElement('div');
+    modal.style.cssText =
+      'background:var(--surface);border:1px solid var(--border);border-radius:12px;' +
+      'width:100%;max-width:680px;max-height:90vh;display:flex;flex-direction:column;' +
+      'overflow:hidden;font-family:"DM Sans",sans-serif';
+
+    modal.innerHTML = `
+      <div style="padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+        <div style="font-size:16px;font-weight:600;color:var(--text)">Preview Customer Survey</div>
+        <button class="btn-small" onclick="surveysCancelPreview()" style="font-size:11px">Cancel</button>
+      </div>
+      <div style="padding:20px 24px;overflow-y:auto;flex:1">
+        <div class="survey-preview-meta">
+          <div class="survey-preview-meta-label">From</div><div>${escapeHtml(rendered.from || '')}</div>
+          <div class="survey-preview-meta-label">To</div><div>${escapeHtml(rendered.to || '')}</div>
+          <div class="survey-preview-meta-label">Reply-To</div><div>${escapeHtml(rendered.replyTo || '')}</div>
+          <div class="survey-preview-meta-label">Subject</div><div style="font-weight:600">${escapeHtml(rendered.subject || '')}</div>
+        </div>
+        <div class="survey-preview-body">${escapeHtml(rendered.body || '')}</div>
+      </div>
+      <div style="padding:14px 24px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:14px">
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);cursor:pointer">
+          <input type="checkbox" id="previewSkipChk" style="margin:0">
+          <span>Don't show preview again — just send</span>
+        </label>
+        <div style="display:flex;gap:8px">
+          <button class="btn-small" onclick="surveysCancelPreview()">Cancel</button>
+          <button class="btn-small btn-primary" onclick="surveysConfirmSend()">Send Now</button>
+        </div>
+      </div>`;
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
   }
 
-  window.surveysClosePreview = function () {
-    document.getElementById('surveyPreviewModal')?.classList.remove('open');
-    _previewState = null;
+  function closePreviewModal() {
+    const el = document.getElementById('surveyPreviewOverlay');
+    if (el) el.remove();
+  }
+
+  window.surveysCancelPreview = async function () {
+    closePreviewModal();
+    if (!_pendingSend) return;
+    const { invitationId } = _pendingSend;
+    _pendingSend = null;
+    // Roll back the inserted row so the project returns to Eligible.
+    await sb.from('survey_invitations').delete().eq('id', invitationId);
+    loadAndRender();
   };
 
   window.surveysConfirmSend = async function () {
-    if (!_previewState) return;
-    if (document.getElementById('surveyPreviewSkipChk').checked) {
+    if (!_pendingSend) { closePreviewModal(); return; }
+    // Capture the "don't show again" preference before tearing down the modal.
+    const chk = document.getElementById('previewSkipChk');
+    if (chk && chk.checked) {
       localStorage.setItem(PREVIEW_SKIP_KEY, '1');
     }
-    const ids = _previewState.ids;
-    surveysClosePreview();
-    await actuallySend(ids);
+    const { invitationId, eligible } = _pendingSend;
+    _pendingSend = null;
+    closePreviewModal();
+    await actuallySend(invitationId, eligible);
+  };
+
+  window.surveysReenablePreview = function () {
+    localStorage.removeItem(PREVIEW_SKIP_KEY);
+    toast('Preview re-enabled for next send.');
+    renderAll();
   };
 
 
-  // ── Edit recipient ────────────────────────────────────────────────────────
+  // Build the row to insert into survey_invitations for a Send action.
+  // Returns the insert payload, or null if active templates are missing.
+  async function buildInvitationPayload(eligible) {
+    const projectId = eligible.project.id;
 
-  window.surveysEditRecipient = function (invId) {
-    const inv = _queue.find(r => r.id === invId);
-    if (!inv) return;
-    _editState = { invId };
-    document.getElementById('surveyEditName').value  = inv.contact_name || '';
-    document.getElementById('surveyEditEmail').value = inv.contact_email || '';
-    document.getElementById('surveyEditModal')?.classList.add('open');
-  };
+    // Fetch contact_id from project_info (used as foreign key on the invitation).
+    const { data: pi } = await sb.from('project_info')
+      .select('contact_id')
+      .eq('project_id', projectId)
+      .maybeSingle();
 
-  window.surveysCloseEditModal = function () {
-    document.getElementById('surveyEditModal')?.classList.remove('open');
-    _editState = null;
-  };
-
-  window.surveysSaveRecipient = async function () {
-    if (!_editState) return;
-    const name  = document.getElementById('surveyEditName').value.trim();
-    const email = document.getElementById('surveyEditEmail').value.trim();
-    try {
-      const { error } = await sb.from('survey_invitations')
-        .update({
-          contact_name:  name  || null,
-          contact_email: email || null,
-        })
-        .eq('id', _editState.invId);
-      if (error) throw error;
-      surveysCloseEditModal();
-      loadAndRender();
-      toast('✓ Recipient updated');
-    } catch (e) {
-      console.error(e);
-      toast('Save failed: ' + (e.message || e));
+    // Active templates (one survey + one email).
+    const [{ data: tpl }, { data: etpl }] = await Promise.all([
+      sb.from('survey_templates')
+        .select('id, name, version, questions, scale_min, scale_max, scale_labels')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      sb.from('survey_email_templates')
+        .select('id, name, subject, body_template, signature_emp_id')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    ]);
+    if (!tpl || !etpl) {
+      console.warn('[surveys] missing active template/email — cannot send');
+      return null;
     }
+
+    // Cryptographically random 48-char hex token for the public survey URL.
+    const buf = new Uint8Array(24);
+    crypto.getRandomValues(buf);
+    const token = Array.from(buf)
+      .map(b => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    return {
+      project_id:        projectId,
+      contact_id:        pi?.contact_id || null,
+      contact_email:     eligible.contactEmail,
+      contact_name:      eligible.contactName !== '—' ? eligible.contactName : null,
+      template_id:       tpl.id,
+      email_template_id: etpl.id,
+      template_snapshot: {
+        name: tpl.name, version: tpl.version, questions: tpl.questions,
+        scale_min: tpl.scale_min, scale_max: tpl.scale_max, scale_labels: tpl.scale_labels,
+      },
+      email_snapshot: {
+        name: etpl.name, subject: etpl.subject,
+        body_template: etpl.body_template, signature_emp_id: etpl.signature_emp_id,
+      },
+      token,
+      status:     'queued',
+      expires_at: new Date(Date.now() + 60 * 24 * 60 * 60 * 1000).toISOString(),
+      queued_at:  new Date().toISOString(),
+      queued_by:  (typeof currentEmployee !== 'undefined' && currentEmployee) ? currentEmployee.id : null,
+    };
+  }
+
+
+  // ── Actions: Skip / Unskip ────────────────────────────────────────────────
+
+  window.surveysSkipProject = async function (projectId) {
+    if (!projectId) return;
+    try {
+      const { error } = await sb.from('projects')
+        .update({ skip_survey: true })
+        .eq('id', projectId);
+      if (error) throw error;
+
+      // Update the in-memory cache so other panels reflect immediately.
+      const p = (typeof projects !== 'undefined' ? projects : []).find(x => x.id === projectId);
+      if (p) p.skip_survey = true;
+
+      toast('Project skipped — will not be surveyed.');
+      loadAndRender();
+    } catch (e) {
+      console.error('[surveys] skip failed', e);
+      toast('Skip failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveysUnskipProject = async function (projectId) {
+    if (!projectId) return;
+    try {
+      const { error } = await sb.from('projects')
+        .update({ skip_survey: false })
+        .eq('id', projectId);
+      if (error) throw error;
+
+      const p = (typeof projects !== 'undefined' ? projects : []).find(x => x.id === projectId);
+      if (p) p.skip_survey = false;
+
+      toast('✓ Restored — project is eligible again.');
+      loadAndRender();
+    } catch (e) {
+      console.error('[surveys] unskip failed', e);
+      toast('Unskip failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveysToggleShowSkipped = function () {
+    _showSkipped = !_showSkipped;
+    renderAll();
   };
 
 
@@ -316,14 +738,24 @@
 
   function fmtDate(s) {
     if (!s) return '—';
-    return new Date(s).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const d = new Date(s);
+    if (isNaN(d)) return '—';
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  function daysSince(s) {
+    if (!s) return '—';
+    const ms = Date.now() - new Date(s).getTime();
+    return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
   }
 
   function escapeHtml(s) {
-    if (s === null || s === undefined) return '';
-    return String(s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
 })();
