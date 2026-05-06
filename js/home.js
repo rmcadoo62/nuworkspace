@@ -293,7 +293,7 @@ async function getWhosOut() {
     const { data } = await sb.from('schedule_blocks')
       .select('emp_id, emp_event_type, start_date, end_date')
       .not('emp_id', 'is', null)
-      .in('emp_event_type', ['vacation', 'sick', 'ooo'])
+      .in('emp_event_type', ['vacation', 'sick', 'ooo', 'work'])
       .lte('start_date', today)
       .gte('end_date', today);
     return (data || []).map(r => ({
@@ -315,6 +315,7 @@ function renderWhosOutCard(blocks) {
     const label = b.empEventType === 'vacation' ? '🌴 Vacation'
                 : b.empEventType === 'sick'     ? '🤒 Sick'
                 : b.empEventType === 'ooo'      ? '🚪 Out of Office'
+                : b.empEventType === 'work'     ? '💻 Working - off site'
                 : '';
     return `<div class="home-out-row">
       <div class="home-out-av" style="background:${color}">${initials}</div>
