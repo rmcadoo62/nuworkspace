@@ -389,7 +389,7 @@ function renderTemplatesPanel() {
       <div style="font-size:13px;color:var(--muted);">Manage onboarding checklists, compliance evidence strings, and content templates.</div>
     </div>
 
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:20px;">
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;">
       ${templateCategories.map(category => {
         const categoryTemplates = templates.filter(t => t.category_id === category.id);
         
@@ -590,6 +590,37 @@ function renderTemplatesPanel() {
           </div>`;
         }
       }).join('')}
+
+      <!-- Customer Surveys card — data lives in survey_templates / survey_email_templates,
+           edited via the openSurveyTemplateEditor(...) function in surveys.js -->
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+        <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+          <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">📊 Customer Surveys</div>
+          <div style="font-size:12px;color:var(--muted);">Questions and email used when sending customer satisfaction surveys.</div>
+        </div>
+        <div style="padding:16px 20px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text);">📝 Survey Questions</div>
+              <div style="font-size:11px;color:var(--muted);">Questions, scale, and labels for the public form</div>
+            </div>
+            <button onclick="openSurveyTemplateEditor('questions')"
+              style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+              Edit
+            </button>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface2);border-radius:8px;">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--text);">✉ Email Template</div>
+              <div style="font-size:11px;color:var(--muted);">Subject, body, and signature used in the survey send</div>
+            </div>
+            <button onclick="openSurveyTemplateEditor('email')"
+              style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+              Edit
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   `;
 }

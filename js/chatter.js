@@ -341,7 +341,7 @@ function renderNotifPanel() {
   list.innerHTML = notifStore.map(n => {
     const proj = projects.find(p => p.id === n.projId);
     const timeStr = new Date(n.ts).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|empHr:[a-f0-9-]+|myinfo:hrrecords|issueTracker|closingReport)$/, '');
+    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|empHr:[a-f0-9-]+|surveyResp:[a-f0-9-]+|myinfo:hrrecords|issueTracker|closingReport)$/, '');
     return '<div class="notif-item' + (n.read ? '' : ' unread') + '" onclick="notifClick(\x27' + n.id + '\x27,\x27' + (n.projId||'') + '\x27)">' +
       '<div class="notif-item-avatar" style="background:' + (n.fromColor||'#888') + ';color:#fff">' + (n.fromInitials||'?') + '</div>' +
       '<div class="notif-item-body">' +
@@ -408,6 +408,21 @@ function notifClick(notifId, projId) {
     } else {
       const navItem = document.getElementById('navHome');
       if (typeof openHomePanel === 'function') openHomePanel(navItem);
+    }
+    return;
+  }
+
+  // Check for survey response notification — preview ends with ||surveyResp:<invId>
+  // Routes Scott / Jordan straight to the response detail modal so they can
+  // see the customer's answers without navigating through the surveys panel.
+  const surveyMatch = preview.match(/\|\|surveyResp:([a-f0-9-]+)$/);
+  if (surveyMatch) {
+    const invitationId = surveyMatch[1];
+    if (typeof openSurveyResponseDetail === 'function') {
+      openSurveyResponseDetail(invitationId);
+    } else if (typeof openSurveyQueuePanel === 'function') {
+      // Fallback: at least open the surveys panel so they can find it.
+      openSurveyQueuePanel();
     }
     return;
   }

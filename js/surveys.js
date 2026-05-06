@@ -365,8 +365,10 @@
       return `
         <div class="surveys-section">
           <div class="surveys-section-header">
-            Eligible Projects
-            <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(0)</span>
+            <span>Eligible Projects
+              <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(0)</span>
+            </span>
+            <button class="btn-small" onclick="openSurveyTemplateEditor('questions')" style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;padding:3px 8px">✏ Edit Templates</button>
           </div>
           <div style="padding:24px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
             No eligible projects right now. A project becomes eligible once it's marked test-complete and all tasks are done.
@@ -379,6 +381,7 @@
     const previewLink = previewDisabled
       ? `<button class="btn-small" onclick="surveysReenablePreview()" style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;padding:3px 8px">🔍 Re-enable preview</button>`
       : '';
+    const editTplBtn = `<button class="btn-small" onclick="openSurveyTemplateEditor('questions')" style="font-size:10px;font-weight:500;text-transform:none;letter-spacing:0;padding:3px 8px">✏ Edit Templates</button>`;
     return `
       <div class="surveys-section">
         <div class="surveys-section-header">
@@ -386,7 +389,7 @@
             Eligible Projects
             <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">(${_eligible.length})</span>
           </span>
-          ${previewLink}
+          <span style="display:flex;gap:6px;align-items:center;">${previewLink}${editTplBtn}</span>
         </div>
         <table class="surveys-table">
           <thead><tr>
@@ -792,8 +795,10 @@
 
   function showResponseModal(invitation, resp, inv) {
     const tpl = inv?.template_snapshot || {};
-    const questions = Array.isArray(tpl.questions) ? tpl.questions : [];
-    const scaleMax = tpl.scale_max != null ? tpl.scale_max : null;
+    const questions   = Array.isArray(tpl.questions) ? tpl.questions : [];
+    const scaleMin    = tpl.scale_min != null ? tpl.scale_min : null;
+    const scaleMax    = tpl.scale_max != null ? tpl.scale_max : null;
+    const scaleLabels = Array.isArray(tpl.scale_labels) ? tpl.scale_labels : [];
 
     // Survey responses store per-question answers under various possible keys.
     // We try common shapes: resp.answers (object keyed by question id) or the
@@ -810,17 +815,70 @@
       ? Number(resp.avg_likert).toFixed(2) + (scaleMax != null ? ` <span style="color:var(--muted);font-size:11px">/ ${scaleMax}</span>` : '')
       : '—';
 
+    // Format a likert value as "5 / 5 — Excellent" using the scale_labels array.
+    // scale_labels[0] corresponds to scale_min, last corresponds to scale_max.
+    function formatLikert(val) {
+      if (val == null || val === '' || isNaN(Number(val))) return null;
+      const n = Number(val);
+      let labelHtml = '';
+      if (scaleLabels.length && scaleMin != null) {
+        const idx = n - scaleMin;
+        if (idx >= 0 && idx < scaleLabels.length && scaleLabels[idx]) {
+          labelHtml = ` <span style="color:var(--muted);font-size:12px">— ${escapeHtml(String(scaleLabels[idx]))}</span>`;
+        }
+      }
+      const denom = scaleMax != null
+        ? ` <span style="color:var(--muted);font-size:12px">/ ${scaleMax}</span>`
+        : '';
+      return `<strong>${n}</strong>${denom}${labelHtml}`;
+    }
+
+    // Format an NPS value as "9 / 10 — Promoter" with a coloured pill.
+    function formatNps(val) {
+      if (val == null || val === '' || isNaN(Number(val))) return null;
+      const n = Number(val);
+      const cls = n >= 9 ? 'nps-promoter' : n <= 6 ? 'nps-detractor' : 'nps-passive';
+      const lbl = n >= 9 ? 'Promoter' : n <= 6 ? 'Detractor' : 'Passive';
+      return `<span class="nps-pill ${cls}">${n}</span> <span style="color:var(--muted);font-size:12px">/ 10 — ${lbl}</span>`;
+    }
+
+    // One-line scale legend shown above the question list, e.g.
+    //   "Scale: 1 (Poor) – 2 (Fair) – 3 (Good) – 4 (Great) – 5 (Excellent)"
+    let scaleLegend = '';
+    if (scaleMin != null && scaleMax != null && scaleLabels.length) {
+      const parts = [];
+      for (let i = 0; i < scaleLabels.length; i++) {
+        parts.push(`${scaleMin + i} (${escapeHtml(String(scaleLabels[i]))})`);
+      }
+      scaleLegend = `
+        <div style="margin-bottom:14px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--muted);">
+          <strong style="color:var(--text);font-weight:600">Scale:</strong> ${parts.join('  •  ')}
+        </div>`;
+    }
+
     // Render the per-question Q&A. Looks up each answer in resp.answers by
-    // the question's id, falls back to checking top-level resp[id].
+    // the question's id, falls back to checking top-level resp[id]. Format
+    // varies by question type so a likert "5" reads as "5 / 5 — Excellent"
+    // instead of a context-free number.
     const questionRows = questions.length ? questions.map(q => {
       const qid = q.id || q.key || '';
+      const qType = (q.type || '').toLowerCase();
       let answer = answersMap[qid];
       if (answer == null) answer = resp[qid];
-      const display = (answer == null || answer === '')
-        ? '<span style="color:var(--muted);font-style:italic">No answer</span>'
-        : (typeof answer === 'object'
-            ? `<pre style="margin:0;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:pre-wrap">${escapeHtml(JSON.stringify(answer, null, 2))}</pre>`
-            : escapeHtml(String(answer)));
+
+      let display;
+      if (answer == null || answer === '') {
+        display = '<span style="color:var(--muted);font-style:italic">No answer</span>';
+      } else if (qType === 'likert') {
+        display = formatLikert(answer) || escapeHtml(String(answer));
+      } else if (qType === 'nps') {
+        display = formatNps(answer) || escapeHtml(String(answer));
+      } else if (typeof answer === 'object') {
+        display = `<pre style="margin:0;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:pre-wrap">${escapeHtml(JSON.stringify(answer, null, 2))}</pre>`;
+      } else {
+        display = escapeHtml(String(answer));
+      }
+
       return `
         <div style="padding:14px 0;border-bottom:1px solid var(--border)">
           <div style="font-size:12px;color:var(--muted);margin-bottom:6px">${escapeHtml(q.text || q.label || qid)}</div>
@@ -892,6 +950,7 @@
       </div>
 
       <div style="padding:6px 24px 24px;overflow-y:auto;flex:1">
+        ${scaleLegend}
         ${questionRows}
         ${extras ? `<div style="margin-top:18px"><div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:6px">Other Fields</div>${extras}</div>` : ''}
       </div>`;
@@ -1021,6 +1080,492 @@
     if (_expandedYears.has(y)) _expandedYears.delete(y);
     else                        _expandedYears.add(y);
     renderAll();
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════════
+  // SURVEY TEMPLATE EDITOR
+  // Edits survey_templates (questions JSONB + scale settings) and
+  // survey_email_templates (subject + body + signature). Opened from
+  // Setup → Templates → Customer Surveys card or from the ✏ Edit Templates
+  // button in the Eligible header. Subgroup = 'questions' or 'email'.
+  // ════════════════════════════════════════════════════════════════════════
+
+  let _surveyTpls       = [];     // survey_templates rows
+  let _emailTpls        = [];     // survey_email_templates rows
+  let _currentTplId     = null;
+  let _currentSubgroup  = 'questions';
+
+  window.openSurveyTemplateEditor = async function (subgroup) {
+    _currentSubgroup = (subgroup === 'email') ? 'email' : 'questions';
+    _currentTplId = null;  // reset so loadSurveyTplData picks the active one
+    if (!document.getElementById('surveyTplModal')) {
+      createSurveyTplModal();
+    }
+    document.getElementById('surveyTplModal').classList.add('open');
+    const body = document.getElementById('surveyTplBody');
+    if (body) body.innerHTML = '<div style="padding:40px;text-align:center;color:var(--muted);">Loading…</div>';
+    await loadSurveyTplData();
+    renderSurveyTplEditor();
+  };
+
+  window.closeSurveyTplEditor = function () {
+    const m = document.getElementById('surveyTplModal');
+    if (m) m.classList.remove('open');
+  };
+
+  async function loadSurveyTplData() {
+    const [qRes, eRes] = await Promise.all([
+      sb.from('survey_templates')
+        .select('id, name, version, questions, scale_min, scale_max, scale_labels, is_active, created_at')
+        .order('created_at', { ascending: false }),
+      sb.from('survey_email_templates')
+        .select('id, name, subject, body_template, signature_emp_id, is_active, created_at')
+        .order('created_at', { ascending: false }),
+    ]);
+    _surveyTpls = qRes.data || [];
+    _emailTpls  = eRes.data || [];
+
+    const list = (_currentSubgroup === 'email') ? _emailTpls : _surveyTpls;
+    if (!_currentTplId || !list.find(t => t.id === _currentTplId)) {
+      const active = list.find(t => t.is_active) || list[0];
+      _currentTplId = active ? active.id : null;
+    }
+  }
+
+  function createSurveyTplModal() {
+    const html = `
+      <div id="surveyTplModal" class="modal-backdrop" onclick="if(event.target===this) closeSurveyTplEditor()">
+        <div class="modal" style="width:92%;max-width:1000px;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;">
+          <div class="modal-header">
+            <div class="modal-title" id="surveyTplTitle">Edit Survey Templates</div>
+            <button class="modal-close" onclick="closeSurveyTplEditor()">&#x2715;</button>
+          </div>
+          <div class="modal-body" id="surveyTplBody" style="flex:1;overflow-y:auto;padding:24px;"></div>
+        </div>
+      </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+  }
+
+  function renderSurveyTplEditor() {
+    const titleEl = document.getElementById('surveyTplTitle');
+    const body    = document.getElementById('surveyTplBody');
+    if (!body) return;
+    if (_currentSubgroup === 'email') {
+      if (titleEl) titleEl.textContent = 'Edit Survey Email Template';
+      body.innerHTML = renderEmailTplBody();
+    } else {
+      if (titleEl) titleEl.textContent = 'Edit Survey Questions';
+      body.innerHTML = renderQuestionsTplBody();
+    }
+  }
+
+  function tplSelectorHTML(list, kind) {
+    const opts = list.map(t => {
+      const star = t.is_active ? ' (active)' : '';
+      const sel  = (t.id === _currentTplId) ? 'selected' : '';
+      return `<option value="${t.id}" ${sel}>${escapeHtml(t.name || 'Untitled')}${star}</option>`;
+    }).join('');
+    const tpl = list.find(t => t.id === _currentTplId);
+    const isActive = tpl?.is_active;
+    return `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:14px;display:grid;grid-template-columns:1fr auto auto auto;gap:10px;align-items:end;">
+        <div>
+          <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Editing Template</div>
+          <select onchange="surveyTplSwitch(this.value)" style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;color:var(--text);font-family:inherit;outline:none;">${opts}</select>
+        </div>
+        <button onclick="surveyTplSetActive('${kind}')" ${isActive ? 'disabled' : ''} style="background:${isActive ? 'transparent' : 'var(--surface2)'};border:1px solid var(--border);border-radius:6px;padding:7px 12px;font-size:12px;color:${isActive ? 'var(--muted)' : 'var(--text)'};cursor:${isActive ? 'default' : 'pointer'};font-family:inherit;opacity:${isActive ? '0.5' : '1'};">${isActive ? '✓ Active' : 'Make Active'}</button>
+        <button onclick="surveyTplDuplicate('${kind}')" style="background:var(--amber);border:none;border-radius:6px;padding:7px 12px;font-size:12px;color:var(--bg);font-weight:600;cursor:pointer;font-family:inherit;">+ Duplicate</button>
+        <button onclick="surveyTplDelete('${kind}')" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:7px 12px;font-size:12px;color:var(--muted);cursor:pointer;font-family:inherit;">Delete</button>
+      </div>`;
+  }
+
+  function autoSaveBannerHTML() {
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:14px;background:var(--amber-glow);border:1px solid var(--amber-dim);border-radius:6px;font-size:12px;color:var(--text);">
+        <span style="font-size:14px;">💾</span>
+        <span><strong>Changes save automatically</strong> when you click or tab out of a field.</span>
+      </div>`;
+  }
+
+  function renderQuestionsTplBody() {
+    if (!_surveyTpls.length) {
+      return `<div style="text-align:center;padding:40px;color:var(--muted);">
+        No survey question templates yet.
+        <div style="margin-top:12px;"><button onclick="surveyTplCreateFirst('questions')" style="background:var(--amber);border:none;border-radius:6px;padding:8px 16px;color:var(--bg);font-weight:600;cursor:pointer;font-family:inherit;">+ Create First Template</button></div>
+      </div>`;
+    }
+    const tpl = _surveyTpls.find(t => t.id === _currentTplId);
+    if (!tpl) return '<div style="padding:40px;text-align:center;color:var(--muted);">Pick a template above.</div>';
+
+    const questions = Array.isArray(tpl.questions) ? tpl.questions : [];
+    const labels = Array.isArray(tpl.scale_labels) ? tpl.scale_labels.join(', ')
+                 : (tpl.scale_labels || '');
+
+    const inputCss = "width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;color:var(--text);font-family:inherit;outline:none;";
+    const tinyLab  = "font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;";
+
+    return `
+      <div style="margin-bottom:14px;">
+        <div style="font-size:13px;color:var(--muted);">Questions, scale, and labels for the public survey form. Existing responses keep their original snapshot — edits only affect future sends.</div>
+      </div>
+      ${autoSaveBannerHTML()}
+      ${tplSelectorHTML(_surveyTpls, 'questions')}
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;display:grid;grid-template-columns:2fr 80px 80px 2fr;gap:12px;align-items:end;">
+        <div>
+          <div style="${tinyLab}">Template Name</div>
+          <input type="text" value="${escapeHtml(tpl.name || '')}" onchange="surveyTplUpdateField('${tpl.id}','questions','name',this.value)" style="${inputCss}">
+        </div>
+        <div>
+          <div style="${tinyLab}">Scale Min</div>
+          <input type="number" value="${tpl.scale_min ?? 1}" onchange="surveyTplUpdateField('${tpl.id}','questions','scale_min',parseInt(this.value)||0)" style="${inputCss}">
+        </div>
+        <div>
+          <div style="${tinyLab}">Scale Max</div>
+          <input type="number" value="${tpl.scale_max ?? 5}" onchange="surveyTplUpdateField('${tpl.id}','questions','scale_max',parseInt(this.value)||0)" style="${inputCss}">
+        </div>
+        <div>
+          <div style="${tinyLab}">Labels (low → high, comma-separated)</div>
+          <input type="text" value="${escapeHtml(labels)}" onchange="surveyTplUpdateLabels('${tpl.id}',this.value)" style="${inputCss}">
+        </div>
+      </div>
+
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+        <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;">Questions (${questions.length})</div>
+        <button onclick="surveyTplAddQuestion('${tpl.id}')" style="background:var(--amber-glow);border:1px solid var(--amber);border-radius:6px;padding:5px 11px;font-size:12px;color:var(--text);cursor:pointer;font-family:inherit;">+ Add Question</button>
+      </div>
+
+      ${questions.length === 0
+        ? '<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:8px;">No questions yet. Click + Add Question.</div>'
+        : questions.map((q, i) => renderQuestionRow(tpl.id, q, i, questions.length)).join('')
+      }
+    `;
+  }
+
+  function renderQuestionRow(tplId, q, idx, total) {
+    const inputCss = "background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:13px;color:var(--text);font-family:inherit;outline:none;";
+    const known = ['likert', 'text', 'nps'];
+    const t = q.type || 'likert';
+    const typeOpts = (known.includes(t) ? known : known.concat([t]))
+      .map(x => `<option value="${x}" ${x === t ? 'selected' : ''}>${x}</option>`).join('');
+    const text = q.text || q.label || '';
+    const upDis   = (idx === 0);
+    const downDis = (idx === total - 1);
+    return `
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;display:flex;gap:10px;align-items:center;">
+        <div style="display:flex;flex-direction:column;gap:2px;">
+          <button onclick="surveyTplMoveQuestion('${tplId}',${idx},-1)" ${upDis ? 'disabled' : ''} title="Move up" style="background:transparent;border:1px solid var(--border);border-radius:4px;width:22px;height:18px;font-size:10px;color:var(--muted);cursor:${upDis ? 'not-allowed' : 'pointer'};opacity:${upDis ? '0.4' : '1'};font-family:inherit;padding:0;">▲</button>
+          <button onclick="surveyTplMoveQuestion('${tplId}',${idx},1)"  ${downDis ? 'disabled' : ''} title="Move down" style="background:transparent;border:1px solid var(--border);border-radius:4px;width:22px;height:18px;font-size:10px;color:var(--muted);cursor:${downDis ? 'not-allowed' : 'pointer'};opacity:${downDis ? '0.4' : '1'};font-family:inherit;padding:0;">▼</button>
+        </div>
+        <span style="font-size:11px;color:var(--muted);min-width:24px;">Q${idx + 1}</span>
+        <select onchange="surveyTplUpdateQuestion('${tplId}',${idx},'type',this.value)" style="${inputCss}width:90px;">${typeOpts}</select>
+        <input type="text" value="${escapeHtml(text)}" onchange="surveyTplUpdateQuestion('${tplId}',${idx},'text',this.value)" style="${inputCss}flex:1;">
+        <button onclick="surveyTplRemoveQuestion('${tplId}',${idx})" title="Delete this question" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:5px 9px;font-size:13px;color:var(--muted);cursor:pointer;font-family:inherit;">×</button>
+      </div>`;
+  }
+
+  function renderEmailTplBody() {
+    if (!_emailTpls.length) {
+      return `<div style="text-align:center;padding:40px;color:var(--muted);">
+        No email templates yet.
+        <div style="margin-top:12px;"><button onclick="surveyTplCreateFirst('email')" style="background:var(--amber);border:none;border-radius:6px;padding:8px 16px;color:var(--bg);font-weight:600;cursor:pointer;font-family:inherit;">+ Create First Template</button></div>
+      </div>`;
+    }
+    const tpl = _emailTpls.find(t => t.id === _currentTplId);
+    if (!tpl) return '<div style="padding:40px;text-align:center;color:var(--muted);">Pick a template above.</div>';
+
+    const inputCss = "width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;color:var(--text);font-family:inherit;outline:none;";
+    const tinyLab  = "font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;";
+
+    // Signature employee dropdown — pulls from the global employees array
+    const emps = (typeof employees !== 'undefined' ? employees : []).filter(e => e && e.active !== false);
+    const empOpts = '<option value="">— None —</option>' + emps.map(e => {
+      const name = `${e.firstName || ''} ${e.lastName || ''}`.trim() || e.email || e.id;
+      return `<option value="${e.id}" ${e.id === tpl.signature_emp_id ? 'selected' : ''}>${escapeHtml(name)}</option>`;
+    }).join('');
+
+    return `
+      <div style="margin-bottom:14px;">
+        <div style="font-size:13px;color:var(--muted);">Subject and body of the email sent to customers when a survey is dispatched. Use <code>{{placeholder}}</code> syntax for dynamic values.</div>
+      </div>
+      ${autoSaveBannerHTML()}
+      ${tplSelectorHTML(_emailTpls, 'email')}
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px;">
+        <div style="${tinyLab}">Template Name</div>
+        <input type="text" value="${escapeHtml(tpl.name || '')}" onchange="surveyTplUpdateField('${tpl.id}','email','name',this.value)" style="${inputCss}margin-bottom:14px;">
+
+        <div style="${tinyLab}">Subject</div>
+        <input type="text" value="${escapeHtml(tpl.subject || '')}" onchange="surveyTplUpdateField('${tpl.id}','email','subject',this.value)" style="${inputCss}margin-bottom:14px;">
+
+        <div style="${tinyLab}">Body</div>
+        <textarea onchange="surveyTplUpdateField('${tpl.id}','email','body_template',this.value)" style="${inputCss}min-height:240px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.5;margin-bottom:14px;resize:vertical;">${escapeHtml(tpl.body_template || '')}</textarea>
+
+        <div style="${tinyLab}">Signature Employee</div>
+        <select onchange="surveyTplUpdateField('${tpl.id}','email','signature_emp_id',this.value || null)" style="${inputCss}">${empOpts}</select>
+      </div>
+
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px 14px;font-size:11px;color:var(--muted);line-height:1.6;">
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px;">Available placeholders</div>
+        Substituted by the <code>survey-send</code> edge function. Common ones include <code>{{contactFirstName}}</code>, <code>{{contactFullName}}</code>, <code>{{projectName}}</code>, <code>{{clientName}}</code>, <code>{{senderName}}</code>, <code>{{surveyLink}}</code>. The exact set depends on what the edge function supports — verify with the preview modal before sending broadly.
+      </div>
+    `;
+  }
+
+
+  // ── Editor actions (window-exposed for inline onclicks) ────────────────────
+
+  window.surveyTplSwitch = function (id) {
+    _currentTplId = id;
+    renderSurveyTplEditor();
+  };
+
+  window.surveyTplUpdateField = async function (id, kind, field, value) {
+    const table = (kind === 'email') ? 'survey_email_templates' : 'survey_templates';
+    try {
+      const { error } = await sb.from(table).update({ [field]: value }).eq('id', id);
+      if (error) throw error;
+      const list = (kind === 'email') ? _emailTpls : _surveyTpls;
+      const t = list.find(x => x.id === id);
+      if (t) t[field] = value;
+      toast('✓ Saved');
+      // If name changed, the dropdown label needs refresh.
+      if (field === 'name') renderSurveyTplEditor();
+    } catch (e) {
+      console.error('[surveys] template update failed', e);
+      toast('Save failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveyTplUpdateLabels = function (id, raw) {
+    const arr = String(raw).split(',').map(s => s.trim()).filter(Boolean);
+    surveyTplUpdateField(id, 'questions', 'scale_labels', arr);
+  };
+
+  window.surveyTplUpdateQuestion = async function (tplId, idx, field, value) {
+    const t = _surveyTpls.find(x => x.id === tplId);
+    if (!t) return;
+    const qs = Array.isArray(t.questions) ? [...t.questions] : [];
+    if (!qs[idx]) return;
+    qs[idx] = { ...qs[idx], [field]: value };  // preserve all other fields
+    try {
+      const { error } = await sb.from('survey_templates').update({ questions: qs }).eq('id', tplId);
+      if (error) throw error;
+      t.questions = qs;
+      toast('✓ Saved');
+    } catch (e) {
+      console.error('[surveys] question update failed', e);
+      toast('Save failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveyTplAddQuestion = async function (tplId) {
+    const t = _surveyTpls.find(x => x.id === tplId);
+    if (!t) return;
+    const qs = Array.isArray(t.questions) ? [...t.questions] : [];
+    const newId = 'q_' + Date.now().toString(36);
+    qs.push({ id: newId, type: 'likert', text: 'New question' });
+    try {
+      const { error } = await sb.from('survey_templates').update({ questions: qs }).eq('id', tplId);
+      if (error) throw error;
+      t.questions = qs;
+      renderSurveyTplEditor();
+      toast('✓ Question added');
+    } catch (e) {
+      console.error('[surveys] add question failed', e);
+      toast('Save failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveyTplRemoveQuestion = async function (tplId, idx) {
+    const t = _surveyTpls.find(x => x.id === tplId);
+    if (!t) return;
+    const qs = Array.isArray(t.questions) ? [...t.questions] : [];
+    if (!qs[idx]) return;
+    if (!confirm(`Delete question "${qs[idx].text || qs[idx].label || ''}"?`)) return;
+    qs.splice(idx, 1);
+    try {
+      const { error } = await sb.from('survey_templates').update({ questions: qs }).eq('id', tplId);
+      if (error) throw error;
+      t.questions = qs;
+      renderSurveyTplEditor();
+      toast('✓ Question removed');
+    } catch (e) {
+      console.error('[surveys] remove question failed', e);
+      toast('Delete failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveyTplMoveQuestion = async function (tplId, idx, dir) {
+    const t = _surveyTpls.find(x => x.id === tplId);
+    if (!t) return;
+    const qs = Array.isArray(t.questions) ? [...t.questions] : [];
+    const newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= qs.length) return;
+    [qs[idx], qs[newIdx]] = [qs[newIdx], qs[idx]];
+    try {
+      const { error } = await sb.from('survey_templates').update({ questions: qs }).eq('id', tplId);
+      if (error) throw error;
+      t.questions = qs;
+      renderSurveyTplEditor();
+    } catch (e) {
+      console.error('[surveys] reorder failed', e);
+      toast('Save failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveyTplSetActive = async function (kind) {
+    if (!_currentTplId) return;
+    const table = (kind === 'email') ? 'survey_email_templates' : 'survey_templates';
+    const list  = (kind === 'email') ? _emailTpls : _surveyTpls;
+    const tpl   = list.find(t => t.id === _currentTplId);
+    if (!tpl) return;
+    if (tpl.is_active) { toast('Already active'); return; }
+    try {
+      // Deactivate any others that are currently active, then activate this one.
+      const others = list.filter(t => t.is_active && t.id !== _currentTplId).map(t => t.id);
+      if (others.length) {
+        const { error: e1 } = await sb.from(table).update({ is_active: false }).in('id', others);
+        if (e1) throw e1;
+      }
+      const { error: e2 } = await sb.from(table).update({ is_active: true }).eq('id', _currentTplId);
+      if (e2) throw e2;
+      list.forEach(t => { t.is_active = (t.id === _currentTplId); });
+      renderSurveyTplEditor();
+      toast('✓ Marked active');
+    } catch (e) {
+      console.error('[surveys] set active failed', e);
+      toast('Save failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveyTplDuplicate = async function (kind) {
+    if (!_currentTplId) return;
+    const table = (kind === 'email') ? 'survey_email_templates' : 'survey_templates';
+    const list  = (kind === 'email') ? _emailTpls : _surveyTpls;
+    const src   = list.find(t => t.id === _currentTplId);
+    if (!src) return;
+    const copy = { ...src };
+    delete copy.id;
+    delete copy.created_at;
+    copy.is_active = false;
+    copy.name = (src.name || 'Untitled') + ' (copy)';
+    try {
+      const { data, error } = await sb.from(table).insert([copy]).select().single();
+      if (error) throw error;
+      list.unshift(data);
+      _currentTplId = data.id;
+      renderSurveyTplEditor();
+      toast('✓ Duplicated');
+    } catch (e) {
+      console.error('[surveys] duplicate failed', e);
+      toast('Duplicate failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveyTplDelete = async function (kind) {
+    if (!_currentTplId) return;
+    const table = (kind === 'email') ? 'survey_email_templates' : 'survey_templates';
+    const list  = (kind === 'email') ? _emailTpls : _surveyTpls;
+    const tpl   = list.find(t => t.id === _currentTplId);
+    if (!tpl) return;
+
+    if (list.length <= 1) {
+      alert('Can\'t delete the only ' + (kind === 'email' ? 'email' : 'question') + ' template. Create another one first.');
+      return;
+    }
+
+    // Delete protection: count survey_invitations referencing this template.
+    const refField = (kind === 'email') ? 'email_template_id' : 'template_id';
+    const { count, error: cntErr } = await sb.from('survey_invitations')
+      .select('id', { count: 'exact', head: true })
+      .eq(refField, _currentTplId);
+    if (cntErr) {
+      console.error('[surveys] delete-protection check failed', cntErr);
+      toast('Couldn\'t verify references — aborting');
+      return;
+    }
+
+    if (count && count > 0) {
+      const deactivate = confirm(
+        `This template was used by ${count} sent survey${count === 1 ? '' : 's'}.\n\n` +
+        `Their snapshots still work, but deleting will leave the rows with a tombstone reference.\n\n` +
+        `OK to deactivate instead (recommended). Cancel to actually delete.`
+      );
+      if (deactivate) {
+        try {
+          const { error } = await sb.from(table).update({ is_active: false }).eq('id', _currentTplId);
+          if (error) throw error;
+          tpl.is_active = false;
+          renderSurveyTplEditor();
+          toast('✓ Deactivated');
+        } catch (e) {
+          console.error('[surveys] deactivate failed', e);
+          toast('Save failed: ' + (e.message || e));
+        }
+        return;
+      }
+      // else: fall through to hard delete
+    }
+
+    if (!confirm(`Permanently delete template "${tpl.name || 'Untitled'}"? This cannot be undone.`)) return;
+
+    try {
+      const { error } = await sb.from(table).delete().eq('id', _currentTplId);
+      if (error) throw error;
+      const idx = list.findIndex(t => t.id === _currentTplId);
+      if (idx > -1) list.splice(idx, 1);
+      // If the deleted one was the active one, promote first remaining to active.
+      if (tpl.is_active && list.length && !list.some(t => t.is_active)) {
+        const promote = list[0];
+        const { error: pErr } = await sb.from(table).update({ is_active: true }).eq('id', promote.id);
+        if (!pErr) promote.is_active = true;
+      }
+      _currentTplId = list[0]?.id || null;
+      renderSurveyTplEditor();
+      toast('✓ Deleted');
+    } catch (e) {
+      console.error('[surveys] delete failed', e);
+      toast('Delete failed: ' + (e.message || e));
+    }
+  };
+
+  window.surveyTplCreateFirst = async function (kind) {
+    const table = (kind === 'email') ? 'survey_email_templates' : 'survey_templates';
+    const list  = (kind === 'email') ? _emailTpls : _surveyTpls;
+    const seed  = (kind === 'email')
+      ? {
+          name: 'Default',
+          subject: 'How was your experience with NU Labs?',
+          body_template: 'Hi {{contactFirstName}},\n\nThanks for working with NU Labs. We\'d love your feedback — it takes about a minute:\n\n{{surveyLink}}\n\nThanks,\n{{senderName}}',
+          signature_emp_id: null,
+          is_active: true
+        }
+      : {
+          name: 'Standard v1',
+          version: 1,
+          questions: [
+            { id: 'q1', type: 'likert', text: 'How would you rate the overall quality of work?' },
+            { id: 'q2', type: 'likert', text: 'How would you rate communication during the project?' },
+            { id: 'q3', type: 'text',   text: 'Any additional comments?' }
+          ],
+          scale_min: 1,
+          scale_max: 5,
+          scale_labels: ['Poor', 'Fair', 'Good', 'Great', 'Excellent'],
+          is_active: true
+        };
+    try {
+      const { data, error } = await sb.from(table).insert([seed]).select().single();
+      if (error) throw error;
+      list.unshift(data);
+      _currentTplId = data.id;
+      renderSurveyTplEditor();
+      toast('✓ Created');
+    } catch (e) {
+      console.error('[surveys] create-first failed', e);
+      toast('Create failed: ' + (e.message || e));
+    }
   };
 
 
