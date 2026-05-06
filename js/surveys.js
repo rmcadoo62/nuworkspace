@@ -41,9 +41,14 @@
 
   // ── Panel routing ─────────────────────────────────────────────────────────
 
-  window.openSurveyQueuePanel = function () {
+  window.openSurveyQueuePanel = function (navEl) {
     document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-    document.getElementById('navSetup')?.classList.add('active');
+    // Highlight the dedicated sidebar nav item. Falls back to whatever
+    // element was passed in (e.g. when called programmatically from a tile
+    // or a chatter notification click).
+    const navItem = document.getElementById('navCustomerSurveys');
+    if (navItem) navItem.classList.add('active');
+    else if (navEl) navEl.classList.add('active');
     activeProjectId = null;
     document.getElementById('topbarName').textContent = 'Customer Surveys';
     document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
