@@ -9,35 +9,7 @@ function runGlobalSearch(q) {
 
   let html = '';
 
-  // Projects
-  const projMatches = projects.filter(p => p.name.toLowerCase().includes(q)).slice(0, 5);
-  if (projMatches.length) {
-    html += '<div class="gs-section"><div class="gs-section-label">Projects</div>';
-    projMatches.forEach(p => {
-      const info = projectInfo[p.id] || {};
-      html += '<div class="gs-item" data-action="project" data-id="' + p.id + '">' +
-        '<span class="gs-item-icon">' + (p.emoji||'📁') + '</span>' +
-        '<div><div class="gs-item-main">' + p.name + '</div>' +
-        '<div class="gs-item-sub">' + (info.status||'') + '</div></div></div>';
-    });
-    html += '</div>';
-  }
-
-  // Tasks
-  const taskMatches = taskStore.filter(t => t.name.toLowerCase().includes(q)).slice(0, 5);
-  if (taskMatches.length) {
-    html += '<div class="gs-section"><div class="gs-section-label">Tasks</div>';
-    taskMatches.forEach(t => {
-      const proj = projects.find(p => p.id === t.proj);
-      html += '<div class="gs-item" data-action="task" data-proj="' + t.proj + '" data-id="' + t._id + '">' +
-        '<span class="gs-item-icon">✓</span>' +
-        '<div><div class="gs-item-main">' + t.name + '</div>' +
-        '<div class="gs-item-sub">' + (proj ? proj.name : '') + '</div></div></div>';
-    });
-    html += '</div>';
-  }
-
-  // Clients
+  // Clients (entity-level matches first — they're usually what you want)
   const clientMatches = clientStore.filter(c => c.name.toLowerCase().includes(q)).slice(0, 4);
   if (clientMatches.length) {
     html += '<div class="gs-section"><div class="gs-section-label">Clients</div>';
@@ -60,6 +32,35 @@ function runGlobalSearch(q) {
         '<span class="gs-item-icon">👤</span>' +
         '<div><div class="gs-item-main">' + c.firstName + ' ' + c.lastName + '</div>' +
         '<div class="gs-item-sub">' + (c.email||'') + '</div></div></div>';
+    });
+    html += '</div>';
+  }
+
+  // Projects
+  const projMatches = projects.filter(p => p.name.toLowerCase().includes(q)).slice(0, 5);
+  if (projMatches.length) {
+    html += '<div class="gs-section"><div class="gs-section-label">Projects</div>';
+    projMatches.forEach(p => {
+      const info = projectInfo[p.id] || {};
+      html += '<div class="gs-item" data-action="project" data-id="' + p.id + '">' +
+        '<span class="gs-item-icon">' + (p.emoji||'📁') + '</span>' +
+        '<div><div class="gs-item-main">' + p.name + '</div>' +
+        '<div class="gs-item-sub">' + (info.status||'') + '</div></div></div>';
+    });
+    html += '</div>';
+  }
+
+  // Tasks (capped at 3 — task names are repetitive and tend to flood the
+  // panel; keeping them shorter pushes them to a tertiary signal)
+  const taskMatches = taskStore.filter(t => t.name.toLowerCase().includes(q)).slice(0, 3);
+  if (taskMatches.length) {
+    html += '<div class="gs-section"><div class="gs-section-label">Tasks</div>';
+    taskMatches.forEach(t => {
+      const proj = projects.find(p => p.id === t.proj);
+      html += '<div class="gs-item" data-action="task" data-proj="' + t.proj + '" data-id="' + t._id + '">' +
+        '<span class="gs-item-icon">✓</span>' +
+        '<div><div class="gs-item-main">' + t.name + '</div>' +
+        '<div class="gs-item-sub">' + (proj ? proj.name : '') + '</div></div></div>';
     });
     html += '</div>';
   }

@@ -431,9 +431,30 @@ let _clientSearchQuery = '';
 
 function renderClientsPanel(search) {
   if (search !== undefined) _clientSearchQuery = search;
-  const q = _clientSearchQuery.toLowerCase();
-  const filtered = clientStore.filter(c => c.name.toLowerCase().includes(q))
+  const q = _clientSearchQuery.toLowerCase().trim();
+
+  // Build a per-client list of contact-name matches once, so we can both
+  // (a) filter by it and (b) show a "↳ matched contact" badge on the card.
+  const contactMatchesByClient = {};
+  if (q) {
+    for (const ct of contactStore) {
+      const fullName = `${ct.firstName || ''} ${ct.lastName || ''}`.trim();
+      const email    = ct.email || '';
+      if (fullName.toLowerCase().includes(q) || email.toLowerCase().includes(q)) {
+        if (!contactMatchesByClient[ct.clientId]) contactMatchesByClient[ct.clientId] = [];
+        contactMatchesByClient[ct.clientId].push(fullName || email);
+      }
+    }
+  }
+
+  const filtered = clientStore
+    .filter(c => {
+      if (!q) return true;
+      if (c.name.toLowerCase().includes(q)) return true;
+      return !!contactMatchesByClient[c.id];
+    })
     .sort((a, b) => a.name.localeCompare(b.name));
+
   const body = document.getElementById('clientsPanelBody');
   if (!body) return;
 
@@ -449,7 +470,7 @@ function renderClientsPanel(search) {
   body.innerHTML = `
     <div class="emp-panel-header">
       <div class="emp-panel-title">Clients <span style="font-size:14px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-weight:400">(${clientStore.length})</span></div>
-      <input class="emp-search" placeholder="Search clients…" value="${_clientSearchQuery}" oninput="_clientSearchQuery=this.value;renderClientsPanel()" />
+      <input class="emp-search" placeholder="Search clients & contacts…" value="${_clientSearchQuery}" oninput="_clientSearchQuery=this.value;renderClientsPanel()" />
       ${can('add_clients') ? `<button class="emp-add-btn" style="background:var(--surface2);border:1.5px solid var(--border);color:var(--text);margin-right:8px" onclick="openSfImportPanel()" title="Import or backfill from a Salesforce CSV export">📥 Import CSV</button>` : ''}
       ${can('add_clients') ? `<button class="emp-add-btn" onclick="openNewClientDrawer()">+ Add Client</button>` : ''}
     </div>
@@ -459,6 +480,19 @@ function renderClientsPanel(search) {
         const jobs = projects.filter(p => (projectInfo[p.id]||{}).clientId === c.id);
         const initials = c.name.split(' ').map(w=>w[0]||'').join('').substring(0,2).toUpperCase();
         const color = colors[Math.abs(c.name.split('').reduce((a,ch)=>a+ch.charCodeAt(0),0)) % colors.length];
+
+        // Show "↳ Jennifer Lovelady" badge when this card surfaced via a
+        // contact match and NOT via the client name. If client name also
+        // matches the query, skip the badge (the name itself is the reason).
+        let matchBadge = '';
+        const nameMatched = q && c.name.toLowerCase().includes(q);
+        const contactMatches = (q && !nameMatched) ? (contactMatchesByClient[c.id] || []) : [];
+        if (contactMatches.length) {
+          const shown = contactMatches.slice(0, 3).map(n => esc(n)).join(', ');
+          const more  = contactMatches.length > 3 ? ` <span style="color:var(--muted)">+${contactMatches.length - 3} more</span>` : '';
+          matchBadge = `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);font-size:11px;color:var(--amber);">↳ ${shown}${more}</div>`;
+        }
+
         return `<div class="client-card" onclick="openClientDrawer('${c.id}')">
           <div class="client-actions">
             <button class="client-action-btn" onclick="event.stopPropagation();openClientDrawer('${c.id}')" title="Edit">&#x270E;</button>
@@ -477,9 +511,10 @@ function renderClientsPanel(search) {
             <div style="font-size:11px;color:var(--muted)">👤 <strong style="color:var(--text)">${contacts.length}</strong> contact${contacts.length!==1?'s':''}</div>
             <div style="font-size:11px;color:var(--muted)">📁 <strong style="color:var(--text)">${jobs.length}</strong> job${jobs.length!==1?'s':''}</div>
           </div>
+          ${matchBadge}
         </div>`;
       }).join('')}
-      ${filtered.length === 0 ? `<div style="color:var(--muted);font-size:13px;padding:20px 0">No clients yet — add one above.</div>` : ''}
+      ${filtered.length === 0 ? `<div style="color:var(--muted);font-size:13px;padding:20px 0">${q ? `No clients or contacts match "${esc(_clientSearchQuery)}".` : 'No clients yet — add one above.'}</div>` : ''}
     </div>`;
 
   // Restore focus and cursor position if the search input was active before re-render
