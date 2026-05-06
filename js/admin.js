@@ -1379,6 +1379,18 @@ let _auditChatterFilters = {
   dateTo:   '',
   keyword:  '',
 };
+let _auditFieldFilters = {
+  empName:    '',   // matches activity_log.employee_name
+  projId:     '',   // applied client-side (record_type→project lookup needed)
+  dateFrom:   '',
+  dateTo:     '',
+  recordType: '',   // 'tasks' | 'projects' | 'employees' | 'shipping' | ''
+  keyword:    '',   // ilike match across record_label / field_changed / old_value / new_value
+};
+let _auditFieldSort = {
+  col: 'created_at',  // 'created_at' | 'employee_name' | 'field_changed'
+  dir: 'desc',        // 'asc' | 'desc'
+};
 
 // Small HTML escape — used for any user-supplied string we render.
 function _auditEsc(s) {
@@ -1448,46 +1460,207 @@ function _switchAuditTab(tab) {
 async function _renderAuditFieldChangesTab() {
   const body = document.getElementById('auditTabBody');
   if (!body) return;
-  body.innerHTML = '<div style="color:var(--muted);font-size:13px">Loading…</div>';
 
-  let logs = [];
-  if (sb) {
-    const { data } = await sb.from('activity_log')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(200);
-    logs = data || [];
+  // Static chrome (filters bar + tracked-fields settings card + empty list
+  // container). Filters/sort changes only re-render the list, not the chrome.
+  body.innerHTML =
+    _auditFieldFiltersHtml() +
+    _auditFieldSettingsHtml() +
+    '<div id="auditFieldList"><div style="color:var(--muted);font-size:13px;padding:20px 0">Loading…</div></div>';
+
+  await _loadAndRenderAuditFieldList();
+}
+
+// Filter bar — mirrors the Chatter Activity filter pattern with one extra
+// dropdown (Record type). Project filter is applied client-side (the
+// activity_log table doesn't have a project_id column; the project for any
+// given row has to be derived via record_type + record_id → tasks → project).
+function _auditFieldFiltersHtml() {
+  const f = _auditFieldFilters;
+
+  // Employee dropdown — activity_log stores employee_name as a denormalized
+  // column, so we filter by name. Same active-only convention as the
+  // Chatter tab.
+  const sortedEmps = [...employees]
+    .filter(e =>
+      e.isActive !== false &&
+      !e.terminationDate &&
+      e.id !== 'aaaaaaaa-0000-0000-0000-000000000001'
+    )
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const empOpts = '<option value="">All employees</option>' +
+    sortedEmps.map(e =>
+      '<option value="' + _auditEsc(e.name) + '"' + (f.empName === e.name ? ' selected' : '') + '>' + _auditEsc(e.name) + '</option>'
+    ).join('');
+
+  // Project dropdown — exclude closed unless one is currently selected.
+  const projInfoLookup = (typeof projectInfo === 'object' && projectInfo) ? projectInfo : {};
+  const sortedProjs = [...projects]
+    .filter(p => {
+      if (p.id === f.projId) return true;
+      return (projInfoLookup[p.id] || {}).status !== 'closed';
+    })
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  const projOpts = '<option value="">All open projects</option>' +
+    sortedProjs.map(p =>
+      '<option value="' + p.id + '"' + (f.projId === p.id ? ' selected' : '') + '>' + _auditEsc((p.emoji ? p.emoji + ' ' : '') + p.name) + '</option>'
+    ).join('');
+
+  // Record type dropdown
+  const typeOpts = '<option value="">All record types</option>' +
+    [['tasks','Tasks'], ['projects','Projects'], ['employees','Employees'], ['shipping','Shipping & Receiving']]
+      .map(([k, l]) => '<option value="' + k + '"' + (f.recordType === k ? ' selected' : '') + '>' + l + '</option>').join('');
+
+  const fieldStyle = 'background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;font-size:13px;color:var(--text);font-family:\x27DM Sans\x27,sans-serif';
+  const labelStyle = 'font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-bottom:4px;display:block';
+
+  return '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;margin-bottom:20px">' +
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;align-items:end">' +
+      '<div><label style="' + labelStyle + '">Employee</label>' +
+        '<select onchange="_updateAuditFieldFilter(\x27empName\x27,this.value)" style="' + fieldStyle + ';width:100%">' + empOpts + '</select></div>' +
+      '<div><label style="' + labelStyle + '">Project</label>' +
+        '<select onchange="_updateAuditFieldFilter(\x27projId\x27,this.value)" style="' + fieldStyle + ';width:100%">' + projOpts + '</select></div>' +
+      '<div><label style="' + labelStyle + '">Record type</label>' +
+        '<select onchange="_updateAuditFieldFilter(\x27recordType\x27,this.value)" style="' + fieldStyle + ';width:100%">' + typeOpts + '</select></div>' +
+      '<div><label style="' + labelStyle + '">From</label>' +
+        '<input type="date" value="' + _auditEsc(f.dateFrom) + '" onchange="_updateAuditFieldFilter(\x27dateFrom\x27,this.value)" style="' + fieldStyle + ';width:100%"></div>' +
+      '<div><label style="' + labelStyle + '">To</label>' +
+        '<input type="date" value="' + _auditEsc(f.dateTo) + '" onchange="_updateAuditFieldFilter(\x27dateTo\x27,this.value)" style="' + fieldStyle + ';width:100%"></div>' +
+      '<div style="grid-column:1/-1;display:flex;gap:10px;align-items:end">' +
+        '<div style="flex:1"><label style="' + labelStyle + '">Search text</label>' +
+          '<input type="text" value="' + _auditEsc(f.keyword) + '" placeholder="Match record, field, or value text…" ' +
+            'onkeydown="if(event.key===\x27Enter\x27){_updateAuditFieldFilter(\x27keyword\x27,this.value);}" ' +
+            'onblur="_updateAuditFieldFilter(\x27keyword\x27,this.value)" style="' + fieldStyle + ';width:100%"></div>' +
+        '<button onclick="_clearAuditFieldFilters()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-size:12px;color:var(--muted);cursor:pointer;font-family:\x27DM Sans\x27,sans-serif">Clear</button>' +
+      '</div>' +
+    '</div></div>';
+}
+
+function _updateAuditFieldFilter(field, value) {
+  if (_auditFieldFilters[field] === value) return;  // no-op (avoids onblur spam)
+  _auditFieldFilters[field] = value;
+  _loadAndRenderAuditFieldList();
+}
+
+function _clearAuditFieldFilters() {
+  _auditFieldFilters = { empName:'', projId:'', dateFrom:'', dateTo:'', recordType:'', keyword:'' };
+  _renderAuditFieldChangesTab();   // full re-render so the inputs reset
+}
+
+function _setAuditFieldSort(col) {
+  if (_auditFieldSort.col === col) {
+    _auditFieldSort.dir = _auditFieldSort.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    _auditFieldSort.col = col;
+    _auditFieldSort.dir = 'desc';   // first click on a new column lands as DESC
+  }
+  _loadAndRenderAuditFieldList();
+}
+
+// Tracked-fields settings card — unchanged from before, just extracted so the
+// list can re-render without redrawing it.
+function _auditFieldSettingsHtml() {
+  const settings = getAuditSettings();
+  let html = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:24px">';
+  html += '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">⚙ Tracked Fields</div>';
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px">';
+  Object.entries(AUDIT_FIELD_DEFS).forEach(([type, fields]) => {
+    const typeLabel = { tasks:'Tasks', projects:'Projects', employees:'Employees', shipping:'Shipping & Receiving' }[type];
+    html += '<div><div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">' + typeLabel + '</div>';
+    fields.forEach(f => {
+      const checked = (settings[type] || []).includes(f.key);
+      html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);margin-bottom:7px">' +
+        '<input type="checkbox" ' + (checked ? 'checked' : '') + ' style="accent-color:var(--amber);width:14px;height:14px;cursor:pointer"' +
+        ' onchange="toggleAuditField(\x27' + type + '\x27,\x27' + f.key + '\x27,this.checked)"> ' + f.label + '</label>';
+    });
+    html += '</div>';
+  });
+  html += '</div></div>';
+  return html;
+}
+
+async function _loadAndRenderAuditFieldList() {
+  const list = document.getElementById('auditFieldList');
+  if (!list) return;
+  list.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:20px 0">Loading…</div>';
+
+  if (!sb) { list.innerHTML = '<div style="color:var(--red);font-size:13px">Not connected.</div>'; return; }
+
+  const f = _auditFieldFilters;
+  const s = _auditFieldSort;
+  const ascending = s.dir === 'asc';
+
+  // Bump the row limit when filters narrow the result so users don't miss
+  // older matches. Without filters the default 200 keeps it snappy.
+  const anyFilterSet = !!(f.empName || f.projId || f.dateFrom || f.dateTo || f.recordType || (f.keyword && f.keyword.trim()));
+  const limit = anyFilterSet ? 1000 : 200;
+
+  let q = sb.from('activity_log')
+    .select('*')
+    .order(s.col, { ascending })
+    .limit(limit);
+
+  if (f.empName)    q = q.eq('employee_name', f.empName);
+  if (f.recordType) q = q.eq('record_type',   f.recordType);
+  if (f.dateFrom)   q = q.gte('created_at', f.dateFrom + 'T00:00:00');
+  if (f.dateTo) {
+    const end = new Date(f.dateTo + 'T00:00:00');
+    end.setDate(end.getDate() + 1);
+    q = q.lt('created_at', end.toISOString());
+  }
+  if (f.keyword && f.keyword.trim()) {
+    const safe = f.keyword.trim().replace(/[%_\\]/g, m => '\\' + m);
+    // Match across the four user-visible columns. record_label may be null;
+    // PostgREST handles that fine.
+    q = q.or(
+      'record_label.ilike.%' + safe + '%,' +
+      'field_changed.ilike.%' + safe + '%,' +
+      'old_value.ilike.%' + safe + '%,' +
+      'new_value.ilike.%' + safe + '%'
+    );
   }
 
-  const settings = getAuditSettings();
-  const fmtDate = d => new Date(d).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+  const { data, error } = await q;
+  if (error) {
+    list.innerHTML = '<div style="color:var(--red);font-size:13px;padding:20px 0">Error loading: ' + _auditEsc(error.message || 'unknown') + '</div>';
+    return;
+  }
+  let logs = data || [];
+
+  // Project filter is client-side because activity_log has no project_id;
+  // we have to look up via record_type + record_id.
+  if (f.projId) {
+    logs = logs.filter(l => {
+      if (l.record_type === 'projects') return l.record_id === f.projId;
+      if (l.record_type === 'tasks') {
+        const t = taskStore.find(t => t._id === l.record_id);
+        return !!(t && t.proj === f.projId);
+      }
+      return false;
+    });
+  }
+
+  list.innerHTML = _renderAuditFieldRows(logs, anyFilterSet);
+}
+
+function _renderAuditFieldRows(logs, filtersActive) {
+  if (logs.length === 0) {
+    if (filtersActive) {
+      return '<div style="text-align:center;padding:48px;color:var(--muted);background:var(--surface);border:1px solid var(--border);border-radius:12px">' +
+        '<div style="font-size:32px;margin-bottom:12px">📋</div>' +
+        '<div style="font-size:14px">No changes match these filters.</div>' +
+        '<div style="font-size:12px;margin-top:6px">Try clearing filters or widening the date range.</div></div>';
+    }
+    return '<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">📋</div><div>No activity logged yet.</div></div>';
+  }
+
+  const fmtDate    = d => new Date(d).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric', hour:'numeric', minute:'2-digit' });
   const fieldLabel = (type, key) => {
-    const def = (AUDIT_FIELD_DEFS[type]||[]).find(f => f.key === key);
+    const def = (AUDIT_FIELD_DEFS[type] || []).find(f => f.key === key);
     return def ? def.label : key;
   };
 
-  // Tracked-fields settings card (unchanged, only shown on this tab)
-  const settingsHtml = () => {
-    let html = '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:24px">';
-    html += '<div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:16px">⚙ Tracked Fields</div>';
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px">';
-    Object.entries(AUDIT_FIELD_DEFS).forEach(([type, fields]) => {
-      const typeLabel = {tasks:'Tasks',projects:'Projects',employees:'Employees',shipping:'Shipping & Receiving'}[type];
-      html += '<div><div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">'+typeLabel+'</div>';
-      fields.forEach(f => {
-        const checked = (settings[type]||[]).includes(f.key);
-        html += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text);margin-bottom:7px">'+
-          '<input type="checkbox" '+(checked?'checked':'')+' style="accent-color:var(--amber);width:14px;height:14px;cursor:pointer"'+
-          ' onchange="toggleAuditField(\x27'+type+'\x27,\x27'+f.key+'\x27,this.checked)"> '+f.label+'</label>';
-      });
-      html += '</div>';
-    });
-    html += '</div></div>';
-    return html;
-  };
-
-  // Build a clickable project cell. Looks like a link, opens the project on its
-  // default Info tab. Falls back to "—" when no project context applies.
+  // Reusable clickable project cell builder.
   const projectCell = (l) => {
     let proj = null;
     if (l.record_type === 'projects') {
@@ -1500,44 +1673,53 @@ async function _renderAuditFieldChangesTab() {
       return '<td style="padding:9px 14px;font-size:12px;color:var(--muted);white-space:nowrap;max-width:140px">—</td>';
     }
     const label = _auditEsc((proj.emoji ? proj.emoji + ' ' : '') + proj.name);
-    return '<td style="padding:9px 14px;font-size:12px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">'+
-      '<span onclick="event.stopPropagation();navToProjectFromAudit(\x27'+proj.id+'\x27,false)" '+
-      'style="color:var(--amber);cursor:pointer;text-decoration:none" '+
-      'onmouseover="this.style.textDecoration=\x27underline\x27" '+
-      'onmouseout="this.style.textDecoration=\x27none\x27" '+
-      'title="Open project">'+label+'</span></td>';
+    return '<td style="padding:9px 14px;font-size:12px;white-space:nowrap;max-width:160px;overflow:hidden;text-overflow:ellipsis">' +
+      '<span onclick="event.stopPropagation();navToProjectFromAudit(\x27' + proj.id + '\x27,false)" ' +
+      'style="color:var(--amber);cursor:pointer;text-decoration:none" ' +
+      'onmouseover="this.style.textDecoration=\x27underline\x27" ' +
+      'onmouseout="this.style.textDecoration=\x27none\x27" ' +
+      'title="Open project">' + label + '</span></td>';
   };
 
-  const logsHtml = logs.length === 0
-    ? '<div style="text-align:center;padding:48px;color:var(--muted)"><div style="font-size:32px;margin-bottom:12px">📋</div><div>No activity logged yet.</div></div>'
-    : '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">'+
-      '<table style="width:100%;border-collapse:collapse">'+
-      '<thead><tr style="border-bottom:2px solid var(--border)">'+
-      '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">When</th>'+
-      '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Who</th>'+
-      '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>'+
-      '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Record</th>'+
-      '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Field</th>'+
-      '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">From</th>'+
-      '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">To</th>'+
-      '</tr></thead><tbody>'+
-      logs.map(l => '<tr style="border-bottom:1px solid var(--border);transition:background .12s" onmouseover="this.style.background=\x27var(--surface2)\x27" onmouseout="this.style.background=\x27\x27">'+
-        '<td style="padding:9px 14px;font-size:11px;color:var(--muted);white-space:nowrap">'+fmtDate(l.created_at)+'</td>'+
-        '<td style="padding:9px 14px;font-size:13px;font-weight:500;color:var(--text)">'+_auditEsc(l.employee_name||'—')+'</td>'+
-        projectCell(l)+
-        '<td style="padding:9px 14px;font-size:12px;color:var(--text)">'+
-          '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface2);color:var(--muted);margin-right:6px">'+_auditEsc(l.record_type)+'</span>'+
-          _auditEsc(l.record_label||l.record_id||'—')+'</td>'+
-        '<td style="padding:9px 14px;font-size:12px;color:var(--text)">'+_auditEsc(fieldLabel(l.record_type, l.field_changed))+'</td>'+
-        '<td style="padding:9px 14px;font-size:12px;color:var(--red);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_auditEsc(l.old_value||'—')+'</td>'+
-        '<td style="padding:9px 14px;font-size:12px;color:var(--green);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+_auditEsc(l.new_value||'—')+'</td>'+
-        '</tr>'
-      ).join('')+
-      '</tbody></table></div>';
+  // Sort-aware header cell. Clicking toggles direction on the active column,
+  // or resets to DESC when switching columns.
+  const s = _auditFieldSort;
+  const sortHeader = (col, label) => {
+    const isActive = s.col === col;
+    const arrow = isActive ? (s.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    const colorActive = isActive ? 'var(--amber)' : 'var(--muted)';
+    return '<th onclick="_setAuditFieldSort(\x27' + col + '\x27)" ' +
+      'style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:' + colorActive + ';cursor:pointer;user-select:none">' +
+      label + arrow + '</th>';
+  };
+  const plainHeader = (label) =>
+    '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">' + label + '</th>';
 
-  body.innerHTML =
-    '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">'+logs.length+' recent changes</div>'+
-    settingsHtml() + logsHtml;
+  return '<div style="font-size:12px;color:var(--muted);margin-bottom:14px">' + logs.length + (logs.length === 1 ? ' change' : ' changes') + '</div>' +
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden">' +
+    '<table style="width:100%;border-collapse:collapse">' +
+    '<thead><tr style="border-bottom:2px solid var(--border)">' +
+      sortHeader('created_at', 'When') +
+      sortHeader('employee_name', 'Who') +
+      plainHeader('Project') +
+      plainHeader('Record') +
+      sortHeader('field_changed', 'Field') +
+      plainHeader('From') +
+      plainHeader('To') +
+    '</tr></thead><tbody>' +
+    logs.map(l => '<tr style="border-bottom:1px solid var(--border);transition:background .12s" onmouseover="this.style.background=\x27var(--surface2)\x27" onmouseout="this.style.background=\x27\x27">' +
+      '<td style="padding:9px 14px;font-size:11px;color:var(--muted);white-space:nowrap">' + fmtDate(l.created_at) + '</td>' +
+      '<td style="padding:9px 14px;font-size:13px;font-weight:500;color:var(--text)">' + _auditEsc(l.employee_name || '—') + '</td>' +
+      projectCell(l) +
+      '<td style="padding:9px 14px;font-size:12px;color:var(--text)">' +
+        '<span style="font-size:10px;padding:1px 6px;border-radius:4px;background:var(--surface2);color:var(--muted);margin-right:6px">' + _auditEsc(l.record_type) + '</span>' +
+        _auditEsc(l.record_label || l.record_id || '—') + '</td>' +
+      '<td style="padding:9px 14px;font-size:12px;color:var(--text)">' + _auditEsc(fieldLabel(l.record_type, l.field_changed)) + '</td>' +
+      '<td style="padding:9px 14px;font-size:12px;color:var(--red);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _auditEsc(l.old_value || '—') + '</td>' +
+      '<td style="padding:9px 14px;font-size:12px;color:var(--green);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + _auditEsc(l.new_value || '—') + '</td>' +
+      '</tr>'
+    ).join('') +
+    '</tbody></table></div>';
 }
 
 function toggleAuditField(type, key, checked) {
