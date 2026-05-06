@@ -154,6 +154,9 @@
       _stats = computeStats(_sent, _completed, _eligible);
 
       renderAll();
+
+      // Sidebar badge: piggyback off the freshly computed _eligible count.
+      _setSurveysBadgeCount(_eligible.length);
     } catch (e) {
       console.error('[surveys] load failed', e);
       body.innerHTML = `<div style="padding:24px;color:var(--red);font-size:13px">Error loading: ${escapeHtml(e.message || String(e))}</div>`;
@@ -1580,6 +1583,78 @@
     } catch (e) {
       console.error('[surveys] create-first failed', e);
       toast('Create failed: ' + (e.message || e));
+    }
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════════
+  // SIDEBAR BADGE
+  // Shows the eligible-projects count on the navCustomerSurveys nav item.
+  // Two entry points:
+  //   - refreshSurveysBadge()  — async; called from auth.js after permissions
+  //                               apply, and on app boot. Does its own slim
+  //                               DB fetch since the surveys panel may not
+  //                               have been opened yet.
+  //   - _setSurveysBadgeCount(n) — sync helper; called from loadAndRender
+  //                               where _eligible is already known so we
+  //                               skip the redundant fetch.
+  // ════════════════════════════════════════════════════════════════════════
+
+  function _setSurveysBadgeCount(count) {
+    const navItem = document.getElementById('navCustomerSurveys');
+    const badge   = document.getElementById('surveysBadge');
+    if (!navItem || !badge) return;
+    if (typeof can === 'function' && !can('view_surveys')) {
+      badge.style.display = 'none';
+      return;
+    }
+    badge.textContent = count;
+    badge.style.display = count > 0 ? 'inline-block' : 'none';
+  }
+
+  window.refreshSurveysBadge = async function () {
+    const navItem = document.getElementById('navCustomerSurveys');
+    const badge   = document.getElementById('surveysBadge');
+    if (!navItem || !badge) return;
+
+    // Permission gate (defense in depth — auth.js also hides the nav item)
+    if (typeof can === 'function' && !can('view_surveys')) {
+      badge.style.display = 'none';
+      return;
+    }
+    // Need the in-memory data structures. Bail if not loaded yet.
+    if (typeof projects === 'undefined' || typeof projectInfo === 'undefined' ||
+        typeof taskStore === 'undefined' || !sb) return;
+
+    try {
+      // Fetch only the invitations that BLOCK eligibility:
+      // sent within last SENT_EXPIRY_DAYS, OR completed (we got feedback).
+      const cutoff = new Date(Date.now() - SENT_EXPIRY_DAYS * 86400000).toISOString();
+      const { data: invs, error } = await sb.from('survey_invitations')
+        .select('project_id, status, sent_at')
+        .or(`status.eq.completed,and(status.eq.sent,sent_at.gte.${cutoff})`);
+      if (error) {
+        console.error('[surveys] badge fetch failed', error);
+        return;
+      }
+      const blocked = new Set((invs || []).map(i => i.project_id));
+
+      // Apply the same eligibility logic as computeEligibleProjects, minus
+      // the warning/priorAttempt decoration which we don't need for a count.
+      const count = projects.filter(p => {
+        const info = projectInfo[p.id] || {};
+        if (!['testcomplete', 'complete'].includes(info.status)) return false;
+        if (p.skip_survey) return false;
+        if (blocked.has(p.id)) return false;
+        const tasks = taskStore.filter(t => t.proj === p.id);
+        const hasOpenTasks = tasks.some(t => !['complete', 'billed', 'cancelled'].includes(t.status));
+        if (hasOpenTasks) return false;
+        return true;
+      }).length;
+
+      _setSurveysBadgeCount(count);
+    } catch (e) {
+      console.error('[surveys] refreshSurveysBadge threw', e);
     }
   };
 
