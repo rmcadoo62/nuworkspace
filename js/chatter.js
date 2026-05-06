@@ -550,7 +550,14 @@ function chatterFilterNotifyList() {
 function chatterRenderNotifyList(q) {
   const list = document.getElementById('chatterNotifyList');
   if (!list) return;
-  const matches = employees.filter(e => e.name && (!q || e.name.toLowerCase().includes(q)));
+  const matches = employees.filter(e => {
+    if (!e.name) return false;
+    // Hide inactive / terminated employees
+    if (e.isActive === false || e.terminationDate) return false;
+    // Hide Ballantine department (handle null department safely)
+    if ((e.dept || '').toLowerCase() === 'ballantine') return false;
+    return !q || e.name.toLowerCase().includes(q);
+  });
   if (!matches.length) { list.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted)">No employees found</div>'; return; }
   list.innerHTML = matches.map(e => {
     const sel = chatterNotifySelected.includes(e.id);
