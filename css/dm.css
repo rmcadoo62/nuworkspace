@@ -1,0 +1,264 @@
+/* ============================================================
+   dm.css — Direct Messaging styles
+   Floating bubble, expanded panel, conversation view, toast.
+   Matches NUWorkspace amber + DM Sans aesthetic.
+   ============================================================ */
+
+/* ── Bubble ─────────────────────────────────────────────── */
+#dmRoot { position: fixed; bottom: 20px; right: 20px; z-index: 9000; font-family: 'DM Sans', sans-serif; }
+
+#dmBubble {
+  width: 52px; height: 52px; border-radius: 50%;
+  background: var(--blue); border: none;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; box-shadow: 0 4px 14px rgba(58,127,212,0.30), 0 1px 3px rgba(0,0,0,0.10);
+  transition: all .18s ease; position: relative; color: #fff;
+}
+#dmBubble:hover { background: #2d6cb8; box-shadow: 0 6px 20px rgba(58,127,212,0.38); transform: translateY(-1px); }
+.dm-bubble-icon { color: #fff; display: flex; align-items: center; justify-content: center; }
+.dm-bubble-badge {
+  position: absolute; top: -3px; right: -3px;
+  min-width: 20px; height: 20px; padding: 0 5px;
+  border-radius: 10px; background: var(--red); color: #fff;
+  font-size: 11px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace; box-sizing: border-box;
+}
+
+/* ── Panel container ────────────────────────────────────── */
+#dmPanel {
+  position: absolute; bottom: 64px; right: 0;
+  width: 360px;
+  height: 540px;
+  max-height: calc(100vh - 110px);
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.18);
+  overflow: hidden; display: flex; flex-direction: column;
+  font-size: 13px; color: var(--text);
+}
+
+.dm-panel-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.dm-panel-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.dm-panel-header-actions { margin-left: auto; display: flex; gap: 6px; }
+.dm-icon-btn {
+  background: none; border: none; padding: 4px;
+  cursor: pointer; color: var(--muted); border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s, color .12s;
+}
+.dm-icon-btn svg { pointer-events: none; }
+.dm-icon-btn:hover { background: var(--surface2); color: var(--amber); }
+
+/* ── Avatars ────────────────────────────────────────────── */
+.dm-avatar {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; flex-shrink: 0;
+}
+.dm-avatar-group {
+  background: var(--amber-glow); color: var(--amber);
+  border: 1.5px solid var(--amber-dim);
+  font-size: 12px; font-weight: 700;
+}
+
+/* ── Thread list ────────────────────────────────────────── */
+.dm-thread-list { overflow-y: auto; flex: 1; min-height: 0; }
+.dm-thread {
+  display: flex; gap: 10px; padding: 11px 14px;
+  border-bottom: 1px solid var(--border); cursor: pointer;
+  transition: background .12s;
+}
+.dm-thread:hover { background: var(--surface2); }
+.dm-thread-unread {
+  background: var(--amber-glow);
+  border-left: 3px solid var(--amber);
+  padding-left: 11px;
+}
+.dm-thread-unread:hover { background: rgba(192,122,26,0.15); }
+.dm-thread-body { flex: 1; min-width: 0; }
+.dm-thread-row1 {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 8px; margin-bottom: 2px;
+}
+.dm-thread-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.dm-thread-unread .dm-thread-name { font-weight: 700; }
+.dm-thread-time { font-size: 11px; color: var(--muted); white-space: nowrap; flex-shrink: 0; font-family: 'JetBrains Mono', monospace; }
+.dm-thread-preview {
+  font-size: 12px; color: var(--muted); line-height: 1.4;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dm-thread-unread .dm-thread-preview { color: var(--text); font-weight: 500; }
+.dm-thread-unread-dot {
+  flex-shrink: 0; align-self: center;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 9px; background: var(--amber); color: #fff;
+  font-size: 10px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Empty state ────────────────────────────────────────── */
+.dm-empty {
+  padding: 28px 16px; text-align: center;
+  color: var(--muted); font-size: 13px;
+}
+
+/* ── Reminder banner ────────────────────────────────────── */
+.dm-reminder {
+  background: rgba(58,127,212,0.08);
+  color: var(--blue);
+  font-size: 11px; padding: 6px 14px;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.4; flex-shrink: 0;
+}
+
+/* ── Message list (open conversation) ───────────────────── */
+.dm-msg-list {
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
+  background: var(--surface);
+  justify-content: flex-end;
+}
+.dm-msg {
+  max-width: 85%; display: flex; flex-direction: column;
+}
+.dm-msg-other { align-self: flex-start; }
+.dm-msg-mine  { align-self: flex-end; align-items: flex-end; }
+.dm-msg-sender {
+  font-size: 11px; color: var(--muted);
+  margin-bottom: 2px; padding: 0 4px;
+}
+.dm-msg-bubble {
+  padding: 8px 12px; font-size: 13px; line-height: 1.45;
+  word-break: break-word; white-space: pre-wrap;
+}
+.dm-msg-other .dm-msg-bubble {
+  background: var(--surface2); color: var(--text);
+  border-radius: 12px 12px 12px 2px;
+}
+.dm-msg-mine .dm-msg-bubble {
+  background: var(--amber-glow); color: var(--amber);
+  border: 1px solid var(--amber-dim);
+  border-radius: 12px 12px 2px 12px;
+}
+.dm-msg-time {
+  font-size: 10px; color: var(--muted);
+  margin-top: 3px; padding: 0 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* ── Composer ───────────────────────────────────────────── */
+.dm-composer {
+  border-top: 1px solid var(--border);
+  padding: 8px 10px; display: flex; gap: 6px; align-items: flex-end;
+  flex-shrink: 0; background: var(--surface);
+}
+.dm-compose-input {
+  flex: 1; resize: none; border: 1.5px solid var(--border);
+  border-radius: 14px; padding: 7px 14px;
+  font-size: 13px; line-height: 1.4;
+  background: var(--surface2); color: var(--text);
+  outline: none; font-family: 'DM Sans', sans-serif;
+  min-height: 32px; max-height: 100px;
+}
+.dm-compose-input:focus { border-color: var(--amber-dim); background: var(--surface); }
+.dm-send-btn {
+  background: var(--amber); color: #fff; border: none;
+  border-radius: 50%; width: 32px; height: 32px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0; transition: background .12s;
+}
+.dm-send-btn:hover { background: var(--amber-dim); }
+
+/* ── Toast notification ─────────────────────────────────── */
+#dmToast {
+  position: absolute; bottom: 64px; right: 0;
+  width: 280px; pointer-events: auto;
+  animation: dmToastSlide .25s ease;
+  z-index: 9001;
+}
+@keyframes dmToastSlide {
+  from { transform: translateY(8px); opacity: 0; }
+  to   { transform: translateY(0); opacity: 1; }
+}
+.dm-toast-card {
+  background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: 8px; padding: 10px 12px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.16);
+}
+.dm-toast-row { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 8px; }
+.dm-toast-body { flex: 1; min-width: 0; }
+.dm-toast-name { font-size: 12px; font-weight: 600; color: var(--text); }
+.dm-toast-preview {
+  font-size: 11px; color: var(--muted);
+  line-height: 1.35; margin-top: 1px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.dm-toast-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.dm-toast-btn {
+  background: transparent; border: 1.5px solid var(--border);
+  border-radius: 5px; padding: 3px 10px;
+  font-size: 11px; color: var(--muted);
+  cursor: pointer; font-family: 'DM Sans', sans-serif;
+  transition: all .12s;
+}
+.dm-toast-btn:hover { border-color: var(--amber-dim); color: var(--amber); }
+.dm-toast-btn-primary {
+  background: var(--amber); color: #fff; border-color: var(--amber);
+}
+.dm-toast-btn-primary:hover { background: var(--amber-dim); border-color: var(--amber-dim); color: #fff; }
+
+/* ── New conversation picker ────────────────────────────── */
+.dm-picker-search-wrap { padding: 10px 14px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.dm-picker-search,
+.dm-picker-group-name {
+  width: 100%; border: 1.5px solid var(--border); border-radius: 6px;
+  padding: 6px 10px; font-size: 12px;
+  background: var(--surface2); color: var(--text);
+  outline: none; font-family: 'DM Sans', sans-serif;
+  box-sizing: border-box;
+}
+.dm-picker-search:focus,
+.dm-picker-group-name:focus { border-color: var(--amber-dim); background: var(--surface); }
+
+.dm-picker-group-name-wrap { padding: 0 14px 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+
+.dm-picker-list {
+  overflow-y: auto;
+  flex: 1 1 0;
+  min-height: 0;
+  max-height: calc(100% - 150px);
+}
+.dm-picker-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; cursor: pointer;
+  font-size: 13px; transition: background .12s;
+}
+.dm-picker-item:hover { background: var(--surface2); }
+.dm-picker-item.selected { background: var(--amber-glow); }
+.dm-picker-name { flex: 1; }
+.dm-picker-check {
+  font-size: 13px; color: var(--amber);
+  font-weight: 700; width: 16px; text-align: center;
+}
+
+.dm-picker-actions {
+  border-top: 1px solid var(--border);
+  padding: 10px 14px; display: flex; align-items: center; gap: 12px;
+  flex-shrink: 0;
+}
+.dm-picker-count { font-size: 12px; color: var(--muted); flex: 1; }
+.dm-create-btn {
+  background: var(--amber); color: #fff; border: none;
+  border-radius: 6px; padding: 6px 14px;
+  font-size: 12.5px; font-weight: 600;
+  cursor: pointer; font-family: 'DM Sans', sans-serif;
+  transition: background .12s;
+}
+.dm-create-btn:hover:not(:disabled) { background: var(--amber-dim); }
+.dm-create-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }

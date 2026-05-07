@@ -1222,6 +1222,8 @@ async function afterLogin(user) {
   bootApp();
   updateApprovalsBadge();
   setupRealtime();
+  // Boot DM module — bubble appears once conversations load
+  if (typeof dmInit === 'function') dmInit();
 }
 
 async function doLogout() {

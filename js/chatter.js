@@ -341,7 +341,7 @@ function renderNotifPanel() {
   list.innerHTML = notifStore.map(n => {
     const proj = projects.find(p => p.id === n.projId);
     const timeStr = new Date(n.ts).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|empHr:[a-f0-9-]+|surveyResp:[a-f0-9-]+|myinfo:hrrecords|issueTracker|closingReport)$/, '');
+    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|empHr:[a-f0-9-]+|surveyResp:[a-f0-9-]+|dm:[a-f0-9-]+|myinfo:hrrecords|issueTracker|closingReport)$/, '');
     return '<div class="notif-item' + (n.read ? '' : ' unread') + '" onclick="notifClick(\x27' + n.id + '\x27,\x27' + (n.projId||'') + '\x27)">' +
       '<div class="notif-item-avatar" style="background:' + (n.fromColor||'#888') + ';color:#fff">' + (n.fromInitials||'?') + '</div>' +
       '<div class="notif-item-body">' +
@@ -394,6 +394,20 @@ function notifClick(notifId, projId) {
   if (preview.endsWith('||myinfo:hrrecords')) {
     if (typeof openMyInfoPanel === 'function') openMyInfoPanel(document.getElementById('navMyInfo'));
     setTimeout(() => { if (typeof switchMyInfoTab === 'function') switchMyInfoTab('hrrecords'); }, 250);
+    return;
+  }
+
+  // Check for direct message notification — preview ends with ||dm:<convId>
+  // Opens the DM panel and lands on that conversation.
+  const dmMatch = preview.match(/\|\|dm:([a-f0-9-]+)$/);
+  if (dmMatch) {
+    const convId = dmMatch[1];
+    if (typeof window.dmReplyFromToast === 'function') {
+      window.dmReplyFromToast(convId);
+    } else if (typeof window.dmTogglePanel === 'function') {
+      // Fallback: open panel; user can find conv in list
+      if (!window.dmPanelOpen) window.dmTogglePanel();
+    }
     return;
   }
 

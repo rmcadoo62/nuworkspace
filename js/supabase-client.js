@@ -675,6 +675,39 @@ function setupRealtime() {
       .subscribe();
   }
 
+  // ── DIRECT_MESSAGES (live DM bubble) ──────────────────────────────────────
+  // Routes incoming messages to dm.js. RLS already restricts the payload to
+  // conversations the current user is a participant in, so no additional
+  // employee_id filter needed in the callback.
+  if (_myEmpId) {
+    sb.channel('rt-direct-messages')
+      .on('postgres_changes', {
+        event:  'INSERT',
+        schema: 'public',
+        table:  'direct_messages',
+      }, (payload) => {
+        if (typeof window.dmOnIncomingMessage === 'function') {
+          window.dmOnIncomingMessage(payload);
+        }
+      })
+      .subscribe();
+
+    // Also watch for new conversation_participants rows naming me — that's
+    // someone adding me to a group. Refresh the conv list so it appears.
+    sb.channel('rt-conversation-participants')
+      .on('postgres_changes', {
+        event:  'INSERT',
+        schema: 'public',
+        table:  'conversation_participants',
+      }, (payload) => {
+        if (payload.new?.employee_id === _myEmpId &&
+            typeof window.dmLoadConversations === 'function') {
+          window.dmLoadConversations();
+        }
+      })
+      .subscribe();
+  }
+
   // ── FEEDBACK_SUBMISSIONS (live Issue Tracker badge for Russ) ──────────────
   // Fixes the bug where the Issue Tracker badge stayed at the value it had at
   // login because nothing pushed updates. Now any insert/update/delete on
@@ -709,7 +742,7 @@ function setupRealtime() {
       .subscribe();
   }
 
-  console.log('\u2713 Realtime subscriptions active (projects, project_info, tasks, schedule_blocks, chatter_notifs, feedback_submissions)');
+  console.log('\u2713 Realtime subscriptions active (projects, project_info, tasks, schedule_blocks, chatter_notifs, direct_messages, feedback_submissions)');
 }
 
 // Re-render the scheduler if it's currently visible
