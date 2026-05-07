@@ -118,7 +118,8 @@
 
 /* ── Message list (open conversation) ───────────────────── */
 .dm-msg-list {
-  flex: 1; min-height: 0; overflow-y: auto;
+  flex: 1 1 0; min-height: 0; overflow-y: auto;
+  max-height: calc(100% - 130px);
   padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
   background: var(--surface);
   justify-content: flex-end;
@@ -262,3 +263,82 @@
 }
 .dm-create-btn:hover:not(:disabled) { background: var(--amber-dim); }
 .dm-create-btn:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; }
+
+/* ── Thread row delete button (hover-revealed) ──────────── */
+.dm-thread { position: relative; }
+.dm-thread-delete {
+  position: absolute; right: 8px; top: 50%;
+  transform: translateY(-50%);
+  width: 26px; height: 26px;
+  background: var(--surface);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--muted);
+  display: none;
+  align-items: center; justify-content: center;
+  padding: 0;
+}
+.dm-thread:hover .dm-thread-delete { display: flex; }
+.dm-thread-delete:hover { background: rgba(208,64,64,0.10); color: var(--red); }
+.dm-thread-delete svg { pointer-events: none; }
+
+/* ── Confirm-delete overlay ─────────────────────────────── */
+.dm-confirm-overlay {
+  position: absolute;
+  bottom: 64px; right: 0;
+  width: 360px; height: 540px;
+  max-height: calc(100vh - 110px);
+  background: rgba(0,0,0,0.40);
+  border-radius: 12px;
+  z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+  padding: 14px;
+  box-sizing: border-box;
+}
+.dm-confirm-modal {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 18px;
+  width: 100%;
+  max-width: 320px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.22);
+}
+.dm-confirm-title {
+  font-size: 14px; font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+.dm-confirm-body {
+  font-size: 12.5px; color: var(--muted);
+  margin-bottom: 16px; line-height: 1.5;
+}
+.dm-confirm-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.dm-confirm-cancel,
+.dm-confirm-primary {
+  padding: 6px 14px;
+  font-size: 12.5px; font-weight: 600;
+  border-radius: 6px; border: none;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  transition: background .12s, color .12s;
+}
+.dm-confirm-cancel {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.dm-confirm-cancel:hover { color: var(--text); border-color: var(--surface3); }
+.dm-confirm-primary { background: var(--blue); color: #fff; }
+.dm-confirm-primary:hover { background: #2d6cb8; }
+.dm-confirm-primary.dm-confirm-danger { background: var(--red); }
+.dm-confirm-primary.dm-confirm-danger:hover { background: #b03333; }
+.dm-confirm-owner-link {
+  display: block; margin-top: 14px;
+  font-size: 11.5px; color: var(--red);
+  text-align: center;
+  text-decoration: none;
+}
+.dm-confirm-owner-link:hover { text-decoration: underline; }

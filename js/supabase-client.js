@@ -705,6 +705,17 @@ function setupRealtime() {
           window.dmLoadConversations();
         }
       })
+      .on('postgres_changes', {
+        event:  'DELETE',
+        schema: 'public',
+        table:  'conversation_participants',
+      }, (payload) => {
+        // Someone removed me, or owner nuked the conversation (which cascades
+        // to delete my participant row). Drop it from my view.
+        if (typeof window.dmOnDeletedParticipant === 'function') {
+          window.dmOnDeletedParticipant(payload);
+        }
+      })
       .subscribe();
   }
 

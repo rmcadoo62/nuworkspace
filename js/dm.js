@@ -222,6 +222,9 @@ function dmRenderListView() {
         <div class="dm-thread-preview">${preview || '<span style="opacity:.5">No messages yet</span>'}</div>
       </div>
       ${unread > 0 ? '<div class="dm-thread-unread-dot">' + (unread > 9 ? '9+' : unread) + '</div>' : ''}
+      <button class="dm-thread-delete" onclick="event.stopPropagation();dmConfirmDelete('${c.id}')" title="${c.is_group ? 'Leave group' : 'Remove conversation'}">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
+      </button>
     </div>`;
   }).join('');
 
@@ -627,6 +630,183 @@ async function dmCreateConversationFromPicker() {
   await dmOpenConversation(newConv.id);
 }
 
+// ── Delete conversation flow ────────────────────────────────
+// Conversation-level delete only (no per-message). Two paths:
+//   1. Self delete: removes only my participant row → conversation
+//      stays for the other side. For groups this is "leave group".
+//   2. Owner override: deletes the conversation row entirely, which
+//      cascades to participants + messages. Logged to activity_log.
+// Confirmation overlay is appended to #dmRoot so capture-phase outside-
+// click handler doesn't close the panel underneath.
+
+function dmConfirmDelete(convId) {
+  const conv = dmConvs.find(c => c.id === convId);
+  if (!conv) return;
+  const isOwner = !!currentEmployee?.isOwner;
+
+  let title, body, primaryLabel;
+  if (conv.is_group) {
+    title = 'Leave this group?';
+    body  = "You'll be removed from \"" + dmConvDisplayName(conv) + "\". Other members will continue without you.";
+    primaryLabel = 'Leave group';
+  } else {
+    const otherEmp = (conv._memberIds || [])
+      .map(id => employees.find(e => e.id === id))
+      .find(e => e && e.id !== currentEmployee?.id);
+    const otherName = otherEmp?.name || 'They';
+    title = 'Remove conversation?';
+    body  = otherName + ' will still see this conversation on their side.';
+    primaryLabel = 'Remove from my list';
+  }
+
+  const existing = document.getElementById('dmConfirmOverlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'dmConfirmOverlay';
+  overlay.className = 'dm-confirm-overlay';
+  overlay.innerHTML = `
+    <div class="dm-confirm-modal" onclick="event.stopPropagation()">
+      <div class="dm-confirm-title">${_dmEsc(title)}</div>
+      <div class="dm-confirm-body">${_dmEsc(body)}</div>
+      <div class="dm-confirm-actions">
+        <button class="dm-confirm-cancel" onclick="dmCancelDelete()">Cancel</button>
+        <button class="dm-confirm-primary" onclick="dmDeleteForSelf('${convId}')">${_dmEsc(primaryLabel)}</button>
+      </div>
+      ${isOwner ? `<a href="#" class="dm-confirm-owner-link" onclick="event.preventDefault();dmConfirmOwnerDelete('${convId}')">Delete entirely (owner override)</a>` : ''}
+    </div>
+  `;
+  overlay.onclick = dmCancelDelete; // click on overlay backdrop closes
+  const root = document.getElementById('dmRoot');
+  if (root) root.appendChild(overlay);
+}
+
+function dmConfirmOwnerDelete(convId) {
+  const conv = dmConvs.find(c => c.id === convId);
+  if (!conv) return;
+  const name = dmConvDisplayName(conv);
+
+  const existing = document.getElementById('dmConfirmOverlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'dmConfirmOverlay';
+  overlay.className = 'dm-confirm-overlay';
+  overlay.innerHTML = `
+    <div class="dm-confirm-modal" onclick="event.stopPropagation()">
+      <div class="dm-confirm-title" style="color:var(--red)">Delete entirely?</div>
+      <div class="dm-confirm-body">
+        This will permanently delete the conversation with <strong>${_dmEsc(name)}</strong> for ALL participants. Messages will be removed. This action is logged.
+      </div>
+      <div class="dm-confirm-actions">
+        <button class="dm-confirm-cancel" onclick="dmCancelDelete()">Cancel</button>
+        <button class="dm-confirm-primary dm-confirm-danger" onclick="dmDeleteForEveryone('${convId}')">Delete for everyone</button>
+      </div>
+    </div>
+  `;
+  overlay.onclick = dmCancelDelete;
+  const root = document.getElementById('dmRoot');
+  if (root) root.appendChild(overlay);
+}
+
+function dmCancelDelete() {
+  document.getElementById('dmConfirmOverlay')?.remove();
+}
+
+async function dmDeleteForSelf(convId) {
+  dmCancelDelete();
+  if (!currentEmployee) return;
+  const conv = dmConvs.find(c => c.id === convId);
+  if (!conv) return;
+
+  // Optimistic local removal
+  const convLabel = dmConvDisplayName(conv);
+  const isGroup = conv.is_group;
+  dmConvs = dmConvs.filter(c => c.id !== convId);
+  delete dmMsgsByConv[convId];
+  if (dmActiveConv === convId) dmActiveConv = null;
+  dmRenderBubble();
+  if (dmPanelOpen) dmRenderListView();
+
+  // DB: remove my participant row
+  const { error } = await sb.from('conversation_participants')
+    .delete()
+    .eq('conversation_id', convId)
+    .eq('employee_id', currentEmployee.id);
+  if (error) {
+    console.error('[dm] delete self participant:', error);
+    if (typeof toast === 'function') toast('Failed to remove conversation');
+    await dmLoadConversations(); // recover from optimistic state
+    return;
+  }
+
+  // Audit log (CMMC AU.L2-3.3.1)
+  try {
+    await sb.from('activity_log').insert({
+      employee_id: currentEmployee.id,
+      employee_name: currentEmployee.name,
+      record_type: 'dm_conversation',
+      record_id: convId,
+      record_label: convLabel,
+      field_changed: 'deleted',
+      old_value: null,
+      new_value: isGroup ? 'left_group' : 'removed_from_list',
+    });
+  } catch (e) { console.warn('[dm] audit log failed:', e); }
+}
+
+async function dmDeleteForEveryone(convId) {
+  dmCancelDelete();
+  if (!currentEmployee?.isOwner) return;
+  const conv = dmConvs.find(c => c.id === convId);
+  if (!conv) return;
+
+  const convLabel = dmConvDisplayName(conv);
+
+  // Optimistic local removal
+  dmConvs = dmConvs.filter(c => c.id !== convId);
+  delete dmMsgsByConv[convId];
+  if (dmActiveConv === convId) dmActiveConv = null;
+  dmRenderBubble();
+  if (dmPanelOpen) dmRenderListView();
+
+  // DB: hard delete the conversation (cascades to participants + messages)
+  const { error } = await sb.from('conversations').delete().eq('id', convId);
+  if (error) {
+    console.error('[dm] owner delete conversation:', error);
+    if (typeof toast === 'function') toast('Failed to delete conversation');
+    await dmLoadConversations();
+    return;
+  }
+
+  // Audit log
+  try {
+    await sb.from('activity_log').insert({
+      employee_id: currentEmployee.id,
+      employee_name: currentEmployee.name,
+      record_type: 'dm_conversation',
+      record_id: convId,
+      record_label: convLabel,
+      field_changed: 'deleted',
+      old_value: null,
+      new_value: 'deleted_for_everyone',
+    });
+  } catch (e) { console.warn('[dm] audit log failed:', e); }
+}
+
+// Realtime: someone removed me from a conversation (or owner nuked it).
+// Either way, my participant row is gone — drop the conv from my view.
+function dmOnDeletedParticipant(payload) {
+  if (!payload?.old || !currentEmployee) return;
+  if (payload.old.employee_id !== currentEmployee.id) return;
+  const convId = payload.old.conversation_id;
+  dmConvs = dmConvs.filter(c => c.id !== convId);
+  delete dmMsgsByConv[convId];
+  if (dmActiveConv === convId) dmActiveConv = null;
+  dmRenderBubble();
+  if (dmPanelOpen) dmRenderListView();
+}
+
 // ── Outside click closes panel/toast on click outside ───────
 // Use CAPTURE phase so we evaluate e.target.closest('#dmRoot') BEFORE any
 // inline onclick mutates the DOM. Otherwise clicking the + button would
@@ -654,3 +834,9 @@ window._dmAutoGrow = _dmAutoGrow;
 window._dmComposeKey = _dmComposeKey;
 window.dmOnIncomingMessage = dmOnIncomingMessage;
 window.dmLoadConversations = dmLoadConversations;
+window.dmConfirmDelete = dmConfirmDelete;
+window.dmConfirmOwnerDelete = dmConfirmOwnerDelete;
+window.dmCancelDelete = dmCancelDelete;
+window.dmDeleteForSelf = dmDeleteForSelf;
+window.dmDeleteForEveryone = dmDeleteForEveryone;
+window.dmOnDeletedParticipant = dmOnDeletedParticipant;
