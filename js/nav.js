@@ -346,3 +346,28 @@ document.addEventListener('DOMContentLoaded', function () {
 
   _updateBackBtn();
 });
+
+// ===== SIDEBAR COLLAPSE TOGGLE =====
+const SB_COLLAPSE_KEY = 'nuworkspace_sidebar_collapsed';
+
+function _applySidebarState(collapsed) {
+  if (collapsed) document.body.classList.add('sb-collapsed');
+  else document.body.classList.remove('sb-collapsed');
+  const btn = document.getElementById('sbToggleBtn');
+  if (btn) btn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+}
+
+function toggleSidebar() {
+  const willCollapse = !document.body.classList.contains('sb-collapsed');
+  _applySidebarState(willCollapse);
+  try { localStorage.setItem(SB_COLLAPSE_KEY, willCollapse ? '1' : '0'); } catch {}
+}
+
+// Restore saved state on load (desktop only — CSS gates the visual effect via media query)
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    if (localStorage.getItem(SB_COLLAPSE_KEY) === '1') _applySidebarState(true);
+  } catch {}
+});
+
+window.toggleSidebar = toggleSidebar;
