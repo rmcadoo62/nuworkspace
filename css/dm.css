@@ -119,10 +119,8 @@
 /* ── Message list (open conversation) ───────────────────── */
 .dm-msg-list {
   flex: 1 1 0; min-height: 0; overflow-y: auto;
-  max-height: calc(100% - 130px);
   padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
   background: var(--surface);
-  justify-content: flex-end;
 }
 .dm-msg {
   max-width: 85%; display: flex; flex-direction: column;
