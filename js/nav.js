@@ -371,3 +371,60 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.toggleSidebar = toggleSidebar;
+
+// ===== NAV TOOLTIPS (collapsed sidebar) =====
+let _navTipEl = null;
+
+function _ensureNavTip() {
+  if (_navTipEl) return _navTipEl;
+  _navTipEl = document.createElement('div');
+  _navTipEl.className = 'nav-tip';
+  document.body.appendChild(_navTipEl);
+  return _navTipEl;
+}
+
+function _navTipText(item) {
+  if (item.dataset.tip) return item.dataset.tip;
+  // Strip icon and badge from a clone to extract just the label text
+  const clone = item.cloneNode(true);
+  clone.querySelectorAll('.icon, .nav-badge').forEach(el => el.remove());
+  const text = clone.textContent.trim();
+  if (text) item.dataset.tip = text;
+  return text;
+}
+
+function _showNavTip(item) {
+  if (!document.body.classList.contains('sb-collapsed')) return;
+  const text = _navTipText(item);
+  if (!text) return;
+  const tip = _ensureNavTip();
+  tip.textContent = text;
+  const r = item.getBoundingClientRect();
+  tip.style.left = (r.right + 12) + 'px';
+  tip.style.top = (r.top + r.height / 2) + 'px';
+  tip.classList.add('show');
+}
+
+function _hideNavTip() {
+  if (_navTipEl) _navTipEl.classList.remove('show');
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const sidebar = document.querySelector('.sidebar');
+  if (!sidebar) return;
+  // Event delegation so dynamically added nav items also work
+  sidebar.addEventListener('mouseover', e => {
+    const item = e.target.closest('.nav-item');
+    if (!item) return;
+    _showNavTip(item);
+  });
+  sidebar.addEventListener('mouseout', e => {
+    const item = e.target.closest('.nav-item');
+    if (!item) return;
+    if (e.relatedTarget && item.contains(e.relatedTarget)) return;
+    _hideNavTip();
+  });
+  sidebar.addEventListener('click', _hideNavTip);
+  const scroll = sidebar.querySelector('.sidebar-nav-scroll');
+  if (scroll) scroll.addEventListener('scroll', _hideNavTip);
+});
