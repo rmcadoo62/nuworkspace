@@ -51,10 +51,10 @@ async function dmLoadConversations() {
     .order('updated_at', { ascending: false });
   if (e2) { console.error('[dm] load conversations:', e2); return; }
 
-  // 3. All participants of those convs (for member display)
+  // 3. All participants of those convs (member display + last_read_at for receipts)
   const { data: allParts, error: e3 } = await sb
     .from('conversation_participants')
-    .select('conversation_id, employee_id')
+    .select('conversation_id, employee_id, last_read_at')
     .in('conversation_id', convIds);
   if (e3) { console.error('[dm] load all participants:', e3); return; }
 
@@ -71,9 +71,10 @@ async function dmLoadConversations() {
   // Compose
   dmConvs = (convs || []).map(c => {
     const myPart = myParts.find(p => p.conversation_id === c.id);
-    const memberIds = (allParts || [])
-      .filter(p => p.conversation_id === c.id)
-      .map(p => p.employee_id);
+    const partsForConv = (allParts || []).filter(p => p.conversation_id === c.id);
+    const memberIds = partsForConv.map(p => p.employee_id);
+    const partReads = {};
+    partsForConv.forEach(p => { partReads[p.employee_id] = p.last_read_at; });
     const msgs = (recentMsgs || []).filter(m => m.conversation_id === c.id);
     const lastMessage = msgs[0] || null;
     const lastReadAt = myPart?.last_read_at || '1970-01-01T00:00:00Z';
@@ -87,6 +88,7 @@ async function dmLoadConversations() {
       ...c,
       _myLastReadAt: lastReadAt,
       _memberIds: memberIds,
+      _participantReads: partReads,
       _lastMessage: lastMessage,
       _unreadCount: unread,
     };
@@ -222,7 +224,7 @@ function dmRenderListView() {
         <div class="dm-thread-preview">${preview || '<span style="opacity:.5">No messages yet</span>'}</div>
       </div>
       ${unread > 0 ? '<div class="dm-thread-unread-dot">' + (unread > 9 ? '9+' : unread) + '</div>' : ''}
-      <button class="dm-thread-delete" onclick="event.stopPropagation();dmConfirmDelete('${c.id}')" title="${c.is_group ? 'Leave group' : 'Remove conversation'}">
+      <button class="dm-thread-delete" onclick="event.stopPropagation();dmConfirmDelete('${c.id}')" title="${c.is_group ? 'Leave group' : 'Delete conversation'}">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m3 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
       </button>
     </div>`;
@@ -249,15 +251,18 @@ function dmRenderListView() {
 async function dmOpenConversation(convId) {
   dmActiveConv = convId;
   // Mark as read
+  const nowIso = new Date().toISOString();
   await sb.from('conversation_participants')
-    .update({ last_read_at: new Date().toISOString() })
+    .update({ last_read_at: nowIso })
     .eq('conversation_id', convId)
     .eq('employee_id', currentEmployee.id);
   // Update local cache
   const conv = dmConvs.find(c => c.id === convId);
   if (conv) {
-    conv._myLastReadAt = new Date().toISOString();
+    conv._myLastReadAt = nowIso;
     conv._unreadCount = 0;
+    if (!conv._participantReads) conv._participantReads = {};
+    conv._participantReads[currentEmployee.id] = nowIso;
   }
   // Make sure we have messages — fetch fresh batch
   await dmLoadMessages(convId);
@@ -288,10 +293,22 @@ function dmRenderConversationView() {
     const senderName = sender ? sender.name.split(' ')[0] : '?';
     const time = dmFmtTime(m.created_at);
     const showSenderName = conv.is_group && !isMine;
+    // Read receipt: 1-on-1 only. "Read" if the other party's last_read_at >= this msg.
+    let receipt = '';
+    if (isMine) {
+      if (!conv.is_group) {
+        const otherEmpId = (conv._memberIds || []).find(id => id !== currentEmployee?.id);
+        const otherLastRead = otherEmpId ? conv._participantReads?.[otherEmpId] : null;
+        const isRead = otherLastRead && new Date(otherLastRead) >= new Date(m.created_at);
+        receipt = ' &middot; ' + (isRead ? '<span class="dm-msg-read">Read</span>' : 'Sent');
+      } else {
+        receipt = ' &middot; Sent';
+      }
+    }
     return `<div class="dm-msg ${isMine ? 'dm-msg-mine' : 'dm-msg-other'}">
       ${showSenderName ? '<div class="dm-msg-sender">' + _dmEsc(senderName) + '</div>' : ''}
       <div class="dm-msg-bubble">${_dmEsc(m.body)}</div>
-      <div class="dm-msg-time">${time}${isMine ? ' &middot; Sent' : ''}</div>
+      <div class="dm-msg-time">${time}${receipt}</div>
     </div>`;
   }).join('');
 
@@ -635,7 +652,7 @@ async function dmCreateConversationFromPicker() {
 //   1. Self delete: removes only my participant row → conversation
 //      stays for the other side. For groups this is "leave group".
 //   2. Owner override: deletes the conversation row entirely, which
-//      cascades to participants + messages. Logged to activity_log.
+//      cascades to participants + messages.
 // Confirmation overlay is appended to #dmRoot so capture-phase outside-
 // click handler doesn't close the panel underneath.
 
@@ -643,9 +660,10 @@ function dmConfirmDelete(convId) {
   const conv = dmConvs.find(c => c.id === convId);
   if (!conv) return;
   const isOwner = !!currentEmployee?.isOwner;
+  const isGroup = !!conv.is_group;
 
   let title, body, primaryLabel;
-  if (conv.is_group) {
+  if (isGroup) {
     title = 'Leave this group?';
     body  = "You'll be removed from \"" + dmConvDisplayName(conv) + "\". Other members will continue without you.";
     primaryLabel = 'Leave group';
@@ -653,10 +671,10 @@ function dmConfirmDelete(convId) {
     const otherEmp = (conv._memberIds || [])
       .map(id => employees.find(e => e.id === id))
       .find(e => e && e.id !== currentEmployee?.id);
-    const otherName = otherEmp?.name || 'They';
-    title = 'Remove conversation?';
-    body  = otherName + ' will still see this conversation on their side.';
-    primaryLabel = 'Remove from my list';
+    const otherName = otherEmp?.name || 'the other person';
+    title = 'Delete this conversation?';
+    body  = 'This will permanently delete the conversation with ' + otherName + ' for both of you. Messages will be removed.';
+    primaryLabel = 'Delete';
   }
 
   const existing = document.getElementById('dmConfirmOverlay');
@@ -665,6 +683,11 @@ function dmConfirmDelete(convId) {
   const overlay = document.createElement('div');
   overlay.id = 'dmConfirmOverlay';
   overlay.className = 'dm-confirm-overlay';
+  // Owner override link only makes sense for groups — for 1-on-1s,
+  // "delete" already nukes the whole thing via the auto-clean trigger.
+  const ownerLinkHtml = (isOwner && isGroup)
+    ? `<a href="#" class="dm-confirm-owner-link" onclick="event.preventDefault();dmConfirmOwnerDelete('${convId}')">Delete entirely (owner override)</a>`
+    : '';
   overlay.innerHTML = `
     <div class="dm-confirm-modal" onclick="event.stopPropagation()">
       <div class="dm-confirm-title">${_dmEsc(title)}</div>
@@ -673,7 +696,7 @@ function dmConfirmDelete(convId) {
         <button class="dm-confirm-cancel" onclick="dmCancelDelete()">Cancel</button>
         <button class="dm-confirm-primary" onclick="dmDeleteForSelf('${convId}')">${_dmEsc(primaryLabel)}</button>
       </div>
-      ${isOwner ? `<a href="#" class="dm-confirm-owner-link" onclick="event.preventDefault();dmConfirmOwnerDelete('${convId}')">Delete entirely (owner override)</a>` : ''}
+      ${ownerLinkHtml}
     </div>
   `;
   overlay.onclick = dmCancelDelete; // click on overlay backdrop closes
@@ -739,20 +762,6 @@ async function dmDeleteForSelf(convId) {
     await dmLoadConversations(); // recover from optimistic state
     return;
   }
-
-  // Audit log (CMMC AU.L2-3.3.1)
-  try {
-    await sb.from('activity_log').insert({
-      employee_id: currentEmployee.id,
-      employee_name: currentEmployee.name,
-      record_type: 'dm_conversation',
-      record_id: convId,
-      record_label: convLabel,
-      field_changed: 'deleted',
-      old_value: null,
-      new_value: isGroup ? 'left_group' : 'removed_from_list',
-    });
-  } catch (e) { console.warn('[dm] audit log failed:', e); }
 }
 
 async function dmDeleteForEveryone(convId) {
@@ -778,20 +787,6 @@ async function dmDeleteForEveryone(convId) {
     await dmLoadConversations();
     return;
   }
-
-  // Audit log
-  try {
-    await sb.from('activity_log').insert({
-      employee_id: currentEmployee.id,
-      employee_name: currentEmployee.name,
-      record_type: 'dm_conversation',
-      record_id: convId,
-      record_label: convLabel,
-      field_changed: 'deleted',
-      old_value: null,
-      new_value: 'deleted_for_everyone',
-    });
-  } catch (e) { console.warn('[dm] audit log failed:', e); }
 }
 
 // Realtime: someone removed me from a conversation (or owner nuked it).
@@ -805,6 +800,21 @@ function dmOnDeletedParticipant(payload) {
   if (dmActiveConv === convId) dmActiveConv = null;
   dmRenderBubble();
   if (dmPanelOpen) dmRenderListView();
+}
+
+// Realtime: a participant updated their last_read_at (i.e., opened the convo).
+// Refresh receipts on any of MY messages they've now read past.
+function dmOnParticipantUpdate(payload) {
+  if (!payload?.new) return;
+  const { conversation_id, employee_id, last_read_at } = payload.new;
+  const conv = dmConvs.find(c => c.id === conversation_id);
+  if (!conv) return;
+  if (!conv._participantReads) conv._participantReads = {};
+  conv._participantReads[employee_id] = last_read_at;
+  // If I'm currently looking at this convo, re-render so receipts flip live
+  if (dmPanelOpen && dmActiveConv === conversation_id) {
+    dmRenderConversationView();
+  }
 }
 
 // ── Outside click closes panel/toast on click outside ───────
@@ -840,3 +850,4 @@ window.dmCancelDelete = dmCancelDelete;
 window.dmDeleteForSelf = dmDeleteForSelf;
 window.dmDeleteForEveryone = dmDeleteForEveryone;
 window.dmOnDeletedParticipant = dmOnDeletedParticipant;
+window.dmOnParticipantUpdate = dmOnParticipantUpdate;
