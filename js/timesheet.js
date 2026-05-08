@@ -299,15 +299,19 @@ async function autoApproveProxyTimesheet() {
       tsData[key] = [];
       const ohKey = 'oh_' + key;
       tsData[ohKey] = {};
+      const ohCmtKey = 'oh_comments_' + key;
+      tsData[ohCmtKey] = {};
       freshRows.forEach(r => {
         if (r.is_overhead && r.overhead_cat) {
           tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+          tsData[ohCmtKey][r.overhead_cat] = JSON.parse(r.notes_json || '{}');
         } else {
           tsData[key].push({
             _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
             taskId: r.task_id||null,
             isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
             hours: JSON.parse(r.hours_json||'{}'),
+            comments: JSON.parse(r.notes_json||'{}'),
           });
         }
       });
@@ -743,15 +747,19 @@ async function viewEmployeeTimesheet(empId, weekKey) {
       if (freshRows) {
         tsData[storeKey] = [];
         tsData[ohKey] = {};
+        const ohCmtKey = 'oh_comments_' + storeKey;
+        tsData[ohCmtKey] = {};
         freshRows.forEach(r => {
           if (r.is_overhead && r.overhead_cat) {
             tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+            tsData[ohCmtKey][r.overhead_cat] = JSON.parse(r.notes_json || '{}');
           } else {
             tsData[storeKey].push({
               _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
               taskId: r.task_id||null,
               isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
               hours: JSON.parse(r.hours_json||'{}'),
+              comments: JSON.parse(r.notes_json||'{}'),
             });
           }
         });
@@ -797,15 +805,19 @@ async function editAndApprove(wsId, empId, weekKey) {
     if (freshRows) {
       tsData[storeKey] = [];
       tsData[ohKey] = {};
+      const ohCmtKey = 'oh_comments_' + storeKey;
+      tsData[ohCmtKey] = {};
       freshRows.forEach(r => {
         if (r.is_overhead && r.overhead_cat) {
           tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+          tsData[ohCmtKey][r.overhead_cat] = JSON.parse(r.notes_json || '{}');
         } else {
           tsData[storeKey].push({
             _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
             taskId: r.task_id||null,
             isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
             hours: JSON.parse(r.hours_json||'{}'),
+            comments: JSON.parse(r.notes_json||'{}'),
           });
         }
       });

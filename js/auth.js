@@ -175,6 +175,7 @@ function setTsComment(key, rowIdx, dayIdx, val) {
   if (!tsData[key] || !tsData[key][rowIdx]) return;
   if (!tsData[key][rowIdx].comments) tsData[key][rowIdx].comments = {};
   tsData[key][rowIdx].comments[dayIdx] = val;
+  if (typeof _tsDebounceAutosave === 'function') _tsDebounceAutosave(key);
 }
 
 function setOhComment(key, cat, di, val) {
@@ -182,6 +183,7 @@ function setOhComment(key, cat, di, val) {
   if (!tsData[cKey]) tsData[cKey] = {};
   if (!tsData[cKey][cat]) tsData[cKey][cat] = {0:'',1:'',2:'',3:'',4:'',5:'',6:''};
   tsData[cKey][cat][di] = val;
+  if (typeof _tsDebounceAutosave === 'function') _tsDebounceAutosave(key);
 }
 
 function toggleTsComment(id) {
@@ -412,15 +414,19 @@ async function openTimesheetPanel(el) {
       if (freshRows) {
         tsData[storeKey] = [];
         tsData[ohKey] = {};
+        const ohCmtKey = 'oh_comments_' + storeKey;
+        tsData[ohCmtKey] = {};
         freshRows.forEach(r => {
           if (r.is_overhead && r.overhead_cat) {
             tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+            tsData[ohCmtKey][r.overhead_cat] = JSON.parse(r.notes_json || '{}');
           } else {
             tsData[storeKey].push({
               _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
               taskId: r.task_id||null,
               isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
               hours: JSON.parse(r.hours_json||'{}'),
+              comments: JSON.parse(r.notes_json||'{}'),
             });
           }
         });
@@ -461,15 +467,19 @@ async function reloadTsWeek(emp) {
     if (freshRows) {
       tsData[storeKey] = [];
       tsData[ohKey] = {};
+      const ohCmtKey = 'oh_comments_' + storeKey;
+      tsData[ohCmtKey] = {};
       freshRows.forEach(r => {
         if (r.is_overhead && r.overhead_cat) {
           tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
+          tsData[ohCmtKey][r.overhead_cat] = JSON.parse(r.notes_json || '{}');
         } else {
           tsData[storeKey].push({
             _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
             taskId: r.task_id||null,
             isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
             hours: JSON.parse(r.hours_json||'{}'),
+            comments: JSON.parse(r.notes_json||'{}'),
           });
         }
       });
@@ -1277,7 +1287,7 @@ window.setTsHours = async function(key, rowIdx, dayIdx, val) {
     await sb.from('timesheet_entries')
       .update({
         hours_json: JSON.stringify(row.hours),
-        comments_json: JSON.stringify(row.comments || {}),
+        notes_json: JSON.stringify(row.comments || {}),
       })
       .eq('id', row._id);
   } else {
