@@ -716,6 +716,17 @@ function setupRealtime() {
           window.dmOnDeletedParticipant(payload);
         }
       })
+      .on('postgres_changes', {
+        event:  'UPDATE',
+        schema: 'public',
+        table:  'conversation_participants',
+      }, (payload) => {
+        // Someone opened a conversation — last_read_at changed.
+        // Used to flip Sent → Read on my messages live.
+        if (typeof window.dmOnParticipantUpdate === 'function') {
+          window.dmOnParticipantUpdate(payload);
+        }
+      })
       .subscribe();
   }
 

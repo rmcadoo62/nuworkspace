@@ -151,6 +151,7 @@
   margin-top: 3px; padding: 0 4px;
   font-family: 'JetBrains Mono', monospace;
 }
+.dm-msg-read { color: var(--blue); font-weight: 600; }
 
 /* ── Composer ───────────────────────────────────────────── */
 .dm-composer {
