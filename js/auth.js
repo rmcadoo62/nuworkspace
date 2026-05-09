@@ -1414,6 +1414,9 @@ async function afterLogin(user) {
   bootApp();
   updateApprovalsBadge();
   setupRealtime();
+  // Re-arm the once-per-session 45-day prune of read notifications. Lives in
+  // chatter.js but the flag has to reset per login session.
+  if (typeof _notifsPruned !== 'undefined') _notifsPruned = false;
   // Fetch unread chatter_notifs so the bell badge reflects state on login,
   // not just after the user clicks the bell. The realtime subscription only
   // catches NEW inserts; existing unread notifs need this initial fetch.

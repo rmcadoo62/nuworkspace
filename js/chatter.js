@@ -10,6 +10,10 @@ let chatterReplyTo = null; // { id, authorName, text }
 let chatterEditingId = null; // id of message currently being edited (null = none)
 let chatterNotifySelected = []; // array of employee ids chosen in notify dropdown
 let notifStore = []; // { id, projId, projName, msgId, fromName, fromColor, fromInitials, text, ts, read }
+// One-shot guard so the 45-day prune of read notifications fires only once per
+// session (at the first loadNotifs call after login). Reset by auth.js on
+// login/logout. Skipped entirely while in View-As mode.
+let _notifsPruned = false;
 
 function chatterMsgs(projId) { return chatterStore[projId] || []; }
 
@@ -301,6 +305,29 @@ async function loadNotifs() {
   if (!currentUser) return;
   const myEmp = currentEmployee || employees.find(e => e.userId === currentUser.id);
   if (!myEmp) return;
+
+  // Once-per-session prune: delete this user's READ notifications older than
+  // 45 days. Unread items stay forever (some employees never clear their bell
+  // and we don't want to silently lose unhandled notifications). Skipped while
+  // impersonating, both because the write guard would block it and because
+  // pruning under another identity is a destructive side-effect that should
+  // never happen in a "view-only" session.
+  const _isView = (typeof isImpersonating === 'function' && isImpersonating());
+  if (!_notifsPruned && !_isView) {
+    _notifsPruned = true;
+    try {
+      const cutoff = new Date(Date.now() - 45 * 86400000).toISOString();
+      // Fire-and-forget — don't block the bell render on cleanup.
+      sb.from('chatter_notifs').delete()
+        .eq('employee_id', myEmp.id)
+        .eq('is_read', true)
+        .lt('created_at', cutoff)
+        .then(({ error }) => {
+          if (error) console.warn('[notifs] 45-day prune error:', error.message);
+        });
+    } catch(e) { console.warn('[notifs] prune exception:', e); }
+  }
+
   try {
     const { data } = await sb.from('chatter_notifs')
       .select('*').eq('employee_id', myEmp.id).order('created_at', { ascending: false }).limit(40);
