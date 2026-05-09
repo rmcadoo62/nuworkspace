@@ -1787,10 +1787,23 @@ function showLifecycleInstructions(templateKey) {
   const onboardingTemplate = templates.find(t => t.key === templateKey && t.type === 'onboarding');
   const offboardingTemplate = templates.find(t => t.key === templateKey && t.type === 'offboarding');
   
-  if (!onboardingTemplate || !offboardingTemplate) {
+  if (!onboardingTemplate && !offboardingTemplate) {
     alert('Template instructions not found');
     return;
   }
+  
+  // Use whichever template exists for the title; prefer onboarding's label if available
+  const titleLabel = onboardingTemplate?.label || offboardingTemplate?.label || templateKey;
+  
+  // Default active tab — onboarding if it exists, else offboarding
+  const startTab = onboardingTemplate ? 'onboarding' : 'offboarding';
+  
+  const onbContent = onboardingTemplate
+    ? (onboardingTemplate.instructions || 'No instructions provided.')
+    : '<div style="color:var(--muted);font-style:italic">No onboarding template configured for this item.</div>';
+  const offContent = offboardingTemplate
+    ? (offboardingTemplate.instructions || 'No instructions provided.')
+    : '<div style="color:var(--muted);font-style:italic">No offboarding template configured for this item.</div>';
   
   // Create modal backdrop
   const backdrop = document.createElement('div');
@@ -1798,28 +1811,31 @@ function showLifecycleInstructions(templateKey) {
   backdrop.id = 'lifecycleInstructionsModal';
   backdrop.onclick = e => { if(e.target===backdrop) backdrop.remove(); };
   
+  const onbTabActive = startTab === 'onboarding';
+  const offTabActive = startTab === 'offboarding';
+  
   backdrop.innerHTML = `
     <div class="modal" style="width:680px;max-height:80vh">
       <div class="modal-header">
-        <div class="modal-title">Instructions: ${onboardingTemplate.label}</div>
+        <div class="modal-title">Instructions: ${titleLabel}</div>
         <button class="modal-close" onclick="document.getElementById('lifecycleInstructionsModal').remove()">✕</button>
       </div>
       <div style="display:flex;border-bottom:1px solid var(--border)">
         <button id="onboardingTab" onclick="switchInstructionTab('onboarding')" 
-          style="flex:1;padding:10px 16px;background:var(--amber);border:none;font-size:13px;font-weight:600;color:var(--bg);cursor:pointer">
-          📋 Onboarding
+          style="flex:1;padding:10px 16px;background:${onbTabActive?'var(--amber)':'var(--surface2)'};border:none;font-size:13px;font-weight:${onbTabActive?'600':'400'};color:${onbTabActive?'var(--bg)':'var(--muted)'};cursor:pointer">
+          📋 Onboarding${!onboardingTemplate ? ' (missing)' : ''}
         </button>
         <button id="offboardingTab" onclick="switchInstructionTab('offboarding')" 
-          style="flex:1;padding:10px 16px;background:var(--surface2);border:none;font-size:13px;color:var(--muted);cursor:pointer">
-          🚪 Offboarding
+          style="flex:1;padding:10px 16px;background:${offTabActive?'var(--amber)':'var(--surface2)'};border:none;font-size:13px;font-weight:${offTabActive?'600':'400'};color:${offTabActive?'var(--bg)':'var(--muted)'};cursor:pointer">
+          🚪 Offboarding${!offboardingTemplate ? ' (missing)' : ''}
         </button>
       </div>
       <div class="modal-body" style="padding:20px;max-height:400px;overflow-y:auto">
-        <div id="onboardingInstructions" style="font-size:13px;line-height:1.5;color:var(--text)">
-          ${onboardingTemplate.instructions || 'No instructions provided.'}
+        <div id="onboardingInstructions" style="display:${onbTabActive?'block':'none'};font-size:13px;line-height:1.5;color:var(--text)">
+          ${onbContent}
         </div>
-        <div id="offboardingInstructions" style="display:none;font-size:13px;line-height:1.5;color:var(--text)">
-          ${offboardingTemplate.instructions || 'No instructions provided.'}
+        <div id="offboardingInstructions" style="display:${offTabActive?'block':'none'};font-size:13px;line-height:1.5;color:var(--text)">
+          ${offContent}
         </div>
       </div>
       <div class="modal-footer">
