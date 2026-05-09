@@ -32,8 +32,13 @@ if (typeof document !== 'undefined' && document.body) {
 // ===== AUTH STATE =====
 // ===== AUTH STATE =====
 let currentUser = null;       // Supabase auth user
-let currentEmployee = null;   // matching employees[] record
-let proxyEmployee = null;  
+let currentEmployee = null;   // matching employees[] record (swaps during View-As)
+let proxyEmployee = null;
+// View-As (admin impersonation) state. realEmployee is the actual logged-in
+// person; viewAsEmployee is non-null only while impersonating. currentEmployee
+// is swapped to viewAsEmployee during a session and restored on exit.
+let realEmployee = null;
+let viewAsEmployee = null;
 
 function isManager() { return !!(currentEmployee && ['manager','Manager','owner','Owner','admin','Admin'].includes(currentEmployee.permissionLevel)); }
 
@@ -1189,12 +1194,192 @@ function applySchedAccessToNav() {
   }
 }
 
+// ============================================================================
+// VIEW-AS (admin impersonation, view-only)
+// ============================================================================
+// Lets a permitted admin step into another employee's perspective WITHOUT
+// disclosing or rotating that employee's password / MFA factor. The session
+// remains authenticated as the real admin (currentUser unchanged); only
+// currentEmployee is swapped so all UI permission gates and data scopes
+// reflect the target employee. All Supabase writes are blocked while in
+// View-As mode by an interceptor on sb.from(), so impersonation is read-only
+// even if a write codepath is missed by the UI.
+//
+// Allow-list — start narrow. Expand later by editing this email list.
+const VIEW_AS_ALLOWED_EMAILS = ['rmcadoo@nulabs.com'];
+
+function isImpersonating() { return viewAsEmployee !== null; }
+
+function canViewAs() {
+  const email = (realEmployee?.email || currentUser?.email || '').toLowerCase();
+  return !!email && VIEW_AS_ALLOWED_EMAILS.includes(email);
+}
+
+function _recomputeIsApprover() {
+  isApprover = currentEmployee
+    ? (currentEmployee.role === 'approver' || currentEmployee.role === 'manager' ||
+       currentEmployee.isApprover === true || currentEmployee.isApprover === 1)
+    : false;
+}
+
+// Apply identity-dependent nav visibility. Run after every identity change
+// (login, View-As enter, View-As exit) so sidebar items match currentEmployee.
+function _applyIdentityNav() {
+  const navApp = document.getElementById('navApprovals');
+  if (navApp) navApp.style.display = isApprover ? 'flex' : 'none';
+  const navTs = document.getElementById('navTimesheetItem');
+  if (navTs) navTs.style.display = (currentEmployee && currentEmployee.isOwner) ? 'none' : 'flex';
+}
+
+function startViewAs(empId) {
+  if (!canViewAs()) { toast('⚠ View-As is not enabled for your account'); return; }
+  if (isImpersonating()) { toast('⚠ Already in View-As — exit first'); return; }
+  const target = employees.find(e => e.id === empId);
+  if (!target) { toast('⚠ Employee not found'); return; }
+  if (realEmployee && target.id === realEmployee.id) { toast('⚠ That is already you'); return; }
+
+  viewAsEmployee = target;
+  currentEmployee = target;
+  _recomputeIsApprover();
+
+  console.log('[ViewAs] START', { actor: realEmployee?.name, target: target.name, ts: new Date().toISOString() });
+
+  _showViewAsBanner();
+  if (typeof applyPermissions === 'function') applyPermissions();
+  _applyIdentityNav();
+
+  // Refresh user-scoped surfaces so the UI reflects the target's view
+  if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
+  if (typeof loadNotifs === 'function') loadNotifs();
+
+  // Update the sidebar user badge to reflect the impersonated identity
+  const av = document.getElementById('userBadgeAv');
+  const nm = document.getElementById('userBadgeName');
+  const rl = document.getElementById('userBadgeRole');
+  if (av) { av.textContent = target.initials; av.style.background = target.color; }
+  if (nm) nm.textContent = target.name.split(' ')[0];
+  if (rl) rl.textContent = isApprover ? 'Approver (View)' : 'Employee (View)';
+
+  // Land on Home so we always start from a panel the target is allowed to see
+  if (typeof openHomePanel === 'function') openHomePanel(document.getElementById('navHome'));
+
+  toast('👁 Now viewing as ' + target.name);
+}
+
+function exitViewAs() {
+  if (!isImpersonating()) return;
+  const wasName = viewAsEmployee.name;
+
+  console.log('[ViewAs] END', { actor: realEmployee?.name, target: wasName, ts: new Date().toISOString() });
+
+  viewAsEmployee = null;
+  currentEmployee = realEmployee;
+  _recomputeIsApprover();
+
+  _hideViewAsBanner();
+  if (typeof applyPermissions === 'function') applyPermissions();
+  _applyIdentityNav();
+  if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
+  if (typeof loadNotifs === 'function') loadNotifs();
+
+  // Restore real-user sidebar badge
+  const av = document.getElementById('userBadgeAv');
+  const nm = document.getElementById('userBadgeName');
+  const rl = document.getElementById('userBadgeRole');
+  if (realEmployee) {
+    if (av) { av.textContent = realEmployee.initials; av.style.background = realEmployee.color; }
+    if (nm) nm.textContent = realEmployee.name.split(' ')[0];
+    if (rl) rl.textContent = isApprover ? 'Approver' : 'Employee';
+  }
+
+  if (typeof openHomePanel === 'function') openHomePanel(document.getElementById('navHome'));
+  toast('✓ Exited View-As (' + wasName + ')');
+}
+
+function _showViewAsBanner() {
+  let banner = document.getElementById('viewAsBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'viewAsBanner';
+    banner.style.cssText = [
+      'position:fixed','top:0','left:0','right:0','z-index:10000',
+      'background:linear-gradient(90deg,#e8a234,#d4881f)','color:#1a1207',
+      'padding:6px 16px','font-size:13px','font-weight:700',
+      'display:flex','align-items:center','justify-content:center','gap:14px',
+      'box-shadow:0 2px 8px rgba(0,0,0,.4)','height:34px','box-sizing:border-box',
+      'font-family:system-ui,-apple-system,sans-serif'
+    ].join(';');
+    document.body.appendChild(banner);
+  }
+  banner.innerHTML =
+    '<span>\uD83D\uDC41 VIEW-ONLY \u2014 Viewing as <span style="text-decoration:underline">' +
+    (viewAsEmployee?.name || '?') + '</span> \u00B7 acting as ' +
+    (realEmployee?.name || 'admin') + '</span>' +
+    '<button onclick="exitViewAs()" style="background:#1a1207;color:#e8a234;border:none;border-radius:5px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer">\u2715 Exit View</button>';
+  banner.style.display = 'flex';
+  const shell = document.getElementById('appShell');
+  if (shell) { shell.style.marginTop = '34px'; shell.style.height = 'calc(100% - 34px)'; }
+}
+
+function _hideViewAsBanner() {
+  const banner = document.getElementById('viewAsBanner');
+  if (banner) banner.style.display = 'none';
+  const shell = document.getElementById('appShell');
+  if (shell) { shell.style.marginTop = ''; shell.style.height = ''; }
+}
+
+// Backstop: wrap sb.from() so insert/update/delete/upsert are no-ops while
+// impersonating. Returns a chainable thenable that always resolves to a
+// view_as_readonly error so callers that await the result do not crash.
+function _installViewAsWriteGuard() {
+  if (!sb || sb._viewAsGuardInstalled) return;
+  sb._viewAsGuardInstalled = true;
+  const origFrom = sb.from.bind(sb);
+  sb.from = function(table) {
+    const builder = origFrom(table);
+    ['insert', 'update', 'delete', 'upsert'].forEach(method => {
+      const orig = builder[method];
+      if (typeof orig !== 'function') return;
+      builder[method] = function(...args) {
+        if (isImpersonating()) {
+          console.warn('[ViewAs] Blocked ' + method + ' on ' + table);
+          if (typeof toast === 'function') toast('\uD83D\uDD12 Read-only \u2014 exit View-As to make changes');
+          return _makeBlockedChain();
+        }
+        return orig.apply(builder, args);
+      };
+    });
+    return builder;
+  };
+}
+
+function _makeBlockedChain() {
+  const blocked = { data: null, error: { message: 'Read-only while in View-As mode', code: 'view_as_readonly' } };
+  const handler = {
+    get(_t, prop) {
+      if (prop === 'then')    return (resolve) => resolve(blocked);
+      if (prop === 'catch')   return () => _makeBlockedChain();
+      if (prop === 'finally') return (cb) => { try { cb && cb(); } catch(e){} return _makeBlockedChain(); };
+      // Any other chained method (.select, .eq, .single, .order, etc.) returns the chain
+      return () => _makeBlockedChain();
+    }
+  };
+  return new Proxy({}, handler);
+}
+
 async function afterLogin(user) {
   proxyEmployee = null; // always clear proxy on any login
   tsWeekOffset = 0;     // reset to current week
   currentUser = user;
   // Match to employee record by email
   currentEmployee = employees.find(e => e.email && e.email.toLowerCase() === user.email.toLowerCase()) || null;
+  // Track the real authenticated employee separately from currentEmployee so
+  // View-As can swap currentEmployee without losing the actor identity.
+  realEmployee = currentEmployee;
+  viewAsEmployee = null;
+  // Install Supabase write guard once — it is a no-op until isImpersonating()
+  // becomes true, so it is always safe to install at login.
+  if (typeof _installViewAsWriteGuard === 'function') _installViewAsWriteGuard();
   isApprover = currentEmployee ? (currentEmployee.role === 'approver' || currentEmployee.role === 'manager' || currentEmployee.isApprover === true || currentEmployee.isApprover === 1) : false;
 
   // Update sidebar badge
@@ -1213,12 +1398,9 @@ async function afterLogin(user) {
     if (role) role.textContent = 'User';
   }
 
-  // Show approvals nav for approvers
-  const navApp = document.getElementById('navApprovals');
-  if (navApp) navApp.style.display = isApprover ? 'flex' : 'none';
-  // Hide timesheet nav for owners
-  const navTs = document.getElementById('navTimesheetItem');
-  if (navTs && currentEmployee && currentEmployee.isOwner) navTs.style.display = 'none';
+  // Apply identity-dependent nav visibility (Approvals shown for approvers,
+  // Timesheet hidden for owners). Centralized so View-As reuses the same logic.
+  _applyIdentityNav();
 
   // Apply permission-based UI
   applyPermissions();
@@ -1257,6 +1439,8 @@ async function doLogout() {
   await sb.auth.signOut();
   window._realtimeActive = false; // allow re-subscription on next login
   currentUser = null; currentEmployee = null; isApprover = false; proxyEmployee = null; tsWeekOffset = 0;
+  realEmployee = null; viewAsEmployee = null;
+  if (typeof _hideViewAsBanner === 'function') _hideViewAsBanner();
   document.getElementById('appShell').style.display = 'none';
   document.getElementById('sidebarUserBadge').style.display = 'none';
   document.getElementById('loginScreen').style.display = 'flex';

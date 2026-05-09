@@ -796,7 +796,8 @@ function showEmpProfile(empId, annivOffset) {
           ${yearsWorked ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">Hired ${fmtDate(emp.hireDate)} · ${yearsWorked} yrs seniority</div>` : ''}
         </div>
       </div>
-      ${isManager() && !_myInfoReadOnly ? `<div style="display:flex;gap:8px">
+      ${isManager() && !_myInfoReadOnly ? `<div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${(typeof canViewAs === 'function' && canViewAs() && (typeof realEmployee === 'undefined' || !realEmployee || realEmployee.id !== empId)) ? `<button onclick="startViewAs('${empId}')" title="Step into this employee's view (read-only)" style="background:rgba(232,162,52,0.12);border:1px solid rgba(232,162,52,0.45);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--amber);cursor:pointer">👁 View as</button>` : ''}
         <button onclick="openEmployeeModal('${empId}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--text);cursor:pointer">✎ Edit</button>
         <button onclick="deleteEmployee('${empId}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:8px;padding:6px 14px;font-size:12px;color:var(--red);cursor:pointer">✕ Remove</button>
       </div>` : ''}
