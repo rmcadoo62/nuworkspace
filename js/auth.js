@@ -1232,6 +1232,10 @@ async function afterLogin(user) {
   bootApp();
   updateApprovalsBadge();
   setupRealtime();
+  // Fetch unread chatter_notifs so the bell badge reflects state on login,
+  // not just after the user clicks the bell. The realtime subscription only
+  // catches NEW inserts; existing unread notifs need this initial fetch.
+  if (typeof loadNotifs === 'function') loadNotifs();
   // Boot DM module — bubble appears once conversations load
   if (typeof dmInit === 'function') dmInit();
 }
