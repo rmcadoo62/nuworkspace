@@ -337,6 +337,11 @@ function renderEmployeesPanel(search) {
             placeholder="Search…" value="${q}" oninput="renderEmployeesPanel(this.value)" id="empSearch" />
           <button onclick="openEmployeeModal(null)" style="background:var(--amber);border:none;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;color:#000;cursor:pointer;white-space:nowrap">+ Add</button>
         </div>
+        ${isManager() ? `<div style="padding:6px 14px;border-bottom:1px solid var(--border)">
+          <button onclick="openBulkLifecycleModal()" style="width:100%;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--muted);cursor:pointer;text-align:left">
+            📋 Bulk lifecycle update
+          </button>
+        </div>` : ''}
         <div style="padding:6px 14px;border-bottom:1px solid var(--border);display:flex;gap:4px">
           ${deptBtn('All', 'all')}
           ${deptBtn('NU Labs', 'nulabs')}
@@ -1469,6 +1474,310 @@ async function updateLifecycleItem(empId, templateKey, field, value) {
   } catch (e) {
     console.error('Failed to update lifecycle item:', e);
     toast('⚠ Update failed');
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  BULK LIFECYCLE UPDATE  (manager-only, opens from Employees panel)
+// ════════════════════════════════════════════════════════════════════
+
+let _bulkState = null;
+let _bulkAllLifecycle = {};   // employee_id -> { template_key -> record }
+let _bulkLastUpdCount = 0;
+
+async function openBulkLifecycleModal() {
+  if (!isManager()) return;
+  await _ensureTemplatesLoaded();
+  if (!templates || !templates.length) {
+    toast('⚠ No lifecycle templates found');
+    return;
+  }
+
+  // Get unique template keys, sorted
+  const onbTemplates = templates.filter(t => t.type === 'onboarding');
+  const uniqueKeys = [...new Map(onbTemplates.map(t => [t.key, t])).values()]
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  if (!uniqueKeys.length) {
+    toast('⚠ No active onboarding templates');
+    return;
+  }
+
+  _bulkState = {
+    templateKey: uniqueKeys[0].key,
+    action: 'onboarding_date',          // 'onboarding_date' | 'offboarding_date' | 'is_na'
+    date: new Date().toISOString().slice(0, 10),
+    tracks: { nulabs: true, ballantine: false },
+    status: 'active',                    // 'active' | 'inactive' | 'all'
+    skipExisting: true,
+    excludedEmpIds: new Set()
+  };
+
+  // Load current lifecycle data once for the preview
+  const { data, error } = await sb.from('employee_lifecycle').select('*').limit(5000);
+  _bulkAllLifecycle = {};
+  if (error) {
+    console.error('Failed to load lifecycle for bulk:', error);
+    toast('⚠ Could not load existing lifecycle data');
+    return;
+  }
+  (data || []).forEach(r => {
+    if (!_bulkAllLifecycle[r.employee_id]) _bulkAllLifecycle[r.employee_id] = {};
+    _bulkAllLifecycle[r.employee_id][r.template_key] = r;
+  });
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'bulkLifecycleModal';
+  backdrop.onclick = e => { if (e.target === backdrop) backdrop.remove(); };
+  backdrop.innerHTML = `
+    <div class="modal" style="width:660px;max-width:95vw">
+      <div class="modal-header">
+        <div class="modal-title">Bulk Lifecycle Update</div>
+        <button class="modal-close" onclick="document.getElementById('bulkLifecycleModal').remove()">✕</button>
+      </div>
+      <div class="modal-body" id="bulkLifecycleBody"></div>
+      <div class="modal-footer" style="justify-content:flex-end">
+        <button onclick="document.getElementById('bulkLifecycleModal').remove()"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 16px;font-size:12.5px;color:var(--text);cursor:pointer">Cancel</button>
+        <button id="bulkApplyBtn" onclick="applyBulkLifecycle()"
+          style="background:var(--amber);border:none;border-radius:7px;padding:8px 18px;font-size:12.5px;font-weight:600;color:#000;cursor:pointer">Apply</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+  _renderBulkBody();
+}
+
+function _bulkSetState(patch) {
+  if (!_bulkState) return;
+  _bulkState = { ..._bulkState, ...patch, tracks: { ..._bulkState.tracks, ...(patch.tracks || {}) } };
+  _renderBulkBody();
+}
+
+function _bulkToggleRow(empId, checked) {
+  if (!_bulkState) return;
+  if (checked) _bulkState.excludedEmpIds.delete(empId);
+  else _bulkState.excludedEmpIds.add(empId);
+  _renderBulkBody();
+}
+
+function _bulkActionBtn(act, label) {
+  const on = _bulkState.action === act;
+  return `<button onclick="_bulkSetState({action:'${act}'})"
+    style="padding:7px 12px;font-size:12px;border:1px solid ${on?'transparent':'var(--border)'};
+    background:${on?'var(--amber)':'var(--surface2)'};color:${on?'#000':'var(--text)'};
+    border-radius:6px;cursor:pointer;font-weight:${on?'600':'500'};font-family:'DM Sans',sans-serif">${label}</button>`;
+}
+
+function _bulkRowEvaluate(emp) {
+  const empTrack = (emp.dept || '').toLowerCase() === 'ballantine' ? 'ballantine' : 'nulabs';
+
+  if (!_bulkState.tracks[empTrack]) return { excluded: true };
+
+  const isInactive = emp.isActive === false || !!emp.terminationDate;
+  if (_bulkState.status === 'active' && isInactive) return { excluded: true };
+  if (_bulkState.status === 'inactive' && !isInactive) return { excluded: true };
+
+  // Does the chosen template apply to this employee's track?
+  const applicableTracks = templates
+    .filter(t => t.key === _bulkState.templateKey)
+    .map(t => t.track);
+  if (!applicableTracks.includes(empTrack)) {
+    const trackLabel = empTrack === 'ballantine' ? 'Ballantine' : 'NU Labs';
+    return { greyed: true, reason: 'not applicable to ' + trackLabel + ' track' };
+  }
+
+  const existing = _bulkAllLifecycle[emp.id] && _bulkAllLifecycle[emp.id][_bulkState.templateKey];
+
+  if (_bulkState.action === 'is_na') {
+    if (existing && existing.is_na) return { greyed: true, reason: 'already N/A' };
+    return { willUpdate: true, existing };
+  }
+
+  const existingDate = existing && existing[_bulkState.action];
+  if (_bulkState.skipExisting && existingDate) {
+    return { greyed: true, reason: existingDate + ' already set' };
+  }
+  return { willUpdate: true, existing, existingDate };
+}
+
+function _renderBulkBody() {
+  const body = document.getElementById('bulkLifecycleBody');
+  if (!body) return;
+
+  const onbTemplates = templates.filter(t => t.type === 'onboarding');
+  const uniqueKeys = [...new Map(onbTemplates.map(t => [t.key, t])).values()]
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+  const opts = uniqueKeys.map(t =>
+    `<option value="${t.key}" ${t.key === _bulkState.templateKey ? 'selected' : ''}>${t.label}</option>`
+  ).join('');
+
+  const isNA = _bulkState.action === 'is_na';
+
+  // Sort employees by last name
+  const sortedEmps = [...employees].sort((a, b) => {
+    const lastA = a.name.trim().split(' ').slice(-1)[0].toLowerCase();
+    const lastB = b.name.trim().split(' ').slice(-1)[0].toLowerCase();
+    return lastA.localeCompare(lastB);
+  });
+
+  let updCount = 0, skipCount = 0, exclCount = 0;
+  const rowHtml = sortedEmps.map(emp => {
+    const ev = _bulkRowEvaluate(emp);
+    if (ev.excluded) { exclCount++; return ''; }
+    const userExcluded = _bulkState.excludedEmpIds.has(emp.id);
+    const willUpdate = !!ev.willUpdate && !userExcluded;
+    if (willUpdate) updCount++; else skipCount++;
+
+    let metaHtml;
+    if (ev.greyed) {
+      metaHtml = `<span style="color:var(--amber)">${ev.reason}</span>`;
+    } else if (isNA) {
+      metaHtml = `<span style="color:#4caf7d">mark N/A · clears dates</span>`;
+    } else {
+      const fromTxt = ev.existingDate
+        ? `<span style="color:var(--amber)">${ev.existingDate}</span>`
+        : '<span style="color:var(--muted)">—</span>';
+      metaHtml = `${fromTxt}<span style="color:var(--muted);margin:0 6px">→</span><span style="color:#4caf7d;font-weight:600">${_bulkState.date || '—'}</span>`;
+    }
+
+    return `
+      <div style="display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:8px;padding:7px 12px;font-size:13px;border-bottom:1px solid var(--border);${ev.greyed?'opacity:0.5;':''}">
+        <input type="checkbox" ${willUpdate?'checked':''} ${ev.greyed?'disabled':''}
+          onchange="_bulkToggleRow('${emp.id}', this.checked)">
+        <div style="color:var(--text);${ev.greyed?'text-decoration:line-through':''}">${emp.name}</div>
+        <div style="font-size:12px">${metaHtml}</div>
+      </div>`;
+  }).join('');
+
+  _bulkLastUpdCount = updCount;
+
+  body.innerHTML = `
+    <div>
+      <div style="font-size:11px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">1 · What to update</div>
+      <div style="display:grid;grid-template-columns:1fr 160px;gap:12px;margin-bottom:12px">
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px">Lifecycle item</label>
+          <select onchange="_bulkSetState({templateKey: this.value})"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none">${opts}</select>
+        </div>
+        <div>
+          <label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px">Date</label>
+          <input type="date" value="${_bulkState.date}" ${isNA?'disabled':''}
+            onchange="_bulkSetState({date: this.value})"
+            style="width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;color:var(--text);color-scheme:dark;outline:none;opacity:${isNA?0.4:1}">
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${_bulkActionBtn('onboarding_date', 'Set onboarding date')}
+        ${_bulkActionBtn('offboarding_date', 'Set offboarding date')}
+        ${_bulkActionBtn('is_na', 'Mark N/A')}
+      </div>
+    </div>
+
+    <div>
+      <div style="font-size:11px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">2 · Who to include</div>
+      <div style="display:flex;gap:32px;flex-wrap:wrap;margin-bottom:10px">
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Track</div>
+          <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text);padding:3px 0;cursor:pointer">
+            <input type="checkbox" ${_bulkState.tracks.nulabs?'checked':''} onchange="_bulkSetState({tracks:{nulabs:this.checked}})"> NU Labs
+          </label>
+          <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text);padding:3px 0;cursor:pointer">
+            <input type="checkbox" ${_bulkState.tracks.ballantine?'checked':''} onchange="_bulkSetState({tracks:{ballantine:this.checked}})"> Ballantine
+          </label>
+        </div>
+        <div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Status</div>
+          ${['active','inactive','all'].map(s => `
+            <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text);padding:3px 0;cursor:pointer">
+              <input type="radio" name="bulkStatus" ${_bulkState.status===s?'checked':''} onchange="_bulkSetState({status:'${s}'})"> ${s==='active'?'Active employees':s==='inactive'?'Inactive only':'All'}
+            </label>`).join('')}
+        </div>
+      </div>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--text);padding:8px 10px;background:var(--surface2);border-radius:6px;cursor:pointer">
+        <input type="checkbox" ${_bulkState.skipExisting?'checked':''} onchange="_bulkSetState({skipExisting:this.checked})">
+        Skip employees who already have this date set
+      </label>
+    </div>
+
+    <div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+        <div style="font-size:11px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">3 · Preview</div>
+        <div style="font-size:12px;color:var(--muted)">
+          <strong style="color:var(--text);font-weight:600">${updCount}</strong> will update ·
+          ${skipCount} will skip ·
+          ${exclCount} excluded
+        </div>
+      </div>
+      <div style="border:1px solid var(--border);border-radius:8px;max-height:240px;overflow-y:auto;background:var(--surface2)">
+        ${rowHtml || '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">No employees match these filters</div>'}
+      </div>
+    </div>
+  `;
+
+  // Update apply button label/disabled
+  const applyBtn = document.getElementById('bulkApplyBtn');
+  if (applyBtn) {
+    applyBtn.textContent = updCount === 0 ? 'Apply' : `Apply ${updCount} update${updCount===1?'':'s'}`;
+    applyBtn.disabled = updCount === 0;
+    applyBtn.style.opacity = updCount === 0 ? '0.4' : '1';
+    applyBtn.style.cursor = updCount === 0 ? 'not-allowed' : 'pointer';
+  }
+}
+
+async function applyBulkLifecycle() {
+  if (!_bulkState || _bulkLastUpdCount === 0) return;
+  const btn = document.getElementById('bulkApplyBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Applying…'; }
+
+  const updates = [];
+  employees.forEach(emp => {
+    const ev = _bulkRowEvaluate(emp);
+    if (ev.excluded || ev.greyed) return;
+    if (_bulkState.excludedEmpIds.has(emp.id)) return;
+
+    const row = {
+      employee_id: emp.id,
+      template_key: _bulkState.templateKey
+    };
+    if (_bulkState.action === 'is_na') {
+      row.is_na = true;
+      row.onboarding_date = null;
+      row.offboarding_date = null;
+    } else {
+      row[_bulkState.action] = _bulkState.date || null;
+    }
+    updates.push(row);
+  });
+
+  if (!updates.length) {
+    toast('⚠ No updates to apply');
+    if (btn) { btn.disabled = false; btn.textContent = 'Apply'; }
+    return;
+  }
+
+  try {
+    const { error } = await sb.from('employee_lifecycle').upsert(updates, {
+      onConflict: 'employee_id,template_key',
+      ignoreDuplicates: false
+    });
+    if (error) throw error;
+
+    lifecycleCache = {};   // invalidate so next drill-in is fresh
+    document.getElementById('bulkLifecycleModal')?.remove();
+    toast('✅ Updated ' + updates.length + ' employee' + (updates.length === 1 ? '' : 's'));
+
+    // Refresh currently-open lifecycle tab if any
+    if (empDetailOpen && empProfileTab === 'lifecycle') {
+      const emp = employees.find(e => e.id === empDetailOpen);
+      if (emp) _loadLifecycleTab(empDetailOpen, emp);
+    }
+  } catch (e) {
+    console.error('Bulk lifecycle update failed:', e);
+    toast('⚠ Update failed: ' + (e.message || e));
+    if (btn) { btn.disabled = false; btn.textContent = 'Apply'; }
   }
 }
 
