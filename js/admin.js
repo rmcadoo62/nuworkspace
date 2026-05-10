@@ -547,12 +547,23 @@ function renderTemplatesPanel() {
             </div>
             <div style="padding:16px 20px;">
               <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
-                <div>
+                <div style="flex:1;min-width:0;">
                   <div style="font-size:13px;font-weight:600;color:var(--text);">📧 Email Templates</div>
-                  <div style="font-size:11px;color:var(--muted);">${emailTemplates.length} template${emailTemplates.length !== 1 ? 's' : ''} — used by the 📧 button on Project Info</div>
+                  <div style="font-size:11px;color:var(--muted);">${emailTemplates.length} template${emailTemplates.length !== 1 ? 's' : ''} — used by the 📧 button on Project Info pages and on Client cards</div>
+                  ${emailTemplates.length > 0 ? `
+                  <div style="font-size:11px;color:var(--text);margin-top:6px;line-height:1.5;">
+                    ${emailTemplates.map(t => {
+                      const label = (t.label || 'Untitled').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                      const audienceLabel =
+                        t.audience === 'client_outreach' ? 'Client card'
+                        : t.audience === 'general'       ? 'Both'
+                        : 'Project page';
+                      return `<span style="display:inline-block;margin-right:10px;"><span style="color:var(--text);font-weight:500;">↳ ${label}</span> <span style="color:var(--muted);font-size:10.5px;">(${audienceLabel})</span></span>`;
+                    }).join('')}
+                  </div>` : ''}
                 </div>
                 <button onclick="editTemplateSubgroup('${category.id}', 'email')"
-                  style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
+                  style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;flex-shrink:0;margin-left:10px;">
                   Edit
                 </button>
               </div>
@@ -756,7 +767,7 @@ function renderTemplateEditModal(category, subgroup = null) {
     } else if (category.name === 'Other Templates') {
       if (subgroup === 'email') {
         modalTitle = 'Edit Email Templates';
-        modalDescription = 'Email templates used by the 📧 button on the Project Info page. Available variables: {{contactFirstName}}, {{contactFullName}}, {{contactEmail}}, {{clientName}}, {{projectName}}, {{po}}, {{quoteNumber}}, {{testCompleteDate}}, {{tentativeTestDate}}, {{senderName}}, {{senderEmail}}.';
+        modalDescription = 'Email templates used by the 📧 button on Project Info pages and on Client cards. Set the Audience on each template to control where it shows up. Available variables: {{contactFirstName}}, {{contactFullName}}, {{contactEmail}}, {{clientName}}, {{projectName}}, {{po}}, {{quoteNumber}}, {{testCompleteDate}}, {{tentativeTestDate}}, {{lastProjectName}}, {{lastProjectClosedDate}}, {{senderName}}, {{senderEmail}}. Project-specific variables ({{projectName}}, {{po}}, {{quoteNumber}}, test dates) are blank when the template is used from a Client card. {{lastProjectName}} and {{lastProjectClosedDate}} resolve to the most recent project for the client.';
       }
     }
   }
@@ -821,11 +832,12 @@ async function addNewTemplate() {
     } else if (category.name === 'Compliance Templates') {
       defaultDomain = editingSubgroup;
       defaultType = 'compliance';
-    } else if (category.name === 'Other Templates') {
-      if (editingSubgroup === 'email') {
-        defaultType = 'email';
-        defaultTrack = null;
-      }
+    } else if (editingSubgroup === 'email') {
+      // Anything else with editingSubgroup='email' is an email-template context
+      // (covers 'Other Templates' and any future category that gains an
+      // email subgroup). Defensive against category-name drift.
+      defaultType = 'email';
+      defaultTrack = null;
     }
   }
 
@@ -841,6 +853,7 @@ async function addNewTemplate() {
     track: defaultTrack,
     domain: defaultDomain,
     type: defaultType,
+    audience: defaultType === 'email' ? 'project' : null,
     sort_order: editingTemplateData.length,
     is_active: true
   };
@@ -1012,12 +1025,23 @@ function renderTemplateEditRow(template, index) {
       </div>
       
       ${template.type === 'email' ? `
-      <div style="margin-bottom:12px;">
-        <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Subject</div>
-        <input type="text" value="${(template.subject||'').replace(/"/g,'&quot;')}"
-          onchange="updateTemplateField('${template.id}', 'subject', this.value)"
-          placeholder="e.g. {{projectName}} — update"
-          style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;">
+      <div style="display:flex;gap:12px;margin-bottom:12px;">
+        <div style="flex:1;">
+          <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Subject</div>
+          <input type="text" value="${(template.subject||'').replace(/"/g,'&quot;')}"
+            onchange="updateTemplateField('${template.id}', 'subject', this.value)"
+            placeholder="e.g. {{projectName}} — update"
+            style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;">
+        </div>
+        <div style="width:180px;flex-shrink:0;">
+          <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;" title="Where this template appears">Audience</div>
+          <select onchange="updateTemplateField('${template.id}', 'audience', this.value)"
+            style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;">
+            <option value="project"         ${(template.audience||'project') === 'project'         ? 'selected' : ''}>Project page only</option>
+            <option value="client_outreach" ${template.audience === 'client_outreach'              ? 'selected' : ''}>Client card only</option>
+            <option value="general"         ${template.audience === 'general'                      ? 'selected' : ''}>Both</option>
+          </select>
+        </div>
       </div>` : ''}
 
       <div style="margin-bottom:12px;">
@@ -1040,6 +1064,10 @@ function renderTemplateEditRow(template, index) {
 
 function closeTemplateEditModal() {
   document.getElementById('templateEditModal').classList.remove('open');
+  // Refresh the outer Templates panel so any type changes made inside
+  // the modal (e.g. flipping a row's Type to 'email') are reflected in
+  // the subgroup card categorization.
+  renderTemplatesPanel();
 }
 
 async function updateTemplateField(templateId, field, value) {
@@ -1071,6 +1099,14 @@ async function updateTemplateField(templateId, field, value) {
       const category = templateCategories.find(c => c.id === editingCategoryId);
       editingTemplateData = templates.filter(t => t.category_id === editingCategoryId).sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
       renderTemplateEditModal(category);
+    }
+
+    // If type changed, re-render so the email-specific fields (Subject /
+    // Audience / Body label) appear or disappear immediately. Without this,
+    // the user has to close and re-open the modal to see the right layout.
+    if (field === 'type') {
+      const category = templateCategories.find(c => c.id === editingCategoryId);
+      if (category) renderTemplateEditModal(category, editingSubgroup);
     }
     
   } catch (e) {
@@ -1982,6 +2018,7 @@ const CAPABILITY_DEFS = [
   { key: 'manage_permissions', label: 'Manage Permissions',    group: 'Admin' },
   { key: 'manage_templates',   label: 'Manage Templates',      group: 'Admin' },
   { key: 'view_chatter',       label: 'View Chatter',          group: 'Communication' },
+  { key: 'send_client_email',  label: 'Send Client Emails',    group: 'Communication' },
   { key: 'post_chatter',       label: 'Post in Chatter',       group: 'Communication' },
   { key: 'view_schedule',      label: 'View Scheduler',        group: 'Scheduler' },
   { key: 'edit_schedule',      label: 'Edit Scheduler',        group: 'Scheduler' },

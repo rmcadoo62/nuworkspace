@@ -2930,9 +2930,11 @@ function renderProjStickyHeader(projId) {
     (info.needUpdatedPo ? '<div class="need-po-checkbox-wrap active" onclick="toggleNeedUpdatedPo(\''+projId+'\')" ><span>⚠ Need Updated PO</span></div>' :
       '<div class="need-po-checkbox-wrap" onclick="toggleNeedUpdatedPo(\''+projId+'\')" ><span>Need Updated PO</span></div>')+
     (()=>{
-      // Email Contact button — enabled only if the project has a client with
-      // at least one contact that has an email address. Sends use a modal
-      // with a contact picker scoped to the client's contacts.
+      // Email Contact button — gated on send_client_email capability,
+      // and enabled only if the project has a client with at least one
+      // contact that has an email address. Sends use a modal with a
+      // contact picker scoped to the client's contacts.
+      if (typeof can === 'function' && !can('send_client_email')) return '';
       const clientContacts = info.clientId ? contactStore.filter(c => c.clientId === info.clientId) : [];
       const sendable = clientContacts.filter(c => c.email && c.email.trim());
       const enabled = sendable.length > 0;
@@ -3620,18 +3622,65 @@ async function renderActivityPanel(projId) {
 
 // ===== EMAIL CONTACT MODAL =====
 // ===== EMAIL CONTACT MODAL =====
-// Lets a user send an email to any contact at the project's client,
-// using a template from Setup → Templates → Other Templates → Email Templates.
-// Default recipient = project's saved Contact Person (if it has an email),
-// but user can swap to any other contact at the same client.
+// Lets a user send an email to any contact at a client, using a template from
+// Setup → Templates → Other Templates → Email Templates.
+//
+// Two modes:
+//   PROJECT mode  — opened from the Project Info page 📧 button. Defaults
+//                   recipient to the project's saved Contact Person. Templates
+//                   are filtered to audience IN ('project','general').
+//                   On success, posts a chatter message on the project.
+//   CLIENT  mode  — opened from a Client card / Due-for-Outreach view.
+//                   No project context. Templates are filtered to
+//                   audience IN ('client_outreach','general'). No chatter post.
+//
+// In both modes, on successful send the contact's last_email_at is stamped
+// for the "Due for Outreach" indicator.
 let _emailModalProjId = null;
+let _emailModalClientId = null;
 let _emailModalContactId = null; // currently-selected recipient
+let _emailModalMode = 'project'; // 'project' | 'client'
 
-async function openEmailContactModal(projId) {
+// Accepts either:
+//   openEmailContactModal(projId)                              -- legacy project mode
+//   openEmailContactModal({ projId, contactId })               -- explicit project mode
+//   openEmailContactModal({ clientId, contactId })             -- client mode
+async function openEmailContactModal(arg) {
+  // Normalize the argument
+  let projId = null, clientId = null, contactId = null;
+  if (typeof arg === 'string') {
+    projId = arg;
+  } else if (arg && typeof arg === 'object') {
+    projId = arg.projId || null;
+    clientId = arg.clientId || null;
+    contactId = arg.contactId || null;
+  }
+
+  // Capability gate
+  if (typeof can === 'function' && !can('send_client_email')) {
+    toast('⚠ You don\'t have permission to send client emails');
+    return;
+  }
+
+  // Project mode: resolve clientId from projectInfo
+  if (projId && !clientId) {
+    const info = projectInfo[projId] || {};
+    if (!info.clientId) { toast('⚠ Set a client on this project first'); return; }
+    clientId = info.clientId;
+    if (!contactId && info.contactId) contactId = info.contactId;
+  }
+
+  if (!clientId) {
+    toast('⚠ No client context for this email');
+    return;
+  }
+
+  const mode = projId ? 'project' : 'client';
+  _emailModalMode = mode;
   _emailModalProjId = projId;
-  const info = projectInfo[projId] || {};
-  if (!info.clientId) { toast('⚠ Set a client on this project first'); return; }
-  const clientContacts = contactStore.filter(c => c.clientId === info.clientId);
+  _emailModalClientId = clientId;
+
+  const clientContacts = contactStore.filter(c => c.clientId === clientId);
   const sendable = clientContacts.filter(c => c.email && c.email.trim());
   if (!sendable.length) {
     toast(clientContacts.length
@@ -3644,8 +3693,8 @@ async function openEmailContactModal(projId) {
     return;
   }
 
-  // Default to project's Contact Person if it has an email; else first sendable contact
-  const defaultCt = (info.contactId && sendable.find(c => c.id === info.contactId))
+  // Default recipient: explicit contactId if it has an email, else first sendable
+  const defaultCt = (contactId && sendable.find(c => c.id === contactId))
     || sendable[0];
   _emailModalContactId = defaultCt.id;
 
@@ -3656,9 +3705,14 @@ async function openEmailContactModal(projId) {
     }
   } catch(e) { console.warn('Template init in email modal failed:', e); }
 
-  // Filter to active email templates
+  // Filter templates by audience for this mode. Existing templates without an
+  // audience value default to 'project' (per the DB migration).
+  const allowedAudiences = mode === 'project'
+    ? ['project', 'general']
+    : ['client_outreach', 'general'];
   const emailTemplates = (typeof templates !== 'undefined' ? templates : [])
-    .filter(t => t.type === 'email' && t.is_active !== false)
+    .filter(t => t.type === 'email' && t.is_active !== false
+                 && allowedAudiences.includes(t.audience || 'project'))
     .sort((a,b) => (a.sort_order||0) - (b.sort_order||0));
 
   // Build modal (first-open only)
@@ -3705,18 +3759,26 @@ function onEmailRecipientChange(contactId) {
 }
 
 // Close email modal and launch the Add-Contact modal for this client.
-// Uses the existing _afterContactSaveProjId hook so after the user saves
-// the new contact, the email modal re-opens automatically.
+// On contact save, the email modal re-opens automatically. Works in both
+// project and client modes; the post-save reopen logic in clients.js reads
+// the _afterContactSave* hooks below.
 function openAddContactFromEmailModal() {
+  const clientId = _emailModalClientId;
+  if (!clientId) { toast('⚠ Set a client first'); return; }
+
+  // Capture state BEFORE closing (which resets the modal state vars)
+  const mode = _emailModalMode;
   const projId = _emailModalProjId;
-  const info = projectInfo[projId] || {};
-  if (!info.clientId) { toast('⚠ Set a client first'); return; }
+
   closeEmailContactModal();
-  // After contact save, this hook re-opens the email modal
+
+  window._afterContactSaveMode = mode;
   window._afterContactSaveProjId = projId;
+  window._afterContactSaveClientId = clientId;
   window._afterContactSaveReopenEmail = true;
+
   if (typeof openContactModal === 'function') {
-    openContactModal(null, info.clientId);
+    openContactModal(null, clientId);
   } else {
     toast('⚠ Add-contact unavailable');
   }
@@ -3777,12 +3839,15 @@ function onEmailWarningAckChange() {
 
 function renderEmailContactModalBody(emailTemplates) {
   const projId = _emailModalProjId;
+  const clientId = _emailModalClientId;
   const info = projectInfo[projId] || {};
   const proj = projects.find(p => p.id === projId) || {};
+  const cl = clientStore.find(c => c.id === clientId);
+  const clientLabel = (cl && cl.name) || info.client || 'client';
 
-  // Contacts scoped to this project's client, filtered to those with emails
-  const clientContacts = info.clientId
-    ? contactStore.filter(c => c.clientId === info.clientId && c.email && c.email.trim())
+  // Contacts scoped to this client, filtered to those with emails
+  const clientContacts = clientId
+    ? contactStore.filter(c => c.clientId === clientId && c.email && c.email.trim())
     : [];
   // Sort: default contact first, then alpha
   clientContacts.sort((a,b) => {
@@ -3819,7 +3884,7 @@ function renderEmailContactModalBody(emailTemplates) {
 
       <div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px">
-          <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Recipient (${info.client || 'client'} contacts)</div>
+          <div style="font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px">Recipient (${clientLabel} contacts)</div>
           <button type="button" onclick="openAddContactFromEmailModal()"
             style="background:transparent;border:1px dashed var(--amber-dim);border-radius:5px;padding:3px 10px;font-size:11px;color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif">+ Add new contact</button>
         </div>
@@ -3858,7 +3923,7 @@ function renderEmailContactModalBody(emailTemplates) {
 
       <div style="font-size:11px;color:var(--muted);padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;line-height:1.5">
         <strong style="color:var(--text)">Available variables</strong> (switching template or recipient re-applies variables and clears manual edits):
-        <code style="font-family:'JetBrains Mono',monospace;font-size:10.5px">{{contactFirstName}} {{contactLastName}} {{contactFullName}} {{contactEmail}} {{clientName}} {{projectName}} {{po}} {{quoteNumber}} {{testCompleteDate}} {{tentativeTestDate}} {{senderName}} {{senderEmail}}</code>
+        <code style="font-family:'JetBrains Mono',monospace;font-size:10.5px">{{contactFirstName}} {{contactLastName}} {{contactFullName}} {{contactEmail}} {{clientName}} {{projectName}} {{po}} {{quoteNumber}} {{testCompleteDate}} {{tentativeTestDate}} {{lastProjectName}} {{lastProjectClosedDate}} {{senderName}} {{senderEmail}}</code>
       </div>
     </div>
   `;
@@ -3879,16 +3944,46 @@ function renderEmailContactModalBody(emailTemplates) {
 
 function emailTemplateVarMap() {
   const projId = _emailModalProjId;
+  const clientId = _emailModalClientId;
   const info = projectInfo[projId] || {};
   const proj = projects.find(p => p.id === projId) || {};
   const ct = contactStore.find(c => c.id === _emailModalContactId) || {};
-  const cl = clientStore.find(c => c.id === info.clientId);
+  const cl = clientStore.find(c => c.id === clientId);
   const fmt = v => {
     if (!v) return '';
     const d = new Date(v + (v.length === 10 ? 'T00:00:00' : ''));
     if (isNaN(d)) return v;
     return d.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
   };
+
+  // Compute lastProjectName / lastProjectClosedDate for this client.
+  // In project mode the current project is excluded (so "last" means the
+  // most recent OTHER project for this client). In client mode all projects
+  // for the client are candidates and we pick the most recent.
+  let lastProjectName = '';
+  let lastProjectClosedDate = '';
+  if (clientId) {
+    const candidates = projects
+      .filter(p => {
+        const pi = projectInfo[p.id] || {};
+        return pi.clientId === clientId && p.id !== projId;
+      })
+      .map(p => {
+        const pi = projectInfo[p.id] || {};
+        const sortDate = pi.endDate || pi.testcompleteDate || p.createdAt || '';
+        return { p, pi, sortDate };
+      })
+      .sort((a, b) => (b.sortDate || '').localeCompare(a.sortDate || ''));
+    if (candidates.length > 0) {
+      lastProjectName = candidates[0].p.name || '';
+      lastProjectClosedDate = fmt(
+        candidates[0].pi.endDate ||
+        candidates[0].pi.testcompleteDate ||
+        candidates[0].p.createdAt
+      );
+    }
+  }
+
   return {
     contactFirstName: ct.firstName || '',
     contactLastName:  ct.lastName  || '',
@@ -3900,6 +3995,8 @@ function emailTemplateVarMap() {
     quoteNumber:      info.quoteNumber || '',
     testCompleteDate: fmt(info.testcompleteDate),
     tentativeTestDate:fmt(info.tentativeTestDate),
+    lastProjectName:  lastProjectName,
+    lastProjectClosedDate: lastProjectClosedDate,
     senderName:       (currentEmployee && currentEmployee.name) || '',
     senderEmail:      (currentEmployee && currentEmployee.email) || '',
   };
@@ -3927,12 +4024,15 @@ function closeEmailContactModal() {
   const m = document.getElementById('emailContactModal');
   if (m) m.classList.remove('open');
   _emailModalProjId = null;
+  _emailModalClientId = null;
   _emailModalContactId = null;
+  _emailModalMode = 'project';
 }
 
 async function sendEmailContactModal() {
   const projId = _emailModalProjId;
-  if (!projId) return;
+  const clientId = _emailModalClientId;
+  if (!projId && !clientId) return;
   const info = projectInfo[projId] || {};
   const proj = projects.find(p => p.id === projId) || {};
   // Read the currently-selected recipient from the dropdown (falls back to modal state)
@@ -4004,7 +4104,8 @@ async function sendEmailContactModal() {
   // 2. Log to sent_emails audit table
   try {
     await sb.from('sent_emails').insert([{
-      project_id:   projId,
+      project_id:   projId || null,
+      client_id:    clientId || (info.clientId || null),
       contact_id:   ct.id || null,
       template_id:  (templateId || null) || null,
       to_email:     ct.email,
@@ -4023,8 +4124,21 @@ async function sendEmailContactModal() {
     console.warn('sent_emails log failed (non-fatal):', e);
   }
 
-  // 3. Post chatter message on project (only on success)
-  if (status === 'sent') {
+  // 2b. Stamp last_email_at on the contact (drives the Due-for-Outreach
+  // indicator on client cards). Only on successful send.
+  if (status === 'sent' && ct.id) {
+    try {
+      const nowIso = new Date().toISOString();
+      await sb.from('contacts').update({ last_email_at: nowIso }).eq('id', ct.id);
+      const cIdx = contactStore.findIndex(c => c.id === ct.id);
+      if (cIdx > -1) contactStore[cIdx].lastEmailAt = nowIso;
+    } catch(e) {
+      console.warn('contact.last_email_at stamp failed (non-fatal):', e);
+    }
+  }
+
+  // 3. Post chatter message on project (only on success, project mode only)
+  if (status === 'sent' && projId) {
     try {
       const authorName = currentEmployee.name || 'Someone';
       const authorInitials = currentEmployee.initials || (authorName.slice(0,2).toUpperCase());

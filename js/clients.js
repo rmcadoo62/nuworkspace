@@ -428,6 +428,129 @@ function openClientsPanel(el) {
 }
 
 let _clientSearchQuery = '';
+let _clientsPanelView  = 'all'; // 'all' | 'outreach'
+
+// Compute contacts that are "due for outreach": have a valid email, not
+// recently contacted (>6 months OR never), and the client has no open
+// projects. Returns an array sorted by stalest-first.
+function _computeOutreachQueue() {
+  const SIX_MONTHS_MS = 180 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+
+  // Which clients have at least one open project?
+  const openByClient = {};
+  for (const p of projects) {
+    const pi = projectInfo[p.id] || {};
+    if (!pi.clientId) continue;
+    if ((pi.status || 'active') !== 'closed') openByClient[pi.clientId] = true;
+  }
+
+  return contactStore.filter(ct => {
+    if (!ct.email || !ct.email.trim()) return false;       // must have email
+    if (ct.emailInvalid) return false;                     // bounced/invalid
+    if (openByClient[ct.clientId]) return false;           // active relationship
+    if (ct.lastEmailAt) {
+      const lastMs = new Date(ct.lastEmailAt).getTime();
+      if (lastMs > now - SIX_MONTHS_MS) return false;      // recently emailed
+    }
+    return true;
+  });
+}
+
+// Render the Due-for-Outreach view: contacts grouped by client, stalest first.
+// Search query (q) filters by contact name, contact email, or client name.
+function _renderOutreachQueue(contacts, q) {
+  const fmtDate = iso => iso
+    ? new Date(iso).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'})
+    : 'Never';
+  const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
+  // Apply search filter
+  let filtered = contacts;
+  if (q) {
+    const ql = q.toLowerCase();
+    filtered = contacts.filter(ct => {
+      const fullName = ((ct.firstName||'') + ' ' + (ct.lastName||'')).toLowerCase();
+      const email = (ct.email||'').toLowerCase();
+      const clientName = ((clientStore.find(c => c.id === ct.clientId)||{}).name || '').toLowerCase();
+      return fullName.includes(ql) || email.includes(ql) || clientName.includes(ql);
+    });
+  }
+
+  if (filtered.length === 0) {
+    if (contacts.length === 0) {
+      return `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
+        <div style="font-size:40px;margin-bottom:12px">🎉</div>
+        <div style="font-size:14px;line-height:1.5">Everyone has been touched recently<br>or is at an active client.</div>
+      </div>`;
+    }
+    return `<div style="text-align:center;padding:60px 20px;color:var(--muted);font-size:13px">No contacts match "${esc(q)}".</div>`;
+  }
+
+  // Group by client
+  const byClient = {};
+  for (const ct of filtered) {
+    if (!byClient[ct.clientId]) byClient[ct.clientId] = [];
+    byClient[ct.clientId].push(ct);
+  }
+
+  // Sort: clients alphabetically; within a client, never-contacted first then oldest-last-contact first
+  const sortedClientIds = Object.keys(byClient).sort((a, b) => {
+    const aName = (clientStore.find(c => c.id === a) || {}).name || '';
+    const bName = (clientStore.find(c => c.id === b) || {}).name || '';
+    return aName.localeCompare(bName);
+  });
+  for (const cid of sortedClientIds) {
+    byClient[cid].sort((a, b) => {
+      if (!a.lastEmailAt && !b.lastEmailAt) {
+        return ((a.firstName||'') + (a.lastName||'')).localeCompare((b.firstName||'') + (b.lastName||''));
+      }
+      if (!a.lastEmailAt) return -1;
+      if (!b.lastEmailAt) return 1;
+      return new Date(a.lastEmailAt) - new Date(b.lastEmailAt);
+    });
+  }
+
+  const sections = sortedClientIds.map(cid => {
+    const client = clientStore.find(c => c.id === cid);
+    const clientName = (client && client.name) || '(unknown client)';
+    const cts = byClient[cid];
+
+    const rows = cts.map(ct => {
+      const fullName = ((ct.firstName||'') + ' ' + (ct.lastName||'')).trim() || '(no name)';
+      const lastLabel = ct.lastEmailAt ? 'Last: ' + fmtDate(ct.lastEmailAt) : 'Never contacted';
+      const tip = ('Send email to ' + (ct.firstName || 'this contact')
+                   + ' • ' + lastLabel
+                   + ' • ⚠ Due for outreach').replace(/"/g,'&quot;');
+      return `<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:600;color:var(--text)">${esc(fullName)}</div>
+          <div style="font-size:11.5px;color:var(--blue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(ct.email||'')}</div>
+        </div>
+        <div style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;flex-shrink:0">${esc(lastLabel)}</div>
+        <button class="client-action-btn"
+          onclick="openEmailContactModal({clientId:'${cid}',contactId:'${ct.id}'})"
+          title="${tip}"
+          style="color:var(--amber);flex-shrink:0">&#x2709;</button>
+      </div>`;
+    }).join('');
+
+    return `<div style="margin-bottom:18px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:0 4px">
+        <div style="font-size:14px;font-weight:600;color:var(--text);cursor:pointer" onclick="openClientDrawer('${cid}')" title="Open client">${esc(clientName)}</div>
+        <div style="font-size:11px;color:var(--muted)">${cts.length} contact${cts.length!==1?'s':''}</div>
+      </div>
+      ${rows}
+    </div>`;
+  }).join('');
+
+  return `<div style="margin-top:8px">
+    <div style="margin-bottom:14px;padding:10px 14px;background:var(--surface2);border-left:3px solid var(--amber);border-radius:4px;font-size:12.5px;color:var(--text);line-height:1.5">
+      <strong>${filtered.length}</strong> contact${filtered.length!==1?'s':''} at <strong>${sortedClientIds.length}</strong> client${sortedClientIds.length!==1?'s':''}${q ? ' matching your search' : ''}. These haven't been emailed via NUWorkspace in the last 6 months and their client has no open projects.
+    </div>
+    ${sections}
+  </div>`;
+}
 
 function renderClientsPanel(search) {
   if (search !== undefined) _clientSearchQuery = search;
@@ -467,14 +590,29 @@ function renderClientsPanel(search) {
   const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const colors = ['#c07a1a','#3a7fd4','#2e9e62','#7c5cbf','#d04040','#2d8a6e'];
 
-  body.innerHTML = `
-    <div class="emp-panel-header">
-      <div class="emp-panel-title">Clients <span style="font-size:14px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-weight:400">(${clientStore.length})</span></div>
-      <input class="emp-search" placeholder="Search clients & contacts…" value="${_clientSearchQuery}" oninput="_clientSearchQuery=this.value;renderClientsPanel()" />
-      ${can('add_clients') ? `<button class="emp-add-btn" style="background:var(--surface2);border:1.5px solid var(--border);color:var(--text);margin-right:8px" onclick="openSfImportPanel()" title="Import or backfill from a Salesforce CSV export">📥 Import CSV</button>` : ''}
-      ${can('add_clients') ? `<button class="emp-add-btn" onclick="openNewClientDrawer()">+ Add Client</button>` : ''}
-    </div>
-    <div class="client-grid">
+  // Compute Due-for-Outreach data only if the user has the capability
+  const canSendEmail = (typeof can === 'function') ? can('send_client_email') : true;
+  const outreachContacts = canSendEmail ? _computeOutreachQueue() : [];
+  const outreachCount = outreachContacts.length;
+
+  // If user lost permission but is viewing the outreach tab, snap back to All
+  if (!canSendEmail && _clientsPanelView === 'outreach') _clientsPanelView = 'all';
+
+  // Tab bar — only rendered when user has email permission. Subtle bottom-border tabs.
+  const tabBar = canSendEmail ? `
+    <div style="display:flex;gap:0;margin:8px 0 18px;border-bottom:1.5px solid var(--border)">
+      <button onclick="_clientsPanelView='all';renderClientsPanel()"
+        style="background:transparent;border:none;border-bottom:2.5px solid ${_clientsPanelView==='all'?'var(--amber)':'transparent'};color:${_clientsPanelView==='all'?'var(--text)':'var(--muted)'};font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;padding:9px 18px;margin-bottom:-1.5px;cursor:pointer">All Clients</button>
+      <button onclick="_clientsPanelView='outreach';renderClientsPanel()"
+        style="background:transparent;border:none;border-bottom:2.5px solid ${_clientsPanelView==='outreach'?'var(--amber)':'transparent'};color:${_clientsPanelView==='outreach'?'var(--text)':'var(--muted)'};font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;padding:9px 18px;margin-bottom:-1.5px;cursor:pointer">Due for Outreach${outreachCount > 0 ? ` <span style="background:var(--amber);color:var(--bg);padding:1px 8px;border-radius:10px;font-size:10px;font-weight:700;margin-left:4px">${outreachCount}</span>` : ''}</button>
+    </div>` : '';
+
+  // Render the content area — either the All-Clients grid or the Outreach queue
+  let contentHtml;
+  if (_clientsPanelView === 'outreach' && canSendEmail) {
+    contentHtml = _renderOutreachQueue(outreachContacts, q);
+  } else {
+    contentHtml = `<div class="client-grid">
       ${filtered.map(c => {
         const contacts = contactStore.filter(ct => ct.clientId === c.id);
         const jobs = projects.filter(p => (projectInfo[p.id]||{}).clientId === c.id);
@@ -516,6 +654,17 @@ function renderClientsPanel(search) {
       }).join('')}
       ${filtered.length === 0 ? `<div style="color:var(--muted);font-size:13px;padding:20px 0">${q ? `No clients or contacts match "${esc(_clientSearchQuery)}".` : 'No clients yet — add one above.'}</div>` : ''}
     </div>`;
+  }
+
+  body.innerHTML = `
+    <div class="emp-panel-header">
+      <div class="emp-panel-title">Clients <span style="font-size:14px;color:var(--muted);font-family:'JetBrains Mono',monospace;font-weight:400">(${clientStore.length})</span></div>
+      <input class="emp-search" placeholder="Search clients & contacts…" value="${_clientSearchQuery}" oninput="_clientSearchQuery=this.value;renderClientsPanel()" />
+      ${can('add_clients') ? `<button class="emp-add-btn" style="background:var(--surface2);border:1.5px solid var(--border);color:var(--text);margin-right:8px" onclick="openSfImportPanel()" title="Import or backfill from a Salesforce CSV export">📥 Import CSV</button>` : ''}
+      ${can('add_clients') ? `<button class="emp-add-btn" onclick="openNewClientDrawer()">+ Add Client</button>` : ''}
+    </div>
+    ${tabBar}
+    ${contentHtml}`;
 
   // Restore focus and cursor position if the search input was active before re-render
   if (wasFocused) {
@@ -621,6 +770,16 @@ function renderClientDrawerBody() {
 
   } else if (_clientDrawerTab === 'dtab-contacts') {
     const contacts = _clientDrawerId ? contactStore.filter(ct => ct.clientId === _clientDrawerId) : [];
+    // Has this client got any open (non-closed) project? Drives the amber rule:
+    // a contact is "due for outreach" only if the client has NO open work AND
+    // there's no recent email. Active-relationship contacts stay grey.
+    const _drawerHasOpenProject = _clientDrawerId
+      ? projects.some(p => {
+          const pi = projectInfo[p.id] || {};
+          return pi.clientId === _clientDrawerId && (pi.status || 'active') !== 'closed';
+        })
+      : false;
+    const _canSendEmail = (typeof can === 'function') ? can('send_client_email') : true;
     body.innerHTML = `
       <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
         ${can('add_contacts') ? `<button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="openContactModal(null,'${_clientDrawerId}')">+ Add Contact</button>` : ''}
@@ -628,13 +787,51 @@ function renderClientDrawerBody() {
       ${contacts.length === 0 ? `<div style="text-align:center;padding:40px;color:var(--muted);font-size:13px">No contacts yet</div>` :
         contacts.map(ct => {
           const initials = (ct.firstName[0]||'')+(ct.lastName[0]||'');
+
+          // Email indicator state for this contact
+          let emailBtnHtml = '';
+          if (_canSendEmail) {
+            const hasEmail = !!(ct.email && ct.email.trim());
+            const invalid = !!ct.emailInvalid;
+            const disabled = !hasEmail || invalid;
+
+            // Amber if (never emailed OR >6mo) AND no open project at this client.
+            // Grey otherwise. Disabled state overrides both.
+            const SIX_MONTHS_MS = 180 * 24 * 60 * 60 * 1000;
+            const stale = !ct.lastEmailAt
+              || (Date.now() - new Date(ct.lastEmailAt).getTime() > SIX_MONTHS_MS);
+            const isAmber = stale && !_drawerHasOpenProject;
+
+            const lastLabel = ct.lastEmailAt
+              ? new Date(ct.lastEmailAt).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'})
+              : 'Never';
+            const tipParts = [];
+            if (invalid)       tipParts.push('Email address marked invalid');
+            else if (!hasEmail) tipParts.push('No email address on file');
+            else {
+              tipParts.push('Send email to ' + (ct.firstName || 'this contact'));
+              tipParts.push('Last contact: ' + lastLabel);
+              if (isAmber) tipParts.push('⚠ Due for outreach');
+            }
+            const tip = tipParts.join(' • ').replace(/"/g,'&quot;');
+
+            const styleParts = ['margin-right:2px'];
+            if (disabled)     styleParts.push('opacity:0.3','cursor:not-allowed');
+            else if (isAmber) styleParts.push('color:var(--amber)');
+            const onclick = disabled
+              ? ''
+              : `onclick="openEmailContactModal({clientId:'${_clientDrawerId}',contactId:'${ct.id}'})"`;
+            emailBtnHtml = `<button class="client-action-btn" ${onclick} title="${tip}" style="${styleParts.join(';')}" ${disabled?'disabled':''}>&#x2709;</button>`;
+          }
+
           return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
             <div style="width:38px;height:38px;border-radius:50%;background:var(--amber);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
             <div style="flex:1">
               <div style="font-size:13.5px;font-weight:600;color:var(--text)">${ct.firstName} ${ct.lastName}</div>
-              ${ct.email ? `<div style="font-size:12px;color:var(--blue)">${ct.email}</div>` : ''}
+              ${ct.email ? `<div style="font-size:12px;color:var(--blue)">${ct.email}${ct.emailInvalid ? ' <span style=\"color:var(--red);font-size:10px;font-weight:600\">⚠ INVALID</span>' : ''}</div>` : ''}
               ${ct.phone ? `<div style="font-size:12px;color:var(--muted)">${ct.phone}</div>` : ''}
             </div>
+            ${emailBtnHtml}
             <button class="client-action-btn" onclick="openContactModal('${ct.id}')" title="Edit">&#x270E;</button>
             ${can('delete_contacts') ? `<button class="client-action-btn" onclick="deleteContact('${ct.id}')" title="Delete">&#x2715;</button>` : ''}
           </div>`;
@@ -1259,17 +1456,27 @@ async function saveContactRecord(id, clientId, firstName, lastName, email, phone
     toast('Contact added');
   }
   renderClientsPanel('');
-  // Refresh project contact picker if we were adding from a project
-  if (window._afterContactSaveProjId) {
-    const _pid = window._afterContactSaveProjId;
+  // After-save hooks: refresh project contact picker, or reopen the Email
+  // Contact modal in whichever mode it was opened from.
+  if (window._afterContactSaveProjId || window._afterContactSaveClientId) {
+    const _pid       = window._afterContactSaveProjId;
+    const _cid       = window._afterContactSaveClientId;
+    const _mode      = window._afterContactSaveMode;        // 'project' | 'client'
     const _reopenEmail = window._afterContactSaveReopenEmail;
-    window._afterContactSaveProjId = null;
-    window._afterContactSaveReopenEmail = false;
-    // If this add-contact came from the Email Contact modal, re-open that modal
-    // (and don't bother refreshing the contact picker dropdown, which isn't visible).
+    window._afterContactSaveProjId       = null;
+    window._afterContactSaveClientId     = null;
+    window._afterContactSaveMode         = null;
+    window._afterContactSaveReopenEmail  = false;
+    // If this add-contact came from the Email Contact modal, re-open it
+    // in the same mode it was in before. (Don't refresh the project picker
+    // in that case — it isn't visible.)
     if (_reopenEmail && typeof openEmailContactModal === 'function') {
-      openEmailContactModal(_pid);
-    } else {
+      if (_mode === 'client' && _cid) {
+        openEmailContactModal({ clientId: _cid });
+      } else if (_pid) {
+        openEmailContactModal(_pid);
+      }
+    } else if (_pid) {
       renderContactPickerList(_pid, '');
       const dd = document.getElementById('contactPickerDropdown');
       if (dd) dd.style.display = 'block';

@@ -282,7 +282,10 @@ async function loadAllData() {
     contactStore = contactRows.map(r => ({
       id: r.id, clientId: r.client_id||null,
       firstName: r.first_name||'', lastName: r.last_name||'',
-      email: r.email||''
+      email: r.email||'',
+      lastEmailAt: r.last_email_at || null,
+      emailInvalid: !!r.email_invalid,
+      emailInvalidAt: r.email_invalid_at || null,
     }));
 
     // Expenses
