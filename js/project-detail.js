@@ -220,6 +220,45 @@ function renderInfoSheet(projId) {
               })()}
             </div>
           </div>
+          <div class="info-field">
+            <div class="info-field-label">Additional Contacts</div>
+            <div class="client-picker-wrap" id="addlContactPickerWrap" style="position:relative">
+              ${(()=>{
+                const addl = projectContactsStore
+                  .filter(pc => pc.projId === projId && pc.contactId !== info.contactId)
+                  .map(pc => ({ pc, ct: contactStore.find(c => c.id === pc.contactId) }))
+                  .filter(x => x.ct)
+                  .sort((a,b) => (a.pc.addedAt||'').localeCompare(b.pc.addedAt||''));
+                const canEmail = (typeof can === 'function' && can('send_client_email'));
+                const hasClient = !!info.clientId;
+                const rowsHtml = addl.map(({ ct }) => {
+                  const name = ((ct.firstName||'') + ' ' + (ct.lastName||'')).trim() || '(unnamed)';
+                  const emailValid = ct.email && ct.email.trim() && !ct.emailInvalid;
+                  const emailBtn = (canEmail && emailValid)
+                    ? `<button onclick="event.stopPropagation();openEmailContactModal({projId:'${projId}',contactId:'${ct.id}'})" title="Email ${name.replace(/"/g,'&quot;')}" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;font-size:13px">&#x2709;</button>`
+                    : '';
+                  const removeBtn = `<button onclick="event.stopPropagation();removeAddlContact('${projId}','${ct.id}')" title="Remove from this project" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;font-size:13px">&#x2715;</button>`;
+                  return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
+                    <div style="flex:1;min-width:0">
+                      <div style="font-size:13px;color:var(--text)">${name}</div>
+                      ${ct.title ? `<div style="font-size:11px;color:var(--muted)">${ct.title}</div>` : ''}
+                      ${ct.email ? `<div style="font-size:11px;color:var(--blue);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${ct.email}</div>` : ''}
+                    </div>
+                    ${emailBtn}${removeBtn}
+                  </div>`;
+                }).join('');
+                const addBtn = hasClient
+                  ? `<button onclick="openAddlContactPicker('${projId}')" style="font-size:12px;color:var(--blue);background:none;border:1px dashed var(--border);border-radius:6px;padding:5px 12px;cursor:pointer">&#x002B; Add contact</button>`
+                  : `<button disabled title="Set a client on this project first" style="font-size:12px;color:var(--muted);background:none;border:1px dashed var(--border);border-radius:6px;padding:5px 12px;cursor:not-allowed;opacity:0.55">&#x002B; Add contact</button>`;
+                return `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px">${rowsHtml}</div>
+                  ${addBtn}
+                  <div class="client-picker-dropdown" id="addlContactPickerDropdown" style="display:none">
+                    <input class="client-picker-search" id="addlContactPickerSearch" placeholder="Search contacts…" oninput="renderAddlContactPickerList('${projId}',this.value)" />
+                    <div class="client-picker-list" id="addlContactPickerList"></div>
+                  </div>`;
+              })()}
+            </div>
+          </div>
           ${dateField('Test Complete Date', fmtDate(info.testcompleteDate), 'testcompleteDate')}
           ${dateField('Closed Date', fmtDate(info.endDate), 'endDate')}
           ${dateField('Tentative Test Date', fmtDate(info.tentativeTestDate), 'tentativeTestDate')}
