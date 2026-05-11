@@ -16,13 +16,13 @@ let dmMsgsByConv  = {};     // convId -> [{id, sender_id, body, created_at, ...}
 let dmActiveConv  = null;   // currently-open conversation id, or null = list view
 let dmPanelOpen   = false;
 let dmToastTimer  = null;
-let _dmInitDone   = false;
+let _dmInitForEmpId = null;     // employee id we last initialized for; lets dmInit re-run when the logged-in user changes (e.g. logout → login as someone else without page reload)
 
 // ── Init / boot ─────────────────────────────────────────────
 async function dmInit() {
-  if (_dmInitDone) return;
   if (!currentEmployee) return;
-  _dmInitDone = true;
+  if (_dmInitForEmpId === currentEmployee.id) return;
+  _dmInitForEmpId = currentEmployee.id;
   await dmLoadConversations();
   dmRenderBubble();
 }
@@ -41,9 +41,11 @@ async function dmReinitForCurrentUser() {
     dmPanelOpen = false;
   }
   if (!currentEmployee) {
+    _dmInitForEmpId = null;
     dmRenderBubble();
     return;
   }
+  _dmInitForEmpId = currentEmployee.id;
   await dmLoadConversations();
 }
 
