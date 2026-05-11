@@ -3740,7 +3740,7 @@ async function openEmailContactModal(arg) {
   // Build modal (first-open only)
   if (!document.getElementById('emailContactModal')) {
     const html = `
-    <div id="emailContactModal" class="modal-backdrop" onclick="if(event.target===this) closeEmailContactModal()">
+    <div id="emailContactModal" class="modal-backdrop" style="z-index:1500" onclick="if(event.target===this) closeEmailContactModal()">
       <div class="modal" style="width:90%;max-width:720px;max-height:90vh;display:flex;flex-direction:column;">
         <div class="modal-header">
           <div class="modal-title">&#x2709; Email Contact</div>
