@@ -3640,6 +3640,8 @@ let _emailModalProjId = null;
 let _emailModalClientId = null;
 let _emailModalContactId = null; // currently-selected recipient
 let _emailModalMode = 'project'; // 'project' | 'client'
+let _emailModalCcIds = [];       // employee IDs currently CC'd
+let _emailModalCcPickerOpen = false;
 
 // Accepts either:
 //   openEmailContactModal(projId)                              -- legacy project mode
@@ -3697,6 +3699,26 @@ async function openEmailContactModal(arg) {
   const defaultCt = (contactId && sendable.find(c => c.id === contactId))
     || sendable[0];
   _emailModalContactId = defaultCt.id;
+
+  // CC defaults: sender always pre-checked. In project mode, if the project's
+  // PM name matches an active employee with an email, pre-check them too.
+  _emailModalCcIds = (currentEmployee && currentEmployee.id) ? [currentEmployee.id] : [];
+  _emailModalCcPickerOpen = false;
+  if (projId) {
+    const _projInfo = projectInfo[projId] || {};
+    const pmName = (_projInfo.pm || '').trim().toLowerCase();
+    if (pmName) {
+      const pmEmp = (typeof employees !== 'undefined' ? employees : []).find(e =>
+        (e.name || '').trim().toLowerCase() === pmName
+        && e.isActive !== false
+        && !e.terminationDate
+        && e.email && e.email.trim()
+      );
+      if (pmEmp && !_emailModalCcIds.includes(pmEmp.id)) {
+        _emailModalCcIds.push(pmEmp.id);
+      }
+    }
+  }
 
   // Lazy-load templates if not yet initialized
   try {
@@ -3914,10 +3936,7 @@ function renderEmailContactModalBody(emailTemplates) {
           style="width:100%;min-height:240px;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:10px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;resize:vertical;box-sizing:border-box;line-height:1.5"></textarea>
       </div>
 
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12.5px;color:var(--text)">
-        <input type="checkbox" id="emailCcMeCheckbox" checked style="margin:0">
-        CC myself (${currentEmployee.email})
-      </label>
+      <div id="emailCcSection">${_renderEmailCcSectionInner()}</div>
 
       ${_renderEmailWarningBanner(projId, _computeEmailWarningTier(projId))}
 
@@ -4020,6 +4039,123 @@ function applyEmailTemplate(templateId) {
   bodyInp.value = substituteEmailVars(t.instructions || '');
 }
 
+// ===== CC PICKER HELPERS =====
+// Active, non-Ballantine employees with an email address, sorted alphabetically.
+function _getEligibleCcEmployees() {
+  return (typeof employees !== 'undefined' ? employees : [])
+    .filter(e =>
+      e.isActive !== false
+      && !e.terminationDate
+      && (e.department || '').toLowerCase() !== 'ballantine'
+      && e.email && e.email.trim()
+    )
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+}
+
+// Render just the CC section's inner HTML — selected chips + Add button + popup.
+// Called both on initial modal render and on every state change inside the CC
+// section (toggle, add, remove) so we don't have to rebuild the entire modal.
+function _renderEmailCcSectionInner() {
+  const projId = _emailModalProjId;
+  const info = projectInfo[projId] || {};
+  const pmName = (info.pm || '').trim().toLowerCase();
+  const meId = currentEmployee && currentEmployee.id;
+  const all = _getEligibleCcEmployees();
+
+  const tagsFor = (e) => {
+    const tags = [];
+    if (e.id === meId) tags.push('you');
+    if (pmName && (e.name || '').trim().toLowerCase() === pmName) tags.push('PM');
+    return tags;
+  };
+
+  // Selected chips — sorted: pre-checked roles first, then alpha
+  const selected = _emailModalCcIds
+    .map(id => all.find(e => e.id === id))
+    .filter(Boolean)
+    .sort((a, b) => {
+      const aRank = (a.id === meId ? 0 : (tagsFor(a).includes('PM') ? 1 : 2));
+      const bRank = (b.id === meId ? 0 : (tagsFor(b).includes('PM') ? 1 : 2));
+      if (aRank !== bRank) return aRank - bRank;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+  const chips = selected.map(e => {
+    const tags = tagsFor(e);
+    const tagStr = tags.length
+      ? ` <span style="color:var(--muted);font-size:10.5px;font-weight:400;margin-left:2px">(${tags.join(', ')})</span>`
+      : '';
+    return `<span style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:3px 2px 3px 10px;font-size:11.5px;color:var(--text);display:inline-flex;align-items:center;gap:2px;font-weight:500">
+      ${(e.name||'').replace(/</g,'&lt;')}${tagStr}
+      <button onclick="_toggleEmailCcEmployee('${e.id}')" title="Remove" style="background:transparent;border:none;color:var(--muted);cursor:pointer;padding:0 6px;font-size:14px;line-height:1">&times;</button>
+    </span>`;
+  }).join('');
+
+  const popup = _emailModalCcPickerOpen ? `
+    <div id="emailCcPicker" style="position:absolute;top:100%;left:0;margin-top:4px;width:300px;max-height:220px;overflow-y:auto;background:var(--surface);border:1.5px solid var(--border);border-radius:8px;box-shadow:0 8px 20px rgba(0,0,0,0.35);z-index:1001;padding:4px 0">
+      ${all.length ? all.map(e => {
+        const checked = _emailModalCcIds.includes(e.id);
+        const tags = tagsFor(e);
+        const tagStr = tags.length
+          ? ` <span style="color:var(--muted);font-size:10.5px">(${tags.join(', ')})</span>`
+          : '';
+        return `<label style="display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;font-size:12.5px;color:var(--text);font-family:'DM Sans',sans-serif"
+          onmouseover="this.style.background='var(--surface2)'"
+          onmouseout="this.style.background=''"
+          title="${(e.email||'').replace(/"/g,'&quot;')}">
+          <input type="checkbox" ${checked ? 'checked' : ''} onchange="_toggleEmailCcEmployee('${e.id}')" style="margin:0;flex-shrink:0">
+          <span style="flex:1;line-height:1.3">${(e.name||'').replace(/</g,'&lt;')}${tagStr}</span>
+        </label>`;
+      }).join('') : '<div style="padding:10px 12px;font-size:12px;color:var(--muted);text-align:center">No eligible employees</div>'}
+    </div>
+  ` : '';
+
+  return `
+    <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.5px">CC</div>
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;position:relative;padding:7px 8px;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;min-height:42px">
+      ${chips}
+      <button id="emailCcAddBtn" type="button" onclick="_toggleEmailCcPicker()"
+        style="background:transparent;border:1px dashed var(--border);border-radius:5px;padding:4px 10px;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif">
+        + Add CC &#x25BE;
+      </button>
+      ${popup}
+    </div>
+  `;
+}
+
+function _rerenderEmailCcSection() {
+  const el = document.getElementById('emailCcSection');
+  if (el) el.innerHTML = _renderEmailCcSectionInner();
+}
+
+function _toggleEmailCcEmployee(empId) {
+  const idx = _emailModalCcIds.indexOf(empId);
+  if (idx > -1) _emailModalCcIds.splice(idx, 1);
+  else _emailModalCcIds.push(empId);
+  _rerenderEmailCcSection();
+}
+
+function _toggleEmailCcPicker() {
+  _emailModalCcPickerOpen = !_emailModalCcPickerOpen;
+  if (_emailModalCcPickerOpen) {
+    // Defer to next tick so the click that opened the picker doesn't immediately close it
+    setTimeout(() => document.addEventListener('mousedown', _onCcPickerOutsideClick), 0);
+  } else {
+    document.removeEventListener('mousedown', _onCcPickerOutsideClick);
+  }
+  _rerenderEmailCcSection();
+}
+
+function _onCcPickerOutsideClick(e) {
+  const picker = document.getElementById('emailCcPicker');
+  const btn = document.getElementById('emailCcAddBtn');
+  if (!picker) return;
+  if (picker.contains(e.target) || (btn && btn.contains(e.target))) return;
+  _emailModalCcPickerOpen = false;
+  document.removeEventListener('mousedown', _onCcPickerOutsideClick);
+  _rerenderEmailCcSection();
+}
+
 function closeEmailContactModal() {
   const m = document.getElementById('emailContactModal');
   if (m) m.classList.remove('open');
@@ -4027,6 +4163,11 @@ function closeEmailContactModal() {
   _emailModalClientId = null;
   _emailModalContactId = null;
   _emailModalMode = 'project';
+  _emailModalCcIds = [];
+  if (_emailModalCcPickerOpen) {
+    document.removeEventListener('mousedown', _onCcPickerOutsideClick);
+  }
+  _emailModalCcPickerOpen = false;
 }
 
 async function sendEmailContactModal() {
@@ -4044,7 +4185,7 @@ async function sendEmailContactModal() {
 
   const subject = (document.getElementById('emailSubjectInput').value || '').trim();
   const body = (document.getElementById('emailBodyInput').value || '').trim();
-  const ccMe = !!document.getElementById('emailCcMeCheckbox')?.checked;
+  // (CC list is built below from _emailModalCcIds — the chip picker state)
   const templateSelect = document.getElementById('emailTemplateSelect');
   const templateId = templateSelect ? templateSelect.value : null;
 
@@ -4063,7 +4204,11 @@ async function sendEmailContactModal() {
   const sendBtn = document.getElementById('emailContactSendBtn');
   if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; sendBtn.style.opacity = '0.6'; }
 
-  const cc = ccMe ? [currentEmployee.email] : [];
+  // Build CC list from the employee IDs the user has selected in the chip picker
+  const cc = _emailModalCcIds
+    .map(id => (typeof employees !== 'undefined' ? employees : []).find(e => e.id === id))
+    .filter(e => e && e.email && e.email.trim())
+    .map(e => e.email.trim());
 
   let resendId = null;
   let status = 'sent';
