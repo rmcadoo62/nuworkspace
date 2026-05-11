@@ -518,7 +518,12 @@ function _renderOutreachQueue(contacts, q) {
 
     const rows = cts.map(ct => {
       const fullName = ((ct.firstName||'') + ' ' + (ct.lastName||'')).trim() || '(no name)';
-      const lastLabel = ct.lastEmailAt ? 'Last: ' + fmtDate(ct.lastEmailAt) : 'Never contacted';
+      const daysSince = ct.lastEmailAt
+        ? Math.floor((Date.now() - new Date(ct.lastEmailAt).getTime()) / (1000 * 60 * 60 * 24))
+        : null;
+      const lastLabel = ct.lastEmailAt
+        ? 'Last: ' + fmtDate(ct.lastEmailAt) + ' (' + daysSince + 'd ago)'
+        : 'Never contacted';
       const tip = ('Send email to ' + (ct.firstName || 'this contact')
                    + ' • ' + lastLabel
                    + ' • ⚠ Due for outreach').replace(/"/g,'&quot;');
@@ -802,8 +807,11 @@ function renderClientDrawerBody() {
               || (Date.now() - new Date(ct.lastEmailAt).getTime() > SIX_MONTHS_MS);
             const isAmber = stale && !_drawerHasOpenProject;
 
+            const _daysSince = ct.lastEmailAt
+              ? Math.floor((Date.now() - new Date(ct.lastEmailAt).getTime()) / (1000 * 60 * 60 * 24))
+              : null;
             const lastLabel = ct.lastEmailAt
-              ? new Date(ct.lastEmailAt).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'})
+              ? new Date(ct.lastEmailAt).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}) + ' (' + _daysSince + 'd ago)'
               : 'Never';
             const tipParts = [];
             if (invalid)       tipParts.push('Email address marked invalid');

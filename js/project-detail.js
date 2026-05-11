@@ -3642,6 +3642,7 @@ let _emailModalContactId = null; // currently-selected recipient
 let _emailModalMode = 'project'; // 'project' | 'client'
 let _emailModalCcIds = [];       // employee IDs currently CC'd
 let _emailModalCcPickerOpen = false;
+let _emailModalSendToAll = false; // when true, recipients are all valid contacts at the client
 
 // Accepts either:
 //   openEmailContactModal(projId)                              -- legacy project mode
@@ -3777,16 +3778,41 @@ async function openEmailContactModal(arg) {
 
 // Called when user picks a different recipient from the dropdown.
 // Re-applies the currently-selected template with the new contact's variables.
-function onEmailRecipientChange(contactId) {
-  _emailModalContactId = contactId;
-  // Update the To line in the summary box
-  const ct = contactStore.find(c => c.id === contactId) || {};
+function onEmailRecipientChange(value) {
   const toLineEl = document.getElementById('emailToLine');
-  if (toLineEl) {
-    const nm = ((ct.firstName||'') + ' ' + (ct.lastName||'')).trim();
-    toLineEl.textContent = nm + ' <' + (ct.email||'') + '>';
+
+  if (value === '__ALL__') {
+    _emailModalSendToAll = true;
+    // Build bulk recipients list (excludes invalid-flagged)
+    const clientId = _emailModalClientId;
+    const cl = clientStore.find(c => c.id === clientId);
+    const info = projectInfo[_emailModalProjId] || {};
+    const clientLabel = (cl && cl.name) || info.client || 'this client';
+    const bulkContacts = contactStore.filter(c =>
+      c.clientId === clientId && c.email && c.email.trim() && !c.emailInvalid
+    );
+    if (toLineEl) {
+      const summary = '\uD83D\uDCE8 All ' + bulkContacts.length + ' contacts at ' + clientLabel.replace(/</g,'&lt;');
+      const list = bulkContacts.map(c =>
+        ((c.firstName||'') + ' ' + (c.lastName||'')).trim() + ' <' + c.email + '>'
+      ).join(', ').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      toLineEl.innerHTML = '<div style="font-weight:600">' + summary + '</div>'
+        + '<div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4;word-break:break-word">' + list + '</div>';
+    }
+  } else {
+    _emailModalSendToAll = false;
+    _emailModalContactId = value;
+    const ct = contactStore.find(c => c.id === value) || {};
+    if (toLineEl) {
+      const nm = ((ct.firstName||'') + ' ' + (ct.lastName||'')).trim();
+      toLineEl.textContent = nm + ' <' + (ct.email||'') + '>';
+    }
   }
-  // Re-apply the current template so {{contactFirstName}} etc. get updated
+
+  // Re-apply the current template so {{contactFirstName}} etc. get re-rendered.
+  // In bulk mode contact-level tokens resolve to the modal's "primary" contact
+  // (the one originally clicked) — user is expected to use generic phrasing
+  // for bulk templates.
   const tmplSelect = document.getElementById('emailTemplateSelect');
   if (tmplSelect && tmplSelect.value) {
     applyEmailTemplate(tmplSelect.value);
@@ -3892,14 +3918,32 @@ function renderEmailContactModalBody(emailTemplates) {
   });
 
   const selectedCt = contactStore.find(c => c.id === _emailModalContactId) || clientContacts[0] || {};
-  const toLine = ((selectedCt.firstName||'') + ' ' + (selectedCt.lastName||'')).trim() + ' <' + (selectedCt.email||'') + '>';
+  // To line: bulk mode shows summary + comma list; single mode shows one address
+  let toLine, toLineHtml;
+  if (_emailModalSendToAll) {
+    const list = clientContacts.filter(c => !c.emailInvalid).map(c =>
+      ((c.firstName||'') + ' ' + (c.lastName||'')).trim() + ' <' + c.email + '>'
+    ).join(', ');
+    const summary = `&#x1F4E8; All ${clientContacts.filter(c=>!c.emailInvalid).length} contacts at ${(clientLabel||'').replace(/</g,'&lt;')}`;
+    toLineHtml = `<div style="font-weight:600">${summary}</div><div style="font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4;word-break:break-word">${list.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>`;
+    toLine = summary; // for any plain-text fallbacks
+  } else {
+    toLine = ((selectedCt.firstName||'') + ' ' + (selectedCt.lastName||'')).trim() + ' <' + (selectedCt.email||'') + '>';
+    toLineHtml = toLine.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
   const fromLine = (currentEmployee.name||'') + ' <' + currentEmployee.email + '>';
 
   const recipOpts = clientContacts.map(c => {
     const nm = ((c.firstName||'') + ' ' + (c.lastName||'')).trim();
-    const sel = (c.id === _emailModalContactId) ? 'selected' : '';
+    const sel = (!_emailModalSendToAll && c.id === _emailModalContactId) ? 'selected' : '';
     return `<option value="${c.id}" ${sel}>${nm.replace(/</g,'&lt;')} — ${(c.email||'').replace(/</g,'&lt;')}</option>`;
   }).join('');
+  // Multi-recipient option: only meaningful when 2+ contacts have valid emails.
+  // Excludes contacts flagged email_invalid.
+  const _validBulkContacts = clientContacts.filter(c => !c.emailInvalid);
+  const allOpt = _validBulkContacts.length >= 2
+    ? `<option value="__ALL__" ${_emailModalSendToAll ? 'selected' : ''}>&#x1F4E8; All ${_validBulkContacts.length} contacts at ${(clientLabel||'').replace(/</g,'&lt;')}</option>`
+    : '';
 
   const templateOpts = emailTemplates.length
     ? emailTemplates.map((t,i) =>
@@ -3914,7 +3958,7 @@ function renderEmailContactModalBody(emailTemplates) {
         <div style="color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.5px">From</div>
         <div style="color:var(--text)">${fromLine.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
         <div style="color:var(--muted);font-weight:600;text-transform:uppercase;font-size:10px;letter-spacing:.5px">To</div>
-        <div style="color:var(--text)" id="emailToLine">${toLine.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+        <div style="color:var(--text)" id="emailToLine">${toLineHtml}</div>
       </div>
 
       <div>
@@ -3926,6 +3970,7 @@ function renderEmailContactModalBody(emailTemplates) {
         <select id="emailRecipientSelect" onchange="onEmailRecipientChange(this.value)"
           style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none">
           ${recipOpts}
+          ${allOpt}
         </select>
       </div>
 
@@ -4177,6 +4222,7 @@ function closeEmailContactModal() {
   _emailModalContactId = null;
   _emailModalMode = 'project';
   _emailModalCcIds = [];
+  _emailModalSendToAll = false;
   if (_emailModalCcPickerOpen) {
     document.removeEventListener('mousedown', _onCcPickerOutsideClick);
   }
@@ -4199,33 +4245,51 @@ async function sendEmailContactModal() {
   if (!projId && !clientId) return;
   const info = projectInfo[projId] || {};
   const proj = projects.find(p => p.id === projId) || {};
-  // Read the currently-selected recipient from the dropdown (falls back to modal state)
-  const recipSelect = document.getElementById('emailRecipientSelect');
-  const selectedContactId = (recipSelect && recipSelect.value) || _emailModalContactId;
-  const ct = contactStore.find(c => c.id === selectedContactId);
-  if (!ct || !ct.email) { toast('⚠ Pick a recipient with an email address'); return; }
-  if (!currentEmployee || !currentEmployee.email) { toast('⚠ Your employee profile has no email'); return; }
+
+  // Determine recipients. In bulk mode, every valid-email contact at this
+  // client (excluding email_invalid). In single mode, the picked contact.
+  let recipients;
+  if (_emailModalSendToAll) {
+    recipients = contactStore.filter(c =>
+      c.clientId === clientId
+      && c.email && c.email.trim()
+      && !c.emailInvalid
+    );
+    if (recipients.length === 0) {
+      toast('\u26A0 No valid recipients at this client');
+      return;
+    }
+  } else {
+    const recipSelect = document.getElementById('emailRecipientSelect');
+    const selectedContactId = (recipSelect && recipSelect.value && recipSelect.value !== '__ALL__')
+      ? recipSelect.value
+      : _emailModalContactId;
+    const ct = contactStore.find(c => c.id === selectedContactId);
+    if (!ct || !ct.email) { toast('\u26A0 Pick a recipient with an email address'); return; }
+    recipients = [ct];
+  }
+
+  if (!currentEmployee || !currentEmployee.email) { toast('\u26A0 Your employee profile has no email'); return; }
 
   const subject = (document.getElementById('emailSubjectInput').value || '').trim();
   const body = (document.getElementById('emailBodyInput').value || '').trim();
-  // (CC list is built below from _emailModalCcIds — the chip picker state)
   const templateSelect = document.getElementById('emailTemplateSelect');
   const templateId = templateSelect ? templateSelect.value : null;
 
-  if (!subject) { toast('⚠ Subject is required'); return; }
-  if (!body)    { toast('⚠ Body is required'); return; }
+  if (!subject) { toast('\u26A0 Subject is required'); return; }
+  if (!body)    { toast('\u26A0 Body is required'); return; }
 
   // Warning tier + acknowledgment (for both gating and audit log)
   const warningTier = _computeEmailWarningTier(projId);
   const ackChk = document.getElementById('emailWarnAckCheckbox');
   const warningAck = (warningTier === 'red') ? !!(ackChk && ackChk.checked) : null;
   if (warningTier === 'red' && !warningAck) {
-    toast('⚠ Confirm the CUI acknowledgment above');
+    toast('\u26A0 Confirm the CUI acknowledgment above');
     return;
   }
 
   const sendBtn = document.getElementById('emailContactSendBtn');
-  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending…'; sendBtn.style.opacity = '0.6'; }
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = 'Sending\u2026'; sendBtn.style.opacity = '0.6'; }
 
   // Build CC list from the employee IDs the user has selected in the chip picker
   const cc = _emailModalCcIds
@@ -4239,18 +4303,19 @@ async function sendEmailContactModal() {
 
   // Resend needs a verified domain. Until apps.nulabs.com is set up,
   // we piggyback on Jordan's verified vibrato.nulabs.com subdomain.
-  // Rewrite the From username@nulabs.com → username@vibrato.nulabs.com,
-  // but set Reply-To to the real address so replies go to the right inbox.
   const SEND_DOMAIN = 'vibrato.nulabs.com';
   const realEmail = currentEmployee.email;
   const localPart = realEmail.split('@')[0];
   const fromEmail = localPart + '@' + SEND_DOMAIN;
 
-  // 1. Call edge function to send
+  const toEmails = recipients.map(r => r.email.trim());
+
+  // 1. Call edge function to send. ONE API call regardless of recipient count;
+  // recipients go in the To array.
   try {
     const { data, error } = await sb.functions.invoke('send-client-email', {
       body: {
-        to: ct.email,
+        to: toEmails,
         cc: cc,
         subject: subject,
         body: body,
@@ -4269,14 +4334,15 @@ async function sendEmailContactModal() {
     // Still log the attempt for audit — continue to sent_emails insert below
   }
 
-  // 2. Log to sent_emails audit table
+  // 2. Log to sent_emails audit table — one row per recipient so per-contact
+  // history stays clean. They all share the same resend_id and timestamps.
   try {
-    await sb.from('sent_emails').insert([{
+    const rows = recipients.map(r => ({
       project_id:   projId || null,
       client_id:    clientId || (info.clientId || null),
-      contact_id:   ct.id || null,
+      contact_id:   r.id || null,
       template_id:  (templateId || null) || null,
-      to_email:     ct.email,
+      to_email:     r.email,
       cc_emails:    cc.join(', ') || null,
       subject:      subject,
       body:         body,
@@ -4287,19 +4353,25 @@ async function sendEmailContactModal() {
       status:       status,
       warning_tier: warningTier,
       warning_acknowledged: warningAck,
-    }]);
+    }));
+    await sb.from('sent_emails').insert(rows);
   } catch(e) {
     console.warn('sent_emails log failed (non-fatal):', e);
   }
 
-  // 2b. Stamp last_email_at on the contact (drives the Due-for-Outreach
+  // 2b. Stamp last_email_at on every recipient (drives the Due-for-Outreach
   // indicator on client cards). Only on successful send.
-  if (status === 'sent' && ct.id) {
+  if (status === 'sent') {
     try {
       const nowIso = new Date().toISOString();
-      await sb.from('contacts').update({ last_email_at: nowIso }).eq('id', ct.id);
-      const cIdx = contactStore.findIndex(c => c.id === ct.id);
-      if (cIdx > -1) contactStore[cIdx].lastEmailAt = nowIso;
+      const ids = recipients.map(r => r.id).filter(Boolean);
+      if (ids.length) {
+        await sb.from('contacts').update({ last_email_at: nowIso }).in('id', ids);
+        for (const id of ids) {
+          const cIdx = contactStore.findIndex(c => c.id === id);
+          if (cIdx > -1) contactStore[cIdx].lastEmailAt = nowIso;
+        }
+      }
     } catch(e) {
       console.warn('contact.last_email_at stamp failed (non-fatal):', e);
     }
@@ -4311,16 +4383,25 @@ async function sendEmailContactModal() {
       const authorName = currentEmployee.name || 'Someone';
       const authorInitials = currentEmployee.initials || (authorName.slice(0,2).toUpperCase());
       const authorColor = currentEmployee.color || '#5b9cf6';
-      const contactName = (ct.firstName||'') + ' ' + (ct.lastName||'');
-      // Look up the template label so it appears in the chatter feed
       const tplLabel = (typeof templates !== 'undefined' && templateId)
         ? (templates.find(t => t.id === templateId)?.label || null)
         : null;
-      const chatterText = '\uD83D\uDCE7 Email sent to ' + contactName.trim() + ' \u2014 ' + subject
-        + (tplLabel ? '  \u2022  Template: ' + tplLabel : '');
+      let chatterText;
+      if (recipients.length === 1) {
+        const r = recipients[0];
+        const contactName = ((r.firstName||'') + ' ' + (r.lastName||'')).trim();
+        chatterText = '\uD83D\uDCE7 Email sent to ' + contactName + ' \u2014 ' + subject
+          + (tplLabel ? '  \u2022  Template: ' + tplLabel : '');
+      } else {
+        const cl = clientStore.find(c => c.id === clientId);
+        const clientLabel = (cl && cl.name) || info.client || 'this client';
+        chatterText = '\uD83D\uDCE7 Email sent to all ' + recipients.length + ' contacts at '
+          + clientLabel + ' \u2014 ' + subject
+          + (tplLabel ? '  \u2022  Template: ' + tplLabel : '');
+      }
       const msg = {
         proj_id:        projId,
-        author_id:      currentUser?.id || null,    // ← auth user id (matches My Chatter query)
+        author_id:      currentUser?.id || null,
         author_name:    authorName,
         author_initials:authorInitials,
         author_color:   authorColor,
@@ -4360,7 +4441,9 @@ async function sendEmailContactModal() {
   if (sendBtn) { sendBtn.disabled = false; sendBtn.innerHTML = '&#x1F4E4; Send Email'; sendBtn.style.opacity = '1'; }
 
   if (status === 'sent') {
-    toast('\u2705 Email sent to ' + ct.email);
+    toast(recipients.length === 1
+      ? '\u2705 Email sent to ' + recipients[0].email
+      : '\u2705 Email sent to ' + recipients.length + ' contacts');
     closeEmailContactModal();
   } else {
     toast('\u26A0 Send failed: ' + (errorMsg || 'Unknown error'));
