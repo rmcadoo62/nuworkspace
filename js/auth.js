@@ -1251,6 +1251,7 @@ function startViewAs(empId) {
   // Refresh user-scoped surfaces so the UI reflects the target's view
   if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
   if (typeof loadNotifs === 'function') loadNotifs();
+  if (typeof dmReinitForCurrentUser === 'function') dmReinitForCurrentUser();
 
   // Update the sidebar user badge to reflect the impersonated identity
   const av = document.getElementById('userBadgeAv');
@@ -1281,6 +1282,7 @@ function exitViewAs() {
   _applyIdentityNav();
   if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
   if (typeof loadNotifs === 'function') loadNotifs();
+  if (typeof dmReinitForCurrentUser === 'function') dmReinitForCurrentUser();
 
   // Restore real-user sidebar badge
   const av = document.getElementById('userBadgeAv');

@@ -27,6 +27,26 @@ async function dmInit() {
   dmRenderBubble();
 }
 
+// Force-reload DM state for the currently-active currentEmployee. Used by
+// View-As to swap to the impersonated user's DM bubble + conversations
+// (and back to the real user on exit). Resets local caches and closes any
+// open panel/conversation views so we don't leak the previous user's data.
+async function dmReinitForCurrentUser() {
+  dmConvs        = [];
+  dmMsgsByConv   = {};
+  dmActiveConv   = null;
+  if (dmPanelOpen) {
+    const panel = document.getElementById('dmPanel');
+    if (panel) panel.style.display = 'none';
+    dmPanelOpen = false;
+  }
+  if (!currentEmployee) {
+    dmRenderBubble();
+    return;
+  }
+  await dmLoadConversations();
+}
+
 // Loads my conversations + member ids + last message + unread counts.
 // Two queries: my participant rows, then conversations + last messages.
 async function dmLoadConversations() {
@@ -830,6 +850,7 @@ document.addEventListener('click', e => {
 
 // ── Expose for inline handlers ──────────────────────────────
 window.dmInit = dmInit;
+window.dmReinitForCurrentUser = dmReinitForCurrentUser;
 window.dmTogglePanel = dmTogglePanel;
 window.dmOpenConversation = dmOpenConversation;
 window.dmBackToList = dmBackToList;
