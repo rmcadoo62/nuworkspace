@@ -16,6 +16,65 @@ const BALLANTINE_ACCRUAL_START = new Date('2026-04-12T00:00:00');
 const _isBallantineDept = (emp) => (emp && emp.dept && emp.dept.toLowerCase() === 'ballantine');
 const _dropIsCreditable = (emp, dropDate) => !_isBallantineDept(emp) || dropDate >= BALLANTINE_ACCRUAL_START;
 
+// ===== SICK ALLOTMENT AS-OF =====
+// Returns the cumulative sick allotment available as of `asOfDate` — i.e., opening
+// balance plus all creditable Jan 1 / May 1 drops that have occurred within the
+// anniversary year on or before that date, capped at 48h. Used by the chronological
+// overage walk so each sick entry is judged against the bank that existed on the day
+// it was taken, not against today's accumulated total. This is the fix for the
+// regression where a May 1 drop retroactively covered an April sick day and silently
+// short-circuited the spill-to-vacation rule.
+function _sickAllotmentAsOf(asOfDate, opening, annivRange, emp) {
+  if (!annivRange) return opening;
+  let running = opening;
+  for (let y = annivRange.start.getFullYear(); y <= annivRange.end.getFullYear(); y++) {
+    for (const mo of [0, 4]) { // Jan=0, May=4
+      const drop = new Date(y, mo, 1);
+      if (drop > annivRange.start && drop <= annivRange.end &&
+          drop <= asOfDate && _dropIsCreditable(emp, drop)) {
+        running = Math.min(48, running + 24);
+      }
+    }
+  }
+  return running;
+}
+
+// ===== SICK ENTRIES IN RANGE =====
+// Collects per-day sick hours from tsData inside the anniversary window, merging
+// the multiple legacy category labels into a single number per day. Returned sorted
+// chronologically so the overage walk can process them in order.
+function _collectSickEntriesInRange(empId, annivRange) {
+  if (!annivRange) return [];
+  const SICK_CAT_KEYS = ['Sick', 'Sick Time', '\u2B21 Sick Time'];
+  const entries = [];
+  const rangeStart = annivRange.start;
+  const rangeEnd   = annivRange.end;
+  Object.keys(tsData).forEach(key => {
+    if (!key.startsWith('oh_' + empId + '|')) return;
+    const weekKey = key.split('|')[1];
+    if (!weekKey) return;
+    const weekDate = new Date(weekKey + 'T00:00:00');
+    const weekEnd = new Date(weekDate); weekEnd.setDate(weekDate.getDate() + 6);
+    if (weekEnd < rangeStart || weekDate >= rangeEnd) return;
+    const oh = tsData[key] || {};
+    const byDay = {};
+    SICK_CAT_KEYS.forEach(cat => {
+      Object.entries(oh[cat] || {}).forEach(([di, hrs]) => {
+        byDay[di] = (byDay[di] || 0) + (parseFloat(hrs) || 0);
+      });
+    });
+    Object.entries(byDay).forEach(([di, hrs]) => {
+      if (hrs <= 0) return;
+      const d = new Date(weekDate);
+      d.setDate(weekDate.getDate() + parseInt(di));
+      if (d < rangeStart || d >= rangeEnd) return;
+      entries.push({ date: d.toISOString().slice(0,10), hrs: hrs });
+    });
+  });
+  entries.sort((a,b) => a.date.localeCompare(b.date));
+  return entries;
+}
+
 
 
 // ===== EMPLOYEES PANEL =====
@@ -429,35 +488,63 @@ function showEmpProfile(empId, annivOffset) {
 
   // Sick accrual: opening balance (sick_bank) + drops on Jan 1 and May 1 within anniversary year, capped at 48h
   // Part-time: NJ rule — 1h per 30h worked, no fixed drops
+  // sickAllotment is the as-of-TODAY total (used by display widgets that show
+  // "X of Y accrued"). The actual overage/bank-used totals come from the
+  // chronological walk further down, which evaluates each entry against the
+  // allotment that existed on the day it was taken.
   let sickAllotment = 0;
   const sickOpeningBalance = emp.sickBank || 0;
   if (isPartTime) {
     const ptAccrued = getPartTimeSickAccrued(empId, new Date().getFullYear());
     sickAllotment = sickOpeningBalance + ptAccrued;
   } else if (emp.hireDate && _annivRange) {
-    const annivStart = _annivRange.start;
-    const annivEnd   = _annivRange.end;
-    let running = sickOpeningBalance;
-    // Add drops that have already occurred since anniv start up to today
-    for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
-      for (const mo of [0, 4]) { // Jan=0, May=4
-        const drop = new Date(y, mo, 1);
-        if (drop > annivStart && drop <= annivEnd && drop <= today && _dropIsCreditable(emp, drop)) {
-          running = Math.min(48, running + 24);
-        }
-      }
-    }
-    sickAllotment = running;
+    sickAllotment = _sickAllotmentAsOf(today, sickOpeningBalance, _annivRange, emp);
   } else {
     if (today >= new Date(year, 0, 1)) sickAllotment += 24;
     if (today >= new Date(year, 4, 1)) sickAllotment += 24;
   }
 
-  // sickAllotment = what's been accrued/available to take this year (capped at 48)
-  // sickBankBalance = true running balance (opening + all drops - used), no cap
+  // Chronological overage walk. For full-time, non-first-year employees we judge
+  // each sick entry against the allotment that existed on that date. Anything
+  // unbacked spills to vacation immediately and the drop that arrives later does
+  // NOT retroactively rebate — policy: no payback once sick is accrued.
+  //
+  // First-year hires keep the old aggregate math (used.sick vs today's
+  // sickAllotment) because their overage is held against future drops rather
+  // than spilled, and the two formulations produce the same final bank balance
+  // once a drop settles the debt.
+  //
+  // Part-time also keeps the old math — accrual is NJ "1h per 30h worked"
+  // without scheduled drop dates, so there's no chronological allotment curve.
+  const _isFirstYearFT = isInFirstYear(emp.hireDate) && !isPartTime;
+  let _rawSickOverage;
+  let _bankUsedTotal;
+  let _chronoTaggedEntries = null;
+  if (!isPartTime && emp.hireDate && _annivRange && !_isFirstYearFT) {
+    const _sickEntries = _collectSickEntriesInRange(empId, _annivRange);
+    let _bankUsedRunning = 0;
+    _chronoTaggedEntries = _sickEntries.map(e => {
+      const entryDate = new Date(e.date + 'T00:00:00');
+      const allotAsOf = _sickAllotmentAsOf(entryDate, sickOpeningBalance, _annivRange, emp);
+      const cap = Math.max(0, allotAsOf - _bankUsedRunning);
+      const bankHrs = Math.min(e.hrs, cap);
+      const overageHrs = e.hrs - bankHrs;
+      _bankUsedRunning += bankHrs;
+      return { ...e, bankHrs, overageHrs };
+    });
+    _rawSickOverage = _chronoTaggedEntries.reduce((s, e) => s + e.overageHrs, 0);
+    _bankUsedTotal = _bankUsedRunning;
+  } else {
+    _rawSickOverage = Math.max(0, used.sick - sickAllotment);
+    _bankUsedTotal = Math.max(0, used.sick - _rawSickOverage);
+  }
+
+  // sickBankBalance = true running balance (opening + all drops up to today − bank-drawn hours).
+  // The "bank-drawn" subtrahend is _bankUsedTotal, NOT used.sick — hours that spilled
+  // to vacation never touched the sick bank and must not be deducted from it.
   const sickBankBalance = (() => {
-    if (isPartTime) return Math.max(0, sickAllotment - used.sick);
-    if (!emp.hireDate || !_annivRange) return sickOpeningBalance - used.sick;
+    if (isPartTime) return Math.max(0, sickAllotment - _bankUsedTotal);
+    if (!emp.hireDate || !_annivRange) return sickOpeningBalance - _bankUsedTotal;
     let running = sickOpeningBalance;
     const annivStart = _annivRange.start;
     const annivEnd   = _annivRange.end;
@@ -469,17 +556,16 @@ function showEmpProfile(empId, annivOffset) {
         }
       }
     }
-    return Math.max(0, running - used.sick);
+    return Math.max(0, running - _bankUsedTotal);
   })();
 
   // Calculate sick overage. For first-year employees the "spill to vacation" rule
   // doesn't apply — they have no vacation bank to pay from. Their sick debt is
   // held against future sick drops and settles itself as drops arrive. Only the
   // pathological excess beyond the 48h annual cap would actually spill to vacation.
-  const _rawSickOverage = Math.max(0, used.sick - sickAllotment);
   let sickOverage;            // the portion that actually hits vacation
   let firstYearPendingDebt;   // first-year-only: sick debt awaiting future drops
-  if (isInFirstYear(emp.hireDate) && !isPartTime) {
+  if (_isFirstYearFT) {
     // Future drops remaining in this anniversary year (Jan 1 / May 1 that haven't happened yet)
     let futureSickCapacity = 0;
     if (_annivRange) {
@@ -996,11 +1082,15 @@ function showEmpProfile(empId, annivOffset) {
                 </div>`;
             }
             const usedSick = used.sick;
-            const over = usedSick > sickAllotment;
+            // "Over" means there was chronological overage on any day — not just
+            // a comparison against today's accumulated allotment. A May 1 drop
+            // does not retroactively rescue an April sick day, so we trigger the
+            // overage label whenever any spill or pending-debt occurred.
+            const over = _rawSickOverage > 0;
             // Sick bar is a "what's in the sick ledger" gauge, not a cumulative-used counter.
             // Overage hours have been transferred out to the vacation ledger and no longer
             // count against the sick bucket, so the bar only ever shows bank-drawn hours.
-            const inBucket = Math.min(usedSick, sickAllotment);
+            const inBucket = _bankUsedTotal;
             // toVacation is the portion actually charged to vacation, matching the outer
             // sickOverage calc — for first-year employees this excludes pending-drop debt.
             const toVacation = sickOverage;
@@ -1079,44 +1169,53 @@ function showEmpProfile(empId, annivOffset) {
             // Sick-days drill-down — mirrors the vacation list, colors overage chips
             // in soft red so it's visually obvious which day(s) hit the vacation bank.
             if (isPartTime) return ''; // part-time sick accounting works differently
-            const sickEntries = [];
-            const _srs = _annivRange?.start || new Date(year, 0, 1);
-            const _sre = _annivRange?.end   || new Date(year + 1, 0, 1);
-            const SICK_CAT_KEYS = ['Sick', 'Sick Time', '⬡ Sick Time'];
-            Object.keys(tsData).forEach(key => {
-              if (!key.startsWith('oh_' + empId + '|')) return;
-              const weekKey = key.split('|')[1];
-              if (!weekKey) return;
-              const weekDate = new Date(weekKey + 'T00:00:00');
-              const weekEnd = new Date(weekDate); weekEnd.setDate(weekDate.getDate() + 6);
-              if (weekEnd < _srs || weekDate >= _sre) return;
-              const oh = tsData[key] || {};
-              // Merge all sick variants per day so we don't double-count
-              const byDay = {};
-              SICK_CAT_KEYS.forEach(cat => {
-                Object.entries(oh[cat] || {}).forEach(([di, hrs]) => {
-                  byDay[di] = (byDay[di] || 0) + (parseFloat(hrs) || 0);
+            // Prefer the chronological tagging computed earlier (non-first-year FT path).
+            // First-year hires fall through to the inline build, which uses today's
+            // sickAllotment — matching their old display behavior since debt is held
+            // rather than spilled.
+            let tagged = _chronoTaggedEntries;
+            if (!tagged) {
+              const sickEntries = [];
+              const _srs = _annivRange?.start || new Date(year, 0, 1);
+              const _sre = _annivRange?.end   || new Date(year + 1, 0, 1);
+              const SICK_CAT_KEYS = ['Sick', 'Sick Time', '\u2B21 Sick Time'];
+              Object.keys(tsData).forEach(key => {
+                if (!key.startsWith('oh_' + empId + '|')) return;
+                const weekKey = key.split('|')[1];
+                if (!weekKey) return;
+                const weekDate = new Date(weekKey + 'T00:00:00');
+                const weekEnd = new Date(weekDate); weekEnd.setDate(weekDate.getDate() + 6);
+                if (weekEnd < _srs || weekDate >= _sre) return;
+                const oh = tsData[key] || {};
+                // Merge all sick variants per day so we don't double-count
+                const byDay = {};
+                SICK_CAT_KEYS.forEach(cat => {
+                  Object.entries(oh[cat] || {}).forEach(([di, hrs]) => {
+                    byDay[di] = (byDay[di] || 0) + (parseFloat(hrs) || 0);
+                  });
+                });
+                Object.entries(byDay).forEach(([di, hrs]) => {
+                  if (hrs <= 0) return;
+                  const d = new Date(weekDate);
+                  d.setDate(weekDate.getDate() + parseInt(di));
+                  if (d < _srs || d >= _sre) return;
+                  sickEntries.push({ date: d.toISOString().slice(0,10), hrs: hrs });
                 });
               });
-              Object.entries(byDay).forEach(([di, hrs]) => {
-                if (hrs <= 0) return;
-                const d = new Date(weekDate);
-                d.setDate(weekDate.getDate() + parseInt(di));
-                if (d < _srs || d >= _sre) return;
-                sickEntries.push({ date: d.toISOString().slice(0,10), hrs: hrs });
+              sickEntries.sort((a,b) => a.date.localeCompare(b.date));
+              if (sickEntries.length === 0) return '';
+              // Walk chronologically and tag hours past the allotment as 'overage'.
+              // First-year fallback uses today's sickAllotment — debt-held semantics.
+              let runningUsed = 0;
+              tagged = sickEntries.map(e => {
+                const before = runningUsed;
+                runningUsed += e.hrs;
+                const bankHrs    = Math.max(0, Math.min(e.hrs, sickAllotment - before));
+                const overageHrs = Math.max(0, e.hrs - bankHrs);
+                return { ...e, bankHrs, overageHrs };
               });
-            });
-            sickEntries.sort((a,b) => a.date.localeCompare(b.date));
-            if (sickEntries.length === 0) return '';
-            // Walk chronologically and tag hours past the allotment as 'overage'
-            let runningUsed = 0;
-            const tagged = sickEntries.map(e => {
-              const before = runningUsed;
-              runningUsed += e.hrs;
-              const bankHrs    = Math.max(0, Math.min(e.hrs, sickAllotment - before));
-              const overageHrs = Math.max(0, e.hrs - bankHrs);
-              return { ...e, bankHrs, overageHrs };
-            });
+            }
+            if (!tagged || tagged.length === 0) return '';
             return '<div style="margin-top:8px;padding:8px 10px;background:var(--surface2);border-radius:6px;border:1px solid var(--border)">' +
               '<div style="font-size:10px;font-weight:600;letter-spacing:.7px;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Sick Days Used</div>' +
               '<div style="display:flex;flex-wrap:wrap;gap:5px">' +
