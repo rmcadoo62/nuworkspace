@@ -836,6 +836,7 @@ function renderClientDrawerBody() {
             <div style="width:38px;height:38px;border-radius:50%;background:var(--amber);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
             <div style="flex:1">
               <div style="font-size:13.5px;font-weight:600;color:var(--text)">${ct.firstName} ${ct.lastName}</div>
+              ${ct.title ? `<div style="font-size:12px;color:var(--muted)">${ct.title}</div>` : ''}
               ${ct.email ? `<div style="font-size:12px;color:var(--blue)">${ct.email}${ct.emailInvalid ? ' <span style=\"color:var(--red);font-size:10px;font-weight:600\">⚠ INVALID</span>' : ''}</div>` : ''}
               ${ct.phone ? `<div style="font-size:12px;color:var(--muted)">${ct.phone}</div>` : ''}
             </div>
@@ -1430,6 +1431,7 @@ function openContactModal(id, clientId) {
   document.getElementById('contactModalTitle').textContent = id ? 'Edit Contact' : 'Add Contact';
   document.getElementById('ctFirstName').value = ct ? ct.firstName : '';
   document.getElementById('ctLastName').value  = ct ? ct.lastName  : '';
+  document.getElementById('ctTitle').value     = ct ? (ct.title||'') : '';
   document.getElementById('ctEmail').value     = ct ? ct.email     : '';
   document.getElementById('ctPhone').value     = ct ? (ct.phone||'') : '';
   document.getElementById('contactModalOverlay').style.display='flex';
@@ -1444,23 +1446,24 @@ async function saveContactModal() {
   const firstName = document.getElementById('ctFirstName').value.trim();
   if (!firstName) { document.getElementById('ctFirstName').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('ctFirstName').style.borderColor='',1500); return; }
   const lastName = document.getElementById('ctLastName').value.trim();
+  const title    = document.getElementById('ctTitle').value.trim();
   const email    = document.getElementById('ctEmail').value.trim();
   const phone    = document.getElementById('ctPhone').value.trim();
   closeContactModal();
-  await saveContactRecord(_contactModalId, _contactModalClientId, firstName, lastName, email, phone);
+  await saveContactRecord(_contactModalId, _contactModalClientId, firstName, lastName, email, phone, title);
 }
 
-async function saveContactRecord(id, clientId, firstName, lastName, email, phone) {
+async function saveContactRecord(id, clientId, firstName, lastName, email, phone, title) {
   if (id) {
     const ct = contactStore.find(x => x.id === id);
-    if (ct) { ct.firstName = firstName; ct.lastName = lastName; ct.email = email; ct.phone = phone||''; }
-    if (sb) await dbUpdate('contacts', id, { first_name: firstName, last_name: lastName, email: email||null, phone: phone||null });
+    if (ct) { ct.firstName = firstName; ct.lastName = lastName; ct.email = email; ct.phone = phone||''; ct.title = title||''; }
+    if (sb) await dbUpdate('contacts', id, { first_name: firstName, last_name: lastName, email: email||null, phone: phone||null, title: title||null });
     toast('Contact updated');
   } else {
-    const row = { client_id: clientId, first_name: firstName, last_name: lastName, email: email||null };
+    const row = { client_id: clientId, first_name: firstName, last_name: lastName, email: email||null, title: title||null };
     const saved = sb ? await dbInsert('contacts', row) : null;
     const newId = saved ? saved.id : 'local-' + Date.now();
-    contactStore.push({ id: newId, clientId, firstName, lastName, email });
+    contactStore.push({ id: newId, clientId, firstName, lastName, email, title: title||'' });
     toast('Contact added');
   }
   renderClientsPanel('');
@@ -2560,12 +2563,12 @@ async function runSfImport() {
 
       for (const ct of a.contacts) {
         if (!ct.firstName && !ct.lastName) continue;
-        const ctPayload = { client_id: clientId, first_name: ct.firstName, last_name: ct.lastName, email: ct.email||null, phone: ct.phone||null };
+        const ctPayload = { client_id: clientId, first_name: ct.firstName, last_name: ct.lastName, email: ct.email||null, phone: ct.phone||null, title: ct.title||null };
         if (sb) {
           const { data: ctData } = await sb.from('contacts').insert(ctPayload).select().single();
-          if (ctData) contactStore.push({ id: ctData.id, clientId, firstName: ct.firstName, lastName: ct.lastName, email: ct.email||'', phone: ct.phone||'' });
+          if (ctData) contactStore.push({ id: ctData.id, clientId, firstName: ct.firstName, lastName: ct.lastName, email: ct.email||'', phone: ct.phone||'', title: ct.title||'' });
         } else {
-          contactStore.push({ id: 'local-ct-'+Date.now()+Math.random(), clientId, firstName: ct.firstName, lastName: ct.lastName, email: ct.email||'', phone: ct.phone||'' });
+          contactStore.push({ id: 'local-ct-'+Date.now()+Math.random(), clientId, firstName: ct.firstName, lastName: ct.lastName, email: ct.email||'', phone: ct.phone||'', title: ct.title||'' });
         }
         contactsAdded++;
       }
