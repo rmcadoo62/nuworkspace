@@ -2972,10 +2972,30 @@ function renderMyInfoChatterTab(empId) {
 async function _loadMyChatter(empId) {
   if (!sb || !currentUser) return '<div style="color:var(--muted);font-size:13px">Not signed in.</div>';
 
+  // Build the "sent" query. In a normal (non-View-As) login the actor IS the
+  // target, so currentUser.id (the auth UUID stored in chatter.author_id) is
+  // correct and behavior is byte-identical to pre-fix. During View-As, the
+  // actor (currentUser) is the impersonator and we don't have a reliable
+  // client-side way to get the target's auth UUID — employees.id is not the
+  // same UUID as auth.users.id; the two tables are linked by email match in
+  // afterLogin(). Match by chatter.author_name instead. This is brittle to
+  // display-name changes, consistent with other name-based gates already in
+  // the codebase, and acceptable because View-As is owner-only and read-only.
+  let sentQuery;
+  if (typeof isImpersonating === 'function' && isImpersonating()) {
+    const targetEmp  = (typeof employees !== 'undefined') ? employees.find(e => e.id === empId) : null;
+    const targetName = targetEmp?.name || null;
+    sentQuery = targetName
+      ? sb.from('chatter').select('*').eq('author_name', targetName).order('created_at', { ascending: false }).limit(100)
+      : Promise.resolve({ data: [] });
+  } else {
+    sentQuery = sb.from('chatter').select('*').eq('author_id', currentUser.id).order('created_at', { ascending: false }).limit(100);
+  }
+
   let sent = [], mentioned = [];
   try {
     const [sentRes, mentionedRes] = await Promise.all([
-      sb.from('chatter').select('*').eq('author_id', currentUser.id).order('created_at', { ascending: false }).limit(100),
+      sentQuery,
       sb.from('chatter').select('*').contains('notify_ids', [empId]).order('created_at', { ascending: false }).limit(100),
     ]);
     sent      = sentRes.data      || [];
