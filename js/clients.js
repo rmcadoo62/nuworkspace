@@ -457,8 +457,10 @@ function _computeOutreachQueue() {
   });
 }
 
-// Render the Due-for-Outreach view: contacts grouped by client, stalest first.
-// Search query (q) filters by contact name, contact email, or client name.
+// Render the Due-for-Outreach view: contacts grouped by client, split into two
+// sub-groups — past customers (had at least one closed job, stalest first) and
+// prospects (never had a job, alphabetical). Search query (q) filters by
+// contact name, contact email, or client name.
 function _renderOutreachQueue(contacts, q) {
   const fmtDate = iso => iso
     ? new Date(iso).toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'})
@@ -494,13 +496,62 @@ function _renderOutreachQueue(contacts, q) {
     byClient[ct.clientId].push(ct);
   }
 
-  // Sort: clients alphabetically; within a client, never-contacted first then oldest-last-contact first
-  const sortedClientIds = Object.keys(byClient).sort((a, b) => {
-    const aName = (clientStore.find(c => c.id === a) || {}).name || '';
-    const bName = (clientStore.find(c => c.id === b) || {}).name || '';
-    return aName.localeCompare(bName);
+  // Index closed projects by clientId in a single pass (avoids O(clients × projects)).
+  // Since clients in this queue have no non-closed projects, their projects
+  // are either all closed or none exist.
+  const closedProjsByClient = {};
+  for (const p of projects) {
+    const pi = projectInfo[p.id] || {};
+    if (pi.status !== 'closed' || !pi.clientId) continue;
+    if (!closedProjsByClient[pi.clientId]) closedProjsByClient[pi.clientId] = [];
+    closedProjsByClient[pi.clientId].push(p);
+  }
+
+  // Resolve per-client metadata: most recent closed project (by endDate desc, nulls last).
+  const lastClosed = {}; // cid -> { jobNum, endDate } | null
+  for (const cid of Object.keys(byClient)) {
+    const list = closedProjsByClient[cid];
+    if (!list || list.length === 0) { lastClosed[cid] = null; continue; }
+    let top = list[0];
+    let topEnd = (projectInfo[top.id]||{}).endDate || '';
+    for (let i = 1; i < list.length; i++) {
+      const e = (projectInfo[list[i].id]||{}).endDate || '';
+      // Prefer non-empty endDate; among non-empty pick the larger (more recent).
+      if ((e && !topEnd) || (e && topEnd && e > topEnd)) { top = list[i]; topEnd = e; }
+    }
+    lastClosed[cid] = {
+      jobNum: (top.name.match(/^\d+/)||[''])[0],
+      endDate: topEnd,
+    };
+  }
+
+  // Split client ids into two sub-groups
+  const customerIds = [];
+  const prospectIds = [];
+  for (const cid of Object.keys(byClient)) {
+    if (lastClosed[cid]) customerIds.push(cid);
+    else prospectIds.push(cid);
+  }
+
+  // Customers: oldest closed date first; missing endDate goes to bottom.
+  customerIds.sort((a, b) => {
+    const ad = lastClosed[a].endDate;
+    const bd = lastClosed[b].endDate;
+    if (!ad && !bd) return 0;
+    if (!ad) return 1;
+    if (!bd) return -1;
+    return ad.localeCompare(bd);
   });
-  for (const cid of sortedClientIds) {
+
+  // Prospects: alphabetical by client name.
+  prospectIds.sort((a, b) => {
+    const an = (clientStore.find(c => c.id === a) || {}).name || '';
+    const bn = (clientStore.find(c => c.id === b) || {}).name || '';
+    return an.localeCompare(bn);
+  });
+
+  // Within each client: never-contacted first, then oldest-last-contact first.
+  for (const cid of [...customerIds, ...prospectIds]) {
     byClient[cid].sort((a, b) => {
       if (!a.lastEmailAt && !b.lastEmailAt) {
         return ((a.firstName||'') + (a.lastName||'')).localeCompare((b.firstName||'') + (b.lastName||''));
@@ -511,7 +562,8 @@ function _renderOutreachQueue(contacts, q) {
     });
   }
 
-  const sections = sortedClientIds.map(cid => {
+  // Build one client section (header row + contact rows)
+  const buildClientSection = (cid, isProspect) => {
     const client = clientStore.find(c => c.id === cid);
     const clientName = (client && client.name) || '(unknown client)';
     const cts = byClient[cid];
@@ -540,20 +592,66 @@ function _renderOutreachQueue(contacts, q) {
       </div>`;
     }).join('');
 
+    // Right-side metadata: job# + closed date for customers, count only for prospects
+    let headerMeta;
+    if (isProspect) {
+      headerMeta = `<div style="font-size:12px;color:var(--muted);white-space:nowrap">${cts.length} contact${cts.length!==1?'s':''}</div>`;
+    } else {
+      const m = lastClosed[cid];
+      const dateLabel = m.endDate ? 'closed ' + fmtDate(m.endDate) : 'closed (date unknown)';
+      headerMeta = `<div style="font-size:12px;color:var(--muted);white-space:nowrap">
+        Last: <span style="font-family:'JetBrains Mono',monospace;color:var(--amber);font-weight:600">#${esc(m.jobNum||'?')}</span>
+        <span style="opacity:.6"> · </span>${dateLabel}
+        <span style="opacity:.6"> · </span>${cts.length} contact${cts.length!==1?'s':''}
+      </div>`;
+    }
+
     return `<div style="margin-bottom:18px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding:0 4px">
-        <div style="font-size:14px;font-weight:600;color:var(--text);cursor:pointer" onclick="openClientDrawer('${cid}')" title="Open client">${esc(clientName)}</div>
-        <div style="font-size:11px;color:var(--muted)">${cts.length} contact${cts.length!==1?'s':''}</div>
+      <div style="display:flex;align-items:baseline;justify-content:space-between;padding:10px 14px;margin-bottom:6px;gap:14px;background:rgba(232,162,52,0.08);border-left:3px solid var(--amber);border-radius:6px;cursor:pointer" onclick="openClientDrawer('${cid}')" title="Open client">
+        <div style="font-size:14px;font-weight:600;color:var(--text)">${esc(clientName)}</div>
+        ${headerMeta}
       </div>
       ${rows}
     </div>`;
-  }).join('');
+  };
+
+  const subgroupHeader = (label, count) =>
+    `<div style="display:flex;align-items:center;gap:10px;margin:0 0 14px">
+      <span style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted)">${label}</span>
+      <span style="flex:1;height:1px;background:var(--border)"></span>
+      <span style="font-size:11px;color:var(--muted)">${count} client${count!==1?'s':''}</span>
+    </div>`;
+
+  const customerCount = customerIds.length;
+  const prospectCount = prospectIds.length;
+
+  let body = '';
+  if (customerCount > 0) {
+    body += `<div style="margin-bottom:28px">
+      ${subgroupHeader('Past customers — oldest job first', customerCount)}
+      ${customerIds.map(cid => buildClientSection(cid, false)).join('')}
+    </div>`;
+  }
+  if (prospectCount > 0) {
+    body += `<div>
+      ${subgroupHeader('Prospects — never had a job', prospectCount)}
+      ${prospectIds.map(cid => buildClientSection(cid, true)).join('')}
+    </div>`;
+  }
+
+  // Summary banner with breakdown
+  const totalContacts = filtered.length;
+  const totalClients  = customerCount + prospectCount;
+  const breakdownParts = [];
+  if (customerCount > 0) breakdownParts.push(`<strong>${customerCount}</strong> past customer${customerCount!==1?'s':''}`);
+  if (prospectCount > 0) breakdownParts.push(`<strong>${prospectCount}</strong> prospect${prospectCount!==1?'s':''}`);
+  const breakdown = breakdownParts.length > 0 ? ' — ' + breakdownParts.join(' · ') : '';
 
   return `<div style="margin-top:8px">
     <div style="margin-bottom:14px;padding:10px 14px;background:var(--surface2);border-left:3px solid var(--amber);border-radius:4px;font-size:12.5px;color:var(--text);line-height:1.5">
-      <strong>${filtered.length}</strong> contact${filtered.length!==1?'s':''} at <strong>${sortedClientIds.length}</strong> client${sortedClientIds.length!==1?'s':''}${q ? ' matching your search' : ''}. These haven't been emailed via NUWorkspace in the last 6 months and their client has no open projects.
+      <strong>${totalContacts}</strong> contact${totalContacts!==1?'s':''} at <strong>${totalClients}</strong> client${totalClients!==1?'s':''}${q ? ' matching your search' : ''}${breakdown}. These haven't been emailed via NUWorkspace in the last 6 months and their client has no open projects.
     </div>
-    ${sections}
+    ${body}
   </div>`;
 }
 
