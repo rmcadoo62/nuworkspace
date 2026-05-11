@@ -6,6 +6,7 @@ const SUPABASE_URL = localStorage.getItem('nuworkspace_sb_url') || 'https://swuu
 const SUPABASE_KEY = localStorage.getItem('nuworkspace_sb_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InN3dXV4em1nbWxkdnZvbXNnbWpmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI4MjcyMzMsImV4cCI6MjA4ODQwMzIzM30.GinbXqvBHcvYRaACBhgpd_Si8-qIDDj7PlbTCINcSU8';
 
 let sb = null; // Supabase client
+let projectContactsStore = []; // [{id, projId, contactId, addedAt}]
 
 // ===== DB HELPERS =====
 // ===== DB HELPERS =====
@@ -111,7 +112,7 @@ async function loadAllData() {
       .map(p => p.id);
 
     // Phase 2: load remaining tables in parallel, filtering tasks to open projects only
-    const [taskRows, empRows, clientRows, contactRows, expRows, , sectionRows, roleRows, billedMonthlyRows, billedCatRows, articleRows] = await Promise.all([
+    const [taskRows, empRows, clientRows, contactRows, expRows, , sectionRows, roleRows, billedMonthlyRows, billedCatRows, articleRows, projectContactRows] = await Promise.all([
       (async () => {
         // Only load tasks for open projects (145 open vs 2252 closed)
         let rows = [], page = 0;
@@ -161,6 +162,7 @@ async function loadAllData() {
         return rows;
       })(),
       fetchAllPages('test_articles', '*', 'created_at'),
+      dbFetch('project_contacts'),
     ]);
 
     // Projects
@@ -287,6 +289,12 @@ async function loadAllData() {
       lastEmailAt: r.last_email_at || null,
       emailInvalid: !!r.email_invalid,
       emailInvalidAt: r.email_invalid_at || null,
+    }));
+    projectContactsStore = (projectContactRows||[]).map(r => ({
+      id: r.id,
+      projId: r.project_id,
+      contactId: r.contact_id,
+      addedAt: r.added_at || null,
     }));
 
     // Expenses
