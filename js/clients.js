@@ -1434,12 +1434,31 @@ function openContactModal(id, clientId) {
   document.getElementById('ctTitle').value     = ct ? (ct.title||'') : '';
   document.getElementById('ctEmail').value     = ct ? ct.email     : '';
   document.getElementById('ctPhone').value     = ct ? (ct.phone||'') : '';
+  // If the client drawer is open, hide it while the contact modal is up so it
+  // can't visually compete or steal clicks (its transform creates a stacking
+  // context that z-index doesn't reliably beat). The drawer's internal state
+  // is preserved — we just toggle .open. Restored in closeContactModal.
+  const _drawer   = document.getElementById('clientDrawer');
+  const _drawerBg = document.getElementById('clientDrawerBackdrop');
+  window._contactModalHidDrawer = !!(_drawer && _drawer.classList.contains('open'));
+  if (window._contactModalHidDrawer) {
+    _drawer.classList.remove('open');
+    if (_drawerBg) _drawerBg.classList.remove('open');
+  }
   document.getElementById('contactModalOverlay').style.display='flex';
   setTimeout(() => document.getElementById('ctFirstName').focus(), 50);
 }
 
 function closeContactModal() {
   document.getElementById('contactModalOverlay').style.display='none';
+  // Restore the client drawer if we hid it on open.
+  if (window._contactModalHidDrawer) {
+    const _drawer   = document.getElementById('clientDrawer');
+    const _drawerBg = document.getElementById('clientDrawerBackdrop');
+    if (_drawer)   _drawer.classList.add('open');
+    if (_drawerBg) _drawerBg.classList.add('open');
+    window._contactModalHidDrawer = false;
+  }
 }
 
 async function saveContactModal() {
