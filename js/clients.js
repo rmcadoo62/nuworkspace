@@ -1483,6 +1483,7 @@ async function saveContactRecord(id, clientId, firstName, lastName, email, phone
     const saved = sb ? await dbInsert('contacts', row) : null;
     const newId = saved ? saved.id : 'local-' + Date.now();
     contactStore.push({ id: newId, clientId, firstName, lastName, email, title: title||'' });
+    window._lastNewContactId = newId;
     toast('Contact added');
   }
   renderClientsPanel('');
@@ -1506,11 +1507,16 @@ async function saveContactRecord(id, clientId, firstName, lastName, email, phone
       } else if (_pid) {
         openEmailContactModal(_pid);
       }
+    } else if (_mode === 'addl' && _pid && window._lastNewContactId) {
+      // Came from the Additional Contacts "+ New Contact" link — link the new
+      // contact to the project as an additional contact.
+      await addAddlContact(_pid, window._lastNewContactId);
     } else if (_pid) {
       renderContactPickerList(_pid, '');
       const dd = document.getElementById('contactPickerDropdown');
       if (dd) dd.style.display = 'block';
     }
+    window._lastNewContactId = null;
   }
 }
 
@@ -1645,6 +1651,16 @@ async function selectContact(projId, contactId) {
     client_contact: info.clientContact,
     client_email: ct.email||null
   });
+  // If this contact was in the project's additional-contacts list, remove it
+  // (no duplicates between primary slot and additional list).
+  const dupIdx = projectContactsStore.findIndex(pc => pc.projId === projId && pc.contactId === contactId);
+  if (dupIdx !== -1) {
+    const dupRow = projectContactsStore[dupIdx];
+    if (sb && dupRow.id && !String(dupRow.id).startsWith('local-')) {
+      await sb.from('project_contacts').delete().eq('id', dupRow.id);
+    }
+    projectContactsStore.splice(dupIdx, 1);
+  }
   document.getElementById('contactPickerDropdown').style.display = 'none';
   renderInfoSheet(projId);
   toast('Contact saved');
@@ -1667,7 +1683,120 @@ document.addEventListener('click', function(e) {
   if (!e.target.closest('#contactPickerWrap')) {
     document.getElementById('contactPickerDropdown')?.style && (document.getElementById('contactPickerDropdown').style.display = 'none');
   }
+  if (!e.target.closest('#addlContactPickerWrap')) {
+    document.getElementById('addlContactPickerDropdown')?.style && (document.getElementById('addlContactPickerDropdown').style.display = 'none');
+  }
 });
+
+// ===== ADDITIONAL CONTACTS PICKER =====
+// ===== ADDITIONAL CONTACTS PICKER =====
+// Parallel to the primary contact picker. Pick from existing client contacts
+// (excluding the primary + already-added additional) or "+ New Contact" to
+// inline-create and auto-link as additional on save.
+
+function openAddlContactPicker(projId) {
+  const dd = document.getElementById('addlContactPickerDropdown');
+  if (!dd) return;
+  const isOpen = dd.style.display !== 'none';
+  dd.style.display = isOpen ? 'none' : 'block';
+  if (!isOpen) {
+    renderAddlContactPickerList(projId, '');
+    setTimeout(() => document.getElementById('addlContactPickerSearch')?.focus(), 50);
+  }
+}
+
+function renderAddlContactPickerList(projId, search) {
+  const list = document.getElementById('addlContactPickerList');
+  if (!list) return;
+  const info = projectInfo[projId] || {};
+  const q = (search||'').toLowerCase();
+  // Exclude primary contact + anyone already added as additional
+  const excludeIds = new Set();
+  if (info.contactId) excludeIds.add(info.contactId);
+  projectContactsStore
+    .filter(pc => pc.projId === projId)
+    .forEach(pc => excludeIds.add(pc.contactId));
+  let contacts = contactStore;
+  if (info.clientId) contacts = contacts.filter(c => c.clientId === info.clientId);
+  contacts = contacts.filter(c => !excludeIds.has(c.id));
+  contacts = contacts.filter(c =>
+    (c.firstName+' '+c.lastName).toLowerCase().includes(q) ||
+    (c.email||'').toLowerCase().includes(q) ||
+    (c.title||'').toLowerCase().includes(q)
+  );
+  list.innerHTML = contacts.map(c =>
+    `<div class="client-picker-item" onclick="addAddlContact('${projId}','${c.id}')">
+      <div>${c.firstName} ${c.lastName}</div>
+      ${c.title ? `<div style="font-size:11px;color:var(--muted)">${c.title}</div>` : ''}
+      ${c.email ? `<div style="font-size:11px;color:var(--muted)">${c.email}</div>` : ''}
+    </div>`
+  ).join('') || `<div class="client-picker-item" style="color:var(--muted)">No contacts available</div>`;
+  list.innerHTML += `<div class="client-picker-item" style="color:var(--blue);border-top:1px solid var(--border);margin-top:4px;padding-top:8px"
+    onclick="closeAddlContactPickerAndAdd('${projId}')">+ New Contact</div>`;
+}
+
+function closeAddlContactPickerAndAdd(projId) {
+  const dd = document.getElementById('addlContactPickerDropdown');
+  if (dd) dd.style.display = 'none';
+  const info = projectInfo[projId] || {};
+  // Tell the contact-save flow to auto-link the new contact to this project
+  // as an additional contact when it's saved.
+  window._afterContactSaveProjId = projId;
+  window._afterContactSaveMode = 'addl';
+  openContactModal(null, info.clientId || null);
+}
+
+async function addAddlContact(projId, contactId) {
+  if (!projId || !contactId) return;
+  // Guard: don't double-add or shadow the primary
+  const info = projectInfo[projId] || {};
+  if (info.contactId === contactId) { toast('Already the primary contact'); return; }
+  if (projectContactsStore.some(pc => pc.projId === projId && pc.contactId === contactId)) {
+    toast('Contact already added');
+    return;
+  }
+  let newRow = null;
+  if (sb) {
+    const { data, error } = await sb.from('project_contacts')
+      .insert({ project_id: projId, contact_id: contactId })
+      .select().single();
+    if (error) {
+      if (error.code === '23505') { toast('Contact already added'); return; }
+      console.error('addAddlContact', error);
+      toast('Could not add contact');
+      return;
+    }
+    newRow = data;
+  }
+  projectContactsStore.push({
+    id: newRow ? newRow.id : 'local-pc-'+Date.now()+Math.random(),
+    projId,
+    contactId,
+    addedAt: newRow ? newRow.added_at : new Date().toISOString(),
+  });
+  const dd = document.getElementById('addlContactPickerDropdown');
+  if (dd) dd.style.display = 'none';
+  renderInfoSheet(projId);
+  toast('Contact added');
+}
+
+async function removeAddlContact(projId, contactId) {
+  if (!projId || !contactId) return;
+  const idx = projectContactsStore.findIndex(pc => pc.projId === projId && pc.contactId === contactId);
+  if (idx === -1) return;
+  const row = projectContactsStore[idx];
+  if (sb && row.id && !String(row.id).startsWith('local-')) {
+    const { error } = await sb.from('project_contacts').delete().eq('id', row.id);
+    if (error) {
+      console.error('removeAddlContact', error);
+      toast('Could not remove contact');
+      return;
+    }
+  }
+  projectContactsStore.splice(idx, 1);
+  renderInfoSheet(projId);
+  toast('Contact removed');
+}
 
 
 
