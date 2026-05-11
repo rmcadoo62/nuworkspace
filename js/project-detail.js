@@ -3759,6 +3759,19 @@ async function openEmailContactModal(arg) {
   }
 
   renderEmailContactModalBody(emailTemplates);
+
+  // If the client drawer is open, hide it while the email modal is up so it
+  // can't visually compete or steal clicks (its transform creates a stacking
+  // context that z-index doesn't reliably beat). The drawer's internal state
+  // is preserved — we just toggle .open. Restored in closeEmailContactModal.
+  const _drawer   = document.getElementById('clientDrawer');
+  const _drawerBg = document.getElementById('clientDrawerBackdrop');
+  window._emailModalHidDrawer = !!(_drawer && _drawer.classList.contains('open'));
+  if (window._emailModalHidDrawer) {
+    _drawer.classList.remove('open');
+    if (_drawerBg) _drawerBg.classList.remove('open');
+  }
+
   document.getElementById('emailContactModal').classList.add('open');
 }
 
@@ -4168,6 +4181,16 @@ function closeEmailContactModal() {
     document.removeEventListener('mousedown', _onCcPickerOutsideClick);
   }
   _emailModalCcPickerOpen = false;
+
+  // If we hid the client drawer on open, slide it back in. Internal drawer
+  // state (current client, current tab) was preserved.
+  if (window._emailModalHidDrawer) {
+    window._emailModalHidDrawer = false;
+    const _drawer   = document.getElementById('clientDrawer');
+    const _drawerBg = document.getElementById('clientDrawerBackdrop');
+    if (_drawer)   _drawer.classList.add('open');
+    if (_drawerBg) _drawerBg.classList.add('open');
+  }
 }
 
 async function sendEmailContactModal() {
