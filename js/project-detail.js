@@ -204,13 +204,21 @@ function renderInfoSheet(projId) {
                 const nm = ct ? ct.firstName+' '+ct.lastName : (info.clientContact || '<span style="color:var(--border)">—</span>');
                 const ti = ct ? ct.title : '';
                 const em = ct ? ct.email : '';
+                const canEmail = (typeof can === 'function' && can('send_client_email'));
+                const emailValid = ct && ct.email && ct.email.trim() && !ct.emailInvalid;
+                const emailBtn = (canEmail && emailValid)
+                  ? `<button onclick="event.stopPropagation();openEmailContactModal({projId:'${projId}',contactId:'${ct.id}'})" title="Email ${(ct.firstName+' '+ct.lastName).trim().replace(/"/g,'&quot;')}" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;font-size:13px">&#x2709;</button>`
+                  : '';
                 return `<div class="client-picker-selected" id="contactPickerSelected" onclick="openContactPicker('${projId}')">
                   <div>
                     <div class="client-picker-name">${nm}</div>
                     ${ti ? `<div style="font-size:11px;color:var(--muted)">${ti}</div>` : ''}
                     ${em ? `<div style="font-size:11px;color:var(--muted)">${em}</div>` : ''}
                   </div>
-                  <div style="margin-left:auto;font-size:10px;color:var(--muted)">&#x25BE;</div>
+                  <div style="margin-left:auto;display:flex;align-items:center;gap:4px">
+                    ${emailBtn}
+                    <div style="font-size:10px;color:var(--muted)">&#x25BE;</div>
+                  </div>
                 </div>
                 <div class="client-picker-dropdown" id="contactPickerDropdown" style="display:none">
                   <input class="client-picker-search" id="contactPickerSearch" placeholder="Search contacts…" oninput="renderContactPickerList('${projId}',this.value)" />
@@ -2970,24 +2978,6 @@ function renderProjStickyHeader(projId) {
       '<div class="credit-hold-checkbox-wrap" onclick="toggleCreditHold(\''+projId+'\')"><span>Credit Hold</span></div>')+
     (info.needUpdatedPo ? '<div class="need-po-checkbox-wrap active" onclick="toggleNeedUpdatedPo(\''+projId+'\')" ><span>⚠ Need Updated PO</span></div>' :
       '<div class="need-po-checkbox-wrap" onclick="toggleNeedUpdatedPo(\''+projId+'\')" ><span>Need Updated PO</span></div>')+
-    (()=>{
-      // Email Contact button — gated on send_client_email capability,
-      // and enabled only if the project has a client with at least one
-      // contact that has an email address. Sends use a modal with a
-      // contact picker scoped to the client's contacts.
-      if (typeof can === 'function' && !can('send_client_email')) return '';
-      const clientContacts = info.clientId ? contactStore.filter(c => c.clientId === info.clientId) : [];
-      const sendable = clientContacts.filter(c => c.email && c.email.trim());
-      const enabled = sendable.length > 0;
-      const tip = enabled
-        ? 'Email a contact at ' + (info.client || 'this client')
-        : (info.clientId
-            ? (clientContacts.length ? 'No contacts at this client have an email address' : 'This client has no contacts yet')
-            : 'Set a client on this project first');
-      return '<div class="email-contact-btn'+(enabled?'':' disabled')+'" title="'+tip.replace(/"/g,'&quot;')+'" '
-        + (enabled ? 'onclick="openEmailContactModal(\''+projId+'\')"' : '')
-        + '><span>&#x2709; Email Contact</span></div>';
-    })()+
     '<div style="margin-left:auto;display:flex;gap:6px;flex-shrink:0">'+
     
     '<button class="info-edit-btn" onclick="confirmDeleteProject(\x27'+projId+'\x27)" style="color:var(--red);border-color:rgba(208,64,64,0.3)">&#x1F5D1; Delete</button>'+
