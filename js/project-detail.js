@@ -172,6 +172,7 @@ function renderInfoSheet(projId) {
           ${clickField('PO Number', info.po, 'po', 'PO Number…')}
           ${clickField('Quote Number', info.quoteNumber, 'quoteNumber', 'Quote Number…')}
           ${field('Billing Type', info.billingType, 'billingType')}
+          ${dateField('Created Date', fmtDate(info.startDate), 'startDate')}
         </div>
       </div>
       <div class="info-section">
@@ -201,10 +202,12 @@ function renderInfoSheet(projId) {
               ${(()=>{
                 const ct = contactStore.find(c => c.id === info.contactId);
                 const nm = ct ? ct.firstName+' '+ct.lastName : (info.clientContact || '<span style="color:var(--border)">—</span>');
+                const ti = ct ? ct.title : '';
                 const em = ct ? ct.email : '';
                 return `<div class="client-picker-selected" id="contactPickerSelected" onclick="openContactPicker('${projId}')">
                   <div>
                     <div class="client-picker-name">${nm}</div>
+                    ${ti ? `<div style="font-size:11px;color:var(--muted)">${ti}</div>` : ''}
                     ${em ? `<div style="font-size:11px;color:var(--muted)">${em}</div>` : ''}
                   </div>
                   <div style="margin-left:auto;font-size:10px;color:var(--muted)">&#x25BE;</div>
@@ -217,7 +220,6 @@ function renderInfoSheet(projId) {
               })()}
             </div>
           </div>
-          ${dateField('Created Date', fmtDate(info.startDate), 'startDate')}
           ${dateField('Test Complete Date', fmtDate(info.testcompleteDate), 'testcompleteDate')}
           ${dateField('Closed Date', fmtDate(info.endDate), 'endDate')}
           ${dateField('Tentative Test Date', fmtDate(info.tentativeTestDate), 'tentativeTestDate')}
