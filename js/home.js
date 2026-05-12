@@ -1,8 +1,11 @@
 // ===== HOME PAGE =====
 
-let _homeWeatherCache = null;
-let _homeAnnouncementId = null; // currently displayed announcement being edited
-let _homeRefreshTimer = null; // 15-minute chatter refresh
+const ANN_MAX_ACTIVE = 3;
+const ANN_TITLE_MAX  = 80;
+
+let _homeWeatherCache       = null;
+let _editingAnnouncementId  = null;        // null = posting new; uuid = editing
+let _homeRefreshTimer       = null;        // 15-minute chatter refresh
 
 // ---- Open Home Panel ----
 function openHomePanel(navEl) {
@@ -28,9 +31,9 @@ async function renderHomePage() {
   if (!wrap) return;
   wrap.innerHTML = '<div class="home-loading">Loading...</div>';
 
-  const [weather, announcement, whosOut, mySubmissions] = await Promise.all([
+  const [weather, announcements, whosOut, mySubmissions] = await Promise.all([
     fetchHomeWeather(),
-    fetchAnnouncement(),
+    fetchAnnouncements(),
     getWhosOut(),
     fetchMySubmissions(),
   ]);
@@ -47,7 +50,7 @@ async function renderHomePage() {
 
       <div class="home-date-header">${dateStr}</div>
 
-      ${renderAnnouncementSection(announcement, canPost)}
+      ${renderAnnouncementSection(announcements, canPost)}
 
       <div class="home-top-row">
         ${renderWeatherCard(weather)}
@@ -65,127 +68,292 @@ async function renderHomePage() {
   attachHomeEvents();
 }
 
-// ---- Announcement ----
-async function fetchAnnouncement() {
-  if (!sb) return null;
+// ---- Announcements ----
+async function fetchAnnouncements() {
+  if (!sb) return [];
   const today = new Date().toISOString().slice(0, 10);
   try {
-    const { data } = await sb.from('announcements')
+    const { data, error } = await sb.from('announcements')
       .select('*')
       .gte('expires_at', today)
       .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-    return data || null;
-  } catch { return null; }
+      .limit(ANN_MAX_ACTIVE);
+    if (error) { console.error('fetchAnnouncements:', error); return []; }
+    return data || [];
+  } catch (e) { console.error('fetchAnnouncements:', e); return []; }
 }
 
-function renderAnnouncementSection(ann, canPost) {
-  const postBtn = canPost
-    ? `<button class="home-ann-post-btn" onclick="openAnnouncementEditor()">
-        ${ann ? '&#x270F; Edit' : '&#x2b; Post Announcement'}
-       </button>`
-    : '';
+function renderAnnouncementSection(anns, canPost) {
+  const count = anns.length;
+  const atCap = count >= ANN_MAX_ACTIVE;
 
-  if (!ann) {
-    return `<div class="home-ann-empty" id="homeAnnSection">
-      ${postBtn}
-      <div id="homeAnnEditor" style="display:none"></div>
-    </div>`;
+  // 0 announcements — just the post button (or nothing if user can't post)
+  if (count === 0) {
+    const postBtn = canPost
+      ? `<button class="home-ann-post-btn" onclick="openAnnouncementEditor(null)">+ Post Announcement</button>`
+      : '';
+    return `<div class="home-ann-empty" id="homeAnnSection">${postBtn}</div>`;
   }
 
-  const emp = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === ann.posted_by);
-  const poster = emp ? emp.name : 'Management';
+  // 1 announcement — full single banner
+  if (count === 1) {
+    return renderSingleAnnouncement(anns[0], canPost);
+  }
+
+  // 2–3 announcements — title list w/ accordion
+  return renderMultiAnnouncements(anns, canPost, atCap);
+}
+
+function renderSingleAnnouncement(ann, canPost) {
+  const emp     = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === ann.posted_by);
+  const poster  = emp ? emp.name : 'Management';
   const expires = new Date(ann.expires_at + 'T00:00:00');
-  const expiresStr = expires.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const expStr  = expires.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+  const title    = (ann.title || '').trim();
+  const message  = (ann.message || '').trim();
+  const showBody = message && message !== title;
+
+  const actions = canPost
+    ? `<div class="home-ann-actions">
+         <button class="home-ann-post-btn"  onclick="openAnnouncementEditor('${ann.id}')">&#x270F; Edit</button>
+         <button class="home-ann-add-btn"   onclick="openAnnouncementEditor(null)">+ New</button>
+         <button class="home-ann-clear-btn" onclick="clearAnnouncement('${ann.id}')">&#x2715; Clear</button>
+       </div>`
+    : '';
 
   return `<div class="home-ann-banner" id="homeAnnSection">
     <div class="home-ann-icon">&#x1F4E2;</div>
     <div class="home-ann-body">
-      <div class="home-ann-message">${ann.message}</div>
-      <div class="home-ann-meta">Posted by ${poster} &middot; Expires ${expiresStr}</div>
+      ${title ? `<div class="home-ann-title-text">${_homeEsc(title)}</div>` : ''}
+      ${showBody ? `<div class="home-ann-message">${_homeEsc(message)}</div>` : ''}
+      <div class="home-ann-meta">Posted by ${_homeEsc(poster)} &middot; Expires ${expStr}</div>
     </div>
-    <div class="home-ann-actions">
-      ${postBtn}
-      ${canPost ? `<button class="home-ann-clear-btn" onclick="clearAnnouncement('${ann.id}')">&#x2715; Clear</button>` : ''}
-    </div>
-    <div id="homeAnnEditor" style="display:none"></div>
+    ${actions}
   </div>`;
 }
 
-window.openAnnouncementEditor = function() {
-  const editor = document.getElementById('homeAnnEditor');
-  if (!editor) return;
+function renderMultiAnnouncements(anns, canPost, atCap) {
+  const items = anns.map(ann => {
+    const emp     = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === ann.posted_by);
+    const poster  = emp ? emp.name : 'Management';
+    const expires = new Date(ann.expires_at + 'T00:00:00');
+    const expStr  = expires.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const title   = (ann.title || (ann.message || '').slice(0, ANN_TITLE_MAX)).trim();
+    const message = (ann.message || '').trim();
+
+    const rowActions = canPost
+      ? `<button class="home-ann-item-edit"  title="Edit"  onclick="event.stopPropagation();openAnnouncementEditor('${ann.id}')">&#x270F;</button>
+         <button class="home-ann-item-clear" title="Clear" onclick="event.stopPropagation();clearAnnouncement('${ann.id}')">&#x2715;</button>`
+      : '';
+
+    return `<div class="home-ann-item" id="ann-item-${ann.id}">
+      <div class="home-ann-item-head" onclick="toggleAnnouncementItem('${ann.id}')">
+        <div class="home-ann-item-chevron">&#x25B8;</div>
+        <div class="home-ann-item-title">${_homeEsc(title)}</div>
+        ${rowActions}
+      </div>
+      <div class="home-ann-item-body">
+        <div class="home-ann-item-message">${_homeEsc(message)}</div>
+        <div class="home-ann-item-meta">Posted by ${_homeEsc(poster)} &middot; Expires ${expStr}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const topAction = canPost
+    ? (atCap
+        ? `<button class="home-ann-post-btn home-ann-post-btn-disabled" disabled title="Maximum ${ANN_MAX_ACTIVE} announcements active. Clear one to add another.">+ Post (max ${ANN_MAX_ACTIVE})</button>`
+        : `<button class="home-ann-post-btn" onclick="openAnnouncementEditor(null)">+ Post Another</button>`)
+    : '';
+
+  return `<div class="home-ann-banner home-ann-banner-multi" id="homeAnnSection">
+    <div class="home-ann-icon">&#x1F4E2;</div>
+    <div class="home-ann-list">${items}</div>
+    ${topAction ? `<div class="home-ann-top-actions">${topAction}</div>` : ''}
+  </div>`;
+}
+
+window.toggleAnnouncementItem = function(id) {
+  const el = document.getElementById('ann-item-' + id);
+  if (el) el.classList.toggle('expanded');
+};
+
+// ---- Editor (modal) ----
+window.openAnnouncementEditor = async function(id) {
+  _editingAnnouncementId = id || null;
+
+  let title = '';
+  let message = '';
+  let expiry = '';
+
   const tomorrow = new Date();
   tomorrow.setDate(tomorrow.getDate() + 1);
-  const tomorrowStr = tomorrow.toISOString().slice(0, 10);
+  expiry = tomorrow.toISOString().slice(0, 10);
 
-  editor.style.display = 'block';
-  editor.innerHTML = `
-    <div class="home-ann-form">
-      <textarea class="home-ann-textarea" id="homeAnnText" placeholder="Type your announcement..." rows="4"></textarea>
-      <div class="home-ann-form-row">
-        <label class="home-ann-label">Expires:
-          <input type="date" class="home-ann-date" id="homeAnnExpiry" value="${tomorrowStr}" />
+  if (id && sb) {
+    try {
+      const { data } = await sb.from('announcements').select('*').eq('id', id).maybeSingle();
+      if (data) {
+        title   = data.title   || '';
+        message = data.message || '';
+        expiry  = data.expires_at || expiry;
+      }
+    } catch (e) { console.error('openAnnouncementEditor fetch:', e); }
+  }
+
+  let overlay = document.getElementById('homeAnnModalOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'homeAnnModalOverlay';
+    overlay.className = 'home-ann-modal-overlay';
+    document.body.appendChild(overlay);
+  }
+
+  const heading = id ? 'Edit Announcement' : 'Post Announcement';
+  const action  = id ? 'Save Changes'      : 'Post';
+
+  overlay.innerHTML = `
+    <div class="home-ann-modal" role="dialog" aria-modal="true" aria-labelledby="homeAnnModalTitle">
+      <div class="home-ann-modal-header">
+        <div class="home-ann-modal-heading" id="homeAnnModalTitle">${heading}</div>
+        <button class="home-ann-modal-close" onclick="closeAnnouncementEditor()" aria-label="Close">&#x2715;</button>
+      </div>
+      <div class="home-ann-modal-body">
+        <label class="home-ann-modal-label">
+          Title <span class="home-ann-modal-label-muted">required &middot; max ${ANN_TITLE_MAX} chars</span>
+          <input type="text" class="home-ann-modal-input" id="homeAnnTitle" maxlength="${ANN_TITLE_MAX}" value="${_homeEsc(title)}" placeholder="Brief headline staff will see first" />
         </label>
-        <button class="home-ann-save-btn" onclick="saveAnnouncement()">Post</button>
-        <button class="home-ann-cancel-btn" onclick="document.getElementById('homeAnnEditor').style.display='none'">Cancel</button>
+        <label class="home-ann-modal-label">
+          Message
+          <textarea class="home-ann-modal-textarea" id="homeAnnText" rows="6" placeholder="Full announcement details...">${_homeEsc(message)}</textarea>
+        </label>
+        <label class="home-ann-modal-label">
+          Expires
+          <input type="date" class="home-ann-modal-date" id="homeAnnExpiry" value="${expiry}" />
+        </label>
+      </div>
+      <div class="home-ann-modal-footer">
+        <button class="home-ann-cancel-btn" onclick="closeAnnouncementEditor()">Cancel</button>
+        <button class="home-ann-save-btn"   onclick="saveAnnouncement()">${action}</button>
       </div>
     </div>
   `;
-  document.getElementById('homeAnnText').focus();
+
+  overlay.classList.add('active');
+  overlay.onclick = (e) => { if (e.target === overlay) closeAnnouncementEditor(); };
+  document.addEventListener('keydown', _annEscHandler);
+
+  setTimeout(() => { document.getElementById('homeAnnTitle')?.focus(); }, 50);
+};
+
+function _annEscHandler(e) {
+  if (e.key === 'Escape') closeAnnouncementEditor();
+}
+
+window.closeAnnouncementEditor = function() {
+  const overlay = document.getElementById('homeAnnModalOverlay');
+  if (overlay) overlay.classList.remove('active');
+  _editingAnnouncementId = null;
+  document.removeEventListener('keydown', _annEscHandler);
 };
 
 window.saveAnnouncement = async function() {
-  const msg     = (document.getElementById('homeAnnText')?.value || '').trim();
-  const expiry  = document.getElementById('homeAnnExpiry')?.value;
-  if (!msg || !expiry) return;
+  const title  = (document.getElementById('homeAnnTitle')?.value || '').trim();
+  const msg    = (document.getElementById('homeAnnText')?.value  || '').trim();
+  const expiry = document.getElementById('homeAnnExpiry')?.value;
+
+  if (!title) {
+    if (typeof toast === 'function') toast('⚠ Title is required');
+    document.getElementById('homeAnnTitle')?.focus();
+    return;
+  }
+  if (!msg) {
+    if (typeof toast === 'function') toast('⚠ Message is required');
+    document.getElementById('homeAnnText')?.focus();
+    return;
+  }
+  if (!expiry) {
+    if (typeof toast === 'function') toast('⚠ Expiration date is required');
+    return;
+  }
   if (!sb || !currentEmployee) return;
 
   try {
-    // Delete any existing active announcements first
-    const today = new Date().toISOString().slice(0, 10);
-    const { error: delErr } = await sb.from('announcements').delete().gte('expires_at', today);
-    if (delErr) {
-      console.error('saveAnnouncement delete:', delErr);
-      if (typeof toast === 'function') toast('⚠ Could not clear old announcement: ' + (delErr.message || delErr.code || ''));
-      return;
+    if (_editingAnnouncementId) {
+      // EDIT — real update, preserves posted_by + created_at
+      const { error } = await sb.from('announcements')
+        .update({ title, message: msg, expires_at: expiry })
+        .eq('id', _editingAnnouncementId);
+      if (error) {
+        console.error('saveAnnouncement update:', error);
+        if (typeof toast === 'function') toast('⚠ Could not save: ' + (error.message || error.code || ''));
+        return;
+      }
+      if (typeof toast === 'function') toast('✓ Announcement updated');
+    } else {
+      // NEW — enforce 3-active cap server-side fetch
+      const today = new Date().toISOString().slice(0, 10);
+      const { data: existing, error: cntErr } = await sb.from('announcements')
+        .select('id')
+        .gte('expires_at', today);
+      if (cntErr) {
+        console.error('saveAnnouncement count:', cntErr);
+        if (typeof toast === 'function') toast('⚠ Could not check active announcements');
+        return;
+      }
+      if ((existing || []).length >= ANN_MAX_ACTIVE) {
+        if (typeof toast === 'function') toast(`⚠ ${ANN_MAX_ACTIVE} announcements already active. Clear one first.`);
+        return;
+      }
+      const { error: insErr } = await sb.from('announcements').insert({
+        title,
+        message:    msg,
+        posted_by:  currentEmployee.id,
+        expires_at: expiry,
+      });
+      if (insErr) {
+        console.error('saveAnnouncement insert:', insErr);
+        if (typeof toast === 'function') toast('⚠ Could not post: ' + (insErr.message || insErr.code || ''));
+        return;
+      }
+      if (typeof toast === 'function') toast('✓ Announcement posted');
     }
-    // Insert new
-    const { error: insErr } = await sb.from('announcements').insert({
-      message: msg,
-      posted_by: currentEmployee.id,
-      expires_at: expiry,
-    });
-    if (insErr) {
-      console.error('saveAnnouncement insert:', insErr);
-      if (typeof toast === 'function') toast('⚠ Could not post announcement: ' + (insErr.message || insErr.code || ''));
-      return;
-    }
-    if (typeof toast === 'function') toast('✓ Announcement posted');
+
+    closeAnnouncementEditor();
     renderHomePage();
-  } catch(e) {
+  } catch (e) {
     console.error('saveAnnouncement:', e);
-    if (typeof toast === 'function') toast('⚠ Could not post announcement');
+    if (typeof toast === 'function') toast('⚠ Could not save announcement');
   }
 };
 
 window.clearAnnouncement = async function(id) {
   if (!sb) return;
+  if (!confirm('Clear this announcement?')) return;
   try {
     const { error } = await sb.from('announcements').delete().eq('id', id);
     if (error) {
       console.error('clearAnnouncement:', error);
-      if (typeof toast === 'function') toast('⚠ Could not clear announcement: ' + (error.message || error.code || ''));
+      if (typeof toast === 'function') toast('⚠ Could not clear: ' + (error.message || error.code || ''));
       return;
     }
     if (typeof toast === 'function') toast('✓ Announcement cleared');
     renderHomePage();
-  } catch(e) {
+  } catch (e) {
     console.error('clearAnnouncement:', e);
     if (typeof toast === 'function') toast('⚠ Could not clear announcement');
   }
 };
+
+// HTML escape helper (file-scoped)
+function _homeEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 // ---- Weather ----
 async function fetchHomeWeather() {
