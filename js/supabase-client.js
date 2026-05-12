@@ -287,9 +287,14 @@ async function loadAllData() {
       firstName: r.first_name||'', lastName: r.last_name||'',
       email: r.email||'',
       title: r.title||'',
+      phone: r.phone||'',
       lastEmailAt: r.last_email_at || null,
       emailInvalid: !!r.email_invalid,
       emailInvalidAt: r.email_invalid_at || null,
+      // Outreach Status — Push 1
+      outreachStatus: r.outreach_status || 'cold',
+      lastActiveAt: r.last_active_at || null,
+      outreachNotes: r.outreach_notes || '',
     }));
     projectContactsStore = (projectContactRows||[]).map(r => ({
       id: r.id,

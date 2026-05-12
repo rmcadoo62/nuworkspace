@@ -483,13 +483,17 @@ async function markContactActive(id) {
   }
 }
 
-// Compute contacts that are "due for outreach": have a valid email, not
-// recently contacted (>6 months OR never), and the client has no open
-// projects. Returns an array sorted by stalest-first.
-// Outreach Status — Push 1: do_not_contact and active are always excluded
-// from the queue (active = currently engaged, doesn't need outreach).
-// If statusFilter is supplied (cold|reached_out|unresponsive), the queue
-// is further narrowed to that status; 'all' applies no status filter.
+// Compute contacts that are "due for outreach". Returns an array sorted
+// by stalest-first.
+// Outreach Status — Push 1 (revised):
+//   • do_not_contact and active are always excluded
+//   • statusFilter='all' or 'cold' (the default view) shows ONLY cold
+//     contacts passing the staleness + no-open-project filters — i.e.
+//     the "to-do list" of fresh outreach candidates. Emailing one moves
+//     it to reached_out and it drops off this view.
+//   • statusFilter='reached_out' shows all reached_out contacts regardless
+//     of recency or client project state (pipeline tracking view)
+//   • statusFilter='unresponsive' same idea — all unresponsive contacts
 function _computeOutreachQueue(statusFilter) {
   const SIX_MONTHS_MS = 180 * 24 * 60 * 60 * 1000;
   const now = Date.now();
@@ -506,14 +510,23 @@ function _computeOutreachQueue(statusFilter) {
     if (!ct.email || !ct.email.trim()) return false;       // must have email
     if (ct.emailInvalid) return false;                     // bounced/invalid
     if (ct.outreachStatus === 'do_not_contact') return false; // opt-out
-    if (ct.outreachStatus === 'active') return false;      // currently engaged — not due
-    if (openByClient[ct.clientId]) return false;           // active relationship
+    if (ct.outreachStatus === 'active') return false;      // currently engaged
+
+    const status = ct.outreachStatus || 'cold';
+
+    // Pipeline-tracking filters: show all contacts in that specific state
+    // with no further gating. Lets the user see who they've reached out to
+    // / given up on regardless of recency.
+    if (statusFilter === 'reached_out') return status === 'reached_out';
+    if (statusFilter === 'unresponsive') return status === 'unresponsive';
+
+    // Default ('all' or 'cold' or anything else): show fresh-outreach
+    // candidates only. Cold status + passing the staleness rules.
+    if (status !== 'cold') return false;
+    if (openByClient[ct.clientId]) return false;
     if (ct.lastEmailAt) {
       const lastMs = new Date(ct.lastEmailAt).getTime();
-      if (lastMs > now - SIX_MONTHS_MS) return false;      // recently emailed
-    }
-    if (statusFilter && statusFilter !== 'all') {
-      if ((ct.outreachStatus || 'cold') !== statusFilter) return false;
+      if (lastMs > now - SIX_MONTHS_MS) return false;
     }
     return true;
   });
@@ -723,9 +736,21 @@ function _renderOutreachQueue(contacts, q) {
     </div>`;
   }
 
+  // Banner description shifts based on which status filter is active. The
+  // default view is the to-do list of fresh outreach; the other filters
+  // are pipeline-tracking views.
+  let bannerDetail;
+  if (_outreachStatusFilter === 'reached_out') {
+    bannerDetail = 'Contacts you\u2019ve emailed and are waiting on a response from. They stay here until you mark them <strong>Active</strong> (they replied) or <strong>Unresponsive</strong> (gave up).';
+  } else if (_outreachStatusFilter === 'unresponsive') {
+    bannerDetail = 'Contacts you\u2019ve tried multiple times without a response. Emailing one moves them back to <strong>Reached out</strong>.';
+  } else {
+    bannerDetail = 'Fresh outreach candidates \u2014 cold contacts with no open project at their client, not emailed in the last 6 months. Sending an email moves a contact to <strong>Reached out</strong> and they drop off this list.';
+  }
+
   return `<div style="margin-top:8px">
     <div style="margin-bottom:14px;padding:10px 14px;background:var(--surface2);border-left:3px solid var(--amber);border-radius:4px;font-size:12.5px;color:var(--text);line-height:1.5">
-      <strong>${totalContacts}</strong> contact${totalContacts!==1?'s':''} at <strong>${totalClients}</strong> client${totalClients!==1?'s':''}${q ? ' matching your search' : ''}${breakdown}. These haven't been emailed via NUWorkspace in the last 6 months and their client has no open projects.
+      <strong>${totalContacts}</strong> contact${totalContacts!==1?'s':''} at <strong>${totalClients}</strong> client${totalClients!==1?'s':''}${q ? ' matching your search' : ''}${breakdown}. ${bannerDetail}
     </div>
     ${jumpNav}
     ${body}
@@ -771,19 +796,26 @@ function renderClientsPanel(search) {
   const colors = ['#c07a1a','#3a7fd4','#2e9e62','#7c5cbf','#d04040','#2d8a6e'];
 
   // Compute Due-for-Outreach data only if the user has the capability.
-  // Outreach Status — Push 1: compute unfiltered set once, bucket by status
-  // for chip counts, then narrow to the active filter for display.
+  // Outreach Status — Push 1 (revised): chip counts come from three separate
+  // filter calls because each status has different visibility rules in the
+  // new model. The default ('all') view shows only cold candidates — that's
+  // the to-do list. Reached-out and unresponsive chips reveal pipeline
+  // contacts that are otherwise hidden from the default view.
   const canSendEmail = (typeof can === 'function') ? can('send_client_email') : true;
-  const outreachAll = canSendEmail ? _computeOutreachQueue('all') : [];
-  const outreachCounts = { all: outreachAll.length, cold: 0, reached_out: 0, unresponsive: 0 };
-  for (const ct of outreachAll) {
-    const s = ct.outreachStatus || 'cold';
-    if (outreachCounts[s] !== undefined) outreachCounts[s]++;
-  }
-  const outreachContacts = (_outreachStatusFilter === 'all')
-    ? outreachAll
-    : outreachAll.filter(ct => (ct.outreachStatus || 'cold') === _outreachStatusFilter);
-  const outreachCount = outreachAll.length;
+  const coldQueue         = canSendEmail ? _computeOutreachQueue('cold')         : [];
+  const reachedOutQueue   = canSendEmail ? _computeOutreachQueue('reached_out')   : [];
+  const unresponsiveQueue = canSendEmail ? _computeOutreachQueue('unresponsive') : [];
+  const outreachCounts = {
+    all:          coldQueue.length,        // "All due" == fresh outreach == cold
+    cold:         coldQueue.length,
+    reached_out:  reachedOutQueue.length,
+    unresponsive: unresponsiveQueue.length,
+  };
+  let outreachContacts;
+  if (_outreachStatusFilter === 'reached_out')      outreachContacts = reachedOutQueue;
+  else if (_outreachStatusFilter === 'unresponsive') outreachContacts = unresponsiveQueue;
+  else                                               outreachContacts = coldQueue;
+  const outreachCount = coldQueue.length;  // tab badge — what's left to do
 
   // If user lost permission but is viewing the outreach tab, snap back to All
   if (!canSendEmail && _clientsPanelView === 'outreach') _clientsPanelView = 'all';

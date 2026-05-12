@@ -4399,31 +4399,50 @@ async function sendEmailContactModal() {
       const nowIso = new Date().toISOString();
       const ids = recipients.map(r => r.id).filter(Boolean);
       if (ids.length) {
-        // Stamp last_email_at unconditionally for all recipients
+        // (a) Stamp last_email_at unconditionally for every recipient
         await sb.from('contacts').update({ last_email_at: nowIso }).in('id', ids);
         for (const id of ids) {
           const cIdx = contactStore.findIndex(c => c.id === id);
           if (cIdx > -1) contactStore[cIdx].lastEmailAt = nowIso;
         }
-        // Conditional outreach_status flip — only rows currently cold or unresponsive.
-        // The .in() filter on outreach_status makes Postgres skip protected rows
-        // (responded, do_not_contact). The same condition is mirrored locally.
-        try {
-          await sb.from('contacts')
-            .update({ outreach_status: 'reached_out' })
-            .in('id', ids)
-            .in('outreach_status', ['cold','unresponsive']);
-          for (const id of ids) {
-            const cIdx = contactStore.findIndex(c => c.id === id);
-            if (cIdx > -1) {
-              const cur = contactStore[cIdx].outreachStatus;
-              if (cur === 'cold' || cur === 'unresponsive') {
-                contactStore[cIdx].outreachStatus = 'reached_out';
-              }
+        // (b) Auto-transition: pre-filter locally. Earlier versions used
+        // .update().in('id',…).in('outreach_status',['cold','unresponsive'])
+        // but PostgREST quoting of enum literals isn't reliable across
+        // versions — the filter could silently match zero rows. Filtering
+        // by local outreachStatus first is also faster (one update instead
+        // of two filter passes) and keeps local + DB in lock-step even if
+        // the DB call fails. Defaulting missing outreachStatus to 'cold'
+        // matches how renderOutreachStatusPill treats it, so the visible
+        // state and the flip behavior stay in agreement.
+        const flippableIds = ids.filter(id => {
+          const ct = contactStore.find(c => c.id === id);
+          if (!ct) return false;
+          const cur = ct.outreachStatus || 'cold';
+          return cur === 'cold' || cur === 'unresponsive';
+        });
+        // Diagnostic: if every recipient was filtered out, surface what we
+        // actually saw locally. Helpful for catching mismatches between the
+        // DB state and the local contactStore.
+        if (ids.length > 0 && flippableIds.length === 0) {
+          console.log('Outreach auto-transition skipped — no eligible recipients. Local statuses:',
+            ids.map(id => {
+              const ct = contactStore.find(c => c.id === id);
+              return { id, status: ct ? (ct.outreachStatus ?? '(undefined)') : '(no store entry)' };
+            }));
+        }
+        if (flippableIds.length) {
+          try {
+            const { error: flipErr } = await sb.from('contacts')
+              .update({ outreach_status: 'reached_out' })
+              .in('id', flippableIds);
+            if (flipErr) throw flipErr;
+            for (const id of flippableIds) {
+              const cIdx = contactStore.findIndex(c => c.id === id);
+              if (cIdx > -1) contactStore[cIdx].outreachStatus = 'reached_out';
             }
+          } catch(e) {
+            console.warn('outreach_status auto-transition failed (non-fatal):', e);
           }
-        } catch(e) {
-          console.warn('outreach_status auto-transition failed (non-fatal):', e);
         }
       }
     } catch(e) {
