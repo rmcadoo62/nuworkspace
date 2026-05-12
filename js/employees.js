@@ -2735,10 +2735,15 @@ async function deleteVacationRequest(reqId, empId) {
   try {
     await sb.from('vacation_requests').delete().eq('id', reqId);
     await sb.from('schedule_blocks').delete().eq('id', 'vac_' + reqId);
-  } catch(e) { toast('⚠ Could not delete request'); return; }
+    // Also remove from in-memory scheduler state so the calendar updates without reload
+    if (Array.isArray(window._schedBlocks)) {
+      const idx = window._schedBlocks.findIndex(b => b.id === 'vac_' + reqId);
+      if (idx > -1) window._schedBlocks.splice(idx, 1);
+    }
+  } catch(e) { toast('⚠ Could not delete request'); console.error('delete vacation error:', e); return; }
   vacationRequestCache[empId] = (vacationRequestCache[empId] || []).filter(r => r.id !== reqId);
-  renderVacReqList(empId);
   toast('Request deleted');
+  _refreshVacationContexts(empId);
 }
 
 async function submitVacationRequest(empId) {
@@ -2824,37 +2829,73 @@ async function approveVacationRequest(reqId, empId) {
   const emp = employees.find(e => e.id === empId);
   if (!emp) return;
 
+  // Step 1 — mark the request approved in vacation_requests
   try {
-    await sb.from('vacation_requests')
+    const { error: updErr } = await sb.from('vacation_requests')
       .update({ status: 'approved', approver_id: currentEmployee?.id || null, updated_at: new Date().toISOString() })
       .eq('id', reqId);
-  } catch(e) { toast('⚠ Error approving request'); return; }
+    if (updErr) { toast('⚠ Error approving request: ' + updErr.message); console.error('vacation approve update error:', updErr); return; }
+  } catch(e) { toast('⚠ Error approving request'); console.error('vacation approve exception:', e); return; }
 
   const req = (vacationRequestCache[empId] || []).find(r => r.id === reqId);
   if (req) req.status = 'approved';
 
-  // Create scheduler block
-  if (req && typeof window.schedSaveBlock === 'function') {
-    const block = {
-      id:           'vac_' + reqId,
-      rowId:        'emp_' + empId,
-      cat:          '__emp__',
-      empId:        empId,
-      empEventType: 'vacation',
-      label:        emp.name + ' — Vacation',
-      start:        req.start_date,
-      end:          req.end_date,
-      projId:       null,
-      taskId:       null,
-      flag:         null,
-      startTime:    null,
-      endTime:      null,
+  // Step 2 — create the calendar (schedule_blocks) entry. Do the upsert
+  // directly here (instead of through window.schedSaveBlock) so we can
+  // actually error-check the result; the IIFE-wrapped helper swallows
+  // errors silently which masked an RLS rejection in the past.
+  let scheduleOk = false;
+  let scheduleErrMsg = '';
+  if (req) {
+    const blockRow = {
+      id:             'vac_' + reqId,
+      row_id:         'emp_' + empId,
+      cat:            '__emp__',
+      start_date:     req.start_date,
+      end_date:       req.end_date,
+      start_time:     null,
+      end_time:       null,
+      label:          emp.name + ' — Vacation',
+      proj_id:        null,
+      task_id:        null,
+      emp_id:         empId,
+      emp_event_type: 'vacation',
+      flag:           null,
     };
-    await window.schedSaveBlock(block);
-    if (typeof window.schedAddBlock === 'function') window.schedAddBlock(block);
+    try {
+      const { error: insErr } = await sb.from('schedule_blocks').upsert(blockRow, { onConflict: 'id' });
+      if (insErr) {
+        scheduleErrMsg = insErr.message || 'unknown error';
+        console.error('vacation schedule_blocks upsert error:', insErr);
+      } else {
+        scheduleOk = true;
+        // Also update in-memory scheduler state so the calendar reflects the
+        // new block without a page reload if the user navigates there.
+        if (typeof window.schedAddBlock === 'function') {
+          window.schedAddBlock({
+            id:           blockRow.id,
+            rowId:        blockRow.row_id,
+            cat:          blockRow.cat,
+            empId:        empId,
+            empEventType: 'vacation',
+            label:        blockRow.label,
+            start:        blockRow.start_date,
+            end:          blockRow.end_date,
+            projId:       null,
+            taskId:       null,
+            flag:         null,
+            startTime:    null,
+            endTime:      null,
+          });
+        }
+      }
+    } catch(e) {
+      scheduleErrMsg = e?.message || String(e);
+      console.error('vacation schedule_blocks upsert exception:', e);
+    }
   }
 
-  // Notify employee
+  // Step 3 — notify the employee
   if (req) {
     const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     try {
@@ -2872,8 +2913,40 @@ async function approveVacationRequest(reqId, empId) {
     } catch(e) {}
   }
 
-  renderVacReqList(empId);
-  toast('✅ Vacation approved — scheduler block created');
+  // Step 4 — honest toast, then re-render whichever surfaces are visible
+  if (scheduleOk) {
+    toast('✅ Vacation approved & added to calendar');
+  } else {
+    toast('⚠ Vacation approved, but calendar entry failed: ' + (scheduleErrMsg || 'unknown') + ' — check RLS on schedule_blocks');
+  }
+  _refreshVacationContexts(empId);
+}
+
+// Helper — re-render whatever vacation-displaying surfaces are currently
+// visible after an approve/reject/delete. Cheaper than blindly calling all
+// renderers; safer than guessing which one the user is looking at.
+function _refreshVacationContexts(empId) {
+  // 1. Approvals badge (Approvals nav item)
+  if (typeof updateApprovalsBadge === 'function') {
+    try { updateApprovalsBadge(); } catch(e) {}
+  }
+  // 2. Approvals panel — re-render if visible (refreshes whichever tab is active)
+  const apprPanel = document.getElementById('panel-approvals');
+  if (apprPanel && apprPanel.classList.contains('active') && typeof renderApprovalsPanel === 'function') {
+    try { renderApprovalsPanel(); } catch(e) { console.warn('renderApprovalsPanel failed:', e); }
+  }
+  // 3. My Info → Vacation tab — re-render if visible
+  const myInfoPanel = document.getElementById('panel-myinfo');
+  if (myInfoPanel && myInfoPanel.classList.contains('active') && window._myInfoActiveTab === 'vacation' && currentEmployee) {
+    if (typeof renderMyInfoVacationTab === 'function') {
+      try { renderMyInfoVacationTab(currentEmployee.id); } catch(e) {}
+    }
+  }
+  // 4. Employee profile's inline vacation list — only if the request belongs
+  // to the employee currently being viewed in Employees panel
+  if (empId && typeof renderVacReqList === 'function' && document.getElementById('vacReqList-' + empId)) {
+    try { renderVacReqList(empId); } catch(e) {}
+  }
 }
 
 function openRejectVacForm(reqId, empId) {
@@ -2900,10 +2973,11 @@ async function confirmRejectVacation(reqId, empId) {
   const note = document.getElementById('rejectVacNote-' + reqId)?.value.trim() || null;
 
   try {
-    await sb.from('vacation_requests')
+    const { error: updErr } = await sb.from('vacation_requests')
       .update({ status: 'rejected', approver_note: note, updated_at: new Date().toISOString() })
       .eq('id', reqId);
-  } catch(e) { toast('⚠ Error rejecting request'); return; }
+    if (updErr) { toast('⚠ Error rejecting request: ' + updErr.message); console.error('vacation reject error:', updErr); return; }
+  } catch(e) { toast('⚠ Error rejecting request'); console.error('vacation reject exception:', e); return; }
 
   const req = (vacationRequestCache[empId] || []).find(r => r.id === reqId);
   if (req) { req.status = 'rejected'; req.approver_note = note; }
@@ -2927,10 +3001,8 @@ async function confirmRejectVacation(reqId, empId) {
   }
 
   document.getElementById('rejectVacInline-' + reqId)?.remove();
-  renderVacReqList(reqId);
-  // Re-query fresh since renderVacReqList with reqId won't work — use empId
-  renderVacReqList(empId);
   toast('Request rejected');
+  _refreshVacationContexts(empId);
 }
 
 
@@ -2943,14 +3015,12 @@ async function renderMyInfoVacationTab(empId) {
   const emp = employees.find(e => e.id === empId);
   if (!emp) return;
 
-  const canApprove = isManager() || isApprover;
-  pane.innerHTML = '<div style="color:var(--muted);font-size:13px">Loading…</div>';
-
-  // Load this employee's own requests
-  await loadAndRenderVacRequests(empId);
-
-  // Build own requests section
-  const mySection = `
+  // This tab is now strictly for the signed-in employee's own vacation
+  // requests and history. Approval actions for OTHER employees' requests
+  // live in the Approvals panel (panel-approvals) → Vacation Requests tab,
+  // alongside timesheet approvals — one consistent home for "things waiting
+  // for my decision." This keeps My Info focused on "things about me."
+  pane.innerHTML = `
     <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
         <div style="font-size:13px;font-weight:700;color:var(--text)">✈️ My Vacation Requests</div>
@@ -2963,101 +3033,7 @@ async function renderMyInfoVacationTab(empId) {
         <div style="color:var(--muted);font-size:12px;padding:4px 0">Loading…</div>
       </div>
     </div>`;
-
-  // Build approver section if manager/approver
-  let approverSection = '';
-  if (canApprove) {
-    // Fetch all vacation requests for employees whose approver is this person OR all if owner/admin
-    let pendingRows = [], historyRows = [];
-    try {
-      const { data } = await sb.from('vacation_requests')
-        .select('*')
-        .order('created_at', { ascending: false });
-      const allReqs = data || [];
-
-      // Filter to requests this person is responsible for
-      const myEmpIds = employees
-        .filter(e => e.isActive !== false && e.id !== empId && (e.approverId === empId || isManager()))
-        .map(e => e.id);
-      const relevant = allReqs.filter(r => myEmpIds.includes(r.employee_id));
-
-      pendingRows = relevant.filter(r => r.status === 'pending');
-      historyRows = relevant.filter(r => r.status !== 'pending');
-    } catch(e) { console.warn('Approver vacation load error:', e); }
-
-    const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const statusColor = { pending: '#e8a234', approved: '#4caf7d', rejected: '#d04040' };
-    const statusLabel = { pending: '⏳ Pending', approved: '✓ Approved', rejected: '✗ Rejected' };
-
-    const buildRow = (r, showActions) => {
-      const sc = statusColor[r.status] || '#888';
-      const sl = statusLabel[r.status] || r.status;
-      const days = Math.round((new Date(r.end_date) - new Date(r.start_date)) / 86400000) + 1;
-      const reqEmp = employees.find(e => e.id === r.employee_id);
-      return `
-      <div style="display:flex;align-items:flex-start;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--bg)">
-        <div style="width:34px;height:34px;border-radius:50%;background:${reqEmp?.color||'#888'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${reqEmp?.initials||'?'}</div>
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:600;color:var(--text)">${r.employee_name}</div>
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px">
-            <div style="font-size:12px;color:var(--muted)">${fmtD(r.start_date)} → ${fmtD(r.end_date)}</div>
-            <span style="font-size:10px;color:var(--muted)">${days} day${days!==1?'s':''}</span>
-            <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:${sc}22;color:${sc};border:1px solid ${sc}44">${sl}</span>
-          </div>
-          ${r.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${r.notes}</div>` : ''}
-          ${r.approver_note ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;font-style:italic">💬 ${r.approver_note}</div>` : ''}
-        </div>
-        ${showActions ? `
-        <div style="display:flex;gap:6px;flex-shrink:0">
-          <button onclick="approveVacationRequest('${r.id}','${r.employee_id}');renderMyInfoVacationTab('${empId}')"
-            style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:#4caf7d;cursor:pointer">✓ Approve</button>
-          <button onclick="openRejectVacForm('${r.id}','${r.employee_id}')"
-            style="background:rgba(208,64,64,0.1);border:1px solid rgba(208,64,64,0.3);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--red);cursor:pointer">✗ Reject</button>
-          <button onclick="deleteVacationRequest('${r.id}','${r.employee_id}');renderMyInfoVacationTab('${empId}')"
-            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer">🗑</button>
-        </div>` : `
-        <button onclick="deleteVacationRequest('${r.id}','${r.employee_id}');renderMyInfoVacationTab('${empId}')"
-          style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer;flex-shrink:0">🗑</button>`}
-      </div>`;
-    };
-
-    const pendingHtml = pendingRows.length
-      ? pendingRows.map(r => buildRow(r, true)).join('')
-      : '<div style="color:var(--muted);font-size:12px;padding:4px 0">No pending requests.</div>';
-
-    // History — show last 20, with toggle
-    const historyHtml = historyRows.length
-      ? `<div id="vacHistoryList">
-          ${historyRows.slice(0, 5).map(r => buildRow(r, false)).join('')}
-        </div>
-        ${historyRows.length > 5 ? `
-          <button id="vacHistoryToggle" onclick="
-            const list=document.getElementById('vacHistoryList');
-            const btn=document.getElementById('vacHistoryToggle');
-            const showing=list.dataset.expanded==='1';
-            list.innerHTML=showing
-              ? ${JSON.stringify(historyRows.slice(0,5).map(r=>buildRow(r,false)).join(''))}
-              : ${JSON.stringify(historyRows.map(r=>buildRow(r,false)).join(''))};
-            list.dataset.expanded=showing?'0':'1';
-            btn.textContent=showing?'Show all ${historyRows.length} requests ▼':'Show less ▲';"
-            style="background:none;border:none;color:var(--amber);font-size:12px;cursor:pointer;padding:4px 0;margin-top:4px">
-            Show all ${historyRows.length} requests ▼
-          </button>` : ''}` 
-      : '<div style="color:var(--muted);font-size:12px;padding:4px 0">No history yet.</div>';
-
-    approverSection = `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
-        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">⏳ Pending Approvals</div>
-        ${pendingHtml}
-      </div>
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
-        <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">📋 Approval History</div>
-        ${historyHtml}
-      </div>`;
-  }
-
-  pane.innerHTML = mySection + approverSection;
-  // Now load the employee's own requests into the placeholder
+  // Load this employee's own requests into the placeholder
   loadAndRenderVacRequests(empId);
 }
 

@@ -538,18 +538,59 @@ async function saveTsNow(key) {
 
 // getWeekStatusObj defined earlier
 
-function updateApprovalsBadge() {
-  if (!isApprover || !currentEmployee) return;
-  const pending = Object.values(tsWeekStatuses).filter(s => {
+// Cached count of pending vacation requests for this approver. Refreshed
+// inside updateApprovalsBadge() so the Approvals tab badge can render
+// synchronously without a second DB roundtrip.
+let _cachedPendingVacationCount = 0;
+
+function _pendingTimesheetCountForApprover() {
+  if (!currentEmployee) return 0;
+  return Object.values(tsWeekStatuses).filter(s => {
     if (s.status !== 'submitted') return false;
     const emp = employees.find(e => e.id === s.employeeId);
     return emp && emp.approverId === currentEmployee.id;
   }).length;
+}
+
+// Resolves which employee IDs the current user is responsible for approving.
+// Managers see all active employees; plain approvers see only those who have
+// them as approverId. Excludes the current user from the set (people don't
+// approve their own requests in the queue).
+function _approveeEmployeeIds() {
+  if (!currentEmployee) return [];
+  return employees
+    .filter(e => e.isActive !== false && e.id !== currentEmployee.id && (e.approverId === currentEmployee.id || isManager()))
+    .map(e => e.id);
+}
+
+async function _fetchPendingVacationCount() {
+  if (!sb || !currentEmployee) return 0;
+  const ids = _approveeEmployeeIds();
+  if (ids.length === 0) return 0;
+  try {
+    const { count, error } = await sb.from('vacation_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending')
+      .in('employee_id', ids);
+    if (error) { console.warn('[approvals] vacation count error:', error.message); return 0; }
+    return count || 0;
+  } catch(e) {
+    console.warn('[approvals] vacation count exception:', e);
+    return 0;
+  }
+}
+
+async function updateApprovalsBadge() {
+  if (!isApprover || !currentEmployee) return;
+  const tsPending = _pendingTimesheetCountForApprover();
+  // Refresh the cached vacation count, then sum for the badge total.
+  _cachedPendingVacationCount = await _fetchPendingVacationCount();
+  const total = tsPending + _cachedPendingVacationCount;
   const badge = document.getElementById('approvalsBadge');
   if (badge) {
-    badge.textContent = pending;
-    badge.style.display = pending > 0 ? 'inline-flex' : 'none';
-    if (pending > 0) badge.style.background = 'rgba(91,156,246,.2)';
+    badge.textContent = total;
+    badge.style.display = total > 0 ? 'inline-flex' : 'none';
+    if (total > 0) badge.style.background = 'rgba(91,156,246,.2)';
   }
 }
 
@@ -589,9 +630,85 @@ function renderApprovalsPanel() {
   const body = document.getElementById('approvalQueueBody');
   if (!body) return;
 
+  _injectApprovalsTabStylesOnce();
+
+  // Default to whichever tab was last active; first open lands on Timesheets.
+  if (!window._approvalsActiveTab) window._approvalsActiveTab = 'timesheets';
+  const activeTab = window._approvalsActiveTab;
+
+  const tsCount  = _pendingTimesheetCountForApprover();
+  // Use the cached vacation count for the tab badge — updateApprovalsBadge()
+  // refreshes the cache as it runs, and the per-tab renderer below pulls
+  // fresh data when its tab is selected.
+  const vacCount = _cachedPendingVacationCount || 0;
+
+  const tabBtn = (id, label, count, isActive) => {
+    const badgeHtml = count > 0
+      ? `<span class="approvals-tab-badge">${count}</span>`
+      : '';
+    return `<button id="approvalsTab-${id}" onclick="switchApprovalsTab('${id}')" class="approvals-tab${isActive ? ' active-tab' : ''}">${label}${badgeHtml}</button>`;
+  };
+
+  body.innerHTML = `
+    <div class="approvals-shell">
+      <div class="approvals-header">
+        <div class="approval-queue-title" style="margin-bottom:0">Approvals</div>
+      </div>
+      <div class="approvals-tab-bar">
+        ${tabBtn('timesheets', '⏰ Timesheets',        tsCount,  activeTab === 'timesheets')}
+        ${tabBtn('vacation',   '✈️ Vacation Requests', vacCount, activeTab === 'vacation')}
+      </div>
+      <div id="approvalsTabContent" class="approvals-tab-content"></div>
+    </div>`;
+
+  if (activeTab === 'timesheets') {
+    _renderApprovalsTimesheetTab();
+  } else if (activeTab === 'vacation') {
+    _renderApprovalsVacationTab();
+  }
+}
+
+function switchApprovalsTab(tab) {
+  window._approvalsActiveTab = tab;
+  renderApprovalsPanel();
+}
+
+function _injectApprovalsTabStylesOnce() {
+  if (document.getElementById('approvalsTabStyles')) return;
+  const style = document.createElement('style');
+  style.id = 'approvalsTabStyles';
+  style.textContent = `
+    .approvals-shell { padding: 0; }
+    .approvals-header { padding: 32px 40px 12px; }
+    .approvals-tab-bar { display: flex; gap: 2px; padding: 0 40px; border-bottom: 1px solid var(--border); background: var(--bg); position: sticky; top: 0; z-index: 5; }
+    .approvals-tab {
+      background: none; border: none; border-bottom: 2px solid transparent;
+      padding: 10px 18px; font-size: 13px; font-weight: 500; cursor: pointer;
+      color: var(--muted); font-family: 'DM Sans', sans-serif;
+      margin-bottom: -1px; border-radius: 6px 6px 0 0; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .approvals-tab:hover { color: var(--text); background: var(--surface2); }
+    .approvals-tab.active-tab { color: var(--amber); border-bottom-color: var(--amber); background: var(--bg); }
+    .approvals-tab-badge {
+      background: rgba(91,156,246,.2); color: var(--blue, #5b9cf6);
+      font-size: 11px; font-weight: 700; border-radius: 10px;
+      padding: 1px 8px; min-width: 18px; text-align: center;
+      font-family: 'JetBrains Mono', monospace;
+    }
+    .approvals-tab.active-tab .approvals-tab-badge { background: rgba(232,162,52,.18); color: var(--amber); }
+    .approvals-tab-content { padding: 24px 40px; }
+  `;
+  document.head.appendChild(style);
+}
+
+// ── Timesheet tab — original approval queue rendering, unchanged behavior ──
+function _renderApprovalsTimesheetTab() {
+  const content = document.getElementById('approvalsTabContent');
+  if (!content) return;
+
   // Get submitted timesheets for this approver's employees
   const myEmployeeIds = employees.filter(e => e.approverId === currentEmployee?.id).map(e => e.id);
-
 
   const pending   = Object.values(tsWeekStatuses).filter(s => s.status === 'submitted' && myEmployeeIds.includes(s.employeeId));
   const rejected  = Object.values(tsWeekStatuses).filter(s => s.status === 'rejected'  && myEmployeeIds.includes(s.employeeId));
@@ -601,7 +718,7 @@ function renderApprovalsPanel() {
   const all = [...pending, ...rejected, ...draft];
 
   if (all.length === 0) {
-    body.innerHTML = '<div class="approval-queue-title">Approvals <span style="font-size:14px;color:var(--muted);font-family:monospace;font-weight:400">(0 pending)</span></div>'+
+    content.innerHTML = '<div style="font-size:14px;color:var(--muted);margin-bottom:14px">' + pending.length + ' pending</div>'+
       '<div style="color:var(--muted);font-size:13px;padding:20px 0">✓ All timesheets reviewed — nothing pending.</div>'+
       (approved.length > 0 ? '<div style="margin-top:20px"><div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px">Recently Approved</div>' +
         approved.map(ws => {
@@ -679,8 +796,119 @@ function renderApprovalsPanel() {
     '</div>';
   }).join('');
 
+  content.innerHTML = '<div style="font-size:14px;color:var(--muted);margin-bottom:14px">'+pending.length+' pending</div>' + cards;
+}
 
-  body.innerHTML = '<div class="approval-queue-title">Approvals <span style="font-size:14px;color:var(--muted);font-family:monospace;font-weight:400">('+pending.length+' pending)</span></div>' + cards;
+// ── Vacation Requests tab — pending + history with approve/reject/delete ──
+async function _renderApprovalsVacationTab() {
+  const content = document.getElementById('approvalsTabContent');
+  if (!content) return;
+
+  content.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:20px 0">Loading vacation requests…</div>';
+
+  // Resolve approvee set the same way the badge count does so the tab and
+  // the badge always agree on "what counts as mine to approve."
+  const myEmpIds = _approveeEmployeeIds();
+  if (myEmpIds.length === 0) {
+    content.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:20px 0">No employees are assigned to you for vacation approval.</div>';
+    return;
+  }
+
+  let pendingRows = [], historyRows = [];
+  try {
+    const { data, error } = await sb.from('vacation_requests')
+      .select('*')
+      .in('employee_id', myEmpIds)
+      .order('created_at', { ascending: false });
+    if (error) {
+      content.innerHTML = '<div style="color:var(--red);font-size:13px;padding:20px 0">⚠ Could not load vacation requests: ' + error.message + '</div>';
+      return;
+    }
+    const all = data || [];
+    pendingRows = all.filter(r => r.status === 'pending');
+    historyRows = all.filter(r => r.status !== 'pending');
+  } catch(e) {
+    content.innerHTML = '<div style="color:var(--red);font-size:13px;padding:20px 0">⚠ Could not load vacation requests.</div>';
+    console.error('[approvals] vacation load exception:', e);
+    return;
+  }
+
+  // Keep the cached count in sync with what we just loaded — protects against
+  // drift between the tab badge and the body when this tab is opened directly.
+  _cachedPendingVacationCount = pendingRows.length;
+
+  const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const statusColor = { pending: '#e8a234', approved: '#4caf7d', rejected: '#d04040' };
+  const statusLabel = { pending: '⏳ Pending', approved: '✓ Approved', rejected: '✗ Rejected' };
+
+  const buildRow = (r, showActions) => {
+    const sc = statusColor[r.status] || '#888';
+    const sl = statusLabel[r.status] || r.status;
+    const days = Math.round((new Date(r.end_date) - new Date(r.start_date)) / 86400000) + 1;
+    const reqEmp = employees.find(e => e.id === r.employee_id);
+    return `
+    <div data-req-id="${r.id}" style="display:flex;align-items:flex-start;gap:12px;padding:10px 12px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;background:var(--bg)">
+      <div style="width:34px;height:34px;border-radius:50%;background:${reqEmp?.color||'#888'};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;flex-shrink:0">${reqEmp?.initials||'?'}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${r.employee_name}</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:2px">
+          <div style="font-size:12px;color:var(--muted)">${fmtD(r.start_date)} → ${fmtD(r.end_date)}</div>
+          <span style="font-size:10px;color:var(--muted)">${days} day${days!==1?'s':''}</span>
+          <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;background:${sc}22;color:${sc};border:1px solid ${sc}44">${sl}</span>
+        </div>
+        ${r.notes ? `<div style="font-size:11px;color:var(--muted);margin-top:3px">${r.notes}</div>` : ''}
+        ${r.approver_note ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;font-style:italic">💬 ${r.approver_note}</div>` : ''}
+      </div>
+      ${showActions ? `
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button onclick="approveVacationRequest('${r.id}','${r.employee_id}')"
+          style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:#4caf7d;cursor:pointer">✓ Approve</button>
+        <button onclick="openRejectVacForm('${r.id}','${r.employee_id}')"
+          style="background:rgba(208,64,64,0.1);border:1px solid rgba(208,64,64,0.3);border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;color:var(--red);cursor:pointer">✗ Reject</button>
+        <button onclick="deleteVacationRequest('${r.id}','${r.employee_id}')"
+          style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer">🗑</button>
+      </div>` : `
+      <button onclick="deleteVacationRequest('${r.id}','${r.employee_id}')"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--muted);cursor:pointer;flex-shrink:0">🗑</button>`}
+    </div>`;
+  };
+
+  // Inline reject form target — openRejectVacForm() inserts the form into
+  // a #vacReqList-<empId> container; we provide one per pending row so the
+  // existing employees.js helpers continue to work unchanged.
+  const pendingHtml = pendingRows.length
+    ? pendingRows.map(r => `<div id="vacReqList-${r.employee_id}">${buildRow(r, true)}</div>`).join('')
+    : '<div style="color:var(--muted);font-size:12px;padding:4px 0">No pending requests.</div>';
+
+  const historyHtml = historyRows.length
+    ? `<div id="vacHistoryListApprovals">
+        ${historyRows.slice(0, 5).map(r => buildRow(r, false)).join('')}
+      </div>
+      ${historyRows.length > 5 ? `
+        <button id="vacHistoryToggleApprovals" onclick="
+          const list=document.getElementById('vacHistoryListApprovals');
+          const btn=document.getElementById('vacHistoryToggleApprovals');
+          const showing=list.dataset.expanded==='1';
+          list.innerHTML=showing
+            ? ${JSON.stringify(historyRows.slice(0,5).map(r=>buildRow(r,false)).join(''))}
+            : ${JSON.stringify(historyRows.map(r=>buildRow(r,false)).join(''))};
+          list.dataset.expanded=showing?'0':'1';
+          btn.textContent=showing?'Show all ${historyRows.length} requests ▼':'Show less ▲';"
+          style="background:none;border:none;color:var(--amber);font-size:12px;cursor:pointer;padding:4px 0;margin-top:4px">
+          Show all ${historyRows.length} requests ▼
+        </button>` : ''}`
+    : '<div style="color:var(--muted);font-size:12px;padding:4px 0">No history yet.</div>';
+
+  content.innerHTML = `
+    <div style="font-size:14px;color:var(--muted);margin-bottom:14px">${pendingRows.length} pending</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">⏳ Pending Approvals</div>
+      ${pendingHtml}
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">📋 Approval History</div>
+      ${historyHtml}
+    </div>`;
 }
 
 

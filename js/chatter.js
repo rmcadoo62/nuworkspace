@@ -338,6 +338,13 @@ async function loadNotifs() {
     }));
   } catch(e) { notifStore = []; }
   renderNotifBadge();
+  // Vacation request notifications arrive via the same chatter_notifs realtime
+  // channel that calls loadNotifs(). Refreshing the Approvals badge here gives
+  // managers near-realtime awareness of new pending requests without needing
+  // a separate realtime subscription on vacation_requests.
+  if (typeof updateApprovalsBadge === 'function') {
+    try { updateApprovalsBadge(); } catch(e) { /* badge is best-effort */ }
+  }
 }
 function renderNotifBadge() {
   const unread = notifStore.filter(n => !n.read).length;
@@ -388,15 +395,27 @@ function notifClick(notifId, projId) {
   document.getElementById('notifPanel').style.display = 'none';
 
   // Check for vacation notification — preview contains ||empId:uuid
+  // Routes the requester (clicking on a status update about their own request)
+  // to My Info → Vacation tab where their request history lives, and routes
+  // the approver (clicking on a "X requested vacation" notification) to the
+  // Approvals panel → Vacation Requests tab where approval actions live.
   const preview = n?.preview || '';
   const empMatch = preview.match(/\|\|empId:([a-f0-9-]+)$/);
   if (empMatch) {
     const requestingEmpId = empMatch[1];
     if (requestingEmpId === currentEmployee?.id) {
+      // Requester clicking — go to their own My Info → Vacation tab
       if (typeof openMyInfoPanel === 'function') openMyInfoPanel(document.getElementById('navMyInfo'));
+      setTimeout(() => { if (typeof switchMyInfoTab === 'function') switchMyInfoTab('vacation'); }, 250);
     } else {
-      if (typeof openEmployeesPanel === 'function') openEmployeesPanel(null);
-      setTimeout(() => { if (typeof showEmpProfile === 'function') showEmpProfile(requestingEmpId); }, 250);
+      // Approver/manager clicking — go to Approvals panel and switch to Vacation tab
+      const navAppr = document.getElementById('navApprovals');
+      if (typeof openApprovalsPanel === 'function') {
+        openApprovalsPanel(navAppr || null);
+      } else if (typeof openSetupPanel === 'function') {
+        openSetupPanel(document.getElementById('navSetup'));
+      }
+      setTimeout(() => { if (typeof switchApprovalsTab === 'function') switchApprovalsTab('vacation'); }, 250);
     }
     return;
   }
