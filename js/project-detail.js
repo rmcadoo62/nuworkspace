@@ -4392,15 +4392,38 @@ async function sendEmailContactModal() {
 
   // 2b. Stamp last_email_at on every recipient (drives the Due-for-Outreach
   // indicator on client cards). Only on successful send.
+  // Also auto-transition outreach_status: cold/unresponsive → reached_out.
+  // active and do_not_contact are NEVER overwritten by a send.
   if (status === 'sent') {
     try {
       const nowIso = new Date().toISOString();
       const ids = recipients.map(r => r.id).filter(Boolean);
       if (ids.length) {
+        // Stamp last_email_at unconditionally for all recipients
         await sb.from('contacts').update({ last_email_at: nowIso }).in('id', ids);
         for (const id of ids) {
           const cIdx = contactStore.findIndex(c => c.id === id);
           if (cIdx > -1) contactStore[cIdx].lastEmailAt = nowIso;
+        }
+        // Conditional outreach_status flip — only rows currently cold or unresponsive.
+        // The .in() filter on outreach_status makes Postgres skip protected rows
+        // (responded, do_not_contact). The same condition is mirrored locally.
+        try {
+          await sb.from('contacts')
+            .update({ outreach_status: 'reached_out' })
+            .in('id', ids)
+            .in('outreach_status', ['cold','unresponsive']);
+          for (const id of ids) {
+            const cIdx = contactStore.findIndex(c => c.id === id);
+            if (cIdx > -1) {
+              const cur = contactStore[cIdx].outreachStatus;
+              if (cur === 'cold' || cur === 'unresponsive') {
+                contactStore[cIdx].outreachStatus = 'reached_out';
+              }
+            }
+          }
+        } catch(e) {
+          console.warn('outreach_status auto-transition failed (non-fatal):', e);
         }
       }
     } catch(e) {
@@ -4476,6 +4499,16 @@ async function sendEmailContactModal() {
       ? '\u2705 Email sent to ' + recipients[0].email
       : '\u2705 Email sent to ' + recipients.length + ' contacts');
     closeEmailContactModal();
+    // Refresh views that depend on contact state (Due-for-Outreach chip counts,
+    // drawer pill/status). Safe to call even when those views aren't active —
+    // they return early if their root element isn't mounted.
+    try {
+      if (typeof renderClientsPanel === 'function') renderClientsPanel();
+      if (typeof renderClientDrawerBody === 'function'
+          && document.getElementById('clientDrawer')?.classList.contains('open')) {
+        renderClientDrawerBody();
+      }
+    } catch(e) { console.warn('post-send refresh failed (non-fatal):', e); }
   } else {
     toast('\u26A0 Send failed: ' + (errorMsg || 'Unknown error'));
     // Leave modal open so user can retry or copy their text

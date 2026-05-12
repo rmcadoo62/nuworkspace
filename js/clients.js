@@ -429,11 +429,68 @@ function openClientsPanel(el) {
 
 let _clientSearchQuery = '';
 let _clientsPanelView  = 'all'; // 'all' | 'outreach'
+let _outreachStatusFilter = 'all'; // 'all' | 'cold' | 'reached_out' | 'unresponsive'
+
+// ===== OUTREACH STATUS — Push 1 =====
+// Pill renderer for the 5 outreach states. Used in drawer contact rows.
+// Colors are tuned for both light and dark mode by leaning on the existing
+// CSS variables for amber/green/red and using neutral-with-alpha for cold.
+function renderOutreachStatusPill(status, lastActiveAt) {
+  const cfg = {
+    cold:           { label: 'cold',           bg: 'rgba(136,135,128,0.15)', fg: 'var(--muted)' },
+    reached_out:    { label: 'reached out',    bg: 'rgba(232,162,52,0.15)',  fg: 'var(--amber)' },
+    unresponsive:   { label: 'unresponsive',   bg: 'rgba(208,64,64,0.10)',   fg: '#c97070' },
+    active:         { label: 'active',         bg: 'rgba(46,158,98,0.15)',   fg: 'var(--green)' },
+    do_not_contact: { label: 'do not contact', bg: 'rgba(208,64,64,0.20)',   fg: 'var(--red)' },
+  };
+  const c = cfg[status] || cfg.cold;
+  const pill = `<span style="display:inline-flex;align-items:center;font-size:10.5px;font-weight:500;padding:2px 9px;border-radius:11px;background:${c.bg};color:${c.fg};white-space:nowrap;line-height:1.4;font-family:'DM Sans',sans-serif">${c.label}</span>`;
+  if (status === 'active' && lastActiveAt) {
+    const d = new Date(lastActiveAt).toLocaleDateString('en-US', { month:'short', day:'numeric' });
+    return pill + `<span style="font-size:10.5px;color:var(--muted);font-weight:400;margin-left:6px" title="Last marked active">&middot; ${d}</span>`;
+  }
+  return pill;
+}
+
+// Mark a contact as active. Sets status=active + last_active_at=now().
+// Used when a contact engages (replies, hands over a PO, joins a call, etc.)
+// where there's no other automatic trigger.
+async function markContactActive(id) {
+  const ct = contactStore.find(c => c.id === id);
+  if (!ct) return;
+  const nowIso = new Date().toISOString();
+  ct.outreachStatus = 'active';
+  ct.lastActiveAt = nowIso;
+  if (sb) {
+    try {
+      await sb.from('contacts').update({
+        outreach_status: 'active',
+        last_active_at: nowIso,
+      }).eq('id', id);
+    } catch(e) {
+      console.warn('markContactActive DB update failed:', e);
+      toast('⚠ Could not save — try again');
+      return;
+    }
+  }
+  toast('✓ Marked as active');
+  // Re-render both layers — chip counts live in the outer panel, pill/notes
+  // live in the drawer. Skipping the panel refresh when the drawer is open
+  // (the previous behavior) left chip counts stale.
+  if (typeof renderClientsPanel === 'function') renderClientsPanel();
+  if (document.getElementById('clientDrawer')?.classList.contains('open')) {
+    renderClientDrawerBody();
+  }
+}
 
 // Compute contacts that are "due for outreach": have a valid email, not
 // recently contacted (>6 months OR never), and the client has no open
 // projects. Returns an array sorted by stalest-first.
-function _computeOutreachQueue() {
+// Outreach Status — Push 1: do_not_contact and active are always excluded
+// from the queue (active = currently engaged, doesn't need outreach).
+// If statusFilter is supplied (cold|reached_out|unresponsive), the queue
+// is further narrowed to that status; 'all' applies no status filter.
+function _computeOutreachQueue(statusFilter) {
   const SIX_MONTHS_MS = 180 * 24 * 60 * 60 * 1000;
   const now = Date.now();
 
@@ -448,10 +505,15 @@ function _computeOutreachQueue() {
   return contactStore.filter(ct => {
     if (!ct.email || !ct.email.trim()) return false;       // must have email
     if (ct.emailInvalid) return false;                     // bounced/invalid
+    if (ct.outreachStatus === 'do_not_contact') return false; // opt-out
+    if (ct.outreachStatus === 'active') return false;      // currently engaged — not due
     if (openByClient[ct.clientId]) return false;           // active relationship
     if (ct.lastEmailAt) {
       const lastMs = new Date(ct.lastEmailAt).getTime();
       if (lastMs > now - SIX_MONTHS_MS) return false;      // recently emailed
+    }
+    if (statusFilter && statusFilter !== 'all') {
+      if ((ct.outreachStatus || 'cold') !== statusFilter) return false;
     }
     return true;
   });
@@ -655,7 +717,7 @@ function _renderOutreachQueue(contacts, q) {
     const pillOut   = "this.style.borderColor='var(--border)';this.style.color='var(--text)'";
     jumpNav = `<div style="position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;padding:8px 0;margin-bottom:8px;background:var(--bg)">
       <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-right:4px">Jump to:</span>
-      <button onclick="window.scrollTo({top:0,behavior:'smooth'})" onmouseover="${pillHover}" onmouseout="${pillOut}" style="${pillStyle}">&#x2191; Top</button>
+      <button onclick="(document.getElementById('outreach-filter-bar')||document.getElementById('clientsPanelBody'))?.scrollIntoView({behavior:'smooth',block:'start'})" onmouseover="${pillHover}" onmouseout="${pillOut}" style="${pillStyle}">&#x2191; Top</button>
       <button onclick="document.getElementById('outreach-grp-customers').scrollIntoView({behavior:'smooth',block:'start'})" onmouseover="${pillHover}" onmouseout="${pillOut}" style="${pillStyle}">Past customers <span style="color:var(--muted)">${customerCount}</span></button>
       <button onclick="document.getElementById('outreach-grp-prospects').scrollIntoView({behavior:'smooth',block:'start'})" onmouseover="${pillHover}" onmouseout="${pillOut}" style="${pillStyle}">Prospects <span style="color:var(--muted)">${prospectCount}</span></button>
     </div>`;
@@ -708,10 +770,20 @@ function renderClientsPanel(search) {
   const esc = s => (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   const colors = ['#c07a1a','#3a7fd4','#2e9e62','#7c5cbf','#d04040','#2d8a6e'];
 
-  // Compute Due-for-Outreach data only if the user has the capability
+  // Compute Due-for-Outreach data only if the user has the capability.
+  // Outreach Status — Push 1: compute unfiltered set once, bucket by status
+  // for chip counts, then narrow to the active filter for display.
   const canSendEmail = (typeof can === 'function') ? can('send_client_email') : true;
-  const outreachContacts = canSendEmail ? _computeOutreachQueue() : [];
-  const outreachCount = outreachContacts.length;
+  const outreachAll = canSendEmail ? _computeOutreachQueue('all') : [];
+  const outreachCounts = { all: outreachAll.length, cold: 0, reached_out: 0, unresponsive: 0 };
+  for (const ct of outreachAll) {
+    const s = ct.outreachStatus || 'cold';
+    if (outreachCounts[s] !== undefined) outreachCounts[s]++;
+  }
+  const outreachContacts = (_outreachStatusFilter === 'all')
+    ? outreachAll
+    : outreachAll.filter(ct => (ct.outreachStatus || 'cold') === _outreachStatusFilter);
+  const outreachCount = outreachAll.length;
 
   // If user lost permission but is viewing the outreach tab, snap back to All
   if (!canSendEmail && _clientsPanelView === 'outreach') _clientsPanelView = 'all';
@@ -728,7 +800,23 @@ function renderClientsPanel(search) {
   // Render the content area — either the All-Clients grid or the Outreach queue
   let contentHtml;
   if (_clientsPanelView === 'outreach' && canSendEmail) {
-    contentHtml = _renderOutreachQueue(outreachContacts, q);
+    // Outreach Status filter chip bar — sits above the existing customers/prospects split.
+    // Bar has an anchor ID so the Top button in the queue's jump-nav can scroll to it.
+    const chipFor = (key, label) => {
+      const active = _outreachStatusFilter === key;
+      const count = outreachCounts[key] || 0;
+      return `<button onclick="_outreachStatusFilter='${key}';renderClientsPanel()"
+        style="font-size:12px;padding:5px 12px;border-radius:14px;border:1px solid ${active?'var(--amber)':'var(--border)'};background:${active?'var(--amber)':'transparent'};color:${active?'var(--bg)':'var(--muted)'};cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:500;white-space:nowrap"
+        >${label} <span style="opacity:0.75;margin-left:4px;font-size:11px">${count}</span></button>`;
+    };
+    const filterBar = `<div id="outreach-filter-bar" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 14px 0;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;scroll-margin-top:60px">
+      <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px;margin-right:4px;font-weight:500">Status</span>
+      ${chipFor('all','All due')}
+      ${chipFor('cold','Cold')}
+      ${chipFor('reached_out','Reached out')}
+      ${chipFor('unresponsive','Unresponsive')}
+    </div>`;
+    contentHtml = filterBar + _renderOutreachQueue(outreachContacts, q);
   } else {
     contentHtml = `<div class="client-grid">
       ${filtered.map(c => {
@@ -945,17 +1033,24 @@ function renderClientDrawerBody() {
             emailBtnHtml = `<button class="client-action-btn" ${onclick} title="${tip}" style="${styleParts.join(';')}" ${disabled?'disabled':''}>&#x2709;</button>`;
           }
 
-          return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px">
-            <div style="width:38px;height:38px;border-radius:50%;background:var(--amber);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0">${initials}</div>
-            <div style="flex:1">
-              <div style="font-size:13.5px;font-weight:600;color:var(--text)">${ct.firstName} ${ct.lastName}</div>
-              ${ct.title ? `<div style="font-size:12px;color:var(--muted)">${ct.title}</div>` : ''}
-              ${ct.email ? `<div style="font-size:12px;color:var(--blue)">${ct.email}${ct.emailInvalid ? ' <span style=\"color:var(--red);font-size:10px;font-weight:600\">⚠ INVALID</span>' : ''}</div>` : ''}
-              ${ct.phone ? `<div style="font-size:12px;color:var(--muted)">${ct.phone}</div>` : ''}
+          return `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:8px;display:flex;align-items:flex-start;gap:12px">
+            <div style="width:38px;height:38px;border-radius:50%;background:var(--amber);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0;margin-top:2px">${initials}</div>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="font-size:13.5px;font-weight:600;color:var(--text)">${ct.firstName} ${ct.lastName}</span>
+                ${renderOutreachStatusPill(ct.outreachStatus || 'cold', ct.lastActiveAt)}
+              </div>
+              ${ct.title ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">${ct.title}</div>` : ''}
+              ${ct.email ? `<div style="font-size:12px;color:var(--blue);margin-top:2px">${ct.email}${ct.emailInvalid ? ' <span style=\"color:var(--red);font-size:10px;font-weight:600\">⚠ INVALID</span>' : ''}</div>` : ''}
+              ${ct.phone ? `<div style="font-size:12px;color:var(--muted);margin-top:2px">${ct.phone}</div>` : ''}
+              ${(ct.outreachNotes && ct.outreachNotes.trim()) ? `<div style="font-size:11.5px;color:var(--muted);font-style:italic;margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);line-height:1.4;white-space:pre-wrap;word-wrap:break-word">${(ct.outreachNotes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}</div>` : ''}
             </div>
-            ${emailBtnHtml}
-            <button class="client-action-btn" onclick="openContactModal('${ct.id}')" title="Edit">&#x270E;</button>
-            ${can('delete_contacts') ? `<button class="client-action-btn" onclick="deleteContact('${ct.id}')" title="Delete">&#x2715;</button>` : ''}
+            <div style="display:flex;align-items:center;gap:4px;flex-shrink:0">
+              ${(ct.outreachStatus === 'reached_out' || ct.outreachStatus === 'unresponsive') ? `<button class="client-action-btn" onclick="markContactActive('${ct.id}')" title="Mark as active — they engaged" style="color:var(--green);font-size:11px;font-weight:600;padding:4px 10px;border:1px solid rgba(46,158,98,0.35);border-radius:5px;line-height:1;background:transparent;cursor:pointer;font-family:'DM Sans',sans-serif">&check; Active</button>` : ''}
+              ${emailBtnHtml}
+              <button class="client-action-btn" onclick="openContactModal('${ct.id}')" title="Edit">&#x270E;</button>
+              ${can('delete_contacts') ? `<button class="client-action-btn" onclick="deleteContact('${ct.id}')" title="Delete">&#x2715;</button>` : ''}
+            </div>
           </div>`;
         }).join('')}`;
 
@@ -1547,6 +1642,35 @@ function openContactModal(id, clientId) {
   document.getElementById('ctTitle').value     = ct ? (ct.title||'') : '';
   document.getElementById('ctEmail').value     = ct ? ct.email     : '';
   document.getElementById('ctPhone').value     = ct ? (ct.phone||'') : '';
+
+  // Outreach Status — Push 1: inject status dropdown + notes textarea once.
+  // Anchored after the phone field's wrapping container; defensive across
+  // class-name conventions (form-group / form-field / .field / .row).
+  if (!document.getElementById('ctOutreachStatus')) {
+    const phoneEl = document.getElementById('ctPhone');
+    const anchor = phoneEl.closest('.form-group, .form-field, .field, .form-row, .row') || phoneEl.parentNode;
+    const injected = document.createElement('div');
+    injected.id = 'ctOutreachFieldsWrap';
+    injected.innerHTML = `
+      <div class="form-group" style="margin-top:12px">
+        <label class="f-label" style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:5px;font-weight:500">Outreach status</label>
+        <select id="ctOutreachStatus" class="f-input" style="width:100%;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px">
+          <option value="cold">Cold — never contacted</option>
+          <option value="reached_out">Reached out — awaiting reply</option>
+          <option value="unresponsive">Unresponsive — tried, no reply</option>
+          <option value="active">Active — engaged / current customer</option>
+          <option value="do_not_contact">Do not contact</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin-top:12px">
+        <label class="f-label" style="display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.6px;margin-bottom:5px;font-weight:500">Notes</label>
+        <textarea id="ctNotes" class="f-input" rows="3" placeholder="Short context — e.g. consolidating vendors, prefers calls, etc." style="width:100%;padding:8px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;resize:vertical;min-height:60px;line-height:1.4"></textarea>
+      </div>`;
+    anchor.parentNode.insertBefore(injected, anchor.nextSibling);
+  }
+  document.getElementById('ctOutreachStatus').value = ct ? (ct.outreachStatus || 'cold') : 'cold';
+  document.getElementById('ctNotes').value          = ct ? (ct.outreachNotes || '') : '';
+
   // If the client drawer is open, hide it while the contact modal is up so it
   // can't visually compete or steal clicks (its transform creates a stacking
   // context that z-index doesn't reliably beat). The drawer's internal state
@@ -1581,25 +1705,65 @@ async function saveContactModal() {
   const title    = document.getElementById('ctTitle').value.trim();
   const email    = document.getElementById('ctEmail').value.trim();
   const phone    = document.getElementById('ctPhone').value.trim();
+  const outreachStatus = (document.getElementById('ctOutreachStatus')||{}).value || 'cold';
+  const outreachNotes  = ((document.getElementById('ctNotes')||{}).value || '').trim();
   closeContactModal();
-  await saveContactRecord(_contactModalId, _contactModalClientId, firstName, lastName, email, phone, title);
+  await saveContactRecord(_contactModalId, _contactModalClientId, firstName, lastName, email, phone, title, outreachStatus, outreachNotes);
 }
 
-async function saveContactRecord(id, clientId, firstName, lastName, email, phone, title) {
+async function saveContactRecord(id, clientId, firstName, lastName, email, phone, title, outreachStatus, outreachNotes) {
+  // Outreach Status — Push 1: status defaults to current value (or 'cold' for new).
+  // If user manually moves to 'active' via the dropdown, stamp last_active_at
+  // unless one is already set (don't clobber a previous timestamp).
+  const ctExisting = id ? contactStore.find(x => x.id === id) : null;
+  const prevStatus = ctExisting ? (ctExisting.outreachStatus || 'cold') : 'cold';
+  const finalStatus = outreachStatus || prevStatus || 'cold';
+  let lastActiveAtToWrite = ctExisting ? ctExisting.lastActiveAt : null;
+  if (finalStatus === 'active' && prevStatus !== 'active' && !lastActiveAtToWrite) {
+    lastActiveAtToWrite = new Date().toISOString();
+  }
+  const notesValue = (outreachNotes || '').trim();
+
   if (id) {
     const ct = contactStore.find(x => x.id === id);
-    if (ct) { ct.firstName = firstName; ct.lastName = lastName; ct.email = email; ct.phone = phone||''; ct.title = title||''; }
-    if (sb) await dbUpdate('contacts', id, { first_name: firstName, last_name: lastName, email: email||null, phone: phone||null, title: title||null });
+    if (ct) {
+      ct.firstName = firstName; ct.lastName = lastName; ct.email = email; ct.phone = phone||''; ct.title = title||'';
+      ct.outreachStatus = finalStatus;
+      ct.outreachNotes  = notesValue;
+      ct.lastActiveAt   = lastActiveAtToWrite;
+    }
+    if (sb) await dbUpdate('contacts', id, {
+      first_name: firstName, last_name: lastName, email: email||null, phone: phone||null, title: title||null,
+      outreach_status: finalStatus,
+      outreach_notes:  notesValue || null,
+      last_active_at:  lastActiveAtToWrite,
+    });
     toast('Contact updated');
   } else {
-    const row = { client_id: clientId, first_name: firstName, last_name: lastName, email: email||null, title: title||null };
+    const row = {
+      client_id: clientId, first_name: firstName, last_name: lastName,
+      email: email||null, title: title||null, phone: phone||null,
+      outreach_status: finalStatus,
+      outreach_notes:  notesValue || null,
+      last_active_at:  lastActiveAtToWrite,
+    };
     const saved = sb ? await dbInsert('contacts', row) : null;
     const newId = saved ? saved.id : 'local-' + Date.now();
-    contactStore.push({ id: newId, clientId, firstName, lastName, email, title: title||'' });
+    contactStore.push({
+      id: newId, clientId, firstName, lastName, email, title: title||'', phone: phone||'',
+      outreachStatus: finalStatus, outreachNotes: notesValue, lastActiveAt: lastActiveAtToWrite,
+    });
     window._lastNewContactId = newId;
     toast('Contact added');
   }
   renderClientsPanel('');
+  // Outreach Status — Push 1: also refresh the drawer body if it's the
+  // contact's host client and the drawer is open, so the pill/notes/Mark
+  // Active button reflect the edit immediately.
+  if (typeof renderClientDrawerBody === 'function'
+      && document.getElementById('clientDrawer')?.classList.contains('open')) {
+    renderClientDrawerBody();
+  }
   // After-save hooks: refresh project contact picker, or reopen the Email
   // Contact modal in whichever mode it was opened from.
   if (window._afterContactSaveProjId || window._afterContactSaveClientId) {
