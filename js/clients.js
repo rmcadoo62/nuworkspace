@@ -627,13 +627,13 @@ function _renderOutreachQueue(contacts, q) {
 
   let body = '';
   if (customerCount > 0) {
-    body += `<div style="margin-bottom:28px">
+    body += `<div id="outreach-grp-customers" style="margin-bottom:28px;scroll-margin-top:60px">
       ${subgroupHeader('Past customers — oldest job first', customerCount)}
       ${customerIds.map(cid => buildClientSection(cid, false)).join('')}
     </div>`;
   }
   if (prospectCount > 0) {
-    body += `<div>
+    body += `<div id="outreach-grp-prospects" style="scroll-margin-top:60px">
       ${subgroupHeader('Prospects — never had a job', prospectCount)}
       ${prospectIds.map(cid => buildClientSection(cid, true)).join('')}
     </div>`;
@@ -647,10 +647,25 @@ function _renderOutreachQueue(contacts, q) {
   if (prospectCount > 0) breakdownParts.push(`<strong>${prospectCount}</strong> prospect${prospectCount!==1?'s':''}`);
   const breakdown = breakdownParts.length > 0 ? ' — ' + breakdownParts.join(' · ') : '';
 
+  // Sticky jump-nav (only when both sub-groups exist; otherwise no need)
+  let jumpNav = '';
+  if (customerCount > 0 && prospectCount > 0) {
+    const pillStyle = "background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:4px 12px;font-size:11px;color:var(--text);cursor:pointer;font-family:inherit;transition:all .12s";
+    const pillHover = "this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'";
+    const pillOut   = "this.style.borderColor='var(--border)';this.style.color='var(--text)'";
+    jumpNav = `<div style="position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:8px;padding:8px 0;margin-bottom:8px;background:var(--bg)">
+      <span style="font-size:10px;font-weight:700;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-right:4px">Jump to:</span>
+      <button onclick="window.scrollTo({top:0,behavior:'smooth'})" onmouseover="${pillHover}" onmouseout="${pillOut}" style="${pillStyle}">&#x2191; Top</button>
+      <button onclick="document.getElementById('outreach-grp-customers').scrollIntoView({behavior:'smooth',block:'start'})" onmouseover="${pillHover}" onmouseout="${pillOut}" style="${pillStyle}">Past customers <span style="color:var(--muted)">${customerCount}</span></button>
+      <button onclick="document.getElementById('outreach-grp-prospects').scrollIntoView({behavior:'smooth',block:'start'})" onmouseover="${pillHover}" onmouseout="${pillOut}" style="${pillStyle}">Prospects <span style="color:var(--muted)">${prospectCount}</span></button>
+    </div>`;
+  }
+
   return `<div style="margin-top:8px">
     <div style="margin-bottom:14px;padding:10px 14px;background:var(--surface2);border-left:3px solid var(--amber);border-radius:4px;font-size:12.5px;color:var(--text);line-height:1.5">
       <strong>${totalContacts}</strong> contact${totalContacts!==1?'s':''} at <strong>${totalClients}</strong> client${totalClients!==1?'s':''}${q ? ' matching your search' : ''}${breakdown}. These haven't been emailed via NUWorkspace in the last 6 months and their client has no open projects.
     </div>
+    ${jumpNav}
     ${body}
   </div>`;
 }
