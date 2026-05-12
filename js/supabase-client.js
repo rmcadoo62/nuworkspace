@@ -168,7 +168,8 @@ async function loadAllData() {
     // Projects
     projects = projRows.map(r => ({
       id: r.id, name: r.name, color: r.color, emoji: r.emoji, desc: r.description || '', description: r.description || '',
-      createdAt: r.created_at ? r.created_at.split('T')[0] : ''
+      createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+      skip_survey: r.skip_survey === true   // Carry through so the Customer Surveys eligibility filter works after a full reload
     }));
 
     // Project info
@@ -557,7 +558,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'projects' }, payload => {
       const r = payload.new;
       if (!projects.find(p => p.id === r.id)) {
-        projects.push({ id: r.id, name: r.name, color: r.color, emoji: r.emoji||'📁', desc: r.description||'' });
+        projects.push({ id: r.id, name: r.name, color: r.color, emoji: r.emoji||'📁', desc: r.description||'', skip_survey: r.skip_survey === true });
         toast('📁 New project: ' + r.name);
         refreshCurrentView();
       }
@@ -565,7 +566,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'projects' }, payload => {
       const r = payload.new;
       const p = projects.find(x => x.id === r.id);
-      if (p) { p.name = r.name; p.color = r.color; p.emoji = r.emoji||p.emoji; p.desc = r.description||''; }
+      if (p) { p.name = r.name; p.color = r.color; p.emoji = r.emoji||p.emoji; p.desc = r.description||''; p.skip_survey = r.skip_survey === true; }
       refreshCurrentView();
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'projects' }, payload => {
