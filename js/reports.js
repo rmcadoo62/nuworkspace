@@ -1791,12 +1791,27 @@ async function renderClosingReport() {
       const tasks = taskStore.filter(t => t.proj === p.id);
       const openTasks = tasks.filter(t => !['complete', 'billed', 'cancelled'].includes(t.status));
       const readyToBill = tasks.filter(t => t.status === 'complete').reduce((s, t) => s + (t.fixedPrice || 0), 0);
-      return { p, info, days, openTasks, readyToBill };
+
+      // Most recent task close date — complete/billed only, cancelled excluded.
+      // Falls back to testcompleteDate if no dated closures exist.
+      const closeDates = tasks
+        .filter(t => t.status === 'complete' || t.status === 'billed')
+        .map(t => t.billedDate || t.completedDate)
+        .filter(Boolean);
+      const lastTaskClose = closeDates.length ? closeDates.sort().slice(-1)[0] : info.testcompleteDate;
+      const daysSinceLastClose = daysSince(lastTaskClose);
+
+      return { p, info, days, openTasks, readyToBill, lastTaskClose, daysSinceLastClose };
     })
     .sort((a, b) => (b.days || 0) - (a.days || 0));
 
-  const over60  = tcRows.filter(r => r.days !== null && r.days >= 60);
-  const under60 = tcRows.filter(r => r.days === null || r.days < 60);
+  // Compound rule: 60d in testcomplete AND zero open tasks AND >=30d since last task closure.
+  const needsAttention = tcRows.filter(r =>
+    r.days !== null && r.days >= 60 &&
+    r.openTasks.length === 0 &&
+    r.daysSinceLastClose !== null && r.daysSinceLastClose >= 30
+  );
+  const tracking = tcRows.filter(r => !needsAttention.includes(r));
 
   // ── Ready to Close (status === 'complete') ───────────────────────────────
   const readyRows = projects
@@ -2024,8 +2039,8 @@ async function renderClosingReport() {
     // Summary chips
     '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px">' +
       '<div style="background:rgba(224,92,92,0.1);border:1px solid rgba(224,92,92,0.3);border-radius:10px;padding:12px 20px;min-width:120px">' +
-        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--red);margin-bottom:4px">60+ Days</div>' +
-        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + over60.length + '</div>' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--red);margin-bottom:4px">Needs Attention</div>' +
+        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + needsAttention.length + '</div>' +
       '</div>' +
       '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 20px;min-width:120px">' +
         '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Test Complete</div>' +
@@ -2041,16 +2056,17 @@ async function renderClosingReport() {
       '</div>' +
     '</div>' +
 
-    // ── Needs Attention (60+ days in testcomplete) ──
-    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--red);margin-bottom:10px">&#x26A0; Needs Attention — 60+ Days in Test Complete</div>' +
+    // ── Needs Attention (60d in testcomplete + all tasks closed + 30d cooled) ──
+    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--red);margin-bottom:4px">&#x26A0; Needs Attention — Eligible to Close</div>' +
+    '<div style="font-size:11px;color:var(--muted);margin-bottom:10px">60+ days in Test Complete · all tasks closed · last closure 30+ days ago</div>' +
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:28px">' +
-      buildTcTable(over60) +
+      buildTcTable(needsAttention) +
     '</div>' +
 
-    // ── Under 60 days (testcomplete) ──
-    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Under 60 Days — Test Complete</div>' +
+    // ── In Test Complete — Tracking (everything else in testcomplete) ──
+    '<div style="font-size:12px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">In Test Complete — Tracking</div>' +
     '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:28px">' +
-      buildTcTable(under60) +
+      buildTcTable(tracking) +
     '</div>' +
 
     // ── Ready to Close (complete status) ──
