@@ -1,11 +1,81 @@
 
 // ===== GLOBAL SEARCH =====
 // ===== GLOBAL SEARCH =====
+
+// ===== RECENT PICKS (search-box history) =====
+// Stored in localStorage. Storage is per-browser, not per-user — switching
+// machines means a fresh recents list. If cross-device sync becomes a need
+// later, swap the three _recents* functions below for Supabase calls; the
+// rest of the file stays as-is.
+const RECENTS_KEY = 'nuworkspace_search_recents';
+const RECENTS_MAX = 5;
+
+function _recentsRead() {
+  try { return JSON.parse(localStorage.getItem(RECENTS_KEY) || '[]'); }
+  catch { return []; }
+}
+function _recentsWrite(arr) {
+  try { localStorage.setItem(RECENTS_KEY, JSON.stringify(arr.slice(0, RECENTS_MAX))); }
+  catch (e) { console.warn('[recents] save failed', e); }
+}
+function _recentsEsc(s) {
+  // Defensive: recents can be tampered with in localStorage. Escape on render.
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function recordRecentPick(pick) {
+  if (!pick || !pick.type || !pick.id) return;
+  // Don't pollute the real user's history while impersonating
+  if (typeof isImpersonating === 'function' && isImpersonating()) return;
+  const recents = _recentsRead().filter(r => !(r.type === pick.type && r.id === pick.id));
+  recents.unshift({
+    type: pick.type,
+    id:   pick.id,
+    proj: pick.proj || null,
+    label: pick.label || '',
+    icon:  pick.icon  || '',
+    sub:   pick.sub   || '',
+    picked_at: Date.now()
+  });
+  _recentsWrite(recents);
+}
+
+function getRecentsForDisplay() {
+  // Filter stale entries whose underlying entity no longer exists in memory
+  return _recentsRead().filter(r => {
+    if (r.type === 'project') return typeof projects    !== 'undefined' && projects.some(p => p.id === r.id);
+    if (r.type === 'task')    return typeof taskStore   !== 'undefined' && taskStore.some(t => t._id === r.id);
+    if (r.type === 'client')  return typeof clientStore !== 'undefined' && clientStore.some(c => c.id === r.id);
+    return false;
+  });
+}
+
+function _renderRecentsHtml(recents) {
+  // No section label — visual absence signals "these are your recents, not a search"
+  let html = '<div class="gs-section">';
+  recents.forEach(r => {
+    const projAttr = r.proj ? ' data-proj="' + _recentsEsc(r.proj) + '"' : '';
+    html += '<div class="gs-item" data-action="' + _recentsEsc(r.type) + '" data-id="' + _recentsEsc(r.id) + '"' + projAttr + '>' +
+      '<span class="gs-item-icon">' + _recentsEsc(r.icon || '📁') + '</span>' +
+      '<div><div class="gs-item-main">' + _recentsEsc(r.label) + '</div>' +
+      (r.sub ? '<div class="gs-item-sub">' + _recentsEsc(r.sub) + '</div>' : '') +
+      '</div></div>';
+  });
+  html += '</div>';
+  return html;
+}
+
 function runGlobalSearch(q) {
   const res = document.getElementById('globalSearchResults');
   if (!res) return;
   q = (q||'').trim().toLowerCase();
-  if (!q) { res.classList.remove('open'); return; }
+  if (!q) {
+    const recents = getRecentsForDisplay();
+    if (!recents.length) { res.classList.remove('open'); return; }
+    res.innerHTML = _renderRecentsHtml(recents);
+    res.classList.add('open');
+    return;
+  }
 
   let html = '';
 
@@ -80,6 +150,11 @@ document.addEventListener('DOMContentLoaded', function() {
     const action = item.dataset.action;
     const id = item.dataset.id;
     const proj = item.dataset.proj;
+    // Capture display data from the DOM (cheaper than re-fetching from state stores)
+    const label = item.querySelector('.gs-item-main')?.textContent || '';
+    const icon  = item.querySelector('.gs-item-icon')?.textContent || '';
+    const sub   = item.querySelector('.gs-item-sub')?.textContent || '';
+    recordRecentPick({ type: action, id, proj, label, icon, sub });
     gsCloseSearch();
     if (action === 'project') {
       navToProject(id);
