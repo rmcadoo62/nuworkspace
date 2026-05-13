@@ -4332,9 +4332,10 @@ async function sendEmailContactModal() {
   let status = 'sent';
   let errorMsg = null;
 
-  // Resend needs a verified domain. Until apps.nulabs.com is set up,
-  // we piggyback on Jordan's verified vibrato.nulabs.com subdomain.
-  const SEND_DOMAIN = 'vibrato.nulabs.com';
+  // Resend requires sending from a verified domain. mail.nulabs.com is our
+  // dedicated transactional-mail subdomain (send-only; not a real mailbox —
+  // replies are routed via reply_to to the user's real @nulabs.com inbox).
+  const SEND_DOMAIN = 'mail.nulabs.com';
   const realEmail = currentEmployee.email;
   const localPart = realEmail.split('@')[0];
   const fromEmail = localPart + '@' + SEND_DOMAIN;
