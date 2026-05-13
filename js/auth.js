@@ -1176,6 +1176,10 @@ function applyPermissions() {
   // surveys.js bails fast if the user lacks view_surveys, so this is safe
   // to call unconditionally.
   if (typeof refreshSurveysBadge === 'function') refreshSurveysBadge();
+
+  // After every individual nav-item has had its visibility set, collapse
+  // any sections (and the Vibrato brand) whose contents are entirely hidden.
+  _autoCollapseNavSections();
 }
 
 function applySchedAccessToNav() {
@@ -1229,6 +1233,44 @@ function _applyIdentityNav() {
   if (navApp) navApp.style.display = isApprover ? 'flex' : 'none';
   const navTs = document.getElementById('navTimesheetItem');
   if (navTs) navTs.style.display = (currentEmployee && currentEmployee.isOwner) ? 'none' : 'flex';
+
+  // Issue Tracker — gate on currentEmployee.email (not currentUser.email) so
+  // that View-As mode correctly hides it: when Russ views as Kevin, currentUser
+  // remains Russ but currentEmployee switches to Kevin, and Kevin should not
+  // see admin-only items. feedback.js's updateIssueBadge() still runs on its
+  // own load path; this is the authoritative gate for identity changes.
+  const navIssueTracker = document.getElementById('navIssueTracker');
+  if (navIssueTracker) {
+    const eEmail = (currentEmployee && currentEmployee.email || '').toLowerCase();
+    navIssueTracker.style.display = (eEmail === 'rmcadoo@nulabs.com') ? 'flex' : 'none';
+  }
+
+  // After identity-dependent items are set, collapse any sections that no
+  // longer have visible children (and hide the Vibrato brand if Quotes is off).
+  if (typeof _autoCollapseNavSections === 'function') _autoCollapseNavSections();
+}
+
+// Hide orphan section labels (REPORTS, COMPLIANCE, SETUP) and the Vibrato
+// brand image when the items they group are all hidden. Runs at the tail end
+// of applyPermissions() and _applyIdentityNav() so it sees the final state
+// of every nav-item's display. Idempotent — safe to call multiple times.
+function _autoCollapseNavSections() {
+  // 1) Vibrato brand image — tie visibility to the Quotes nav item below it.
+  const navQuotes     = document.getElementById('navQuotes');
+  const vibratoBrand  = document.getElementById('vibratoBrand');
+  if (vibratoBrand && navQuotes) {
+    const hidden = navQuotes.style.display === 'none';
+    vibratoBrand.style.display = hidden ? 'none' : '';
+  }
+
+  // 2) Each sidebar .nav-section — hide the whole section (which includes
+  //    its .nav-label) when every .nav-item inside is display:none.
+  document.querySelectorAll('.sidebar .nav-section').forEach(section => {
+    const items = section.querySelectorAll('.nav-item');
+    if (items.length === 0) return; // no nav-items to gate on; leave alone
+    const anyVisible = Array.from(items).some(item => item.style.display !== 'none');
+    section.style.display = anyVisible ? '' : 'none';
+  });
 }
 
 function startViewAs(empId) {
