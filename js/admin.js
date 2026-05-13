@@ -2009,6 +2009,7 @@ const CAPABILITY_DEFS = [
   { key: 'view_clients',       label: 'View Clients',          group: 'Clients' },
   { key: 'view_dashboard',     label: 'View Dashboard',        group: 'Reports' },
   { key: 'view_reports',       label: 'View Reports',          group: 'Reports' },
+  { key: 'view_closing_report',label: 'View Closing Report',   group: 'Reports' },
   { key: 'view_billing',       label: 'View Billing Queue',    group: 'Reports' },
   { key: 'view_quotes',        label: 'View Quotes (Vibrato)', group: 'Reports' },
   { key: 'view_surveys',       label: 'View Customer Surveys', group: 'Reports' },

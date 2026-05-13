@@ -48,7 +48,16 @@ function can(capability) {
   // If employee has a role assigned, check its capabilities
   if (currentEmployee.roleId && permissionRoles.length) {
     const role = permissionRoles.find(r => r.id === currentEmployee.roleId);
-    if (role) return !!(role.capabilities[capability]);
+    if (role) {
+      // Auto-inherit: view_closing_report was added after view_reports existed,
+      // so any role with no explicit value should inherit from view_reports.
+      // Once the new checkbox is toggled in the Permissions panel, that explicit
+      // setting (true OR false) takes precedence over this fallback.
+      if (capability === 'view_closing_report' && role.capabilities[capability] === undefined) {
+        return !!(role.capabilities.view_reports);
+      }
+      return !!(role.capabilities[capability]);
+    }
   }
   // Fallback: map old permissionLevel to capabilities
   const mgr = currentEmployee.permissionLevel === 'manager';
@@ -62,7 +71,7 @@ function can(capability) {
     view_schedule: true, edit_schedule: true, view_cmmc: true,
     view_hours: true, view_expenses: mgr, view_invoicing: mgr,
     view_proj_shipping: true, view_clients: mgr, view_quotes: mgr,
-    view_surveys: mgr,
+    view_surveys: mgr, view_closing_report: mgr,
   };
   return !!(fallbacks[capability]);
 }
@@ -1098,7 +1107,7 @@ function applyPermissions() {
   const navRep = document.getElementById('navReports');
   if (navRep) navRep.style.display = can('view_reports') ? 'flex' : 'none';
   const navClosing = document.getElementById('navClosingReport');
-  if (navClosing) navClosing.style.display = can('view_reports') ? 'flex' : 'none';
+  if (navClosing) navClosing.style.display = can('view_closing_report') ? 'flex' : 'none';
   const navSurveys = document.getElementById('navCustomerSurveys');
   if (navSurveys) navSurveys.style.display = can('view_surveys') ? 'flex' : 'none';
   const navCmmc = document.getElementById('navCompliance');
