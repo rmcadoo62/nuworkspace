@@ -709,7 +709,6 @@ function toggleNavFilterChip(group, value, el) {
   renderProjectNav();
   updateNavFilterDot();
   if (document.getElementById('panel-projects')?.classList.contains('active')) renderProjectsTable();
-  document.getElementById('allBadge').textContent = projects.length;
   updateProjViewsLabel();
 }
 
@@ -997,7 +996,6 @@ function toggleNavFilterChip(group, value, el) {
   renderProjectNav();
   updateNavFilterDot();
   if (document.getElementById('panel-projects')?.classList.contains('active')) renderProjectsTable();
-  document.getElementById('allBadge').textContent = projects.length;
 }
 
 function clearNavFilter() {
@@ -1031,8 +1029,6 @@ function updateNavFilterDot() {
 
 function renderProjectNav(){
   // Sidebar project list removed — projects now shown in table view
-  const badge = document.getElementById('allBadge');
-  if (badge) badge.textContent = projects.length;
   updateNavFilterDot();
   if (document.getElementById('panel-projects')?.classList.contains('active')) renderProjectsTable();
 }
