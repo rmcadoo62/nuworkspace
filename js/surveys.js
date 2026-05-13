@@ -1609,7 +1609,8 @@
       return;
     }
     badge.textContent = count;
-    badge.style.display = count > 0 ? 'inline-block' : 'none';
+    badge.style.display = '';                              // unhide if perm-check previously hid it
+    badge.classList.toggle('has-items', count > 0);        // amber when >0, muted when 0
   }
 
   window.refreshSurveysBadge = async function () {
