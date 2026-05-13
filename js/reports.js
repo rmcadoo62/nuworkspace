@@ -709,7 +709,6 @@ function renderInProgressReport() {
 
   // Summary stats
   const totalCount = ipTasks.length;
-  const overdueCount = ipTasks.filter(t => t.overdue && !t.done).length;
   const totalValue = ipTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
   const projectCount = new Set(ipTasks.map(t => t.projId)).size;
 
@@ -812,10 +811,6 @@ function renderInProgressReport() {
         <div class="report-stat">
           <div class="report-stat-label">In-Progress Tasks</div>
           <div class="report-stat-val" style="color:#4caf7d">${totalCount}</div>
-        </div>
-        <div class="report-stat">
-          <div class="report-stat-label">Overdue</div>
-          <div class="report-stat-val" style="color:var(--red)">${overdueCount}</div>
         </div>
         <div class="report-stat">
           <div class="report-stat-label">Active Projects</div>
