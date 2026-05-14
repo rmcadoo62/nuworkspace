@@ -35,8 +35,6 @@
 <div id="loginScreen" style="display:none">
   <div class="login-box">
     <div class="login-logo">
-      <div style="font-family:'DM Sans',sans-serif;font-size:22px;font-weight:600;letter-spacing:2.5px;text-transform:uppercase;color:var(--text);line-height:1;margin-bottom:5px;">Workspace</div>
-      <div style="font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);line-height:1;margin-bottom:14px;">NUForce</div>
       <img src="https://images.squarespace-cdn.com/content/v1/4ffd78c424accf259206d1dc/1473195765839-Z06GZYUXTVC8DBAGVE1V/logo-shadowed.png" alt="NU Labs" />
     </div>
     <div class="login-title">Welcome to NUWorkspace</div>
@@ -66,9 +64,7 @@
   </div>
 </div>
 <div id="appLoader">
-  <div class="loader-logo" style="display:flex;flex-direction:column;align-items:center;gap:6px;margin-bottom:14px;">
-    <div style="font-family:'DM Sans',sans-serif;font-size:22px;font-weight:600;letter-spacing:2.5px;text-transform:uppercase;color:var(--text);line-height:1;">Workspace</div>
-    <div style="font-family:'DM Sans',sans-serif;font-size:12px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);line-height:1;margin-bottom:10px;">NUForce</div>
+  <div class="loader-logo" style="display:flex;flex-direction:column;align-items:center;margin-bottom:14px;">
     <img src="https://images.squarespace-cdn.com/content/v1/4ffd78c424accf259206d1dc/1473195765839-Z06GZYUXTVC8DBAGVE1V/logo-shadowed.png" alt="NU Labs" style="max-height:65px;object-fit:contain;" />
   </div>
   <div class="loader-sub">Loading your workspace…</div>
@@ -170,18 +166,24 @@
   <div class="nav-section">
     <div class="nav-item" id="navQuotes" onclick="openQuotesPanel(this)"><span class="icon">&#x1F4CB;</span> Quotes</div>
   </div>
+  <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Reports</div>
+  </div>
   <div class="nav-section">
-    <div class="nav-label">Reports</div>
     <div class="nav-item" id="navReports" onclick="openReportsPanel(this)"><span class="icon">&#x1F4CA;</span> Reports</div>
     <div class="nav-item" id="navClosingReport" onclick="openClosingReport(this)"><span class="icon">&#x1F4CB;</span> Closing Report <span class="nav-badge" id="closingBadge" style="display:none">0</span></div>
     <div class="nav-item" id="navCustomerSurveys" onclick="openSurveyQueuePanel(this)"><span class="icon survey-count" id="surveysBadge">0</span> Surveys</div>
   </div>
-  <div class="nav-section">
-    <div class="nav-label">Compliance</div>
-    <div class="nav-item" id="navCompliance" onclick="openCompliancePanel(this)"><span class="icon">&#x1F6E1;</span> CMMC 2.0</div>
+  <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Compliance</div>
   </div>
   <div class="nav-section">
-    <div class="nav-label">Setup</div>
+    <div class="nav-item" id="navCompliance" onclick="openCompliancePanel(this)"><span class="icon">&#x1F6E1;</span> CMMC 2.0</div>
+  </div>
+  <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Setup</div>
+  </div>
+  <div class="nav-section">
     <div class="nav-item" id="navSetup" onclick="openSetupPanel(this)"><span class="icon">&#x2699;</span> Setup</div>
     <div class="nav-item" id="navIssueTracker" style="display:none" onclick="openIssueTrackerPanel(this)"><span class="icon">&#x1F41B;</span> Issue Tracker <span class="nav-badge" id="issuesBadge" style="display:none">0</span></div>
   </div>
