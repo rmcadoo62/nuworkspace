@@ -47,27 +47,40 @@ function renderChatter(projId) {
     selfAv.style.color = '#fff';
   }
   const msgs = chatterMsgs(projId);
-  // Separate top-level from replies
+  // Index replies by parent id for O(1) child lookup at any depth
+  const childrenByParent = {};
+  msgs.forEach(m => {
+    if (m.replyTo) {
+      if (!childrenByParent[m.replyTo]) childrenByParent[m.replyTo] = [];
+      childrenByParent[m.replyTo].push(m);
+    }
+  });
+  // Top-level: messages with no replyTo (still newest-first; fetch already desc)
   const topLevel = msgs.filter(m => !m.replyTo);
-  const replies = msgs.filter(m => m.replyTo);
   if (!topLevel.length) {
     feed.innerHTML = '<div class="chatter-empty"><div class="chatter-empty-icon">\u{1F4AC}</div><div>No messages yet \u2014 start the conversation!</div></div>';
     return;
   }
+  // Recursively render a message and its descendants. Children within a thread
+  // are sorted OLDEST-FIRST so conversation reads top-down naturally; top-level
+  // stays newest-first so active threads bubble up.
+  function renderTree(m, depth) {
+    let html = chatterMsgHtml(m, depth);
+    const kids = (childrenByParent[m.id] || []).slice().sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    if (kids.length) {
+      html += '<div class="chatter-replies">';
+      kids.forEach(k => { html += renderTree(k, depth + 1); });
+      html += '</div>';
+    }
+    return html;
+  }
   let out = '';
   let lastDate = '';
-  // Newest first (fetch is already descending)
   topLevel.forEach(m => {
     const d = new Date(m.ts);
     const dateStr = d.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
     if (dateStr !== lastDate) { out += '<div class="chatter-date-divider">' + dateStr + '</div>'; lastDate = dateStr; }
-    out += chatterMsgHtml(m, false);
-    const kids = replies.filter(r => r.replyTo === m.id);
-    if (kids.length) {
-      out += '<div class="chatter-replies">';
-      kids.forEach(k => { out += chatterMsgHtml(k, true); });
-      out += '</div>';
-    }
+    out += renderTree(m, 0);
   });
   feed.innerHTML = out;
   feed.scrollTop = 0;
@@ -75,7 +88,8 @@ function renderChatter(projId) {
   updateChatterTabBadge(projId);
 }
 
-function chatterMsgHtml(m, isReply) {
+function chatterMsgHtml(m, depth) {
+  const isReply = depth > 0;
   const d = new Date(m.ts);
   const now = new Date();
   const sameYear = d.getFullYear() === now.getFullYear();
@@ -111,7 +125,7 @@ function chatterMsgHtml(m, isReply) {
       '</div>';
   } else {
     const textHtml = (m.text || '').replace(/\n/g,'<br>').replace(/@([\w][\w ]*?)(?=\s|$|<br>)/g, '<span class="mention">@$1</span>');
-    const replyBtn  = !isReply ? '<button class="chatter-action-btn" onclick="chatterStartReply(\x27' + m.id + '\x27,\x27' + (m.authorName||'').replace(/'/g,"\x27") + '\x27)">\u21A9 Reply</button>' : '';
+    const replyBtn  = '<button class="chatter-action-btn" onclick="chatterStartReply(\x27' + m.id + '\x27,\x27' + (m.authorName||'').replace(/'/g,"\x27") + '\x27)">\u21A9 Reply</button>';
     const editBtn   = isOwn  ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterEdit(\x27' + m.id + '\x27)">\u270E Edit</button>' : '';
     const deleteBtn = isOwn  ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterDelete(\x27' + m.id + '\x27)">\uD83D\uDDD1 Delete</button>' : '';
     bodyContent =
@@ -136,12 +150,42 @@ function chatterStartReply(msgId, authorName) {
   const lbl = document.getElementById('chatterReplyLabel');
   if (bar) bar.style.display = 'flex';
   if (lbl) lbl.textContent = 'Replying to ' + authorName;
+
+  // Pre-fill notify chips with the parent message's audience: parent author +
+  // parent's notifyIds, minus the current user (don't ping yourself). This
+  // REPLACES any pre-existing chip selections — the user can ✕ anyone they
+  // don't want before posting. The chip row is the single source of truth at
+  // post time.
+  const parentMsg = (chatterStore[activeProjectId] || []).find(m => m.id === msgId);
+  if (parentMsg) {
+    const myEmpId = (currentEmployee || employees.find(e => e.userId === currentUser?.id))?.id;
+    const parentAuthorEmpId = parentMsg.authorId
+      ? employees.find(e => e.userId === parentMsg.authorId)?.id
+      : null;
+    const preFill = [];
+    if (parentAuthorEmpId) preFill.push(parentAuthorEmpId);
+    (parentMsg.notifyIds || []).forEach(id => preFill.push(id));
+    chatterNotifySelected = [...new Set(preFill)].filter(id => id && id !== myEmpId);
+    chatterRenderNotifyChips();
+    const btn = document.getElementById('chatterNotifyBtn');
+    if (btn) {
+      btn.textContent = chatterNotifySelected.length ? '\uD83D\uDD14 Notify (' + chatterNotifySelected.length + ')' : '\uD83D\uDD14 Notify';
+      if (chatterNotifySelected.length) btn.classList.add('has-selections');
+      else btn.classList.remove('has-selections');
+    }
+  }
+
   document.getElementById('chatterInput')?.focus();
 }
 function chatterCancelReply() {
   chatterReplyTo = null;
   const bar = document.getElementById('chatterReplyBar');
   if (bar) bar.style.display = 'none';
+  // Clear the pre-filled chips so they don't bleed into the next non-reply post
+  chatterNotifySelected = [];
+  chatterRenderNotifyChips();
+  const btn = document.getElementById('chatterNotifyBtn');
+  if (btn) { btn.textContent = '\uD83D\uDD14 Notify'; btn.classList.remove('has-selections'); }
 }
 
 async function chatterDelete(msgId) {
@@ -216,27 +260,11 @@ async function chatterPost() {
   // Collect @mentioned employee ids
   const mentionedNames = [...text.matchAll(/@([\w][\w ]*?)(?=\s|$)/g)].map(m => m[1].toLowerCase());
   const mentionedIds = employees.filter(e => mentionedNames.some(n => e.name?.toLowerCase().startsWith(n))).map(e => e.id);
+  // Chip row (chatterNotifySelected) is the single source of truth for who gets
+  // notified. For replies, it is pre-filled in chatterStartReply with the
+  // parent's author + notifyIds (minus the current user), so we don't need to
+  // re-fetch the parent author here. The user has full control via the chips.
   let allNotifyIds = [...new Set([...mentionedIds, ...chatterNotifySelected])];
-  
-  // If this is a reply, also notify the original chatter author
-  if (chatterReplyTo && chatterReplyTo.id) {
-    try {
-      const { data: originalMsg } = await sb.from('chatter')
-        .select('author_id')
-        .eq('id', chatterReplyTo.id)
-        .single();
-      
-      if (originalMsg && originalMsg.author_id && originalMsg.author_id !== currentUser?.id) {
-        // Find the employee record for the original author
-        const originalAuthorEmp = employees.find(e => e.userId === originalMsg.author_id);
-        if (originalAuthorEmp && !allNotifyIds.includes(originalAuthorEmp.id)) {
-          allNotifyIds.push(originalAuthorEmp.id);
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching original chatter author:', error);
-    }
-  }
   const msg = {
     proj_id: activeProjectId,
     author_id: currentUser?.id || null,
