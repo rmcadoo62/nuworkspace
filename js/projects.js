@@ -58,11 +58,11 @@ const PROJ_COL_DEFS = [
   { key: 'tentativeTest', label: 'Tent. Test Date',      ptc: 'tenttest', default: false, width: '120px' },
   { key: 'testcomplete',  label: 'Test Comp. Date',      ptc: 'testcomp', default: false, width: '120px' },
   { key: 'dcas',          label: 'DCAS',                 ptc: 'dcas',     default: true,  width: '80px',
-    colorRule: ynCnfColor },
+    colorRule: dcasColor },
   { key: 'witness',       label: 'Cust. Witness',        ptc: 'witness',  default: false, width: '130px',
-    colorRule: ynCnfColor },
+    colorRule: witnessColor },
   { key: 'tpApproval',    label: 'TP Approval',          ptc: 'tpappr',   default: false, width: '100px',
-    colorRule: ynCnfColor },
+    colorRule: tpApprovalColor },
   { key: 'dpas',          label: 'DPAS',                 ptc: 'dpas',     default: false, width: '70px'  },
   { key: 'cui',           label: 'CUI',                  ptc: 'cui',      default: false, width: '80px'  },
   { key: 'creditHold',    label: 'Credit Hold',          ptc: 'credit',   default: false, width: '90px'  },
@@ -74,16 +74,31 @@ const PROJ_COL_DEFS = [
 ];
 
 // Color rule helpers — return {bg, color} or null
-// Palette: green = yes/CNF (confirmed), red = no. Matches existing status/phase tinting style.
-function ynCnfColor(v) {
+// Palette: green = good/confirmed, red = bad/warning, amber = partial. Matches existing status tinting style.
+const _COLOR_GREEN = { bg: 'rgba(46,158,98,0.15)',  color: '#2e9e62' };
+const _COLOR_RED   = { bg: 'rgba(208,64,64,0.12)',  color: '#d04040' };
+const _COLOR_AMBER = { bg: 'rgba(232,162,52,0.15)', color: '#e8a234' };
+
+// DCAS:        Yes=Red, No=none, CNF=Green
+function dcasColor(v) {
   const s = (v || '').toString().trim().toLowerCase();
-  if (!s || s === '—') return null;
-  if (s === 'yes' || s === 'y' || s === 'cnf' || s === 'confirmed') {
-    return { bg: 'rgba(46,158,98,0.15)', color: '#2e9e62' };
-  }
-  if (s === 'no' || s === 'n') {
-    return { bg: 'rgba(208,64,64,0.12)', color: '#d04040' };
-  }
+  if (s === 'yes' || s === 'y') return _COLOR_RED;
+  if (s === 'cnf' || s === 'confirmed') return _COLOR_GREEN;
+  return null;
+}
+// Customer Witness: Yes=Red, No=none, CNF=Green
+function witnessColor(v) {
+  const s = (v || '').toString().trim().toLowerCase();
+  if (s === 'yes' || s === 'y') return _COLOR_RED;
+  if (s === 'cnf' || s === 'confirmed') return _COLOR_GREEN;
+  return null;
+}
+// TP Approval: Yes=Green, No=Red, Partial=Yellow, Not Required=none
+function tpApprovalColor(v) {
+  const s = (v || '').toString().trim().toLowerCase();
+  if (s === 'yes' || s === 'y') return _COLOR_GREEN;
+  if (s === 'no'  || s === 'n') return _COLOR_RED;
+  if (s === 'partial') return _COLOR_AMBER;
   return null;
 }
 function inHouseColor(v) {
