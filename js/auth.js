@@ -1272,13 +1272,19 @@ function _autoCollapseNavSections() {
     vibratoBrand.style.display = hidden ? 'none' : '';
   }
 
-  // 2) Each sidebar .nav-section — hide the whole section (which includes
-  //    its .nav-label) when every .nav-item inside is display:none.
+  // 2) Each sidebar .nav-section — hide the whole section AND its preceding
+  //    .brand-block header (REPORTS, COMPLIANCE, SETUP, etc) when every
+  //    .nav-item inside is display:none. Brand-block lives OUTSIDE the
+  //    section as a previous sibling after the wordmark refactor.
   document.querySelectorAll('.sidebar .nav-section').forEach(section => {
     const items = section.querySelectorAll('.nav-item');
     if (items.length === 0) return; // no nav-items to gate on; leave alone
     const anyVisible = Array.from(items).some(item => item.style.display !== 'none');
     section.style.display = anyVisible ? '' : 'none';
+    const prevBrand = section.previousElementSibling;
+    if (prevBrand && prevBrand.classList.contains('brand-block')) {
+      prevBrand.style.display = anyVisible ? '' : 'none';
+    }
   });
 }
 
