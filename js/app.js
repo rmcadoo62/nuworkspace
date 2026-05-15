@@ -127,7 +127,12 @@ function confirmDeleteTask() {
 (async function startup() {
   try {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
-      auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true }
+      auth: {
+        storage: window.nulabsSessionStorage,
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+      }
     });
 
     // Keep the session alive — handles silent token refresh and expiry across tabs

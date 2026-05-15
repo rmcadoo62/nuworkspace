@@ -16,9 +16,16 @@ async function connectSupabase() {
   if (!url || !key) { err.textContent = 'Both fields are required.'; return; }
   btn.textContent = 'Connecting…'; btn.disabled = true;
 
-  // Test connection
+ // Test connection
   try {
-    const testSb = window.supabase.createClient(url, key);
+    const testSb = window.supabase.createClient(url, key, {
+      auth: {
+        storage: window.nulabsSessionStorage,
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true
+      }
+    });
     const { error } = await testSb.from('projects').select('id').limit(1);
     if (error) throw error;
     localStorage.setItem('nuworkspace_sb_url', url);
@@ -2024,6 +2031,7 @@ const CAPABILITY_DEFS = [
   { key: 'view_schedule',      label: 'View Scheduler',        group: 'Scheduler' },
   { key: 'edit_schedule',      label: 'Edit Scheduler',        group: 'Scheduler' },
   { key: 'view_cmmc',          label: 'View CMMC Compliance',  group: 'Compliance' },
+  { key: 'access_nuforce',     label: 'Access NUForce',        group: 'Apps' },
 ];
 
 function openPermissionsPanel() {

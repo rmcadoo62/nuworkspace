@@ -1199,9 +1199,16 @@ async function saveProject() {
   const start = document.getElementById('projStart').value;
   const end   = document.getElementById('projEnd').value;
 
-  if (!sb) {
+ if (!sb) {
     try {
-      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: {
+          storage: window.nulabsSessionStorage,
+          autoRefreshToken: true,
+          persistSession: true,
+          detectSessionInUrl: true
+        }
+      });
     } catch(e) {
       toast('⚠ Not connected to Supabase');
       if (btn) { btn.disabled = false; btn.textContent = 'Create Project'; }
