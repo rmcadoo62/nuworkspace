@@ -147,23 +147,65 @@ function getHolidays(year) {
   const columbusDay = nthWeekday(year, 9, 1, 2); // 2nd Monday Oct
   const thanksgiving = nthWeekday(year, 10, 4, 4); // 4th Thursday Nov
   const blackFriday = addDays(thanksgiving, 1);
-  const holidays = [
-    { name: "New Year's Eve",    date: fmt(new Date(year-1, 11, 31)) },
-    { name: "New Year's Day",    date: fmt(new Date(year, 0, 1)) },
-    { name: "Martin Luther King Jr. Day", date: fmt(nthWeekday(year, 0, 1, 3)) },
-    { name: "Presidents' Day",   date: fmt(nthWeekday(year, 1, 1, 3)) },
-    { name: "Good Friday",       date: fmt(goodFriday) },
-    { name: "Memorial Day",      date: fmt(memorialDay) },
-    { name: "Juneteenth",        date: fmt(new Date(year, 5, 19)) },
-    { name: "Independence Day",  date: fmt(new Date(year, 6, 4)) },
-    { name: "Labor Day",         date: fmt(laborDay) },
-    { name: "Columbus Day",      date: fmt(columbusDay) },
-    { name: "Veterans Day",      date: fmt(new Date(year, 10, 11)) },
-    { name: "Thanksgiving Day",  date: fmt(thanksgiving) },
-    { name: "Black Friday",      date: fmt(blackFriday) },
-    { name: "Christmas Eve",     date: fmt(new Date(year, 11, 24)) },
-    { name: "Christmas Day",     date: fmt(new Date(year, 11, 25)) },
+  // Federal observed-date rule: fixed-date holidays falling on Saturday shift
+  // to the Friday before; those falling on Sunday shift to the Monday after.
+  // Floating Monday/Thursday holidays (MLK, Presidents', Memorial, Labor,
+  // Columbus, Thanksgiving) never need shifting. Good Friday is always Friday.
+  // Black Friday is always Friday (follows Thanksgiving).
+  //
+  // Collision rule: if the observed (shifted) date is already another holiday,
+  // the shift is skipped — that day simply isn't observed as a workday holiday.
+  // This handles Christmas Day on Saturday (would shift onto Christmas Eve Fri)
+  // and New Year's Day on Saturday (would shift onto New Year's Eve Fri).
+  const FIXED_HOLIDAYS_OBSERVED = new Set([
+    "New Year's Eve", "New Year's Day", "Juneteenth", "Independence Day",
+    "Veterans Day", "Christmas Eve", "Christmas Day"
+  ]);
+  const observedDate = (d) => {
+    const dow = d.getDay();
+    if (dow === 6) return addDays(d, -1); // Saturday → Friday before
+    if (dow === 0) return addDays(d,  1); // Sunday → Monday after
+    return d;
+  };
+
+  const raw = [
+    { name: "New Year's Eve",    date: new Date(year-1, 11, 31) },
+    { name: "New Year's Day",    date: new Date(year, 0, 1) },
+    { name: "Martin Luther King Jr. Day", date: nthWeekday(year, 0, 1, 3) },
+    { name: "Presidents' Day",   date: nthWeekday(year, 1, 1, 3) },
+    { name: "Good Friday",       date: goodFriday },
+    { name: "Memorial Day",      date: memorialDay },
+    { name: "Juneteenth",        date: new Date(year, 5, 19) },
+    { name: "Independence Day",  date: new Date(year, 6, 4) },
+    { name: "Labor Day",         date: laborDay },
+    { name: "Columbus Day",      date: columbusDay },
+    { name: "Veterans Day",      date: new Date(year, 10, 11) },
+    { name: "Thanksgiving Day",  date: thanksgiving },
+    { name: "Black Friday",      date: blackFriday },
+    { name: "Christmas Eve",     date: new Date(year, 11, 24) },
+    { name: "Christmas Day",     date: new Date(year, 11, 25) },
   ];
+
+  // First pass: compute target dates with observed-rule shifting applied.
+  const targets = raw.map(h => {
+    if (!FIXED_HOLIDAYS_OBSERVED.has(h.name)) return { ...h, target: h.date, shifted: false };
+    const target = observedDate(h.date);
+    return { ...h, target, shifted: target.getTime() !== h.date.getTime() };
+  });
+
+  // Second pass: detect collisions. If a shifted holiday lands on a date that's
+  // already occupied by another holiday's target date, skip the shift entirely.
+  const occupiedByUnshifted = new Set(
+    targets.filter(t => !t.shifted).map(t => fmt(t.target))
+  );
+
+  const holidays = targets
+    .filter(t => !(t.shifted && occupiedByUnshifted.has(fmt(t.target))))
+    .map(t => ({
+      name: t.shifted ? `${t.name} (observed)` : t.name,
+      date: fmt(t.target)
+    }));
+
   return holidays;
 }
 
