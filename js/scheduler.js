@@ -2212,6 +2212,17 @@ window.setSchedView = function(v, btn) {
   }
 };
 
+// Jump the calendar view to a specific year and month. Used by the
+// Company Holidays card in Setup so the "View on calendar" button can
+// open the Scheduler calendar pre-positioned to the relevant year.
+// month is 0-indexed (0 = January) to match JS Date convention.
+window.setSchedCalendarYearMonth = function(year, month) {
+  const today = new Date();
+  schedZoom = 'month';
+  schedOffset = (year - today.getFullYear()) * 12 + ((month || 0) - today.getMonth());
+  if (typeof renderSchedCalendar === 'function') renderSchedCalendar();
+};
+
 // ---- Calendar render ----
 function renderSchedCalendar() {
   const today = new Date(); today.setHours(0,0,0,0);

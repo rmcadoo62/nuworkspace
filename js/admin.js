@@ -2290,6 +2290,8 @@ function renderCompanyHolidaysCard() {
           </select>
           <button id="chSaveBtn" onclick="window._chSave()"
             style="padding:5px 14px;border-radius:6px;background:var(--amber);color:#0e0e0f;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">Save changes</button>
+          <button onclick="window._chViewOnCalendar()" title="Open Scheduler calendar to this year"
+            style="padding:5px 12px;border-radius:6px;background:transparent;color:var(--text);border:1px solid var(--border);font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x1F4C5; View on calendar</button>
         </div>
       </div>
       <div id="chBody" style="padding:14px 18px;">
@@ -2386,11 +2388,13 @@ function _chRenderBody() {
     // Use the row's index into the full _chSt.rows array so handlers can find
     // the right object even after sorting/filtering.
     const realIdx = _chSt.rows.indexOf(r);
+    const dowInfo = _chDowInfo(r.holiday_date);
     return `
-      <div style="display:grid;grid-template-columns:160px 1fr 36px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);">
+      <div style="display:grid;grid-template-columns:160px 90px 1fr 36px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);">
         <input type="date" value="${r.holiday_date || ''}"
           onchange="window._chEditDate(${realIdx}, this.value)"
           style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:5px 8px;outline:none;" />
+        <div style="font-size:11px;font-weight:600;text-align:center;padding:4px 6px;border-radius:6px;background:${dowInfo.bg};color:${dowInfo.color};border:1px solid ${dowInfo.border};white-space:nowrap;" title="${dowInfo.title}">${dowInfo.label}</div>
         <input type="text" value="${(r.name || '').replace(/"/g,'&quot;')}" placeholder="Holiday name"
           oninput="window._chEditName(${realIdx}, this.value)"
           style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:5px 8px;outline:none;width:100%;" />
@@ -2407,8 +2411,9 @@ function _chRenderBody() {
   bodyEl.innerHTML = `
     ${seedRow}
     ${visible.length > 0 ? `
-      <div style="display:grid;grid-template-columns:160px 1fr 36px;gap:10px;padding:0 0 8px 0;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);">
+      <div style="display:grid;grid-template-columns:160px 90px 1fr 36px;gap:10px;padding:0 0 8px 0;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);">
         <div>Date</div>
+        <div style="text-align:center;">Day</div>
         <div>Name</div>
         <div></div>
       </div>
@@ -2424,12 +2429,76 @@ function _chRenderBody() {
     </div>`;
 }
 
+// Render the weekday tag for a given YYYY-MM-DD date string.
+// Returns { label, bg, color, border, title } for the inline tag style.
+// Weekend dates are flagged in amber as a gentle warning — saves trips to
+// a wall calendar to verify which day a fixed-date holiday falls on.
+function _chDowInfo(dateStr) {
+  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+    return { label: '—', bg: 'var(--surface2)', color: 'var(--muted)',
+             border: 'var(--border)', title: '' };
+  }
+  // Parse with explicit T00:00:00 to avoid UTC-vs-local shift on the boundary
+  const d = new Date(dateStr + 'T00:00:00');
+  const names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const fullNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const dow = d.getDay();
+  const isWeekend = (dow === 0 || dow === 6);
+  if (isWeekend) {
+    return {
+      label: '&#x26A0; ' + names[dow],
+      bg:    'rgba(232,162,52,0.12)',
+      color: '#c47a1f',
+      border:'rgba(232,162,52,0.4)',
+      title: 'This holiday falls on a ' + fullNames[dow] + ' — did you mean the observed weekday?',
+    };
+  }
+  return {
+    label: names[dow],
+    bg:    'var(--surface2)',
+    color: 'var(--text)',
+    border:'var(--border)',
+    title: fullNames[dow],
+  };
+}
+
+// Open the Scheduler in calendar view, positioned to January of the
+// currently-selected year. Bridges Setup → Scheduler so the admin can
+// visually verify holiday dates against schedule blocks without losing
+// the year context.
+window._chViewOnCalendar = function() {
+  if (_chHasUnsavedChanges()) {
+    if (!confirm('You have unsaved changes for ' + _chSt.year + '. Continue without saving?')) return;
+  }
+  // 1) Open the scheduler panel
+  if (typeof window.openSchedulerPanel === 'function') {
+    window.openSchedulerPanel();
+  } else {
+    alert('Scheduler is unavailable. Open it from the sidebar instead.');
+    return;
+  }
+  // 2) Flip to calendar view (small delay so the panel finishes opening first)
+  setTimeout(() => {
+    const calBtn = document.getElementById('schedViewCal');
+    if (calBtn && typeof window.setSchedView === 'function') {
+      window.setSchedView('calendar', calBtn);
+    }
+    // 3) Jump to January of the target year
+    if (typeof window.setSchedCalendarYearMonth === 'function') {
+      window.setSchedCalendarYearMonth(_chSt.year, 0);
+    }
+  }, 80);
+};
+
 window._chEditDate = function(idx, val) {
   const r = _chSt.rows[idx];
   if (!r) return;
   r.holiday_date = val;
   if (!r._new) r._dirty = true;
-  _chUpdateButtonState();
+  // Full body re-render so the weekday tag refreshes alongside the new date.
+  // The date input fires onchange (not oninput), so this only runs when the
+  // user commits a change — not on every keystroke.
+  _chRenderBody();
 };
 
 window._chEditName = function(idx, val) {
