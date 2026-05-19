@@ -6,6 +6,7 @@ let quotesLoaded    = false;
 let quotesLostLoaded = false;
 let quotesShowLost  = false;
 let quotesSearchVal = '';
+let quotesBubbleFilter = null; // 'open_pipeline' | 'mon_won' | 'ytd_won' | null
 let _resolvedCols   = [];
 
 // ── Fixed column order with candidate field names ────────────────────────
@@ -89,6 +90,11 @@ async function openQuotesPanel(el) {
   showProjectView('panel-quotes');
   if (!quotesLoaded) { await loadQuotes(); quotesLoaded = true; }
   renderQuotesPanel();
+  // Silently load lost quotes in background so Show Lost toggle is instant.
+  // Lost rows stay hidden from the table until the user toggles Show Lost.
+  if (!quotesLostLoaded) {
+    loadLostQuotes().then(() => { renderQuotesPanel(); }).catch(e => console.error('lost bg:', e));
+  }
 }
 
 async function loadQuotes() {
@@ -111,6 +117,7 @@ async function loadQuotes() {
 
 async function loadLostQuotes() {
   if (!sb) return;
+  if (quotesLostLoaded) return;
   let all = [], page = 0;
   while (true) {
     const { data, error } = await sb.from('quotes').select('*')
@@ -123,7 +130,10 @@ async function loadLostQuotes() {
     if (data.length < 1000) break;
     page++;
   }
-  quotesData = [...quotesData, ...all];
+  // Avoid duplicates if something already merged lost rows in
+  const existingIds = new Set(quotesData.map(r => r.id));
+  const fresh = all.filter(r => !existingIds.has(r.id));
+  quotesData = [...quotesData, ...fresh];
   quotesLostLoaded = true;
 }
 
@@ -132,12 +142,16 @@ async function refreshQuotes() {
   quotesLostLoaded = false;
   quotesData = [];
   quotesSearchVal = '';
+  quotesBubbleFilter = null;
   const searchEl = document.getElementById('quotesSearch');
   if (searchEl) searchEl.value = '';
   await loadQuotes();
   quotesLoaded = true;
   if (quotesShowLost) {
     await loadLostQuotes();
+  } else {
+    // Silent background load so Show Lost toggle is instant
+    loadLostQuotes().then(() => { renderQuotesPanel(); }).catch(e => console.error('lost bg:', e));
   }
   renderQuotesPanel();
   toast('Quotes refreshed');
@@ -148,15 +162,16 @@ async function toggleLostQuotes() {
   if (quotesShowLost && !quotesLostLoaded) {
     toast('Loading lost quotes…');
     await loadLostQuotes();
-  } else if (!quotesShowLost) {
-    // Remove lost records from memory
-    quotesData = quotesData.filter(r => {
-      const s = String(r.stage || '').toLowerCase().replace(/[\s-]+/g,'_');
-      return s !== 'lost' && s !== 'closed_lost';
-    });
   }
+  // Lost rows stay in quotesData even when hidden; render filter controls visibility.
   resolveQuoteCols(quotesData);
   renderQuotesPanel();
+}
+
+// Helper: is a row a "lost" stage?
+function _isLostRow(r) {
+  const s = String(r.stage || '').toLowerCase().replace(/[\s\-\/]+/g,'_');
+  return s === 'lost' || s === 'closed_lost';
 }
 
 function quotesSortBy(key) {
@@ -166,15 +181,60 @@ function quotesSortBy(key) {
 }
 
 // ── Render panel ─────────────────────────────────────────────────────────
+function setQuotesBubbleFilter(name) {
+  // Toggle off if clicking the active filter
+  quotesBubbleFilter = (quotesBubbleFilter === name) ? null : name;
+  renderQuotesPanel();
+}
+
+// Helpers for date-bounded windows
+function _qStartOfMonth() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); }
+function _qStartOfYear()  { const d = new Date(); return new Date(d.getFullYear(), 0, 1); }
+
+function _qIsOpen(r) {
+  // Normalize: lowercase, collapse spaces/hyphens/slashes to underscores
+  const s = String(r.stage || '').toLowerCase().replace(/[\s\-\/]+/g,'_');
+  // Jordan's data uses "Proposal/Price Quote" as a single combined stage value
+  return s === 'proposal_price_quote';
+}
+function _qIsWon(r) {
+  const s = String(r.stage || '').toLowerCase().replace(/[\s\-\/]+/g,'_');
+  return s === 'won' || s === 'closed_won';
+}
+
 function renderQuotesPanel() {
   const container = document.getElementById('quotesTableContainer');
   const subEl     = document.getElementById('quotesSub');
   if (!container) return;
 
+  // Start from all loaded rows, hide lost unless Show Lost is on
+  let baseRows = quotesShowLost ? quotesData : quotesData.filter(r => !_isLostRow(r));
+
+  // Apply bubble click-through filter (operates on quotesData, not search-filtered)
+  if (quotesBubbleFilter) {
+    const startMo = _qStartOfMonth();
+    const startYr = _qStartOfYear();
+    if (quotesBubbleFilter === 'open_pipeline') {
+      baseRows = baseRows.filter(_qIsOpen);
+    } else if (quotesBubbleFilter === 'mon_won') {
+      baseRows = baseRows.filter(r => {
+        if (!_qIsWon(r)) return false;
+        const d = r.won_date ? new Date(r.won_date) : null;
+        return d && !isNaN(d) && d >= startMo;
+      });
+    } else if (quotesBubbleFilter === 'ytd_won') {
+      baseRows = baseRows.filter(r => {
+        if (!_qIsWon(r)) return false;
+        const d = r.won_date ? new Date(r.won_date) : null;
+        return d && !isNaN(d) && d >= startYr;
+      });
+    }
+  }
+
   const search = quotesSearchVal.trim().toLowerCase();
   let rows = search
-    ? quotesData.filter(r => Object.values(r).some(v => String(v ?? '').toLowerCase().includes(search)))
-    : quotesData;
+    ? baseRows.filter(r => Object.values(r).some(v => String(v ?? '').toLowerCase().includes(search)))
+    : baseRows;
 
   const moneySort = _resolvedCols.find(c => c.money && c.key === quotesSortCol);
   rows = [...rows].sort((a, b) => {
@@ -184,7 +244,19 @@ function renderQuotesPanel() {
     return quotesSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
   });
 
-  if (subEl) subEl.textContent = `${rows.length} quote${rows.length !== 1 ? 's' : ''}${quotesShowLost ? '' : ' (lost hidden)'}`;
+  // Subheader: row count + active filter chip + lost-hidden note
+  const filterLabels = {
+    open_pipeline: 'Open Pipeline',
+    mon_won:       'Mon. Won',
+    ytd_won:       'YTD Won',
+  };
+  let subText = `${rows.length} quote${rows.length !== 1 ? 's' : ''}`;
+  if (quotesBubbleFilter) {
+    subText += ` · filtered: ${filterLabels[quotesBubbleFilter]} (click bubble to clear)`;
+  } else if (!quotesShowLost) {
+    subText += ' (lost hidden)';
+  }
+  if (subEl) subEl.textContent = subText;
 
   // Update the Show Lost button appearance
   const lostBtn = document.getElementById('showLostBtn');
@@ -194,30 +266,55 @@ function renderQuotesPanel() {
     lostBtn.style.color       = quotesShowLost ? 'var(--amber)'     : 'var(--muted)';
   }
 
-  if (!rows.length) {
-    container.innerHTML = `<div style="text-align:center;padding:60px 20px;color:var(--muted)">
-      <div style="font-size:36px;margin-bottom:12px">📋</div>
-      <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px">No quotes found</div>
-      <div style="font-size:13px">${search ? 'No results found.' : 'Quotes will appear here once loaded.'}</div>
-    </div>`;
-    return;
+  // ── Compute bubble metrics (always over full dataset, ignoring bubble filter) ──
+  // Use quotesData directly so numbers don't change based on what's currently displayed.
+  const startMo = _qStartOfMonth();
+  const startYr = _qStartOfYear();
+
+  // Open Pipeline
+  let openSum = 0;
+  // Mon. Won
+  let monWCount = 0, monWSum = 0;
+  // YTD Won
+  let ytdWSum = 0;
+
+  for (const r of quotesData) {
+    const total = parseFloat(r.total) || 0;
+    const wonAt    = r.won_date    ? new Date(r.won_date)   : null;
+    const isWon  = _qIsWon(r);
+
+    if (_qIsOpen(r)) openSum += total;
+
+    if (isWon && wonAt && !isNaN(wonAt)) {
+      if (wonAt >= startMo) { monWCount++; monWSum += total; }
+      if (wonAt >= startYr) { ytdWSum += total; }
+    }
   }
 
-  // Stat bubbles
-  const stageCol = _resolvedCols.find(c => c.badge);
-  const moneyCol = _resolvedCols.find(c => c.money);
+  // ── Build bubbles ──
+  // Color tokens
+  const blue  = { color: '#5b9cf6', bg: 'rgba(91,156,246,0.08)' };
+  const green = { color: '#4caf7d', bg: 'rgba(76,175,125,0.10)' };
+  const purple= { color: '#a78bfa', bg: 'rgba(167,139,250,0.08)' };
+
   let bubbles = '';
-  if (moneyCol) {
-    const grand = quotesData.reduce((s,r) => s + (parseFloat(r[moneyCol.key])||0), 0);
-    bubbles += _qBubble('Total Value', fmtMoney(grand), '#5b9cf6', 'rgba(91,156,246,0.08)');
-  }
-  if (stageCol) {
-    const counts = {};
-    quotesData.forEach(r => { const k = String(r[stageCol.key]||'unknown').toLowerCase().replace(/[\s-]+/g,'_'); counts[k]=(counts[k]||0)+1; });
-    Object.entries(counts).forEach(([k,cnt]) => {
-      const m = STAGE_MAP[k] || { label:k, color:'#7a7a85', bg:'rgba(122,122,133,0.08)' };
-      bubbles += _qBubble(m.label, cnt, m.color, m.bg);
-    });
+  bubbles += _qBubble('Open Pipeline', _qFmt$(openSum), null, blue.color, blue.bg,
+    `setQuotesBubbleFilter('open_pipeline')`, quotesBubbleFilter === 'open_pipeline');
+  bubbles += _qBubble('Mon. Won', monWCount, _qFmt$(monWSum), green.color, green.bg,
+    `setQuotesBubbleFilter('mon_won')`, quotesBubbleFilter === 'mon_won');
+  bubbles += _qBubble('YTD Won', _qFmt$(ytdWSum), null, purple.color, purple.bg,
+    `setQuotesBubbleFilter('ytd_won')`, quotesBubbleFilter === 'ytd_won');
+
+  // Empty-state guard for table (bubbles already computed)
+  if (!rows.length) {
+    container.innerHTML = `
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">${bubbles}</div>
+      <div style="text-align:center;padding:60px 20px;color:var(--muted)">
+        <div style="font-size:36px;margin-bottom:12px">📋</div>
+        <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px">No quotes found</div>
+        <div style="font-size:13px">${search || quotesBubbleFilter ? 'No results match the current filter.' : 'Quotes will appear here once loaded.'}</div>
+      </div>`;
+    return;
   }
 
   // Table
@@ -227,7 +324,7 @@ function renderQuotesPanel() {
   const idxMap = new Map(quotesData.map((r,i) => [r,i]));
 
   container.innerHTML = `
-    ${bubbles ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">${bubbles}</div>` : ''}
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">${bubbles}</div>
     <div style="overflow-x:auto;border:1px solid var(--border);border-radius:10px">
       <table style="width:100%;border-collapse:collapse">
         <thead><tr>${_resolvedCols.map(c=>`<th style="${TH}" onclick="quotesSortBy('${c.key}')">${c.label}${arrow(c.key)}</th>`).join('')}</tr></thead>
@@ -242,10 +339,27 @@ function renderQuotesPanel() {
     </div>`;
 }
 
-function _qBubble(label, value, color, bg) {
-  return `<div style="background:${bg};border:1px solid ${color}44;border-radius:10px;padding:10px 16px;min-width:90px;cursor:default">
+// Round to nearest dollar, comma-separated, no cents
+function _qFmt$(val) {
+  const n = parseFloat(val);
+  return isNaN(n) ? '$0' : '$' + Math.round(n).toLocaleString('en-US');
+}
+
+function _qBubble(label, primary, secondary, color, bg, onClick, active) {
+  const clickable = !!onClick;
+  const cursor    = clickable ? 'pointer' : 'default';
+  const borderColor = active ? color : `${color}44`;
+  const ringShadow  = active ? `box-shadow:0 0 0 2px ${color}55;` : '';
+  const handler   = clickable ? `onclick="${onClick}"` : '';
+  const hoverIn   = clickable ? `onmouseover="this.style.background='${color}22'"` : '';
+  const hoverOut  = clickable ? `onmouseout="this.style.background='${bg}'"` : '';
+  const secondaryHtml = secondary !== null && secondary !== undefined
+    ? `<div style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-top:3px">${secondary}</div>`
+    : '';
+  return `<div ${handler} ${hoverIn} ${hoverOut} style="background:${bg};border:1px solid ${borderColor};border-radius:10px;padding:10px 16px;min-width:140px;cursor:${cursor};transition:background .1s,box-shadow .15s;${ringShadow}">
     <div style="font-size:10px;color:${color};font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">${label}</div>
-    <div style="font-size:22px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1">${value}</div>
+    <div style="font-size:22px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1">${primary}</div>
+    ${secondaryHtml}
   </div>`;
 }
 
