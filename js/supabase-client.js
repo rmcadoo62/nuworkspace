@@ -650,6 +650,7 @@ function setupRealtime() {
         t.due = r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
         t.section = r.section||t.section; t.fixedPrice = r.fixed_price ? parseFloat(r.fixed_price) : t.fixedPrice;
         t.completedDate = r.completed_date||''; t.billedDate = r.billed_date||'';
+        t.cancelledDate = r.cancelled_date||'';
       }
       if (!wasDone && r.done) toast('✓ Task completed: ' + r.name);
       refreshCurrentView();

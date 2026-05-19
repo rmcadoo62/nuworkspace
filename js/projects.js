@@ -19,14 +19,63 @@ function openProjectsTable(el) {
   renderProjectsTable();
 }
 
-function openDashboardPanel(el) {
+async function openDashboardPanel(el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   if (el) el.classList.add('active');
   activeProjectId = null;
   document.getElementById('topbarName').textContent = 'Dashboard';
-  
+
   showProjectView('panel-dashboard');
+
+  // Render immediately with whatever's in memory so the user sees content fast.
   renderDashboard();
+
+  // Then refresh task date fields from Supabase in the background and re-render
+  // if anything changed. This catches drift from out-of-band changes (other
+  // tabs, direct SQL, realtime drops while idle). Cheap query — only the
+  // small subset of columns that drive dashboard charts.
+  if (sb && typeof taskStore !== 'undefined') {
+    try {
+      const fresh = await dbFetch('tasks',
+        'id,status,cancelled_date,completed_date,billed_date,sales_category,fixed_price');
+      if (Array.isArray(fresh) && fresh.length) {
+        let changed = 0;
+        const freshById = new Map(fresh.map(r => [r.id, r]));
+        taskStore.forEach(t => {
+          const r = freshById.get(t._id);
+          if (!r) return;
+          const newCancelled = r.cancelled_date || '';
+          const newCompleted = r.completed_date || '';
+          const newBilled    = r.billed_date    || '';
+          const newStatus    = r.status         || t.status;
+          const newSalesCat  = r.sales_category || '';
+          const newFixedPrice = r.fixed_price ? parseFloat(r.fixed_price) : 0;
+          if (t.cancelledDate !== newCancelled
+              || t.completedDate !== newCompleted
+              || t.billedDate    !== newBilled
+              || t.status        !== newStatus
+              || t.salesCat      !== newSalesCat
+              || t.fixedPrice    !== newFixedPrice) {
+            t.cancelledDate = newCancelled;
+            t.completedDate = newCompleted;
+            t.billedDate    = newBilled;
+            t.status        = newStatus;
+            t.salesCat      = newSalesCat;
+            t.fixedPrice    = newFixedPrice;
+            changed++;
+          }
+        });
+        // Only re-render if anything actually changed and the dashboard is
+        // still the active panel (user may have navigated away during fetch).
+        if (changed > 0) {
+          const stillActive = document.getElementById('panel-dashboard')?.classList.contains('active');
+          if (stillActive) renderDashboard();
+        }
+      }
+    } catch (e) {
+      console.warn('Dashboard fresh-fetch failed (using cached data):', e);
+    }
+  }
 }
 
 

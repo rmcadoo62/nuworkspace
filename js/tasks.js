@@ -831,6 +831,27 @@ async function inlineSave(taskId, projId, field, value) {
 
     // Auto-set dates on status transitions
     const extraUpdates = {};
+
+    // ── Clear stamps that no longer apply ─────────────────────────────────
+    // Stamps are sticky by intent — but if status moves AWAY from the state
+    // that set them, the stamp becomes a "ghost" that misleads reports.
+    // Mirror the set-rules below so each stamp is cleared in exactly the
+    // statuses it would never be set in.
+    if (value !== 'cancelled' && t.cancelledDate) {
+      t.cancelledDate = '';
+      extraUpdates.cancelled_date = null;
+    }
+    if (value !== 'billed' && t.billedDate) {
+      t.billedDate = '';
+      extraUpdates.billed_date = null;
+    }
+    // completed_date is set for complete/done/billed — clear only when
+    // moving to a status that wouldn't have set it (new/inprogress/cancelled)
+    if (!['complete','done','billed'].includes(value) && t.completedDate) {
+      t.completedDate = '';
+      extraUpdates.completed_date = null;
+    }
+
     if (value === 'inprogress' && !t.taskStartDate) {
       t.taskStartDate = today;
       extraUpdates.task_start_date = today;
