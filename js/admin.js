@@ -2057,9 +2057,36 @@ function renderPermissionsPanel() {
   // Group capabilities
   const groups = [...new Set(CAPABILITY_DEFS.map(c => c.group))];
 
-  body.innerHTML = permissionRoles.map(role => {
+  // Role-level collapse state lives in localStorage so it persists across
+  // visits. Key per role id. Missing key = collapsed (the default on first
+  // load). false = explicitly expanded.
+  const collapsed = _getCollapsedRoles();
+
+  const expandAllBtn = `<button onclick="window._toggleAllPermRoles(false)"
+    style="background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;padding:4px 10px;cursor:pointer;font-family:'DM Sans',sans-serif;">Expand all</button>`;
+  const collapseAllBtn = `<button onclick="window._toggleAllPermRoles(true)"
+    style="background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:11px;padding:4px 10px;cursor:pointer;font-family:'DM Sans',sans-serif;">Collapse all</button>`;
+  const topBar = `<div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:12px;">${expandAllBtn}${collapseAllBtn}</div>`;
+
+  body.innerHTML = topBar + permissionRoles.map(role => {
     const assignedEmps = employees.filter(e => e.roleId === role.id);
     const caps = role.capabilities || {};
+    const isCollapsed = collapsed[role.id] !== false; // default: collapsed
+    const arrow = isCollapsed ? '&#x25B8;' : '&#x25BE;'; // ▸ or ▾
+
+    // Stacked avatars shown in the header only when collapsed — gives a
+    // quick "who is in this role" answer without expanding.
+    const avatars = isCollapsed
+      ? assignedEmps.slice(0, 10).map(e =>
+          `<div style="width:26px;height:26px;border-radius:50%;background:${e.color};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;margin-left:-6px;border:2px solid var(--surface2);" title="${e.name}">${e.initials}</div>`
+        ).join('') +
+        (assignedEmps.length > 10
+          ? `<div style="font-size:10px;color:var(--muted);margin-left:8px;">+${assignedEmps.length - 10}</div>`
+          : '') +
+        (assignedEmps.length === 0
+          ? `<div style="font-size:11px;color:var(--muted);font-style:italic;">No employees assigned</div>`
+          : '')
+      : '';
 
     const capRows = groups.map(group => {
       const defs = CAPABILITY_DEFS.filter(c => c.group === group);
@@ -2078,16 +2105,20 @@ function renderPermissionsPanel() {
     }).join('');
 
     return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-bottom:16px;overflow:hidden;">
-      <!-- Role header -->
-      <div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;background:var(--surface2);">
-        <div style="flex:1;">
+      <!-- Role header (click to toggle) -->
+      <div style="padding:16px 20px;${isCollapsed ? '' : 'border-bottom:1px solid var(--border);'}display:flex;align-items:center;gap:12px;background:var(--surface2);cursor:pointer;user-select:none;"
+        onclick="window._togglePermRole(event, '${role.id}')">
+        <span style="font-size:13px;color:var(--muted);width:14px;display:inline-block;text-align:center;">${arrow}</span>
+        <div style="flex:1;min-width:0;">
           <div style="font-size:16px;font-weight:700;color:var(--text);">${role.name}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${role.description}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px;">${role.description || ''}</div>
         </div>
-        <button onclick="openEditRoleModal('${role.id}')" style="background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:5px 12px;cursor:pointer;font-family:'DM Sans',sans-serif;">✎ Edit</button>
-        <button onclick="deleteRole('${role.id}')" style="background:transparent;border:1px solid rgba(208,64,64,.3);border-radius:6px;color:var(--red);font-size:12px;padding:5px 12px;cursor:pointer;font-family:'DM Sans',sans-serif;">✕</button>
+        <div style="display:flex;align-items:center;padding-right:6px;" data-stop-toggle>${avatars}</div>
+        <button onclick="event.stopPropagation();openEditRoleModal('${role.id}')" style="background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-size:12px;padding:5px 12px;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x270E; Edit</button>
+        <button onclick="event.stopPropagation();deleteRole('${role.id}')" style="background:transparent;border:1px solid rgba(208,64,64,.3);border-radius:6px;color:var(--red);font-size:12px;padding:5px 12px;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x2715;</button>
       </div>
-      <!-- Capabilities -->
+      ${isCollapsed ? '' : `
+      <!-- Capabilities + Assigned (only when expanded) -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;padding:20px 20px 8px;">
         <div>${capRows}</div>
         <!-- Assigned employees -->
@@ -2099,21 +2130,67 @@ function renderPermissionsPanel() {
               <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);">
                 <div style="width:28px;height:28px;border-radius:50%;background:${e.color};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0;">${e.initials}</div>
                 <div style="flex:1;font-size:13px;color:var(--text);">${e.name}</div>
-                <button onclick="unassignRole('${e.id}')" style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 4px;" title="Remove from role">✕</button>
+                <button onclick="unassignRole('${e.id}')" style="background:transparent;border:none;color:var(--muted);cursor:pointer;font-size:12px;padding:2px 4px;" title="Remove from role">&#x2715;</button>
               </div>`).join('')}
           <div style="margin-top:12px;">
             <select onchange="assignRole(this.value,'${role.id}');this.value=''"
               style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:6px 10px;outline:none;width:100%;cursor:pointer;">
-              <option value="">+ Assign employee…</option>
+              <option value="">+ Assign employee&hellip;</option>
               ${employees.filter(e => !e.roleId && e.isActive !== false).map(e =>
                 `<option value="${e.id}">${e.name}</option>`).join('')}
             </select>
           </div>
         </div>
-      </div>
+      </div>`}
     </div>`;
   }).join('');
 }
+
+// ─── Permissions panel: role-level collapse state ─────────────────────────
+// localStorage shape: { "<role_id_uuid>": false, "<role_id_uuid>": true, ... }
+// Missing key = collapsed (the default on first load).
+// false = explicitly expanded; true = explicitly collapsed.
+
+const _PERM_ROLE_COLLAPSE_KEY = 'nuworkspace_perm_roles_collapsed';
+
+function _getCollapsedRoles() {
+  try {
+    const raw = localStorage.getItem(_PERM_ROLE_COLLAPSE_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _setCollapsedRoles(state) {
+  try {
+    localStorage.setItem(_PERM_ROLE_COLLAPSE_KEY, JSON.stringify(state));
+  } catch (_) { /* localStorage quota / disabled — silent fallback */ }
+}
+
+window._togglePermRole = function(event, roleId) {
+  // Don't toggle if the click landed on a child button or the avatars area —
+  // those have stopPropagation but defense-in-depth helps if a future child
+  // gets added without it.
+  if (event && event.target) {
+    let el = event.target;
+    while (el && el !== event.currentTarget) {
+      if (el.tagName === 'BUTTON' || el.dataset?.stopToggle !== undefined) return;
+      el = el.parentElement;
+    }
+  }
+  const state = _getCollapsedRoles();
+  state[roleId] = !(state[roleId] !== false); // currently expanded? → collapse; else → expand
+  _setCollapsedRoles(state);
+  renderPermissionsPanel();
+};
+
+window._toggleAllPermRoles = function(collapseAll) {
+  const state = {};
+  permissionRoles.forEach(r => { state[r.id] = collapseAll; });
+  _setCollapsedRoles(state);
+  renderPermissionsPanel();
+};
 
 async function openSchedSettingsPanel() {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -2290,8 +2367,6 @@ function renderCompanyHolidaysCard() {
           </select>
           <button id="chSaveBtn" onclick="window._chSave()"
             style="padding:5px 14px;border-radius:6px;background:var(--amber);color:#0e0e0f;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">Save changes</button>
-          <button onclick="window._chViewOnCalendar()" title="Open Scheduler calendar to this year"
-            style="padding:5px 12px;border-radius:6px;background:transparent;color:var(--text);border:1px solid var(--border);font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x1F4C5; View on calendar</button>
         </div>
       </div>
       <div id="chBody" style="padding:14px 18px;">
@@ -2388,13 +2463,11 @@ function _chRenderBody() {
     // Use the row's index into the full _chSt.rows array so handlers can find
     // the right object even after sorting/filtering.
     const realIdx = _chSt.rows.indexOf(r);
-    const dowInfo = _chDowInfo(r.holiday_date);
     return `
-      <div style="display:grid;grid-template-columns:160px 90px 1fr 36px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);">
+      <div style="display:grid;grid-template-columns:160px 1fr 36px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);">
         <input type="date" value="${r.holiday_date || ''}"
           onchange="window._chEditDate(${realIdx}, this.value)"
           style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:5px 8px;outline:none;" />
-        <div style="font-size:11px;font-weight:600;text-align:center;padding:4px 6px;border-radius:6px;background:${dowInfo.bg};color:${dowInfo.color};border:1px solid ${dowInfo.border};white-space:nowrap;" title="${dowInfo.title}">${dowInfo.label}</div>
         <input type="text" value="${(r.name || '').replace(/"/g,'&quot;')}" placeholder="Holiday name"
           oninput="window._chEditName(${realIdx}, this.value)"
           style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:5px 8px;outline:none;width:100%;" />
@@ -2411,9 +2484,8 @@ function _chRenderBody() {
   bodyEl.innerHTML = `
     ${seedRow}
     ${visible.length > 0 ? `
-      <div style="display:grid;grid-template-columns:160px 90px 1fr 36px;gap:10px;padding:0 0 8px 0;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);">
+      <div style="display:grid;grid-template-columns:160px 1fr 36px;gap:10px;padding:0 0 8px 0;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);">
         <div>Date</div>
-        <div style="text-align:center;">Day</div>
         <div>Name</div>
         <div></div>
       </div>
@@ -2429,76 +2501,12 @@ function _chRenderBody() {
     </div>`;
 }
 
-// Render the weekday tag for a given YYYY-MM-DD date string.
-// Returns { label, bg, color, border, title } for the inline tag style.
-// Weekend dates are flagged in amber as a gentle warning — saves trips to
-// a wall calendar to verify which day a fixed-date holiday falls on.
-function _chDowInfo(dateStr) {
-  if (!dateStr || !/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-    return { label: '—', bg: 'var(--surface2)', color: 'var(--muted)',
-             border: 'var(--border)', title: '' };
-  }
-  // Parse with explicit T00:00:00 to avoid UTC-vs-local shift on the boundary
-  const d = new Date(dateStr + 'T00:00:00');
-  const names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const fullNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-  const dow = d.getDay();
-  const isWeekend = (dow === 0 || dow === 6);
-  if (isWeekend) {
-    return {
-      label: '&#x26A0; ' + names[dow],
-      bg:    'rgba(232,162,52,0.12)',
-      color: '#c47a1f',
-      border:'rgba(232,162,52,0.4)',
-      title: 'This holiday falls on a ' + fullNames[dow] + ' — did you mean the observed weekday?',
-    };
-  }
-  return {
-    label: names[dow],
-    bg:    'var(--surface2)',
-    color: 'var(--text)',
-    border:'var(--border)',
-    title: fullNames[dow],
-  };
-}
-
-// Open the Scheduler in calendar view, positioned to January of the
-// currently-selected year. Bridges Setup → Scheduler so the admin can
-// visually verify holiday dates against schedule blocks without losing
-// the year context.
-window._chViewOnCalendar = function() {
-  if (_chHasUnsavedChanges()) {
-    if (!confirm('You have unsaved changes for ' + _chSt.year + '. Continue without saving?')) return;
-  }
-  // 1) Open the scheduler panel
-  if (typeof window.openSchedulerPanel === 'function') {
-    window.openSchedulerPanel();
-  } else {
-    alert('Scheduler is unavailable. Open it from the sidebar instead.');
-    return;
-  }
-  // 2) Flip to calendar view (small delay so the panel finishes opening first)
-  setTimeout(() => {
-    const calBtn = document.getElementById('schedViewCal');
-    if (calBtn && typeof window.setSchedView === 'function') {
-      window.setSchedView('calendar', calBtn);
-    }
-    // 3) Jump to January of the target year
-    if (typeof window.setSchedCalendarYearMonth === 'function') {
-      window.setSchedCalendarYearMonth(_chSt.year, 0);
-    }
-  }, 80);
-};
-
 window._chEditDate = function(idx, val) {
   const r = _chSt.rows[idx];
   if (!r) return;
   r.holiday_date = val;
   if (!r._new) r._dirty = true;
-  // Full body re-render so the weekday tag refreshes alongside the new date.
-  // The date input fires onchange (not oninput), so this only runs when the
-  // user commits a change — not on every keystroke.
-  _chRenderBody();
+  _chUpdateButtonState();
 };
 
 window._chEditName = function(idx, val) {
