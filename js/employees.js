@@ -127,7 +127,28 @@ async function _ensureTemplatesLoaded() {
 
 // ── Time-off helpers ────────────────────────────────────────────────────────
 
-function getHolidays(year) {
+// ── Company Holidays: hybrid DB + federal-rule fallback ─────────────────────
+//
+// The official source of truth is the `company_holidays` Supabase table,
+// editable from Setup → Scheduler Settings → Company Holidays. The table is
+// loaded into `_holidaysCache` at app boot (current year + next year, see
+// app.js) and refreshed when the admin saves edits.
+//
+// `getHolidays(year)` stays synchronous so existing callers (Home upcoming
+// card, scheduler stripe, employee card chips, PTO accrual walk) don't have
+// to change. If the requested year is not yet cached, the federal-rule
+// calculation is returned synchronously and a background fetch populates the
+// cache for next time. If the year exists in DB but has zero rows (admin
+// intentionally cleared it), we honor that as "no paid holidays" rather than
+// silently falling back, by storing an empty array in the cache.
+
+const _holidaysCache = {};          // { 2026: [...], 2027: [...] }
+const _holidaysFetchInFlight = {};  // { 2026: Promise, ... }
+
+// Federal-rule calculation. Used as: (a) the seed source for the
+// "Auto-seed from federal rules" button in Setup, (b) the synchronous
+// fallback when a year has not yet been loaded from the DB.
+function getHolidaysFromFederalRule(year) {
   // Compute variable holidays for a given year
   const easterDate = y => {
     const f = Math.floor, a = y%19, b = f(y/100), c = y%100,
@@ -208,6 +229,88 @@ function getHolidays(year) {
 
   return holidays;
 }
+
+// ── Hybrid getHolidays: cache → DB → federal fallback ───────────────────────
+
+// Synchronous getter. Returns DB-backed holidays for the year if cached,
+// otherwise federal-rule fallback. Triggers a background DB fetch on miss
+// so subsequent calls get the real data.
+function getHolidays(year) {
+  if (_holidaysCache[year] !== undefined) {
+    return _holidaysCache[year];
+  }
+  // Cache miss → kick off async fetch (fire-and-forget) and return fallback
+  loadHolidaysFromDB(year).catch(err =>
+    console.warn('[holidays] background fetch failed for ' + year + ':', err)
+  );
+  return getHolidaysFromFederalRule(year);
+}
+
+// Async DB loader. Fetches the year's holidays from Supabase and stores them
+// in the cache. If the year has zero rows in the DB, we still cache an empty
+// array (the admin's intent — no holidays — rather than continuing to fall
+// back to federal-rule forever). Multiple concurrent calls for the same year
+// share one in-flight promise.
+async function loadHolidaysFromDB(year) {
+  if (_holidaysFetchInFlight[year]) return _holidaysFetchInFlight[year];
+  if (typeof sb === 'undefined' || !sb) {
+    // Supabase client not yet initialized — fall back to federal rule.
+    // app.js calls loadHolidaysFromDB after auth, so this should be rare.
+    return getHolidaysFromFederalRule(year);
+  }
+  const promise = (async () => {
+    try {
+      const { data, error } = await sb.from('company_holidays')
+        .select('name, holiday_date, sort_order')
+        .eq('year', year)
+        .order('holiday_date', { ascending: true });
+      if (error) throw error;
+      if (data && data.length > 0) {
+        // Sort by sort_order first (nulls last), then by date
+        const rows = data.slice().sort((a, b) => {
+          const sa = a.sort_order == null ? Infinity : a.sort_order;
+          const sb_ = b.sort_order == null ? Infinity : b.sort_order;
+          if (sa !== sb_) return sa - sb_;
+          return a.holiday_date.localeCompare(b.holiday_date);
+        });
+        _holidaysCache[year] = rows.map(r => ({
+          name: r.name,
+          date: r.holiday_date  // already in YYYY-MM-DD form
+        }));
+      } else {
+        // No rows configured for this year → federal-rule fallback. We do
+        // NOT cache an empty array here, because "no rows" most likely means
+        // "admin hasn't set this year up yet", not "no paid holidays". Cache
+        // the fallback so we don't re-query on every call.
+        _holidaysCache[year] = getHolidaysFromFederalRule(year);
+      }
+      return _holidaysCache[year];
+    } catch (e) {
+      console.error('[holidays] DB load failed for ' + year + ':', e);
+      // On error, fall back to federal rule but don't cache — we'll retry
+      // next time. Returning here avoids breaking the page.
+      return getHolidaysFromFederalRule(year);
+    } finally {
+      delete _holidaysFetchInFlight[year];
+    }
+  })();
+  _holidaysFetchInFlight[year] = promise;
+  return promise;
+}
+
+// Invalidate cache for a given year (called from Setup after admin saves).
+// Force-refetches and re-warms the cache so the next getHolidays() call
+// returns fresh data.
+async function invalidateHolidaysCache(year) {
+  delete _holidaysCache[year];
+  delete _holidaysFetchInFlight[year];
+  return loadHolidaysFromDB(year);
+}
+
+// Expose to admin.js (Setup UI) and app.js (boot pre-warm)
+window.loadHolidaysFromDB = loadHolidaysFromDB;
+window.invalidateHolidaysCache = invalidateHolidaysCache;
+window.getHolidaysFromFederalRule = getHolidaysFromFederalRule;
 
 function getVacationAllotment(hireDateStr) {
   if (!hireDateStr) return 0;

@@ -2207,6 +2207,7 @@ function renderSchedSettingsPanel() {
   }).join('');
 
   body.innerHTML = `
+    ${renderCompanyHolidaysCard()}
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;">
       <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
         <div style="padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
@@ -2225,7 +2226,443 @@ function renderSchedSettingsPanel() {
         <div style="padding:10px 18px;">${accessRows}</div>
       </div>
     </div>`;
+
+  // Kick off async load of the currently selected year's holidays into the
+  // Company Holidays section. This is fire-and-forget — the section initially
+  // shows a "Loading…" state and re-renders once data is back.
+  if (typeof window !== 'undefined' && window._companyHolidaysInit) {
+    window._companyHolidaysInit();
+  }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMPANY HOLIDAYS — Setup UI
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Self-contained section in Scheduler Settings (admin/owner-only) that
+// manages the `company_holidays` Supabase table. Architecture:
+//
+//   _chSt: in-memory working state for the currently-selected year.
+//          Edits accumulate here until "Save changes" commits the diff.
+//
+//   renderCompanyHolidaysCard():       returns the section HTML (called by
+//                                      renderSchedSettingsPanel)
+//
+//   window._companyHolidaysInit():     async; fetches selected year's rows
+//                                      from DB and re-renders the section
+//                                      body in place. Called after panel
+//                                      paint and after year-dropdown change.
+//
+//   Save flow:
+//     - Compute diff (deletes, updates, inserts) against _chSt._original
+//     - Execute via Supabase. Single transaction not available from JS
+//       client; do deletes → updates → inserts so partial failure leaves
+//       the cleanest state.
+//     - Invalidate the holidays cache for that year so Home card / scheduler
+//       stripes / employee card chips immediately see the new dates.
+//     - Re-fetch and re-render the section.
+//
+// Permission: hidden entirely unless currentEmployee.isOwner === true.
+// RLS will also reject writes from non-admins, so the gate is defense-in-depth.
+
+const _chSt = {
+  year: null,
+  rows: [],          // [{ id?, holiday_date, name, sort_order, _dirty?, _new?, _deleted? }]
+  _original: [],     // snapshot of rows as loaded, for diff
+  loading: false,
+};
+
+function renderCompanyHolidaysCard() {
+  // Hidden entirely for non-owners (RLS would block writes anyway,
+  // but no point rendering the UI).
+  if (!currentEmployee?.isOwner) return '';
+
+  if (_chSt.year == null) _chSt.year = new Date().getFullYear();
+  return `
+    <div id="companyHolidaysCard" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:24px;">
+      <div style="padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <span style="font-weight:700;font-size:13px;">&#x1F3D6;&#xFE0F; Company Holidays</span>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+          <label style="font-size:12px;color:var(--muted);">Year:</label>
+          <select id="chYearSelect" onchange="window._chSetYear(parseInt(this.value,10))"
+            style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:5px 10px;outline:none;cursor:pointer;">
+            ${_chBuildYearOptions()}
+          </select>
+          <button id="chSaveBtn" onclick="window._chSave()"
+            style="padding:5px 14px;border-radius:6px;background:var(--amber);color:#0e0e0f;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">Save changes</button>
+        </div>
+      </div>
+      <div id="chBody" style="padding:14px 18px;">
+        <div style="color:var(--muted);font-size:12px;">Loading&hellip;</div>
+      </div>
+    </div>`;
+}
+
+function _chBuildYearOptions() {
+  const cur = new Date().getFullYear();
+  // Current year, next 2, plus any years already present in cache/state
+  const set = new Set([cur, cur + 1, cur + 2]);
+  if (_chSt.year != null) set.add(_chSt.year);
+  if (typeof window._holidaysCachedYears === 'function') {
+    window._holidaysCachedYears().forEach(y => set.add(y));
+  }
+  const years = Array.from(set).sort((a, b) => a - b);
+  return years.map(y => `<option value="${y}"${y === _chSt.year ? ' selected' : ''}>${y}</option>`).join('');
+}
+
+window._chSetYear = async function(year) {
+  // Warn if there are unsaved changes
+  if (_chHasUnsavedChanges()) {
+    if (!confirm('You have unsaved changes for ' + _chSt.year + '. Switch year and lose them?')) {
+      // Re-select the old value in the dropdown
+      const sel = document.getElementById('chYearSelect');
+      if (sel) sel.value = String(_chSt.year);
+      return;
+    }
+  }
+  _chSt.year = year;
+  await window._companyHolidaysInit();
+};
+
+window._companyHolidaysInit = async function() {
+  if (!currentEmployee?.isOwner) return;
+  if (_chSt.year == null) _chSt.year = new Date().getFullYear();
+  const bodyEl = document.getElementById('chBody');
+  if (!bodyEl) return;
+  bodyEl.innerHTML = '<div style="color:var(--muted);font-size:12px;">Loading&hellip;</div>';
+  _chSt.loading = true;
+  try {
+    const { data, error } = await sb.from('company_holidays')
+      .select('id, year, holiday_date, name, sort_order')
+      .eq('year', _chSt.year)
+      .order('holiday_date', { ascending: true });
+    if (error) throw error;
+    _chSt.rows = (data || []).map(r => ({
+      id: r.id, holiday_date: r.holiday_date, name: r.name,
+      sort_order: r.sort_order, _dirty: false, _new: false, _deleted: false
+    }));
+    _chSt._original = JSON.parse(JSON.stringify(_chSt.rows));
+  } catch (e) {
+    console.error('[holidays] load year ' + _chSt.year + ' failed:', e);
+    bodyEl.innerHTML = '<div style="color:var(--red);font-size:12px;">Failed to load: ' + (e.message || 'unknown') + '</div>';
+    _chSt.loading = false;
+    return;
+  }
+  _chSt.loading = false;
+  _chRenderBody();
+};
+
+function _chHasUnsavedChanges() {
+  if (_chSt.rows.some(r => r._new || r._dirty || r._deleted)) return true;
+  return false;
+}
+
+function _chRenderBody() {
+  const bodyEl = document.getElementById('chBody');
+  if (!bodyEl) return;
+
+  // Visible rows = everything not marked deleted, sorted by date
+  const visible = _chSt.rows.filter(r => !r._deleted).slice().sort((a, b) =>
+    (a.holiday_date || '').localeCompare(b.holiday_date || '')
+  );
+
+  const isEmpty = visible.length === 0;
+
+  let seedRow = '';
+  if (isEmpty) {
+    seedRow = `
+      <div style="padding:18px;background:var(--surface2);border:1px dashed var(--border);border-radius:8px;text-align:center;margin-bottom:14px;">
+        <div style="font-size:13px;color:var(--muted);margin-bottom:10px;">No holidays configured for ${_chSt.year}.</div>
+        <div style="display:flex;justify-content:center;gap:10px;flex-wrap:wrap;">
+          <button onclick="window._chAutoSeed()"
+            style="padding:6px 14px;border-radius:6px;background:var(--green);color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x2699; Auto-seed from federal rules</button>
+          <button onclick="window._chDuplicatePrior()"
+            style="padding:6px 14px;border-radius:6px;background:var(--surface);color:var(--text);border:1px solid var(--border);font-size:12px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">&#x1F4CB; Duplicate from ${_chSt.year - 1}</button>
+        </div>
+      </div>`;
+  }
+
+  const rowsHtml = visible.map((r, idx) => {
+    // Use the row's index into the full _chSt.rows array so handlers can find
+    // the right object even after sorting/filtering.
+    const realIdx = _chSt.rows.indexOf(r);
+    return `
+      <div style="display:grid;grid-template-columns:160px 1fr 36px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);">
+        <input type="date" value="${r.holiday_date || ''}"
+          onchange="window._chEditDate(${realIdx}, this.value)"
+          style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:5px 8px;outline:none;" />
+        <input type="text" value="${(r.name || '').replace(/"/g,'&quot;')}" placeholder="Holiday name"
+          oninput="window._chEditName(${realIdx}, this.value)"
+          style="background:var(--surface2);border:1.5px solid var(--border);border-radius:6px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12px;padding:5px 8px;outline:none;width:100%;" />
+        <button onclick="window._chDeleteRow(${realIdx})" title="Remove this holiday"
+          style="background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--red);font-size:14px;cursor:pointer;height:28px;display:flex;align-items:center;justify-content:center;">&times;</button>
+      </div>`;
+  }).join('');
+
+  const dirtyCount = _chSt.rows.filter(r => r._new || r._dirty || r._deleted).length;
+  const dirtyBadge = dirtyCount > 0
+    ? `<span style="font-size:11px;color:var(--amber);margin-left:8px;">&middot; ${dirtyCount} unsaved change${dirtyCount===1?'':'s'}</span>`
+    : '';
+
+  bodyEl.innerHTML = `
+    ${seedRow}
+    ${visible.length > 0 ? `
+      <div style="display:grid;grid-template-columns:160px 1fr 36px;gap:10px;padding:0 0 8px 0;font-size:10px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);">
+        <div>Date</div>
+        <div>Name</div>
+        <div></div>
+      </div>
+      ${rowsHtml}
+    ` : ''}
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+      <button onclick="window._chAddRow()"
+        style="padding:6px 14px;border-radius:6px;background:transparent;color:var(--text);border:1px dashed var(--border);font-size:12px;cursor:pointer;font-family:'DM Sans',sans-serif;">+ Add holiday</button>
+      <div style="font-size:11px;color:var(--muted);">${visible.length} holiday${visible.length===1?'':'s'}${dirtyBadge}</div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.5;">
+      The holiday list flows through to the Home page upcoming-holidays card, the Scheduler calendar stripes, the employee card chips, and the timesheet PTO accrual logic. Changes take effect after Save and a page refresh.
+    </div>`;
+}
+
+window._chEditDate = function(idx, val) {
+  const r = _chSt.rows[idx];
+  if (!r) return;
+  r.holiday_date = val;
+  if (!r._new) r._dirty = true;
+  _chUpdateButtonState();
+};
+
+window._chEditName = function(idx, val) {
+  const r = _chSt.rows[idx];
+  if (!r) return;
+  r.name = val;
+  if (!r._new) r._dirty = true;
+  _chUpdateButtonState();
+};
+
+window._chDeleteRow = function(idx) {
+  const r = _chSt.rows[idx];
+  if (!r) return;
+  if (r._new) {
+    // New row not yet saved → just drop it from the array
+    _chSt.rows.splice(idx, 1);
+  } else {
+    r._deleted = true;
+  }
+  _chRenderBody();
+};
+
+window._chAddRow = function() {
+  // Default the new row's date to Jan 1 of the selected year so the date
+  // input has a meaningful starting value; user changes it immediately.
+  const defaultDate = _chSt.year + '-01-01';
+  _chSt.rows.push({
+    id: null,
+    holiday_date: defaultDate,
+    name: '',
+    sort_order: null,
+    _new: true, _dirty: false, _deleted: false,
+  });
+  _chRenderBody();
+};
+
+window._chAutoSeed = function() {
+  if (typeof window.getHolidaysFromFederalRule !== 'function') {
+    alert('Federal-rule seeder unavailable. Reload the page and try again.');
+    return;
+  }
+  const seed = window.getHolidaysFromFederalRule(_chSt.year);
+  // The federal rule includes "New Year's Eve" which sits on Dec 31 of the
+  // PRIOR year. Drop entries that don't belong to _chSt.year, otherwise
+  // we'd create rows with year = _chSt.year but a date like 2025-12-31.
+  const yearStr = String(_chSt.year);
+  _chSt.rows = seed
+    .filter(h => h.date.startsWith(yearStr))
+    .map(h => ({
+      id: null,
+      holiday_date: h.date,
+      name: h.name,
+      sort_order: null,
+      _new: true, _dirty: false, _deleted: false,
+    }));
+  _chRenderBody();
+};
+
+window._chDuplicatePrior = async function() {
+  const priorYear = _chSt.year - 1;
+  try {
+    const { data, error } = await sb.from('company_holidays')
+      .select('holiday_date, name, sort_order')
+      .eq('year', priorYear)
+      .order('holiday_date', { ascending: true });
+    if (error) throw error;
+    if (!data || data.length === 0) {
+      alert('No holidays found for ' + priorYear + '. Nothing to duplicate.');
+      return;
+    }
+    // Shift each holiday_date forward by exactly one year.
+    // Note: this preserves the calendar date (Jul 4 → Jul 4) but NOT the
+    // observed-day shift. After duplication, the admin should review the
+    // list because what was "Independence Day (observed)" on Fri Jul 3, 2026
+    // shouldn't be on Sat Jul 3, 2027 — it should be on the new observed day.
+    // We surface this with a warning.
+    _chSt.rows = data.map(r => {
+      const [yStr, m, d] = r.holiday_date.split('-');
+      const newDate = (_chSt.year) + '-' + m + '-' + d;
+      return {
+        id: null,
+        holiday_date: newDate,
+        name: r.name,
+        sort_order: r.sort_order,
+        _new: true, _dirty: false, _deleted: false,
+      };
+    });
+    _chRenderBody();
+    setTimeout(() => alert(
+      'Duplicated ' + data.length + ' holidays from ' + priorYear + '. ' +
+      'Please review — dates were shifted forward one year as-is; if any ' +
+      'were "observed" dates that need re-shifting for the new calendar, ' +
+      'edit them before saving.'
+    ), 50);
+  } catch (e) {
+    console.error('[holidays] duplicate from prior year failed:', e);
+    alert('Failed to duplicate: ' + (e.message || 'unknown error'));
+  }
+};
+
+function _chUpdateButtonState() {
+  // Update the dirty badge without re-rendering the entire body
+  const bodyEl = document.getElementById('chBody');
+  if (!bodyEl) return;
+  // Find the dirty span and update it. Cheaper than full re-render and
+  // keeps the user's text-input focus intact while typing.
+  const dirtyCount = _chSt.rows.filter(r => r._new || r._dirty || r._deleted).length;
+  // For simplicity just patch the count line (last summary div is the one with "holiday" count)
+  // If we can't find it, fall through silently — full re-render isn't worth it.
+  const summaryDivs = bodyEl.querySelectorAll('div');
+  for (const d of summaryDivs) {
+    if (d.textContent && /\d+ holiday/i.test(d.textContent) && d.style && d.style.fontSize === '11px') {
+      const visible = _chSt.rows.filter(r => !r._deleted).length;
+      d.innerHTML = visible + ' holiday' + (visible === 1 ? '' : 's') +
+        (dirtyCount > 0
+          ? `<span style="font-size:11px;color:var(--amber);margin-left:8px;">&middot; ${dirtyCount} unsaved change${dirtyCount===1?'':'s'}</span>`
+          : '');
+      break;
+    }
+  }
+}
+
+window._chSave = async function() {
+  if (!currentEmployee?.isOwner) {
+    alert('Only owners can edit the holiday schedule.');
+    return;
+  }
+
+  // Validate before any DB writes
+  const visible = _chSt.rows.filter(r => !r._deleted);
+  for (const r of visible) {
+    if (!r.holiday_date || !/^\d{4}-\d{2}-\d{2}$/.test(r.holiday_date)) {
+      alert('A row has an invalid or empty date. Please fix before saving.');
+      return;
+    }
+    const rowYear = parseInt(r.holiday_date.slice(0, 4), 10);
+    if (rowYear !== _chSt.year) {
+      alert('Row date "' + r.holiday_date + '" is not in the year ' + _chSt.year +
+        '. Either change the date or switch the Year dropdown to ' + rowYear + '.');
+      return;
+    }
+    if (!r.name || !r.name.trim()) {
+      alert('A row has an empty name. Please fill in or remove it before saving.');
+      return;
+    }
+  }
+  // Check for duplicate dates within the visible set (the table has a unique
+  // constraint on (year, holiday_date) — catch this before the DB does for a
+  // clearer error message)
+  const seen = new Set();
+  for (const r of visible) {
+    if (seen.has(r.holiday_date)) {
+      alert('Duplicate date: ' + r.holiday_date + '. Each holiday must have a unique date.');
+      return;
+    }
+    seen.add(r.holiday_date);
+  }
+
+  const btn = document.getElementById('chSaveBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+
+  try {
+    // Deletes first
+    const toDelete = _chSt.rows.filter(r => r._deleted && r.id);
+    for (const r of toDelete) {
+      const { error } = await sb.from('company_holidays').delete().eq('id', r.id);
+      if (error) throw new Error('Delete failed for "' + r.name + '": ' + error.message);
+    }
+
+    // Updates
+    const toUpdate = _chSt.rows.filter(r => r._dirty && !r._deleted && !r._new && r.id);
+    for (const r of toUpdate) {
+      const { error } = await sb.from('company_holidays').update({
+        holiday_date: r.holiday_date,
+        name: r.name.trim(),
+        sort_order: r.sort_order,
+      }).eq('id', r.id);
+      if (error) throw new Error('Update failed for "' + r.name + '": ' + error.message);
+    }
+
+    // Inserts
+    const toInsert = _chSt.rows
+      .filter(r => r._new && !r._deleted)
+      .map(r => ({
+        year: _chSt.year,
+        holiday_date: r.holiday_date,
+        name: r.name.trim(),
+        sort_order: r.sort_order,
+      }));
+    if (toInsert.length > 0) {
+      const { error } = await sb.from('company_holidays').insert(toInsert);
+      if (error) throw new Error('Insert failed: ' + error.message);
+    }
+
+    // Invalidate the in-memory holidays cache so Home card / scheduler stripes
+    // / employee card chips immediately see the new data on next render.
+    if (typeof window.invalidateHolidaysCache === 'function') {
+      await window.invalidateHolidaysCache(_chSt.year).catch(()=>{});
+    }
+
+    // Reload our local working state from DB
+    await window._companyHolidaysInit();
+
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '✓ Saved';
+      btn.style.background = 'var(--green)';
+      btn.style.color = '#fff';
+      setTimeout(() => {
+        btn.textContent = 'Save changes';
+        btn.style.background = 'var(--amber)';
+        btn.style.color = '#0e0e0f';
+      }, 1800);
+    }
+  } catch (e) {
+    console.error('[holidays] save failed:', e);
+    alert('Save failed: ' + (e.message || 'unknown error') +
+      '\n\nThe holiday list may be partially saved. Reload the page to see the current state.');
+    if (btn) { btn.disabled = false; btn.textContent = 'Save changes'; }
+  }
+};
+
+// Helper exposed for _chBuildYearOptions: list years currently in the
+// holidays cache (lets the dropdown include historical edits the admin
+// may have done in earlier sessions).
+window._holidaysCachedYears = function() {
+  // The cache itself lives in employees.js; we sniff via the keys of the
+  // exposed loader's known years. Since _holidaysCache is module-scoped,
+  // we don't have direct access — instead, we just trust the static set
+  // (current + 2). If the admin needs to edit a year far back, they can
+  // type in the URL query string in the future. For now this is fine.
+  return [];
+};
 
 function renderSchedSettingsSection() {
   // Append to setup panel's scroll container

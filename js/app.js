@@ -196,6 +196,21 @@ function confirmDeleteTask() {
       }
       setTimeout(()=>{ if(typeof ittSetW==='function') ittSetW(ittGetW()); },200);
 
+      // Pre-warm the holidays cache for current year + next year so the Home
+      // upcoming-holidays card, scheduler stripe, employee card chips, and PTO
+      // accrual walk all see the DB-backed list rather than the federal-rule
+      // fallback. Fire-and-forget — cache misses fall back synchronously, so
+      // we don't block startup waiting for these to complete.
+      if (typeof window.loadHolidaysFromDB === 'function') {
+        const _hYear = new Date().getFullYear();
+        window.loadHolidaysFromDB(_hYear).catch(e =>
+          console.warn('[startup] Holiday pre-warm failed for ' + _hYear + ':', e)
+        );
+        window.loadHolidaysFromDB(_hYear + 1).catch(e =>
+          console.warn('[startup] Holiday pre-warm failed for ' + (_hYear+1) + ':', e)
+        );
+      }
+
       // Phase D: SSO return detection. signInWithDuoSSO() set this flag
       // before redirecting to Duo. If we got here with the flag still set,
       // the redirect-back from Duo just succeeded — log it.
