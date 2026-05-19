@@ -1334,6 +1334,7 @@ const AUDIT_FIELD_DEFS = {
     { key: 'need_updated_po',label: 'Need Updated PO' },
     { key: 'pm',            label: 'PM Assignment' },
     { key: 'contract_amount',label: 'Contract Amount' },
+    { key: 'primary_contact',label: 'Primary Contact' },
   ],
   employees: [
     { key: 'permission_level', label: 'Permission Level' },

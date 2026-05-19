@@ -1896,9 +1896,14 @@ async function selectClient(projId, clientId) {
 async function clearClientPicker(projId) {
   const info = projectInfo[projId];
   if (!info) return;
+  const _oldContactName = info.clientContact || null;
   info.clientId = null; info.client = '';
   info.contactId = null; info.clientContact = '';
   if (sb) await dbUpdate('project_info', projId, { client_id: null, client: null, contact_id: null, client_contact: null });
+  if (_oldContactName && typeof logAuditChange === 'function') {
+    const _proj = (typeof projects !== 'undefined' ? projects.find(p => p.id === projId) : null);
+    logAuditChange('projects', projId, _proj?.name||projId, 'primary_contact', _oldContactName, null);
+  }
   document.getElementById('clientPickerDropdown').style.display = 'none';
   renderInfoSheet(projId);
 }
@@ -1952,6 +1957,7 @@ async function selectContact(projId, contactId) {
   const info = projectInfo[projId];
   const ct = contactStore.find(x => x.id === contactId);
   if (!info || !ct) return;
+  const _oldContactName = info.clientContact || null;
   info.contactId = contactId;
   info.clientContact = ct.firstName + ' ' + ct.lastName;
   info.clientEmail = ct.email;
@@ -1960,6 +1966,10 @@ async function selectContact(projId, contactId) {
     client_contact: info.clientContact,
     client_email: ct.email||null
   });
+  const _proj = (typeof projects !== 'undefined' ? projects.find(p => p.id === projId) : null);
+  if (typeof logAuditChange === 'function') {
+    logAuditChange('projects', projId, _proj?.name||projId, 'primary_contact', _oldContactName, info.clientContact);
+  }
   // If this contact was in the project's additional-contacts list, remove it
   // (no duplicates between primary slot and additional list).
   const dupIdx = projectContactsStore.findIndex(pc => pc.projId === projId && pc.contactId === contactId);
@@ -1978,8 +1988,13 @@ async function selectContact(projId, contactId) {
 async function clearContactPicker(projId) {
   const info = projectInfo[projId];
   if (!info) return;
+  const _oldContactName = info.clientContact || null;
   info.contactId = null; info.clientContact = ''; info.clientEmail = '';
   if (sb) await dbUpdate('project_info', projId, { contact_id: null, client_contact: null, client_email: null });
+  if (_oldContactName && typeof logAuditChange === 'function') {
+    const _proj = (typeof projects !== 'undefined' ? projects.find(p => p.id === projId) : null);
+    logAuditChange('projects', projId, _proj?.name||projId, 'primary_contact', _oldContactName, null);
+  }
   document.getElementById('contactPickerDropdown').style.display = 'none';
   renderInfoSheet(projId);
 }
