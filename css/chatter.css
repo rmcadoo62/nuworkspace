@@ -76,6 +76,30 @@
 .chatter-notify-chip button{background:none;border:none;cursor:pointer;color:var(--amber);font-size:11px;padding:0;line-height:1;margin-left:2px;opacity:.7;}
 .chatter-notify-chip button:hover{opacity:1;}
 
+/* ===== CHATTER GROUPS DROPDOWN ===== */
+.chatter-groups-list{max-height:260px;overflow-y:auto;}
+.chatter-groups-item{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;font-size:13px;color:var(--text);transition:background .12s;border-bottom:1px solid var(--border);}
+.chatter-groups-item:last-of-type{border-bottom:none;}
+.chatter-groups-item:hover{background:var(--surface2);}
+.chatter-groups-item.is-default{background:var(--amber-glow);}
+.chatter-groups-item-star{width:14px;text-align:center;font-size:12px;color:var(--amber);flex-shrink:0;}
+.chatter-groups-item-name{flex:1;font-weight:500;}
+.chatter-groups-item-count{font-size:11px;color:var(--muted);margin-right:6px;}
+.chatter-groups-item-edit{background:none;border:none;cursor:pointer;color:var(--muted);font-size:13px;padding:2px 6px;border-radius:4px;}
+.chatter-groups-item-edit:hover{color:var(--amber);background:var(--amber-glow);}
+.chatter-groups-new{display:block;width:100%;padding:9px 12px;background:none;border:none;border-top:1.5px solid var(--border);font-size:12.5px;color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;text-align:left;}
+.chatter-groups-new:hover:not(:disabled){background:var(--amber-glow);}
+.chatter-groups-new:disabled{color:var(--muted);cursor:not-allowed;opacity:0.6;}
+.chatter-groups-empty{padding:14px 14px 6px;font-size:12px;color:var(--muted);text-align:center;}
+
+/* ===== CHATTER GROUP EDITOR MEMBER ROWS ===== */
+.chatter-group-member-row{display:flex;align-items:center;gap:10px;padding:7px 12px;cursor:pointer;font-size:13px;color:var(--text);transition:background .12s;border-bottom:1px solid var(--border);}
+.chatter-group-member-row:last-child{border-bottom:none;}
+.chatter-group-member-row:hover{background:var(--surface);}
+.chatter-group-member-row.selected{background:var(--amber-glow);}
+.chatter-group-member-cb{width:18px;height:18px;border:1.5px solid var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--surface);font-size:12px;color:var(--amber);font-weight:700;}
+.chatter-group-member-row.selected .chatter-group-member-cb{border-color:var(--amber);background:var(--amber);color:#fff;}
+
 /* ===== CHATTER REPLIES ===== */
 /* ===== CHATTER REPLIES ===== */
 .chatter-reply-bar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--amber-glow);border-radius:6px;margin-bottom:8px;border-left:3px solid var(--amber);}

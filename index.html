@@ -773,6 +773,15 @@
                   <div class="chatter-notify-list" id="chatterNotifyList"></div>
                 </div>
               </div>
+              <!-- Groups (personal notify shortcuts) -->
+              <div class="chatter-notify-wrap" id="chatterGroupsWrap">
+                <button class="chatter-notify-btn" id="chatterGroupsBtn" onclick="chatterToggleGroupsDrop(event)" title="Apply a saved group of recipients">
+                  👥 Groups
+                </button>
+                <div class="chatter-notify-drop" id="chatterGroupsDrop" style="display:none">
+                  <div class="chatter-groups-list" id="chatterGroupsList"></div>
+                </div>
+              </div>
               <div class="chatter-attachments-preview" id="chatterAttachPreview"></div>
               <button class="btn btn-primary" style="margin-left:auto;padding:6px 18px;font-size:13px" onclick="chatterPost()">Post</button>
             </div>
@@ -1654,6 +1663,36 @@
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="closeIssueDetailModal()">Close</button>
         <button class="btn btn-primary" onclick="saveIssueChanges()" id="saveIssueBtn" style="display:none">Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Chatter Group Editor Modal -->
+  <div class="modal-backdrop" id="chatterGroupModal" onclick="if(event.target===this)chatterCloseGroupModal()" style="z-index:1200">
+    <div class="modal" style="width:480px;max-width:94vw">
+      <div class="modal-header">
+        <div class="modal-title" id="chatterGroupModalTitle">👥 New Group</div>
+        <button class="modal-close" onclick="chatterCloseGroupModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="info-field-label" style="display:block;margin-bottom:5px">Group name</label>
+        <input id="chatterGroupNameInput" type="text" maxlength="40" placeholder="e.g. Office" style="width:100%;border:1.5px solid var(--border);border-radius:6px;padding:7px 10px;font-size:13px;background:var(--surface2);color:var(--text);outline:none;font-family:'DM Sans',sans-serif;box-sizing:border-box;margin-bottom:14px" oninput="chatterGroupModalValidate()" />
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;margin-bottom:14px">
+          <input type="checkbox" id="chatterGroupDefaultInput" style="cursor:pointer" />
+          <span>⭐ Set as my default group (auto-applied when chatter opens)</span>
+        </label>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:5px">
+          <label class="info-field-label" style="margin:0">Members</label>
+          <span id="chatterGroupMemberCount" style="font-size:11px;color:var(--muted)">None selected</span>
+        </div>
+        <input id="chatterGroupMemberSearch" type="text" placeholder="Search employees…" oninput="chatterRenderGroupModalMembers()" style="width:100%;border:1.5px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;background:var(--surface2);color:var(--text);outline:none;font-family:'DM Sans',sans-serif;box-sizing:border-box;margin-bottom:8px" />
+        <div id="chatterGroupMemberList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;background:var(--surface2)"></div>
+      </div>
+      <div class="modal-footer" style="display:flex;align-items:center;gap:10px">
+        <button class="btn btn-ghost" id="chatterGroupDeleteBtn" onclick="chatterDeleteGroup()" style="color:var(--red);display:none">Delete</button>
+        <div style="flex:1"></div>
+        <button class="btn btn-ghost" onclick="chatterCloseGroupModal()">Cancel</button>
+        <button class="btn btn-primary" id="chatterGroupSaveBtn" onclick="chatterSaveGroup()">Save</button>
       </div>
     </div>
   </div>

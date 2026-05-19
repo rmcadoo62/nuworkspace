@@ -9,6 +9,8 @@ let chatterMentionSel = 0;
 let chatterReplyTo = null; // { id, authorName, text }
 let chatterEditingId = null; // id of message currently being edited (null = none)
 let chatterNotifySelected = []; // array of employee ids chosen in notify dropdown
+let chatterGroupsStore = []; // { id, name, memberIds, isDefault } — personal notify groups for current user
+let _chatterEditingGroupId = null; // id of group open in editor modal (null = creating new)
 let notifStore = []; // { id, projId, projName, msgId, fromName, fromColor, fromInitials, text, ts, read }
 // One-shot guard so the 45-day prune of read notifications fires only once per
 // session (at the first loadNotifs call after login). Reset by auth.js on
@@ -34,6 +36,14 @@ async function loadChatter(projId) {
   } catch(e) { chatterStore[projId] = chatterStore[projId] || []; }
   renderChatter(projId);
   loadNotifs();
+  // Load personal notify groups and auto-apply default group if one is set,
+  // but only when no chips are already selected (don't stomp other flows).
+  // Reloaded every project-load — small query, accounts for user switches
+  // and edits made elsewhere.
+  try {
+    await chatterLoadGroups();
+    if (!chatterNotifySelected.length) chatterApplyDefaultGroup();
+  } catch(e) { console.warn('Chatter groups load error:', e); }
 }
 
 function renderChatter(projId) {
@@ -167,12 +177,7 @@ function chatterStartReply(msgId, authorName) {
     (parentMsg.notifyIds || []).forEach(id => preFill.push(id));
     chatterNotifySelected = [...new Set(preFill)].filter(id => id && id !== myEmpId);
     chatterRenderNotifyChips();
-    const btn = document.getElementById('chatterNotifyBtn');
-    if (btn) {
-      btn.textContent = chatterNotifySelected.length ? '\uD83D\uDD14 Notify (' + chatterNotifySelected.length + ')' : '\uD83D\uDD14 Notify';
-      if (chatterNotifySelected.length) btn.classList.add('has-selections');
-      else btn.classList.remove('has-selections');
-    }
+    chatterUpdateNotifyBtn();
   }
 
   document.getElementById('chatterInput')?.focus();
@@ -184,8 +189,9 @@ function chatterCancelReply() {
   // Clear the pre-filled chips so they don't bleed into the next non-reply post
   chatterNotifySelected = [];
   chatterRenderNotifyChips();
-  const btn = document.getElementById('chatterNotifyBtn');
-  if (btn) { btn.textContent = '\uD83D\uDD14 Notify'; btn.classList.remove('has-selections'); }
+  chatterUpdateNotifyBtn();
+  // Re-apply default group now that we're back to fresh-message mode
+  chatterApplyDefaultGroup();
 }
 
 async function chatterDelete(msgId) {
@@ -677,11 +683,14 @@ function chatterToggleNotifyEmp(empId) {
   else chatterNotifySelected.push(empId);
   chatterRenderNotifyList((document.getElementById('chatterNotifySearch')?.value || '').toLowerCase());
   chatterRenderNotifyChips();
-  // Update button label
+  chatterUpdateNotifyBtn();
+}
+function chatterUpdateNotifyBtn() {
   const btn = document.getElementById('chatterNotifyBtn');
-  if (btn) btn.textContent = chatterNotifySelected.length ? '🔔 Notify (' + chatterNotifySelected.length + ')' : '🔔 Notify';
-  if (chatterNotifySelected.length) btn?.classList.add('has-selections');
-  else btn?.classList.remove('has-selections');
+  if (!btn) return;
+  btn.textContent = chatterNotifySelected.length ? '🔔 Notify (' + chatterNotifySelected.length + ')' : '🔔 Notify';
+  if (chatterNotifySelected.length) btn.classList.add('has-selections');
+  else btn.classList.remove('has-selections');
 }
 function chatterRenderNotifyChips() {
   const wrap = document.getElementById('chatterNotifyChips');
@@ -705,6 +714,291 @@ document.addEventListener('click', e => {
     if (drop) drop.style.display = 'none';
   }
 });
+
+// ── Chatter Groups (personal notify shortcuts) ─────────────────────────
+// Per-user saved groups of employee ids. Click a group to chip everyone in.
+// One group per user may be flagged is_default → auto-applied when a project's
+// chatter loads (provided no chips are already selected).
+// Hard cap: 5 groups per user. Name length capped at 40 chars (DB check).
+
+const CHATTER_GROUPS_MAX = 5;
+
+// Resolve current user → employee row. Tries currentEmployee first (set by
+// auth.js after login), falls back to email lookup if needed.
+function _chatterCurrentEmpId() {
+  if (typeof currentEmployee !== 'undefined' && currentEmployee?.id) return currentEmployee.id;
+  return null;
+}
+
+async function chatterLoadGroups() {
+  const empId = _chatterCurrentEmpId();
+  if (!empId || !sb) { chatterGroupsStore = []; return; }
+  try {
+    const { data, error } = await sb.from('chatter_groups')
+      .select('*').eq('employee_id', empId)
+      .order('is_default', { ascending: false })
+      .order('name', { ascending: true });
+    if (error) throw error;
+    chatterGroupsStore = (data || []).map(r => ({
+      id: r.id, name: r.name, memberIds: r.member_ids || [], isDefault: !!r.is_default
+    }));
+  } catch(e) {
+    console.warn('chatterLoadGroups error:', e);
+    chatterGroupsStore = [];
+  }
+}
+
+// Filter member ids the way the Notify dropdown does — drop inactive,
+// terminated, or Ballantine-department employees. Silent skip.
+function _chatterValidMemberIds(ids) {
+  return (ids || []).filter(id => {
+    const e = employees.find(x => x.id === id);
+    if (!e || !e.name) return false;
+    if (e.isActive === false || e.terminationDate) return false;
+    if ((e.dept || '').toLowerCase() === 'ballantine') return false;
+    return true;
+  });
+}
+
+function chatterApplyGroup(groupId) {
+  const g = chatterGroupsStore.find(x => x.id === groupId);
+  if (!g) return;
+  const valid = _chatterValidMemberIds(g.memberIds);
+  // Additive merge with existing selection — no duplicates.
+  chatterNotifySelected = [...new Set([...chatterNotifySelected, ...valid])];
+  chatterRenderNotifyChips();
+  chatterUpdateNotifyBtn();
+  // Close the dropdown
+  const drop = document.getElementById('chatterGroupsDrop');
+  if (drop) drop.style.display = 'none';
+}
+
+function chatterApplyDefaultGroup() {
+  if (!chatterGroupsStore || !chatterGroupsStore.length) return;
+  if (chatterNotifySelected.length) return; // never overwrite existing chips
+  const def = chatterGroupsStore.find(g => g.isDefault);
+  if (!def) return;
+  chatterApplyGroup(def.id);
+}
+
+function chatterToggleGroupsDrop(e) {
+  e.stopPropagation();
+  const drop = document.getElementById('chatterGroupsDrop');
+  const btn  = document.getElementById('chatterGroupsBtn');
+  if (!drop) return;
+  const isOpen = drop.style.display !== 'none';
+  if (isOpen) { drop.style.display = 'none'; return; }
+  if (btn) {
+    const rect = btn.getBoundingClientRect();
+    drop.style.left   = rect.left + 'px';
+    drop.style.top    = (rect.bottom + 6) + 'px';
+    drop.style.bottom = 'auto';
+    drop.style.width  = Math.max(240, rect.width) + 'px';
+  }
+  chatterRenderGroupsDropdown();
+  drop.style.display = '';
+}
+
+function chatterRenderGroupsDropdown() {
+  const list = document.getElementById('chatterGroupsList');
+  if (!list) return;
+  const atMax = chatterGroupsStore.length >= CHATTER_GROUPS_MAX;
+  let html = '';
+  if (!chatterGroupsStore.length) {
+    html += '<div class="chatter-groups-empty">No groups yet. Create one to chip a team of recipients in one click.</div>';
+  } else {
+    html += chatterGroupsStore.map(g => {
+      const memberCount = _chatterValidMemberIds(g.memberIds).length;
+      const star = g.isDefault ? '⭐' : '';
+      const nameEsc = (g.name || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+      return '<div class="chatter-groups-item' + (g.isDefault ? ' is-default' : '') + '" onclick="chatterApplyGroup(\'' + g.id + '\')">' +
+        '<div class="chatter-groups-item-star">' + star + '</div>' +
+        '<div class="chatter-groups-item-name">' + (g.name || '(unnamed)') + '</div>' +
+        '<div class="chatter-groups-item-count">' + memberCount + '</div>' +
+        '<button class="chatter-groups-item-edit" onclick="event.stopPropagation();chatterOpenGroupModal(\'' + g.id + '\')" title="Edit group">✏</button>' +
+      '</div>';
+    }).join('');
+  }
+  html += '<button class="chatter-groups-new" onclick="chatterOpenGroupModal(null)"' +
+    (atMax ? ' disabled title="Maximum 5 groups"' : '') +
+    '>+ New group' + (atMax ? ' (5/5 max)' : '') + '</button>';
+  list.innerHTML = html;
+}
+
+// Close groups dropdown on outside click
+document.addEventListener('click', e => {
+  if (!e.target.closest('#chatterGroupsWrap')) {
+    const drop = document.getElementById('chatterGroupsDrop');
+    if (drop) drop.style.display = 'none';
+  }
+});
+
+// ── Group editor modal ────────────────────────────────────────────────
+let _chatterGroupModalMemberIds = []; // working set while modal is open
+
+function chatterOpenGroupModal(groupId) {
+  // Block creation past the cap
+  if (!groupId && chatterGroupsStore.length >= CHATTER_GROUPS_MAX) {
+    toast('⚠ Maximum ' + CHATTER_GROUPS_MAX + ' groups');
+    return;
+  }
+  // Close the Groups dropdown so it doesn't float over the modal
+  const drop = document.getElementById('chatterGroupsDrop');
+  if (drop) drop.style.display = 'none';
+  _chatterEditingGroupId = groupId || null;
+  const modal = document.getElementById('chatterGroupModal');
+  const titleEl = document.getElementById('chatterGroupModalTitle');
+  const nameInp = document.getElementById('chatterGroupNameInput');
+  const defInp  = document.getElementById('chatterGroupDefaultInput');
+  const delBtn  = document.getElementById('chatterGroupDeleteBtn');
+  if (groupId) {
+    const g = chatterGroupsStore.find(x => x.id === groupId);
+    if (!g) return;
+    titleEl.textContent = '👥 Edit Group';
+    nameInp.value = g.name || '';
+    defInp.checked = !!g.isDefault;
+    _chatterGroupModalMemberIds = [...(g.memberIds || [])];
+    if (delBtn) delBtn.style.display = '';
+  } else {
+    titleEl.textContent = '👥 New Group';
+    nameInp.value = '';
+    defInp.checked = false;
+    _chatterGroupModalMemberIds = [];
+    if (delBtn) delBtn.style.display = 'none';
+  }
+  const search = document.getElementById('chatterGroupMemberSearch');
+  if (search) search.value = '';
+  chatterRenderGroupModalMembers();
+  chatterGroupModalValidate();
+  modal.classList.add('open');
+  setTimeout(() => nameInp?.focus(), 50);
+}
+
+function chatterCloseGroupModal() {
+  const modal = document.getElementById('chatterGroupModal');
+  if (modal) modal.classList.remove('open');
+  _chatterEditingGroupId = null;
+  _chatterGroupModalMemberIds = [];
+}
+
+function chatterGroupModalValidate() {
+  const nameInp = document.getElementById('chatterGroupNameInput');
+  const saveBtn = document.getElementById('chatterGroupSaveBtn');
+  if (!nameInp || !saveBtn) return;
+  const ok = nameInp.value.trim().length > 0;
+  saveBtn.disabled = !ok;
+  saveBtn.style.opacity = ok ? '1' : '0.5';
+  saveBtn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+}
+
+function chatterRenderGroupModalMembers() {
+  const list = document.getElementById('chatterGroupMemberList');
+  if (!list) return;
+  const q = (document.getElementById('chatterGroupMemberSearch')?.value || '').toLowerCase();
+  const matches = employees.filter(e => {
+    if (!e.name) return false;
+    if (e.isActive === false || e.terminationDate) return false;
+    if ((e.dept || '').toLowerCase() === 'ballantine') return false;
+    return !q || e.name.toLowerCase().includes(q);
+  });
+  // Selected first (alphabetical within each bucket), then the rest
+  matches.sort((a, b) => {
+    const aSel = _chatterGroupModalMemberIds.includes(a.id) ? 0 : 1;
+    const bSel = _chatterGroupModalMemberIds.includes(b.id) ? 0 : 1;
+    if (aSel !== bSel) return aSel - bSel;
+    return (a.name || '').localeCompare(b.name || '');
+  });
+  // Update count label
+  const countEl = document.getElementById('chatterGroupMemberCount');
+  if (countEl) countEl.textContent = _chatterGroupModalMemberIds.length
+    ? _chatterGroupModalMemberIds.length + ' selected'
+    : 'None selected';
+  if (!matches.length) {
+    list.innerHTML = '<div style="padding:14px;font-size:12px;color:var(--muted);text-align:center">No employees match</div>';
+    return;
+  }
+  list.innerHTML = matches.map(e => {
+    const sel = _chatterGroupModalMemberIds.includes(e.id);
+    return '<div class="chatter-group-member-row' + (sel ? ' selected' : '') + '" onclick="chatterToggleGroupModalMember(\'' + e.id + '\')">' +
+      '<div class="chatter-group-member-cb">' + (sel ? '✓' : '') + '</div>' +
+      '<div class="chatter-notify-avatar" style="background:' + e.color + ';color:#fff">' + e.initials + '</div>' +
+      '<div class="chatter-notify-name">' + e.name + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function chatterToggleGroupModalMember(empId) {
+  const idx = _chatterGroupModalMemberIds.indexOf(empId);
+  if (idx > -1) _chatterGroupModalMemberIds.splice(idx, 1);
+  else _chatterGroupModalMemberIds.push(empId);
+  chatterRenderGroupModalMembers();
+}
+
+async function chatterSaveGroup() {
+  const empId = _chatterCurrentEmpId();
+  if (!empId || !sb) { toast('⚠ Not signed in'); return; }
+  const nameInp = document.getElementById('chatterGroupNameInput');
+  const defInp  = document.getElementById('chatterGroupDefaultInput');
+  const name = (nameInp?.value || '').trim();
+  if (!name) { toast('⚠ Group name required'); return; }
+  if (name.length > 40) { toast('⚠ Group name max 40 characters'); return; }
+  const isDefault = !!defInp?.checked;
+  const memberIds = [..._chatterGroupModalMemberIds];
+
+  try {
+    // If marking this as default, clear default on any other group first
+    // (the unique partial index would otherwise reject the second true).
+    if (isDefault) {
+      const others = chatterGroupsStore.filter(g => g.isDefault && g.id !== _chatterEditingGroupId);
+      for (const o of others) {
+        await sb.from('chatter_groups').update({ is_default: false, updated_at: new Date().toISOString() }).eq('id', o.id);
+      }
+    }
+
+    if (_chatterEditingGroupId) {
+      // Update
+      const { error } = await sb.from('chatter_groups').update({
+        name, member_ids: memberIds, is_default: isDefault, updated_at: new Date().toISOString()
+      }).eq('id', _chatterEditingGroupId);
+      if (error) throw error;
+    } else {
+      // Insert — re-check cap server-side to avoid race
+      if (chatterGroupsStore.length >= CHATTER_GROUPS_MAX) {
+        toast('⚠ Maximum ' + CHATTER_GROUPS_MAX + ' groups');
+        return;
+      }
+      const { error } = await sb.from('chatter_groups').insert({
+        employee_id: empId, name, member_ids: memberIds, is_default: isDefault
+      });
+      if (error) throw error;
+    }
+    await chatterLoadGroups();
+    chatterRenderGroupsDropdown();
+    chatterCloseGroupModal();
+    toast('Group saved');
+  } catch(e) {
+    console.warn('chatterSaveGroup error:', e);
+    toast('⚠ Could not save group');
+  }
+}
+
+async function chatterDeleteGroup() {
+  if (!_chatterEditingGroupId || !sb) return;
+  const g = chatterGroupsStore.find(x => x.id === _chatterEditingGroupId);
+  if (!g) return;
+  if (!confirm('Delete group "' + (g.name || '') + '"?')) return;
+  try {
+    const { error } = await sb.from('chatter_groups').delete().eq('id', _chatterEditingGroupId);
+    if (error) throw error;
+    await chatterLoadGroups();
+    chatterRenderGroupsDropdown();
+    chatterCloseGroupModal();
+    toast('Group deleted');
+  } catch(e) {
+    console.warn('chatterDeleteGroup error:', e);
+    toast('⚠ Could not delete group');
+  }
+}
 
 // ── Attachments ────────────────────────────────────────────────────────
 function chatterAttachFile(e) {
