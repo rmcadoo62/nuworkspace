@@ -1089,7 +1089,7 @@ function renderClientDrawerBody() {
   } else if (_clientDrawerTab === 'dtab-jobs') {
     const jobs = _clientDrawerId
       ? projects.filter(p => (projectInfo[p.id]||{}).clientId === _clientDrawerId)
-          .sort((a,b) => a.name.localeCompare(b.name))
+          .sort((a,b) => b.name.localeCompare(a.name))
       : [];
 
     const fmt$ = n => n > 0 ? '$' + n.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}) : '—';
