@@ -182,6 +182,32 @@ function renderDashboard() {
     ...Object.values(_yearReversals).flatMap(m => Object.keys(m)),
   ])].sort();
 
+  // ── Booking chart data — 12 months current year, net per month + 3-mo moving avg ──
+  // Bars = net (bookings − reversals) per month; future months stay at 0.
+  // Moving avg only spans months up to and including the current month (so it
+  // doesn't get dragged down by empty future months).
+  const _bkChartLabels = _monthNames.map((m,i) => m + ' ' + String(_curYear).slice(2));
+  const _bkChartKeys   = _monthNames.map((_,i) => _curYear + '-' + String(i+1).padStart(2,'0'));
+  const _bkChartData   = _monthNames.map((_,mi) => {
+    if (mi > _curMonth) return 0;
+    const book = Object.values(_yearBookings[mi]||{}).reduce((a,b)=>a+b,0);
+    const rev  = Object.values(_yearReversals[mi]||{}).reduce((a,b)=>a+b,0);
+    return book - rev;
+  });
+  const _bkChartMovingAvg = _bkChartData.map((_, i) => {
+    if (i > _curMonth) return null; // don't draw line past current month
+    const start = Math.max(0, i - 2);
+    const slice = _bkChartData.slice(start, i + 1);
+    return slice.reduce((s, v) => s + v, 0) / slice.length;
+  });
+  window._bookingChartData = {
+    labels: _bkChartLabels,
+    data:   _bkChartData,
+    keys:   _bkChartKeys,
+    movingAvg: _bkChartMovingAvg,
+    curMonth: _curMonth,
+  };
+
   // YTD summary numbers
   const _ytdBookings  = Object.values(_yearBookings).reduce((s,m)  => s + Object.values(m).reduce((a,b)=>a+b,0), 0);
   const _ytdReversals = Object.values(_yearReversals).reduce((s,m) => s + Object.values(m).reduce((a,b)=>a+b,0), 0);
@@ -690,6 +716,7 @@ function renderDashboard() {
           <div style="display:flex;gap:4px;margin-left:auto">
             <button id="bkBtnYear"  onclick="setBkView('year')"  style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Full Year</button>
             <button id="bkBtnMonth" onclick="setBkView('month')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Month</button>
+            <button id="bkBtnChart" onclick="setBkView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px">
@@ -728,6 +755,9 @@ function renderDashboard() {
             <button id="bkDtlBtnSummary" onclick="setBkMonthSubview('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
             <button id="bkDtlBtnDetail"  onclick="setBkMonthSubview('detail')"  style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
           </div>
+        </div>
+        <div id="bkChartWrap" style="display:none">
+          <canvas id="bookingByMonthChart" height="110"></canvas>
         </div>
       </div>
     </div>
@@ -1196,21 +1226,34 @@ window._openProjectFromDash = function(id) {
 };
 
 function setBkView(view) {
+  if (view !== 'year' && view !== 'month' && view !== 'chart') view = 'year';
   window._bkCurrentView = view;
   const yearWrap  = document.getElementById('bkYearWrap');
   const monthWrap = document.getElementById('bkMonthWrap');
+  const chartWrap = document.getElementById('bkChartWrap');
   const btnYear   = document.getElementById('bkBtnYear');
   const btnMonth  = document.getElementById('bkBtnMonth');
+  const btnChart  = document.getElementById('bkBtnChart');
   if (!yearWrap) return;
-  const isYear = view === 'year';
-  yearWrap.style.display  = isYear ? '' : 'none';
-  monthWrap.style.display = isYear ? 'none' : '';
-  btnYear.style.background  = isYear ? 'var(--amber-glow)' : 'transparent';
-  btnYear.style.color       = isYear ? 'var(--amber)' : 'var(--muted)';
-  btnYear.style.borderColor = isYear ? 'var(--amber-dim)' : 'var(--border)';
-  btnMonth.style.background  = !isYear ? 'var(--amber-glow)' : 'transparent';
-  btnMonth.style.color       = !isYear ? 'var(--amber)' : 'var(--muted)';
-  btnMonth.style.borderColor = !isYear ? 'var(--amber-dim)' : 'var(--border)';
+
+  yearWrap.style.display  = view === 'year'  ? '' : 'none';
+  monthWrap.style.display = view === 'month' ? '' : 'none';
+  if (chartWrap) chartWrap.style.display = view === 'chart' ? '' : 'none';
+
+  const styleBtn = (btn, active) => {
+    if (!btn) return;
+    btn.style.background  = active ? 'var(--amber-glow)' : 'transparent';
+    btn.style.color       = active ? 'var(--amber)' : 'var(--muted)';
+    btn.style.borderColor = active ? 'var(--amber-dim)' : 'var(--border)';
+  };
+  styleBtn(btnYear,  view === 'year');
+  styleBtn(btnMonth, view === 'month');
+  styleBtn(btnChart, view === 'chart');
+
+  // Draw the booking chart on first switch — canvas must be visible for sizing
+  if (view === 'chart') {
+    setTimeout(() => _drawBookingChart(), 50);
+  }
 }
 
 function setBkMonth(mo) {
@@ -1514,3 +1557,130 @@ function _drawBilledQuarterly(canv) {
     plugins: [stackedSegmentLabels]
   });
 }
+
+// Booking-specific value-label plugin — handles negative values with ($X) format
+const _bookingBarValueLabels = {
+  id: 'bookingBarValueLabels',
+  afterDatasetsDraw(chart) {
+    const ctx = chart.ctx;
+    chart.data.datasets.forEach((dataset, i) => {
+      if (dataset.type === 'line') return;
+      const meta = chart.getDatasetMeta(i);
+      meta.data.forEach((bar, idx) => {
+        const val = dataset.data[idx];
+        if (val === null || val === undefined || val === 0) return;
+        const abs = Math.abs(val);
+        const fmt = abs >= 1000 ? '$' + (abs/1000).toFixed(1) + 'k' : '$' + abs.toFixed(0);
+        const label = val < 0 ? '(' + fmt + ')' : fmt;
+        ctx.save();
+        ctx.fillStyle = val < 0 ? '#e05c5c' : '#c8c8d8';
+        ctx.font = '600 10px DM Sans, sans-serif';
+        ctx.textAlign = 'center';
+        // For negative bars, the bar grows downward — label goes below the bar
+        if (val < 0) {
+          ctx.textBaseline = 'top';
+          ctx.fillText(label, bar.x, bar.y + 3);
+        } else {
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(label, bar.x, bar.y - 3);
+        }
+        ctx.restore();
+      });
+    });
+  }
+};
+
+// ── Booking chart drawer — net bookings per month + 3-mo moving avg ────────
+// Bars are green for positive net months, red for negative, faded gray for
+// zero/future. Clicking a bar jumps to that month's tab in the By Month view.
+function _drawBookingChart() {
+  const canv = document.getElementById('bookingByMonthChart');
+  if (!canv || typeof Chart === 'undefined') return;
+  const m = window._bookingChartData;
+  if (!m) return;
+
+  const existing = Chart.getChart(canv);
+  if (existing) existing.destroy();
+
+  const barColors = m.data.map((v, i) => {
+    if (i > m.curMonth) return 'rgba(122,122,133,0.15)'; // future months
+    if (v > 0) return 'rgba(76,175,125,0.7)';            // positive net — green
+    if (v < 0) return 'rgba(224,92,92,0.7)';             // negative net — red
+    return 'rgba(122,122,133,0.2)';                       // zero — faded
+  });
+  const borderColors = m.data.map((v, i) => {
+    if (i > m.curMonth) return 'rgba(122,122,133,0.2)';
+    if (v > 0) return '#4caf7d';
+    if (v < 0) return '#e05c5c';
+    return 'rgba(122,122,133,0.3)';
+  });
+
+  new Chart(canv, {
+    type: 'bar',
+    data: {
+      labels: m.labels,
+      datasets: [{
+        label: 'Net Bookings',
+        data: m.data,
+        backgroundColor: barColors,
+        borderColor:     borderColors,
+        borderWidth: 1.5, borderRadius: 5, borderSkipped: false, order: 1,
+      },{
+        type: 'line',
+        label: '3-mo Moving Avg',
+        data: m.movingAvg,
+        borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)',
+        borderWidth: 2.5, pointRadius: 3, pointHoverRadius: 5,
+        pointBackgroundColor: '#c07a1a', pointBorderColor: '#c07a1a',
+        fill: false, tension: 0.3, spanGaps: false, order: 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      onHover: (e, els) => { e.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+      onClick: (e, els) => {
+        if (!els.length) return;
+        const idx = els[0].index;
+        if (idx > m.curMonth) return; // ignore clicks on future months
+        // Switch to By Month view and jump to the clicked month
+        setBkView('month');
+        if (typeof setBkMonth === 'function') setBkMonth(idx);
+      },
+      plugins: {
+        legend: {
+          display: true, position: 'top', align: 'end',
+          labels: { color: '#9a9aaa', font: { size: 10, family: 'DM Sans, sans-serif' }, boxWidth: 12, boxHeight: 8, padding: 10, usePointStyle: false }
+        },
+        tooltip: {
+          mode: 'index', intersect: false,
+          filter: (item) => item.parsed.y !== null && item.parsed.y !== undefined,
+          callbacks: {
+            label: ctx => {
+              const v = ctx.parsed.y;
+              const prefix = ctx.dataset.label === 'Net Bookings' ? ' Net: ' : ' 3-mo Avg: ';
+              const isNeg = v < 0;
+              const abs = Math.abs(v||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+              return prefix + (isNeg ? '($' + abs + ')' : '$' + abs);
+            }
+          }
+        }
+      },
+      scales: {
+        x: { ticks: { color: '#9a9aaa', font: { size: 10 } }, grid: { display: false } },
+        y: {
+          ticks: {
+            color: '#9a9aaa', font: { size: 10 },
+            callback: v => {
+              const abs = Math.abs(v);
+              const fmt = abs >= 1000 ? '$' + (abs/1000).toFixed(0) + 'k' : '$' + abs;
+              return v < 0 ? '(' + fmt + ')' : fmt;
+            }
+          },
+          grid: { color: 'rgba(255,255,255,0.05)' }, beginAtZero: true
+        }
+      }
+    },
+    plugins: [_bookingBarValueLabels]
+  });
+}
+
