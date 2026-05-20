@@ -7,7 +7,7 @@ operational thresholds baked into the application code. Useful for:
 - CMMC documentation (auditors love seeing policy decisions enumerated)
 - Onboarding future developers (these are not in the database — they are in code)
 
-Last refreshed: May 13, 2026, based on current uploads + project snapshot.
+Last refreshed: May 20, 2026, based on current uploads + project snapshot.
 
 ---
 
@@ -132,6 +132,7 @@ These exist mostly to keep payloads small. Watch the 2,000 and 1,000 limits — 
 | Email provider | Resend | Account-level config; API key in Supabase env var `RESEND_API_KEY` |
 | Verified sending domain | `mail.nulabs.com` | DNS records (SPF/DKIM/MAIL FROM CNAME) at Network Solutions; verified in Resend dashboard. Referenced as constants in: `project-detail.js` `SEND_DOMAIN`, `send-notification/index.ts` `FROM_EMAIL`, `survey-send/index.ts` `FROM_ADDR`. Migrated from `vibrato.nulabs.com` on May 13, 2026. |
 | Edge Functions sending email | `send-notification` (chatter @mentions, timesheet alerts), `send-client-email` (client outreach), `survey-send` (customer satisfaction surveys) | `supabase/functions/<name>/index.ts` |
+| Resend bounce/complaint webhook | `resend-webhook` — verifies Svix HMAC signature, then sets `contacts.email_invalid=true` on hard bounces (`email.bounced` type=Permanent) and spam complaints (`email.complained`). Subscribed events configured in Resend dashboard. | `supabase/functions/resend-webhook/index.ts`. PUBLIC (Verify JWT OFF); secured by Svix signature + `RESEND_WEBHOOK_SECRET`. Added 2026-05-20. |
 | Edge Function AI model (chat helper) | `claude-3-haiku-20240307` | (per memory; Tier 1 account constraint) |
 | Encrypted shared folder | `NUEncrypted` (AES-256, Synology) | (per memory) |
 | VPN | UniFi Dream Machine Pro, OpenVPN, full tunnel | not yet live |
