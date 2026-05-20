@@ -1778,6 +1778,60 @@ window.schedGoToday = function() {
   schedOffset = 0;
   if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
 };
+
+// ---- Jump to an arbitrary date (click the range label) ----
+// Converts the picked date into the correct schedOffset for the active zoom.
+// Gantt view only — calendar view is intentionally excluded.
+window.schedJumpToDate = function(dateStr) {
+  if (!dateStr) return;
+  if (schedView !== 'gantt') return;
+  // Parse YYYY-MM-DD as a local date (avoid UTC shift from new Date(str))
+  const [y, m, d] = dateStr.split('-').map(Number);
+  if (!y || !m || !d) return;
+  const picked = new Date(y, m - 1, d); picked.setHours(0,0,0,0);
+  const today  = new Date();          today.setHours(0,0,0,0);
+
+  if (schedZoom === 'month') {
+    schedOffset = (picked.getFullYear()*12 + picked.getMonth())
+                - (today.getFullYear()*12  + today.getMonth());
+  } else if (schedZoom === 'quarter') {
+    const pickedQ = Math.floor(picked.getMonth()/3);
+    const todayQ  = Math.floor(today.getMonth()/3);
+    schedOffset = (picked.getFullYear()*4 + pickedQ)
+                - (today.getFullYear()*4  + todayQ);
+  } else {
+    // 1week (7-day) or week (14-day) — measure from this week's Monday
+    // to the Monday of the picked date's week, in whole periods.
+    const periodDays = (schedZoom === '1week') ? 7 : 14;
+    const mondayOf = (dt) => {
+      const dow = dt.getDay(); const diff = (dow + 6) % 7;
+      return addDays(dt, -diff);
+    };
+    const todayMon  = mondayOf(today);
+    const pickedMon = mondayOf(picked);
+    const weeksApart = Math.round((pickedMon - todayMon) / 86400000 / 7);
+    // For 2-week zoom, two calendar weeks share one offset step.
+    schedOffset = (periodDays === 7)
+      ? weeksApart
+      : Math.floor(weeksApart / 2);
+  }
+  renderSched();
+};
+
+// Open a native date picker anchored to the range label.
+window.schedOpenDatePicker = function() {
+  if (schedView !== 'gantt') return;
+  const inp = document.getElementById('schedJumpDate');
+  if (!inp) return;
+  // Seed with the current range start so the picker opens near the view
+  try {
+    const r = getSchedRange();
+    const s = r.start;
+    inp.value = `${s.getFullYear()}-${String(s.getMonth()+1).padStart(2,'0')}-${String(s.getDate()).padStart(2,'0')}`;
+  } catch(e) {}
+  if (typeof inp.showPicker === 'function') inp.showPicker();
+  else inp.focus();
+};
 window.setSchedZoom = function(z, btn) {
   schedZoom = z; schedOffset = 0;
   // Only clear active on the gantt zoom group, not the view-mode buttons

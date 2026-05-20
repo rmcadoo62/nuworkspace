@@ -390,7 +390,8 @@
           <div class="sched-title">&#x1F4C6; Scheduler</div>
           <div class="sched-nav">
             <button class="sched-nav-btn" onclick="schedNav(-1)" title="Previous">&#x2039;</button>
-            <span class="sched-range-label" id="schedRangeLabel">—</span>
+            <span class="sched-range-label" id="schedRangeLabel" onclick="schedOpenDatePicker()" title="Click to jump to a date">—</span>
+            <input type="date" id="schedJumpDate" class="sched-jump-date" onchange="schedJumpToDate(this.value)" tabindex="-1" aria-label="Jump to date">
             <button class="sched-nav-btn" onclick="schedNav(1)" title="Next">&#x203A;</button>
           </div>
           <button class="sched-today-btn" onclick="schedGoToday()">Today</button>
