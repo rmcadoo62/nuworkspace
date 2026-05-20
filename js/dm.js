@@ -384,7 +384,14 @@ function _dmComposeKey(e) {
 
 async function dmSendFromComposer() {
   const input = document.getElementById('dmComposeInput');
-  if (!input || !dmActiveConv) return;
+  if (!input || !dmActiveConv) {
+    // [dm-diag] Silent bail here looks to the user like "I typed a reply and
+    // nothing happened." Log which precondition failed so a recurrence is
+    // diagnosable from the recipient's console.
+    console.warn('[dm-diag] dmSendFromComposer aborted:',
+      { hasInput: !!input, dmActiveConv });
+    return;
+  }
   const body = input.value.trim();
   if (!body) return;
   input.value = '';
@@ -393,9 +400,18 @@ async function dmSendFromComposer() {
 }
 
 async function dmSendMessage(convId, body) {
-  if (!currentEmployee) return;
+  if (!currentEmployee) {
+    console.warn('[dm-diag] dmSendMessage aborted: no currentEmployee');
+    return;
+  }
   const conv = dmConvs.find(c => c.id === convId);
-  if (!conv) return;
+  if (!conv) {
+    // The conversation the user is "in" isn't in the loaded list — stale state.
+    // This is the prime suspect for "I can see the message but can't reply."
+    console.warn('[dm-diag] dmSendMessage aborted: conv not in dmConvs',
+      { convId, loadedConvIds: dmConvs.map(c => c.id), dmActiveConv });
+    return;
+  }
 
   // Optimistic insert into local cache
   const tempId = '_temp_' + Date.now();
@@ -416,7 +432,16 @@ async function dmSendMessage(convId, body) {
     body,
   }]).select().single();
   if (error) {
-    console.error('[dm] send failed:', error);
+    // [dm-diag] Break the error object into its Postgres fields so an RLS
+    // denial (code 42501) is unmistakable vs. a network/auth failure.
+    console.error('[dm] send failed:', {
+      code:    error.code,
+      message: error.message,
+      details: error.details,
+      hint:    error.hint,
+      convId,
+      senderId: currentEmployee.id,
+    });
     if (typeof toast === 'function') toast('Failed to send message');
     // Remove optimistic
     dmMsgsByConv[convId] = (dmMsgsByConv[convId] || []).filter(m => m.id !== tempId);
