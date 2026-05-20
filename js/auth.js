@@ -1179,6 +1179,10 @@ function applyPermissions() {
   const navQuotes = document.getElementById('navQuotes');
   if (navQuotes) navQuotes.style.display = can('view_quotes') ? 'flex' : 'none';
 
+  // NUForce launcher — gated by the access_nuforce capability
+  const navNuforce = document.getElementById('navNuforce');
+  if (navNuforce) navNuforce.style.display = can('access_nuforce') ? 'flex' : 'none';
+
   applySchedAccessToNav();
 
   // Initialize the Customer Surveys eligible-count badge. Function in
@@ -1264,12 +1268,15 @@ function _applyIdentityNav() {
 // of applyPermissions() and _applyIdentityNav() so it sees the final state
 // of every nav-item's display. Idempotent — safe to call multiple times.
 function _autoCollapseNavSections() {
-  // 1) Vibrato brand image — tie visibility to the Quotes nav item below it.
+  // 1) NUForce brand header — show if EITHER Quotes or the NUForce launcher
+  //    is visible (a user may have access_nuforce without view_quotes).
   const navQuotes     = document.getElementById('navQuotes');
+  const navNuforce    = document.getElementById('navNuforce');
   const vibratoBrand  = document.getElementById('vibratoBrand');
-  if (vibratoBrand && navQuotes) {
-    const hidden = navQuotes.style.display === 'none';
-    vibratoBrand.style.display = hidden ? 'none' : '';
+  if (vibratoBrand) {
+    const quotesVisible  = navQuotes  && navQuotes.style.display  !== 'none';
+    const nuforceVisible = navNuforce && navNuforce.style.display !== 'none';
+    vibratoBrand.style.display = (quotesVisible || nuforceVisible) ? '' : 'none';
   }
 
   // 2) Each sidebar .nav-section — hide the whole section AND its preceding
@@ -1463,6 +1470,23 @@ async function afterLogin(user) {
 
   // Apply permission-based UI
   applyPermissions();
+
+  // Phase 7: SSO return-to. If another nulabs.com app (e.g. NUForce) bounced
+  // an unauthenticated user here with ?return_to=, send them back now that
+  // they're logged in. Open-redirect guard: only https://*.nulabs.com hosts
+  // are honored — a parsed hostname check, not a string prefix (so tricks like
+  // nuforce.nulabs.com.evil.com are correctly rejected).
+  try {
+    const returnTo = new URLSearchParams(window.location.search).get('return_to');
+    if (returnTo) {
+      const u = new URL(returnTo);
+      if (u.protocol === 'https:' &&
+          (u.hostname === 'nulabs.com' || u.hostname.endsWith('.nulabs.com'))) {
+        window.location.replace(returnTo);
+        return; // navigating away — skip the rest of app boot
+      }
+    }
+  } catch (_) { /* malformed return_to — ignore and continue normal login */ }
 
   // Hide login, show app
   document.getElementById('loginScreen').style.display = 'none';

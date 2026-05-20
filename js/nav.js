@@ -143,6 +143,34 @@
   window.submitBugReport = submitBugReport;
 })();
 
+// ===== NUFORCE LAUNCHER =====
+// Opens the companion NUForce app in a new tab. The session is shared via the
+// .nulabs.com cookie (set by nulabs-session-storage.js), so NUForce picks up
+// the existing login automatically — no second sign-in. The launcher's
+// visibility is gated by the access_nuforce capability in applyPermissions().
+function openNuforce() {
+  // Optional CMMC audit trail — fire-and-forget, never blocks the launch.
+  // Delete this try/catch block if you don't want launch events logged.
+  try {
+    if (typeof sb !== 'undefined' && sb && typeof currentEmployee !== 'undefined' && currentEmployee) {
+      (async () => {
+        try {
+          await sb.from('activity_log').insert({
+            employee_id: currentEmployee.id,
+            employee_name: currentEmployee.name,
+            record_type: 'auth', record_id: null,
+            record_label: 'NUForce',
+            field_changed: 'nuforce_launch',
+            old_value: null, new_value: 'opened'
+          });
+        } catch (_) { /* logging must never block the launch */ }
+      })();
+    }
+  } catch (_) { /* ignore */ }
+  window.open('https://nuforce.nulabs.com', '_blank', 'noopener');
+}
+window.openNuforce = openNuforce;
+
 // ===== IN-APP NAVIGATION HISTORY =====
 // ===== IN-APP NAVIGATION HISTORY =====
 // Tracks navigation so the ← Back button can replay the previous screen.
