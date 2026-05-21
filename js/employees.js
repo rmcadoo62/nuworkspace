@@ -1112,61 +1112,65 @@ function showEmpProfile(empId, annivOffset) {
               '<b>80h will be available on ' + fmtAnniv + '</b> (first anniversary).'+
             '</div>';
           })() : (() => {
-            // Build quarterly drop visualization
-            const totalAvail = annivOffset === 0 ? vacOpeningBalance + vacAllotment : vacAllotment;
+            // ===== Two-row vacation display =====
+            // Row 1 (usage): a pure bucket-fill gauge — used vs. total available.
+            //   NO time axis lives on this bar, so the fill can't be misread against dates.
+            // Row 2 (accrual schedule): the four quarterly drops as discrete cells,
+            //   marked received (past) or upcoming (future). NO fill bar here, so the
+            //   schedule can't be misread as consumption.
+            // This separation is the fix for the old single-bar dual-axis confusion.
+            // Total available = opening balance + what has actually dropped so far
+            // (NOT the full-year allotment). This makes "Remaining" reconcile with the
+            // headline bank balance: opening + accrued − used = bank balance.
+            const totalAvail = annivOffset === 0 ? vacOpeningBalance + vacAccrued : vacAllotment;
             const usedHrs = used.vacation + sickOverage;
             const usedPct = totalAvail > 0 ? Math.min(100, (usedHrs / totalAvail) * 100) : 0;
             const over = usedHrs > totalAvail;
+            const remainingHrs = totalAvail - usedHrs; // may be negative when overdrawn
             const fmtShort = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
             const today2 = new Date();
 
-            // Calculate quarterly drop dates and amounts from annivStart
+            // Quarterly drop dates/amounts from annivStart. For past anniversary years
+            // (annivOffset !== 0) the whole year has elapsed, so every drop reads received.
             const drops = [];
             if (_annivRange) {
               const dropAmt = vacAllotment / 4;
               for (let q = 1; q <= 4; q++) {
                 const dropDate = new Date(_annivRange.start);
                 dropDate.setMonth(dropDate.getMonth() + (q * 3));
-                // Position as % of total year span
-                const yearMs = _annivRange.end - _annivRange.start;
-                const pct = ((dropDate - _annivRange.start) / yearMs) * 100;
-                const past = dropDate <= today2;
-                drops.push({ date: dropDate, pct, amt: dropAmt, past, label: fmtShort(dropDate) });
+                const past = annivOffset === 0 ? (dropDate <= today2) : true;
+                drops.push({ date: dropDate, amt: dropAmt, past, label: fmtShort(dropDate) });
               }
             }
 
-            // Today marker position
-            const todayPct = _annivRange ? Math.min(100, Math.max(0,
-              ((today2 - _annivRange.start) / (_annivRange.end - _annivRange.start)) * 100
-            )) : null;
-
             return `
-              <div style="position:relative;margin-top:10px;margin-bottom:32px">
-                <!-- Bar track -->
-                <div style="background:var(--surface2);border-radius:6px;height:10px;position:relative;overflow:visible">
-                  <!-- Used fill -->
-                  <div style="height:100%;border-radius:6px;width:${usedPct}%;background:${over?'rgba(208,64,64,0.85)':'var(--blue)'};transition:width .4s;position:relative;z-index:1"></div>
-                  <!-- Today marker -->
-                  ${todayPct !== null && annivOffset === 0 ? `<div style="position:absolute;left:${todayPct}%;top:-4px;bottom:-4px;width:2px;background:var(--amber);border-radius:2px;z-index:3" title="Today"></div>` : ''}
-                  <!-- Drop tick marks -->
-                  ${drops.map(d => `
-                    <div style="position:absolute;left:${d.pct}%;top:-3px;bottom:-3px;width:2px;background:${d.past?'rgba(58,127,212,0.6)':'rgba(58,127,212,0.25)'};z-index:2;border-radius:1px"></div>
-                  `).join('')}
-                </div>
-                <!-- Drop labels below -->
-                <div style="position:relative;height:28px;margin-top:2px">
-                  ${drops.map(d => `
-                    <div style="position:absolute;left:${d.pct}%;transform:translateX(-50%);text-align:center;white-space:nowrap">
-                      <div style="font-size:9px;font-weight:600;color:${d.past?'var(--blue)':'var(--muted)'}">${d.label}</div>
-                      <div style="font-size:9px;color:${d.past?'var(--blue)':'var(--muted)'}">+${d.amt}h</div>
-                    </div>
-                  `).join('')}
-                </div>
+              <!-- Row 1: usage gauge (quantity only, no time axis) -->
+              <div style="font-size:10px;color:var(--muted);margin-top:10px;margin-bottom:6px">
+                ${usedHrs.toFixed(1)}h used of ${totalAvail.toFixed(1)}h total
               </div>
-              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:-20px">
-                <span>${usedHrs.toFixed(1)}h used${over?' · bank overdrawn '+Math.abs(vacBankBalance).toFixed(1)+'h':''}</span>
-                ${annivOffset === 0 ? `<span>opened ${vacOpeningBalance}h + ${vacAccrued}h accrued = ${(vacOpeningBalance + vacAccrued).toFixed(1)}h</span>` : `<span>${vacAllotment}h allotted</span>`}
-              </div>`;
+              <div style="background:var(--surface2);border-radius:6px;height:12px;overflow:hidden">
+                <div style="height:100%;border-radius:6px;width:${usedPct}%;background:${over?'rgba(208,64,64,0.85)':'var(--blue)'};transition:width .4s"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:5px">
+                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${over?'rgba(208,64,64,0.85)':'var(--blue)'};margin-right:5px"></span>Used ${usedHrs.toFixed(1)}h</span>
+                <span>${over ? 'Overdrawn '+Math.abs(remainingHrs).toFixed(1)+'h' : 'Remaining '+remainingHrs.toFixed(1)+'h'}</span>
+              </div>
+
+              <!-- Row 2: accrual schedule (time only, no fill) -->
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:16px;margin-bottom:10px">
+                <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Accrual Schedule</span>
+                <span style="font-size:10px;color:var(--muted)">${annivOffset === 0 ? `opened ${vacOpeningBalance}h · earns +${(vacAllotment/4)}h / quarter` : `${vacAllotment}h allotted`}</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+                ${drops.map(d => `
+                  <div style="text-align:center">
+                    <div style="font-size:10px;font-weight:600;color:${d.past?'var(--blue)':'var(--muted)'}">${d.past?'✓ ':''}${d.label}</div>
+                    <div style="font-size:9px;color:var(--muted);margin-top:1px">+${d.amt}h</div>
+                    <div style="height:4px;border-radius:2px;margin-top:5px;background:${d.past?'var(--blue)':'var(--surface2)'}"></div>
+                  </div>
+                `).join('')}
+              </div>
+              <div style="font-size:9px;color:var(--muted);margin-bottom:8px">${annivOffset === 0 ? 'Filled = already received · faded = arrives later this year' : 'All quarters received'}</div>`;
           })()}
           ${(() => {
             // Build vacation drill-down using anniversary range
@@ -1226,6 +1230,11 @@ function showEmpProfile(empId, annivOffset) {
                   <span>~${totalHrsWorked}h worked · 1h per 30h (NJ)</span>
                 </div>`;
             }
+            // ===== Two-row sick display (mirrors vacation) =====
+            // Row 1 (usage): bucket-fill gauge of bank-drawn hours vs. allotment.
+            //   No time axis on the bar, so fill can't be misread against drop dates.
+            // Row 2 (accrual schedule): the Jan 1 / May 1 drops as discrete cells,
+            //   marked received or upcoming. No fill here.
             const usedSick = used.sick;
             // "Over" means there was chronological overage on any day — not just
             // a comparison against today's accumulated allotment. A May 1 drop
@@ -1242,23 +1251,19 @@ function showEmpProfile(empId, annivOffset) {
             const sickUsedPct = sickAllotment > 0 ? Math.min(100, (inBucket / sickAllotment) * 100) : 0;
             const fmtShort = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
             const today2 = new Date();
+            // Drops: Jan 1 / May 1 at +24h. For past anniversary years every drop reads received.
             const sickDrops = [];
             if (_annivRange) {
-              const yearMs = _annivRange.end - _annivRange.start;
               for (let y = _annivRange.start.getFullYear(); y <= _annivRange.end.getFullYear(); y++) {
                 for (const mo of [0, 4]) {
                   const dropDate = new Date(y, mo, 1);
                   if (dropDate > _annivRange.start && dropDate <= _annivRange.end) {
-                    const pct = ((dropDate - _annivRange.start) / yearMs) * 100;
-                    const past = dropDate <= today2;
-                    sickDrops.push({ date: dropDate, pct, amt: 24, past, label: fmtShort(dropDate) });
+                    const past = annivOffset === 0 ? (dropDate <= today2) : true;
+                    sickDrops.push({ date: dropDate, amt: 24, past, label: fmtShort(dropDate) });
                   }
                 }
               }
             }
-            const todayPct = _annivRange ? Math.min(100, Math.max(0,
-              ((today2 - _annivRange.start) / (_annivRange.end - _annivRange.start)) * 100
-            )) : null;
             // Label tells the full story: what's in the sick bucket right now, plus any
             // hours that were taken this year but transferred out to vacation — or, for
             // first-year employees, held pending against a future sick drop.
@@ -1277,27 +1282,52 @@ function showEmpProfile(empId, annivOffset) {
               leftLabel = usedSick.toFixed(1) + 'h used';
             }
             return `
-              <div style="position:relative;margin-top:10px;margin-bottom:32px">
-                <div style="background:var(--surface2);border-radius:6px;height:10px;position:relative;overflow:visible">
-                  <div style="height:100%;border-radius:6px;width:${sickUsedPct}%;background:var(--amber);transition:width .4s;position:relative;z-index:1"></div>
-                  ${todayPct !== null && annivOffset === 0 ? `<div style="position:absolute;left:${todayPct}%;top:-4px;bottom:-4px;width:2px;background:var(--amber);border-radius:2px;z-index:3" title="Today"></div>` : ''}
-                  ${sickDrops.map(d => `
-                    <div style="position:absolute;left:${d.pct}%;top:-3px;bottom:-3px;width:2px;background:${d.past?'rgba(232,162,52,0.7)':'rgba(232,162,52,0.25)'};z-index:2;border-radius:1px"></div>
-                  `).join('')}
-                </div>
-                <div style="position:relative;height:28px;margin-top:2px">
-                  ${sickDrops.map(d => `
-                    <div style="position:absolute;left:${d.pct}%;transform:translateX(-50%);text-align:center;white-space:nowrap">
-                      <div style="font-size:9px;font-weight:600;color:${d.past?'var(--amber)':'var(--muted)'}">${d.label}</div>
-                      <div style="font-size:9px;color:${d.past?'var(--amber)':'var(--muted)'}">+${d.amt}h</div>
-                    </div>
-                  `).join('')}
-                </div>
-              </div>
-              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:-20px;gap:10px">
+              <!-- Row 1: usage gauge (quantity only, no time axis) -->
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:10px;margin-bottom:6px;gap:10px">
                 <span>${leftLabel}</span>
                 <span style="white-space:nowrap">opened ${sickOpeningBalance}h + up to 48h drops</span>
-              </div>${(() => {
+              </div>
+              <div style="background:var(--surface2);border-radius:6px;height:12px;overflow:hidden">
+                <div style="height:100%;border-radius:6px;width:${sickUsedPct}%;background:var(--amber);transition:width .4s"></div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-top:5px">
+                <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:var(--amber);margin-right:5px"></span>Used ${usedSick.toFixed(1)}h</span>
+                <span>Bank ${sickBankBalance.toFixed(1)}h</span>
+              </div>
+
+              <!-- Row 2: accrual schedule (time only, no fill) -->
+              <!-- 4-slot grid matching vacation's quarters, so Jan/May land under the
+                   same columns as vacation's quarterly drops. Each drop is placed in the
+                   quarter slot it falls into relative to the anniversary start; empty
+                   quarters render as placeholder cells to keep the columns aligned. -->
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:16px;margin-bottom:10px">
+                <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted)">Accrual Schedule</span>
+                <span style="font-size:10px;color:var(--muted)">drops +24h on Jan 1 &amp; May 1</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+                ${(() => {
+                  const slots = [null, null, null, null];
+                  if (_annivRange) {
+                    const aMonth = _annivRange.start.getMonth();
+                    const aYear  = _annivRange.start.getFullYear();
+                    sickDrops.forEach(d => {
+                      // Whole-quarter offset of this drop from the anniversary start.
+                      const monthsIn = (d.date.getFullYear() - aYear) * 12 + (d.date.getMonth() - aMonth);
+                      const slot = Math.min(3, Math.max(0, Math.floor(monthsIn / 3)));
+                      slots[slot] = d;
+                    });
+                  }
+                  return slots.map(d => {
+                    if (!d) return '<div></div>';
+                    return `<div style="text-align:center">
+                      <div style="font-size:10px;font-weight:600;color:${d.past?'var(--amber)':'var(--muted)'}">${d.past?'✓ ':''}${d.label}</div>
+                      <div style="font-size:9px;color:var(--muted);margin-top:1px">+${d.amt}h</div>
+                      <div style="height:4px;border-radius:2px;margin-top:5px;background:${d.past?'var(--amber)':'var(--surface2)'}"></div>
+                    </div>`;
+                  }).join('');
+                })()}
+              </div>
+              <div style="font-size:9px;color:var(--muted);margin-bottom:8px">${annivOffset === 0 ? 'Filled = already received · faded = arrives later this year' : 'All drops received'}</div>${(() => {
                 // Show the next upcoming drop (if any) and what the bank will look like after.
                 // Overage under Interpretation A is already paid from vacation — future drops
                 // create fresh sick capacity, they do NOT retroactively rebate vacation.
@@ -1307,7 +1337,7 @@ function showEmpProfile(empId, annivOffset) {
                 // Projected bank after drop = current bank + drop amount (capped at 48 by policy,
                 // but actual cap logic runs in getTimeOffUsed so keep this display simple).
                 const projectedBank = Math.min(48, Math.max(0, sickBankBalance) + next.amt);
-                return '<div style="margin-top:4px;font-size:10px;color:var(--muted);font-style:italic">Next drop ' + next.label + ' (+' + next.amt + 'h) → sick bank will be ' + projectedBank.toFixed(1) + 'h</div>';
+                return '<div style="margin-top:2px;font-size:10px;color:var(--muted);font-style:italic">Next drop ' + next.label + ' (+' + next.amt + 'h) → sick bank will be ' + projectedBank.toFixed(1) + 'h</div>';
               })()}`;
           })()}
           ${(() => {
