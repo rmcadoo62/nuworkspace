@@ -16,26 +16,6 @@
 .login-btn:disabled{opacity:.6;cursor:not-allowed;}
 .login-error{color:var(--red);font-size:12px;margin-top:10px;text-align:center;min-height:18px;}
 
-/* ===== PHASE D: SSO BUTTON, DIVIDER, BYPASS HINT ===== */
-/* SSO button — primary action, visually distinct from amber email-login button */
-.sso-btn{width:100%;background:var(--surface2);color:var(--text);border:1.5px solid var(--border);border-radius:8px;padding:12px;font-size:14px;font-weight:600;font-family:'DM Sans',sans-serif;cursor:pointer;transition:all var(--transition);display:flex;align-items:center;justify-content:center;gap:8px;}
-.sso-btn:hover{background:var(--surface3);border-color:var(--amber-dim);}
-.sso-btn:disabled{opacity:.6;cursor:not-allowed;}
-
-/* "or" divider with horizontal lines */
-.login-divider{display:flex;align-items:center;text-align:center;margin:18px 0;color:var(--muted);font-size:11px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;}
-.login-divider::before,
-.login-divider::after{content:'';flex:1;height:1px;background:var(--border);}
-.login-divider span{padding:0 14px;}
-
-/* Italic muted caption under email/password — explains why it's still here */
-.bypass-hint{font-size:11px;color:var(--muted);font-style:italic;text-align:center;margin-top:12px;line-height:1.45;}
-
-/* Kill switch: when EMAIL_BYPASS_ENABLED is false, auth.js sets this attribute
-   on <body> to hide the email/password section entirely (Duo SSO only). */
-body[data-bypass-disabled] #emailLoginSection,
-body[data-bypass-disabled] .login-divider{display:none;}
-
 
 /* ===== USER BADGE IN SIDEBAR ===== */
 /* ===== USER BADGE IN SIDEBAR ===== */

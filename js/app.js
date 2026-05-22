@@ -211,29 +211,6 @@ function confirmDeleteTask() {
         );
       }
 
-      // Phase D: SSO return detection. signInWithDuoSSO() set this flag
-      // before redirecting to Duo. If we got here with the flag still set,
-      // the redirect-back from Duo just succeeded — log it.
-      try {
-        const ssoFlag = sessionStorage.getItem('_ssoInitiatedAt');
-        if (ssoFlag) {
-          sessionStorage.removeItem('_ssoInitiatedAt');
-          const elapsedMs = Date.now() - parseInt(ssoFlag, 10);
-          // Sanity check: anything > 10 min isn't really an SSO return
-          // (probably a leftover flag from a prior failed attempt).
-          if (elapsedMs > 0 && elapsedMs < 10 * 60 * 1000) {
-            await sb.from('activity_log').insert({
-              employee_id: null,
-              employee_name: session.user.email || 'SSO',
-              record_type: 'auth', record_id: null,
-              record_label: session.user.email || 'Duo SAML',
-              field_changed: 'sso_returned',
-              old_value: null, new_value: 'elapsed_ms=' + elapsedMs,
-            });
-          }
-        }
-      } catch (_) { /* logging shouldn't block startup */ }
-
       await afterLogin(session.user);
       if (typeof initRouter === 'function') initRouter();
     } else {

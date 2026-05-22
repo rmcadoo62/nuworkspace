@@ -40,25 +40,15 @@
     <div class="login-title">Welcome to NUWorkspace</div>
     <div class="login-sub">Sign in to access your workspace</div>
 
-    <!-- Phase D: Duo SSO sign-in (primary) -->
-    <button class="sso-btn" id="ssoBtn" onclick="signInWithDuoSSO()">🔒 Sign in with Duo</button>
-
-    <!-- Divider -->
-    <div class="login-divider"><span>or</span></div>
-
-    <!-- Email/password (owner bypass during SSO transition) -->
-    <div id="emailLoginSection">
-      <div class="login-field">
-        <label>Email</label>
-        <input type="email" id="loginEmail" placeholder="you@nulabs.com" onkeydown="if(event.key==='Enter')doLogin()" />
-      </div>
-      <div class="login-field">
-        <label>Password</label>
-        <input type="password" id="loginPassword" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" />
-      </div>
-      <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
-      <div class="bypass-hint">Email/password sign-in is reserved for owners during the SSO transition.</div>
+    <div class="login-field">
+      <label>Email</label>
+      <input type="email" id="loginEmail" placeholder="you@nulabs.com" onkeydown="if(event.key==='Enter')doLogin()" />
     </div>
+    <div class="login-field">
+      <label>Password</label>
+      <input type="password" id="loginPassword" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()" />
+    </div>
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">Sign In</button>
 
     <div class="login-error" id="loginError"></div>
   </div>

@@ -1,34 +1,4 @@
 
-// ===== PHASE 5: SSO/SAML CONFIGURATION =====
-// ===== PHASE 5: SSO/SAML CONFIGURATION =====
-//
-// EMAIL_BYPASS_ENABLED is the single security gate during SSO rollout.
-// When TRUE  → both Duo SSO and email/password are available to all users.
-//              Russ walks each employee through Duo enrollment at their pace.
-// When FALSE → email/password is fully disabled. The form is hidden via the
-//              body[data-bypass-disabled] CSS rule and doLogin() short-circuits
-//              before any signInWithPassword call. All authentication is forced
-//              through Duo SSO (which enforces AD password + Duo Push MFA).
-//
-// Cutover plan: flip this to false once every active employee has successfully
-// completed at least one Duo SSO login. There is no calendar deadline.
-//
-// Duo-down break-glass: flip back to true, push, log in, fix Duo, flip back.
-// (Supabase dashboard auth is independent of Duo, so a Duo outage cannot lock
-//  Russ out of the database.)
-const EMAIL_BYPASS_ENABLED = true;
-
-// Wire the kill switch into the DOM so CSS can hide the email/password
-// section when EMAIL_BYPASS_ENABLED is false.
-if (typeof document !== 'undefined' && document.body) {
-  if (!EMAIL_BYPASS_ENABLED) document.body.setAttribute('data-bypass-disabled', '');
-} else if (typeof document !== 'undefined') {
-  document.addEventListener('DOMContentLoaded', () => {
-    if (!EMAIL_BYPASS_ENABLED) document.body.setAttribute('data-bypass-disabled', '');
-  });
-}
-
-
 // ===== AUTH STATE =====
 // ===== AUTH STATE =====
 let currentUser = null;       // Supabase auth user
@@ -978,69 +948,6 @@ function updateTsStatusBadge(key) {
 // ===== AUTH FUNCTIONS =====
 // ===== AUTH FUNCTIONS =====
 
-// Phase D: Initiate SAML SSO via Supabase → Duo → Active Directory.
-// Returns user to current origin; startup() detects the return and
-// logs sso_returned via the sessionStorage flag set here.
-async function signInWithDuoSSO() {
-  const btn = document.getElementById('ssoBtn');
-  if (btn && btn.disabled) return;
-  if (btn) { btn.disabled = true; btn.textContent = '⏳ Redirecting to Duo…'; }
-  const err = document.getElementById('loginError');
-  if (err) err.textContent = '';
-
-  // Mark SSO-in-flight so startup() can log the return event.
-  sessionStorage.setItem('_ssoInitiatedAt', Date.now().toString());
-
-  // Best-effort log of the initiation. Pre-auth, so no employee_id yet.
-  try {
-    await sb.from('activity_log').insert({
-      employee_id: null, employee_name: 'SSO',
-      record_type: 'auth', record_id: null,
-      record_label: 'Duo SAML', field_changed: 'sso_initiated',
-      old_value: null, new_value: null,
-    });
-  } catch (_) { /* logging failure must not block sign-in */ }
-
-  try {
-    // redirectTo uses the current origin so localhost:8000 dev and
-    // workspace.nulabs.com prod both work without code changes.
-    const redirectTo = window.location.origin + window.location.pathname;
-
-    const { data, error } = await sb.auth.signInWithSSO({
-      domain: 'nulabs.com',
-      options: { redirectTo }
-    });
-
-    if (error) {
-      sessionStorage.removeItem('_ssoInitiatedAt');
-      if (err) err.textContent = 'SSO error: ' + (error.message || 'Could not start sign-in.');
-      if (btn) { btn.disabled = false; btn.textContent = '🔒 Sign in with Duo'; }
-      try {
-        await sb.from('activity_log').insert({
-          employee_id: null, employee_name: 'SSO',
-          record_type: 'auth', record_id: null,
-          record_label: 'Duo SAML', field_changed: 'sso_failed',
-          old_value: null, new_value: (error.message || 'unknown').slice(0, 200),
-        });
-      } catch (_) {}
-      return;
-    }
-
-    if (data && data.url) {
-      window.location.href = data.url;  // hand off to Duo
-    } else {
-      // Shouldn't happen if signInWithSSO succeeded, but guard anyway.
-      sessionStorage.removeItem('_ssoInitiatedAt');
-      if (err) err.textContent = 'SSO error: No redirect URL returned.';
-      if (btn) { btn.disabled = false; btn.textContent = '🔒 Sign in with Duo'; }
-    }
-  } catch (e) {
-    sessionStorage.removeItem('_ssoInitiatedAt');
-    if (err) err.textContent = 'SSO error: ' + (e.message || 'unexpected error');
-    if (btn) { btn.disabled = false; btn.textContent = '🔒 Sign in with Duo'; }
-  }
-}
-
 async function doLogin() {
   const btn = document.getElementById('loginBtn');
   if (btn.disabled) return; // prevent double-submission from rapid Enter presses
@@ -1051,13 +958,6 @@ async function doLogin() {
   if (!email || !pass) { err.textContent = 'Please enter email and password.'; btn.disabled = false; btn.textContent = 'Sign In'; return; }
   err.textContent = '';
 
-  // Phase D kill switch — flip EMAIL_BYPASS_ENABLED to false after staff cutover.
-  if (!EMAIL_BYPASS_ENABLED) {
-    err.textContent = 'Email/password sign-in is disabled. Please use Sign in with Duo.';
-    btn.disabled = false; btn.textContent = 'Sign In';
-    return;
-  }
-
   const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
   if (error) {
     err.textContent = error.message || 'Invalid email or password.';
@@ -1065,13 +965,12 @@ async function doLogin() {
     return;
   }
 
-  // Phase D: log every email/password login during the SSO transition window.
-  // After kill switch flip, this code path is unreachable.
+  // Audit: record each successful login (CMMC AU.L2-3.3.1 — audit user access).
   try {
     await sb.from('activity_log').insert({
       employee_id: null, employee_name: email,
       record_type: 'auth', record_id: null,
-      record_label: email, field_changed: 'bypass_used',
+      record_label: email, field_changed: 'login',
       old_value: null, new_value: null,
     });
   } catch (_) {}
@@ -1535,10 +1434,6 @@ async function doLogout() {
   document.getElementById('loginError').textContent = '';
   document.getElementById('loginBtn').disabled = false;
   document.getElementById('loginBtn').textContent = 'Sign In';
-  // Phase D: also reset SSO button (in case user clicked it then signed out)
-  const ssoBtn = document.getElementById('ssoBtn');
-  if (ssoBtn) { ssoBtn.disabled = false; ssoBtn.textContent = '🔒 Sign in with Duo'; }
-  sessionStorage.removeItem('_ssoInitiatedAt');
 }
 
 // ===== SUPABASE PATCHES =====
