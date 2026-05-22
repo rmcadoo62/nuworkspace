@@ -751,7 +751,7 @@ function renderInProgressReport() {
       // Project header row
       rows += `
         <tr style="background:var(--surface2);border-top:1px solid var(--border);cursor:pointer" onclick="ipOpenProject('${g.projId}')" title="Open project">
-          <td colspan="4" style="padding:10px 14px">
+          <td colspan="3" style="padding:10px 14px">
             <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
               <div style="font-weight:600;font-size:13.5px;color:var(--text)">📁 ${escapeHtml(g.projName)}</div>
               <div style="font-size:11.5px;color:var(--muted)">${escapeHtml(g.clientName)}</div>
@@ -765,12 +765,17 @@ function renderInProgressReport() {
 
       // Task rows under this project
       g.tasks.forEach(t => {
+        const _hrsToDate = (typeof getHoursForTask === 'function') ? getHoursForTask(t.name, t.proj, t._id) : 0;
+        const _budgetHrs = t.budgetHours || 0;
+        const _overBudget = _budgetHrs > 0 && _hrsToDate > _budgetHrs;
+        const _hrsDisplay = (_hrsToDate > 0 || _budgetHrs > 0)
+          ? `<span style="color:${_overBudget ? 'var(--red)' : 'var(--text)'}">${_hrsToDate.toFixed(1)}h</span><span style="color:var(--muted)"> / ${_budgetHrs > 0 ? _budgetHrs.toFixed(0)+'h' : '—'}</span>`
+          : '<span style="color:var(--muted)">—</span>';
         rows += `
           <tr style="border-top:1px solid var(--border)">
             <td style="padding:9px 14px 9px 32px;font-size:12.5px;color:var(--text)">↳ ${escapeHtml(t.name||'Untitled')}</td>
             <td style="padding:9px 14px;font-size:11.5px;color:var(--muted);font-family:'JetBrains Mono',monospace">${escapeHtml(t.catKey || '—')}</td>
-            <td style="padding:9px 14px;font-size:12px;color:var(--muted)">${escapeHtml(t.empName)}</td>
-            <td style="padding:9px 14px;font-size:11px;color:var(--muted)">${escapeHtml(t.revenueType==='nocharge' ? 'No Charge' : 'Fixed')}</td>
+            <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px">${_hrsDisplay}</td>
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.fixedPrice>0?'var(--text)':'var(--muted)'}">${t.fixedPrice ? fmt$(t.fixedPrice) : '—'}</td>
           </tr>
         `;
@@ -784,8 +789,7 @@ function renderInProgressReport() {
             <tr style="background:var(--surface2)">
               <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Task / Project</th>
               <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>
-              <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Assignee</th>
-              <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Type</th>
+              <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Hours</th>
               <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>
             </tr>
           </thead>
