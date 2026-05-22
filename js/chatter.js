@@ -51,7 +51,7 @@ function renderChatter(projId) {
   const selfAv = document.getElementById('chatterSelfAvatar');
   if (!feed) return;
   if (selfAv && currentUser) {
-    const emp = currentEmployee || employees.find(e => e.userId === currentUser.id) || {};
+    const emp = currentEmployee || {};
     selfAv.textContent = emp.initials || currentUser.email?.[0]?.toUpperCase() || '?';
     selfAv.style.background = emp.color || 'var(--amber)';
     selfAv.style.color = '#fff';
@@ -105,7 +105,12 @@ function chatterMsgHtml(m, depth) {
   const sameYear = d.getFullYear() === now.getFullYear();
   const timeStr = d.toLocaleTimeString('en-US', { hour:'numeric', minute:'2-digit' }) +
     (sameYear ? '' : ', ' + d.getFullYear());
-  const isOwn = currentEmployee && (m.authorName === currentEmployee.name || m.authorId === currentUser?.id);
+  const isOwn = !!currentEmployee && m.authorId === currentEmployee.id;
+  // Edit/Delete are suppressed while in View-As: impersonation is a read-only
+  // diagnostic (mirrors the read-only prune guard in loadNotifs). Owners
+  // looking through someone else's eyes should not be able to mutate chatter.
+  const _isView = (typeof isImpersonating === 'function' && isImpersonating());
+  const canModify = isOwn && !_isView;
   const isEditing = chatterEditingId === m.id;
   const avatarClass = isReply ? 'chatter-reply-avatar' : 'chatter-msg-avatar';
   const msgClass = isReply ? 'chatter-reply-msg' : 'chatter-msg';
@@ -136,8 +141,8 @@ function chatterMsgHtml(m, depth) {
   } else {
     const textHtml = (m.text || '').replace(/\n/g,'<br>').replace(/@([\w][\w ]*?)(?=\s|$|<br>)/g, '<span class="mention">@$1</span>');
     const replyBtn  = '<button class="chatter-action-btn" onclick="chatterStartReply(\x27' + m.id + '\x27,\x27' + (m.authorName||'').replace(/'/g,"\x27") + '\x27)">\u21A9 Reply</button>';
-    const editBtn   = isOwn  ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterEdit(\x27' + m.id + '\x27)">\u270E Edit</button>' : '';
-    const deleteBtn = isOwn  ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterDelete(\x27' + m.id + '\x27)">\uD83D\uDDD1 Delete</button>' : '';
+    const editBtn   = canModify ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterEdit(\x27' + m.id + '\x27)">\u270E Edit</button>' : '';
+    const deleteBtn = canModify ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterDelete(\x27' + m.id + '\x27)">\uD83D\uDDD1 Delete</button>' : '';
     bodyContent =
       '<div class="chatter-msg-text">' + textHtml + '</div>' +
       attachHtml +
@@ -168,10 +173,8 @@ function chatterStartReply(msgId, authorName) {
   // post time.
   const parentMsg = (chatterStore[activeProjectId] || []).find(m => m.id === msgId);
   if (parentMsg) {
-    const myEmpId = (currentEmployee || employees.find(e => e.userId === currentUser?.id))?.id;
-    const parentAuthorEmpId = parentMsg.authorId
-      ? employees.find(e => e.userId === parentMsg.authorId)?.id
-      : null;
+    const myEmpId = currentEmployee?.id;
+    const parentAuthorEmpId = parentMsg.authorId || null;
     const preFill = [];
     if (parentAuthorEmpId) preFill.push(parentAuthorEmpId);
     (parentMsg.notifyIds || []).forEach(id => preFill.push(id));
@@ -259,7 +262,7 @@ async function chatterPost() {
   const text = input.innerText.trim();
   if (!text && !chatterAttachPending.length) return;
   if (!activeProjectId) return;
-  const emp = currentEmployee || employees.find(e => e.userId === currentUser?.id) || {};
+  const emp = currentEmployee || {};
   const authorName = emp.name || currentUser?.email?.split('@')[0] || 'Unknown';
   const authorInitials = emp.initials || authorName[0]?.toUpperCase() || '?';
   const authorColor = emp.color || '#888';
@@ -273,7 +276,7 @@ async function chatterPost() {
   let allNotifyIds = [...new Set([...mentionedIds, ...chatterNotifySelected])];
   const msg = {
     proj_id: activeProjectId,
-    author_id: currentUser?.id || null,
+    author_id: currentEmployee?.id || null,
     author_name: authorName, author_initials: authorInitials, author_color: authorColor,
     text, attachments: chatterAttachPending.map(a => ({ name: a.name, size: a.size, dataUrl: a.dataUrl })),
     reply_to: chatterReplyTo ? chatterReplyTo.id : null,
@@ -337,7 +340,7 @@ async function chatterPost() {
 // ── Notifications ──────────────────────────────────────────────────────
 async function loadNotifs() {
   if (!currentUser) return;
-  const myEmp = currentEmployee || employees.find(e => e.userId === currentUser.id);
+  const myEmp = currentEmployee;
   if (!myEmp) return;
 
   // Once-per-session prune: delete this user's READ notifications older than
@@ -542,7 +545,7 @@ function notifClick(notifId, projId) {
 }
 function markAllNotifsRead(e) {
   if (e) e.stopPropagation();
-  const myEmp = currentEmployee || employees.find(e => e.userId === currentUser?.id);
+  const myEmp = currentEmployee;
   if (!myEmp) return;
   notifStore.forEach(n => n.read = true);
   sb.from('chatter_notifs').update({ is_read: true }).eq('employee_id', myEmp.id).then(() => {});
