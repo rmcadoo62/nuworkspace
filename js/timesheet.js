@@ -332,7 +332,10 @@ async function submitTimesheet() {
     return;
   }
   // Build key using currentEmployee only — never proxy — this is the employee's own submit
-  const weekDate = getWeekKey(tsWeekOffset);
+  // Use the pinned week the grid actually rendered, NOT a freshly recomputed offset —
+  // recomputing getWeekKey(tsWeekOffset) at submit time submits the wrong week if the
+  // clock has crossed the Sat->Sun boundary while the tab was open (the "Lucas bug").
+  const weekDate = tsRenderedWeekStart || getWeekKey(tsWeekOffset);
   const key = currentEmployee.id + '|' + weekDate;
   const emp = currentEmployee;
   if (!emp) { toast('You must be signed in as an employee to submit'); return; }

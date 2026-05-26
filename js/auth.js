@@ -52,6 +52,7 @@ let isApprover = false;
 let tsWeekStatuses = {};
 let tsData = {};
 let tsWeekOffset = 0; // 0 = current week
+let tsRenderedWeekStart = null; // absolute week_start shown in the grid; submit acts on THIS, not a recomputed offset
 
 function getWeekKey(offset) {
   const d = getWeekMonday(offset);
@@ -473,6 +474,7 @@ async function reloadTsWeek(emp) {
 
 function renderTimesheet() {
   const key = getTsKey(tsWeekOffset);
+  tsRenderedWeekStart = getWeekKey(tsWeekOffset);  // PIN: absolute week the grid is showing; submit reads this
   ensureWeek(key);
   const rows = tsData[key];
   const days = getWeekDays(tsWeekOffset);
