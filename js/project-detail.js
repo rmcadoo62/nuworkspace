@@ -3024,6 +3024,12 @@ function renderInvoicingPanel(projId) {
 
   function taskRow(t, showMarkBtn) {
     const empM = employees.find(e => e.initials === t.assign) || {color:'#555'};
+    // Ready to Bill table → show Completed Date; Already Billed → show Billed Date.
+    // Fall back to t.due (the original due date) only if the corresponding field is missing,
+    // so legacy rows still render something rather than a bare em-dash.
+    const dateStr = showMarkBtn
+      ? (t.completedDate ? fmtShortDate(t.completedDate) : (t.due || '—'))
+      : (t.billedDate    ? fmtShortDate(t.billedDate)    : (t.due || '—'));
     const ptCell = showMarkBtn ? '' : `
       <td onclick="event.stopPropagation()" style="padding:4px 8px">
         <input type="text" value="${t.peachtreeInv||''}"
@@ -3037,7 +3043,7 @@ function renderInvoicingPanel(projId) {
       <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.taskNum ? '<span style="font-size:10px;color:var(--muted);font-family:JetBrains Mono,monospace;margin-right:6px">#'+t.taskNum+'</span>' : ''}${t.name}</td>
       <td><div style="display:flex;align-items:center;gap:6px"><div class="itt-av" style="background:${empM.color};width:20px;height:20px;font-size:9px">${t.assign||'?'}</div><span style="font-size:12px">${t.assign||'—'}</span></div></td>
       <td class="inv-amount" style="color:var(--green)">${fmt$(t.fixedPrice||0)}</td>
-      <td style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace">${t.due||'—'}</td>
+      <td style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace">${dateStr}</td>
       ${ptCell}
       <td>
         ${showMarkBtn
