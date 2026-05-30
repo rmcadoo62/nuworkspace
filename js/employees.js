@@ -3622,6 +3622,16 @@ function _renderHrRecordsTab(empId, emp) {
     : data.discipline.map(d => _renderDisciplineCard(d, canEdit, emp)).join('');
 
   inner.innerHTML = `
+    <!-- COMPANY DOCUMENTS -->
+    <div id="hrCompanyDocsSection_${empId}" style="margin-bottom:22px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-family:'DM Serif Display',serif;font-size:18px;color:var(--text)">📖 Company Documents</div>
+      </div>
+      <div id="hrCompanyDocsList_${empId}" style="display:flex;flex-direction:column;gap:8px">
+        <div style="padding:14px;text-align:center;color:var(--muted);font-size:12.5px;background:var(--surface);border:1px dashed var(--border);border-radius:10px">Loading…</div>
+      </div>
+    </div>
+
     ${counters.length ? `
       <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">${counterHtml}</div>
       ${otherCountHtml}
@@ -3650,6 +3660,63 @@ function _renderHrRecordsTab(empId, emp) {
   `;
   // Re-target status pill renderer for all cards (attached to window for expand handlers)
   window._hrStatusPill = statusPill;
+
+  // Populate Company Documents section (async — handbook only for now)
+  _loadHrCompanyDocs(empId);
+}
+
+// ── Company Documents (handbook) loader for HR Records tab ──────────
+function _hrDocEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function _loadHrCompanyDocs(empId) {
+  const list = document.getElementById(`hrCompanyDocsList_${empId}`);
+  if (!list) return;
+  try {
+    const { data, error } = await sb
+      .from('hr_documents')
+      .select('id, doc_key, doc_name, storage_path, filename, file_size_bytes, uploaded_at')
+      .eq('doc_key', 'handbook')
+      .maybeSingle();
+    if (error) throw error;
+
+    if (!data) {
+      list.innerHTML = `
+        <div style="padding:18px;text-align:center;color:var(--muted);font-size:12.5px;background:var(--surface);border:1px dashed var(--border);border-radius:10px">
+          No Employee Handbook has been uploaded yet.
+          ${isManager() ? `<div style="margin-top:6px;font-size:11.5px">Managers can upload it from <b>Setup → Company Documents</b>.</div>` : ''}
+        </div>`;
+      return;
+    }
+
+    const uploaded = data.uploaded_at
+      ? new Date(data.uploaded_at).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' })
+      : '—';
+
+    list.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;transition:border-color var(--transition)"
+        onmouseover="this.style.borderColor='var(--amber-dim)'" onmouseout="this.style.borderColor='var(--border)'">
+        <div style="font-size:22px;flex-shrink:0">📕</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13.5px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_hrDocEsc(data.doc_name)}</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">Posted ${uploaded}</div>
+        </div>
+        <button onclick="openPdfViewer({bucket:'hr-documents',path:'${_hrDocEsc(data.storage_path)}',filename:'${_hrDocEsc(data.filename)}',title:'${_hrDocEsc(data.doc_name)}'})"
+          style="padding:6px 14px;border:1px solid var(--amber-dim);border-radius:7px;background:transparent;font-size:12px;color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600"
+          onmouseover="this.style.background='var(--amber-glow)'"
+          onmouseout="this.style.background='transparent'">
+          👁 View
+        </button>
+      </div>`;
+  } catch (err) {
+    list.innerHTML = `
+      <div style="padding:14px;color:var(--red);font-size:12.5px;background:var(--surface);border:1px solid var(--border);border-radius:10px">
+        Could not load company documents: ${_hrDocEsc(err.message || err)}
+      </div>`;
+  }
 }
 
 // ── Review Card ────────────────────────────────────────────────────

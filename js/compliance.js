@@ -3892,6 +3892,13 @@ function _docCard(r) {
             onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
             🕓 ${versionCount} versions
           </button>` : ''}
+        ${(r.filename||'').toLowerCase().endsWith('.pdf') ? `
+        <button onclick="openPdfViewer({bucket:'cmmc-documents',path:'${_esc(r.storage_path)}',filename:'${_esc(r.filename)}',title:'${_esc(r.doc_name)} (v${r.version_number})'})"
+          style="padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+          onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'"
+          onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">
+          👁 View
+        </button>` : ''}
         <button onclick="downloadDoc('${r.id}','${_esc(r.storage_path)}','${_esc(r.filename)}')"
           style="padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
           onmouseover="this.style.borderColor='var(--blue)';this.style.color='var(--blue)'"
@@ -4300,6 +4307,10 @@ function openDocVersionsModal(docName) {
         <td style="padding:10px 14px;font-size:12px;color:var(--muted);font-style:italic">${_esc(r.change_notes||'—')}</td>
         <td style="padding:10px 14px;font-size:12px;color:var(--muted)">${_fmtFileSize(r.file_size_bytes||0)}</td>
         <td style="padding:10px 14px;text-align:right">
+          ${(r.filename||'').toLowerCase().endsWith('.pdf') ? `<button onclick="openPdfViewer({bucket:'cmmc-documents',path:'${_esc(r.storage_path)}',filename:'${_esc(r.filename)}',title:'${_esc(r.doc_name||docName)} (v${r.version_number})'})"
+            style="margin-right:4px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
+            onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">👁</button>` : ''}
           <button onclick="downloadDoc('${r.id}','${_esc(r.storage_path)}','${_esc(r.filename)}')"
             style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif"
             onmouseover="this.style.borderColor='var(--blue)';this.style.color='var(--blue)'"

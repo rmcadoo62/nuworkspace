@@ -169,9 +169,229 @@ function openSetupPanel(el) {
   // Line 4: Merge Duplicate Clients
   // (Customer Surveys moved to its own sidebar nav item under Closing Report)
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F9F9;','Merge Duplicate Clients','Find and merge client records with similar names.',"openMergeClientsPanel(document.getElementById('navSetup'))"));
+  // Line 5: Company Documents (managers/owners only — uploads the Employee Handbook for all staff to view)
+  if (isManager()) tiles.push(tile('&#x1F4D6;','Company Documents','Upload and manage the Employee Handbook and other company-wide documents.',"openCompanyDocsPanel(document.getElementById('navSetup'))"));
 
   const grid = document.getElementById('setupTilesGrid');
   if (grid) grid.innerHTML = tiles.join('') || '<div style="color:var(--muted);font-size:13px">No setup options available for your role.</div>';
+}
+
+
+// ===== COMPANY DOCUMENTS PANEL =====
+// Manager-only panel under Setup. Currently manages the Employee Handbook.
+// Storage: hr-documents bucket. Tracking row: public.hr_documents WHERE doc_key='handbook'.
+
+function openCompanyDocsPanel(el) {
+  if (!isManager()) {
+    alert('You do not have permission to manage company documents.');
+    return;
+  }
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
+  activeProjectId = null;
+  document.getElementById('topbarName').textContent = 'Company Documents';
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-company-docs').classList.add('active');
+  renderCompanyDocsPanel();
+}
+
+async function renderCompanyDocsPanel() {
+  const body = document.getElementById('companyDocsPanelBody');
+  if (!body) return;
+
+  body.innerHTML = `<div style="color:var(--muted);font-size:13px;padding:14px">Loading…</div>`;
+
+  let handbook = null;
+  try {
+    const { data, error } = await sb
+      .from('hr_documents')
+      .select('id, doc_key, doc_name, storage_path, filename, file_size_bytes, uploaded_at, uploaded_by')
+      .eq('doc_key', 'handbook')
+      .maybeSingle();
+    if (error) throw error;
+    handbook = data;
+  } catch (err) {
+    body.innerHTML = `<div style="color:var(--red);font-size:13px;padding:14px">Could not load: ${_cdocsEsc(err.message || err)}</div>`;
+    return;
+  }
+
+  const handbookCard = handbook
+    ? `<div style="display:flex;align-items:center;gap:14px;padding:14px 18px;background:var(--surface);border:1.5px solid var(--border);border-radius:12px">
+        <div style="font-size:26px;flex-shrink:0">📕</div>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14.5px;font-weight:600;color:var(--text)">${_cdocsEsc(handbook.doc_name)}</div>
+          <div style="font-size:11.5px;color:var(--muted);margin-top:2px">
+            ${_cdocsEsc(handbook.filename)}
+            ${handbook.file_size_bytes ? ' · ' + _cdocsFmtSize(handbook.file_size_bytes) : ''}
+            · Uploaded ${new Date(handbook.uploaded_at).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'})}
+            ${handbook.uploaded_by ? ' by ' + _cdocsEsc(handbook.uploaded_by) : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap">
+          <button onclick="openPdfViewer({bucket:'hr-documents',path:'${_cdocsEsc(handbook.storage_path)}',filename:'${_cdocsEsc(handbook.filename)}',title:'${_cdocsEsc(handbook.doc_name)}'})"
+            style="padding:6px 14px;border:1px solid var(--amber-dim);border-radius:7px;background:transparent;font-size:12px;color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">👁 View</button>
+          <button onclick="openHandbookUploadModal(true)"
+            style="padding:6px 14px;border:1px solid var(--border);border-radius:7px;background:transparent;font-size:12px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600"
+            onmouseover="this.style.borderColor='var(--green)';this.style.color='var(--green)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">↑ Replace</button>
+          <button onclick="deleteHandbook('${handbook.id}','${_cdocsEsc(handbook.storage_path)}')"
+            style="padding:6px 12px;border:1px solid var(--border);border-radius:7px;background:transparent;font-size:12px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600"
+            onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'"
+            onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">🗑</button>
+        </div>
+      </div>`
+    : `<div style="padding:24px;text-align:center;background:var(--surface);border:1px dashed var(--border);border-radius:12px">
+        <div style="font-size:32px;margin-bottom:8px">📕</div>
+        <div style="font-size:14px;color:var(--text);font-weight:600;margin-bottom:4px">No handbook uploaded yet</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:14px">Upload a PDF to make the Employee Handbook visible to all staff under My Info → HR Records.</div>
+        <button onclick="openHandbookUploadModal(false)"
+          style="background:var(--amber);color:#0e0e0f;border:none;border-radius:7px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer">↑ Upload Handbook</button>
+      </div>`;
+
+  body.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:13px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;font-weight:600">Employee Handbook</div>
+      ${handbookCard}
+    </div>`;
+}
+
+function _cdocsEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function _cdocsFmtSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB';
+  return (bytes/1024/1024).toFixed(1) + ' MB';
+}
+
+function openHandbookUploadModal(isReplace) {
+  const existing = document.getElementById('handbookUploadBackdrop');
+  if (existing) existing.remove();
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'handbookUploadBackdrop';
+  backdrop.onclick = e => { if (e.target === backdrop) closeHandbookUploadModal(); };
+  backdrop.innerHTML = `
+    <div class="modal" style="width:520px">
+      <div class="modal-header">
+        <div class="modal-title">${isReplace ? '↑ Replace Employee Handbook' : '↑ Upload Employee Handbook'}</div>
+        <button class="modal-close" type="button" onclick="closeHandbookUploadModal()">&#x2715;</button>
+      </div>
+      <div class="modal-body">
+        ${isReplace ? `<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12.5px;color:var(--muted);line-height:1.55">
+          Replacing the handbook will overwrite the previous file. All employees will see the new version immediately.
+        </div>` : ''}
+        <div class="field">
+          <div class="field-label">Document Name</div>
+          <input type="text" id="handbookDocName" class="f-input" value="Employee Handbook" placeholder="Employee Handbook" />
+        </div>
+        <div class="field">
+          <div class="field-label">PDF File</div>
+          <input type="file" id="handbookFileInput" accept="application/pdf,.pdf" class="f-input" style="padding:7px 10px" />
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">PDF only. Max 50&nbsp;MB.</div>
+        </div>
+        <div id="handbookUploadStatus" style="font-size:12.5px;color:var(--muted);min-height:18px"></div>
+      </div>
+      <div class="modal-footer" style="justify-content:flex-end">
+        <button type="button" onclick="closeHandbookUploadModal()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 16px;border-radius:7px;font-size:13px;cursor:pointer;font-family:'DM Sans',sans-serif">Cancel</button>
+        <button type="button" id="handbookUploadSubmit" onclick="submitHandbookUpload()" style="background:var(--amber);color:#0e0e0f;border:none;padding:8px 18px;border-radius:7px;font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif">Upload</button>
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+  requestAnimationFrame(() => backdrop.classList.add('open'));
+}
+
+function closeHandbookUploadModal() {
+  const el = document.getElementById('handbookUploadBackdrop');
+  if (el) el.remove();
+}
+
+async function submitHandbookUpload() {
+  const fileInput = document.getElementById('handbookFileInput');
+  const nameInput = document.getElementById('handbookDocName');
+  const status    = document.getElementById('handbookUploadStatus');
+  const submitBtn = document.getElementById('handbookUploadSubmit');
+
+  const file = fileInput && fileInput.files && fileInput.files[0];
+  if (!file) {
+    status.style.color = 'var(--red)';
+    status.textContent = 'Please choose a PDF file.';
+    return;
+  }
+  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+    status.style.color = 'var(--red)';
+    status.textContent = 'Only PDF files are allowed.';
+    return;
+  }
+  if (file.size > 50 * 1024 * 1024) {
+    status.style.color = 'var(--red)';
+    status.textContent = 'File exceeds 50 MB limit.';
+    return;
+  }
+
+  const docName = (nameInput.value || 'Employee Handbook').trim();
+  // Use a stable storage path so a replace overwrites cleanly; preserve original extension.
+  const storagePath = `handbook/handbook.pdf`;
+  const uploaderEmail = (window.currentEmployee && currentEmployee.email) || 'unknown';
+
+  submitBtn.disabled = true;
+  submitBtn.style.opacity = '0.6';
+  status.style.color = 'var(--muted)';
+  status.textContent = 'Uploading…';
+
+  try {
+    // Upload (upsert true so replace works)
+    const { error: upErr } = await sb.storage
+      .from('hr-documents')
+      .upload(storagePath, file, { upsert: true, contentType: 'application/pdf' });
+    if (upErr) throw upErr;
+
+    // Upsert tracking row (one per doc_key)
+    const { error: rowErr } = await sb
+      .from('hr_documents')
+      .upsert({
+        doc_key: 'handbook',
+        doc_name: docName,
+        storage_path: storagePath,
+        filename: file.name,
+        file_size_bytes: file.size,
+        uploaded_at: new Date().toISOString(),
+        uploaded_by: uploaderEmail
+      }, { onConflict: 'doc_key' });
+    if (rowErr) throw rowErr;
+
+    status.style.color = 'var(--green)';
+    status.textContent = 'Uploaded.';
+    setTimeout(() => {
+      closeHandbookUploadModal();
+      renderCompanyDocsPanel();
+    }, 600);
+  } catch (err) {
+    status.style.color = 'var(--red)';
+    status.textContent = 'Upload failed: ' + (err.message || err);
+    submitBtn.disabled = false;
+    submitBtn.style.opacity = '1';
+  }
+}
+
+async function deleteHandbook(rowId, storagePath) {
+  if (!isManager()) return;
+  if (!confirm('Delete the Employee Handbook? This removes it for all employees. You can re-upload at any time.')) return;
+  try {
+    // Storage first (best effort — if it 404s, the row delete still proceeds)
+    if (storagePath) {
+      const { error: stErr } = await sb.storage.from('hr-documents').remove([storagePath]);
+      if (stErr) console.warn('Storage delete warning:', stErr);
+    }
+    const { error } = await sb.from('hr_documents').delete().eq('id', rowId);
+    if (error) throw error;
+    renderCompanyDocsPanel();
+  } catch (err) {
+    alert('Delete failed: ' + (err.message || err));
+  }
 }
 
 
