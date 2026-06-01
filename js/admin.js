@@ -2253,6 +2253,7 @@ const CAPABILITY_DEFS = [
   { key: 'edit_schedule',      label: 'Edit Scheduler',        group: 'Scheduler' },
   { key: 'view_cmmc',          label: 'View CMMC Compliance',  group: 'Compliance' },
   { key: 'access_nuforce',     label: 'Access NUForce',        group: 'Apps' },
+  { key: 'nuforce_approve_quotes', label: 'Approve Quotes (NUForce)', group: 'Apps' },
 ];
 
 function openPermissionsPanel() {
