@@ -237,9 +237,19 @@ function renderQuotesPanel() {
     : baseRows;
 
   const moneySort = _resolvedCols.find(c => c.money && c.key === quotesSortCol);
+  const dateSort  = _resolvedCols.find(c => c.date  && c.key === quotesSortCol);
   rows = [...rows].sort((a, b) => {
     let va = a[quotesSortCol] ?? '', vb = b[quotesSortCol] ?? '';
     if (moneySort) { va = parseFloat(va)||0; vb = parseFloat(vb)||0; return quotesSortDir === 'asc' ? va-vb : vb-va; }
+    if (dateSort) {
+      const ta = va ? new Date(va).getTime() : NaN;
+      const tb = vb ? new Date(vb).getTime() : NaN;
+      const aBad = isNaN(ta), bBad = isNaN(tb);
+      if (aBad && bBad) return 0;
+      if (aBad) return 1;   // missing/unparseable dates always sink to the bottom
+      if (bBad) return -1;
+      return quotesSortDir === 'asc' ? ta - tb : tb - ta;
+    }
     va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
     return quotesSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
   });
