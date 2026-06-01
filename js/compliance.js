@@ -3696,6 +3696,41 @@ const DOC_CATEGORIES = [
   'Other',
 ];
 
+// ───────────────────────────────────────────────────────────────────────
+// Document Status Audit — checks bucket against expected versions
+//
+// UPDATE WHEN YOU DRAFT A NEW VERSION of any policy. The audit dashboard
+// will flag the slot as "Upload pending" until the new version lands in
+// the cmmc_documents table.
+//
+// `doc_name` here must match the doc_name field in cmmc_documents
+// (post-cleanup, no version suffix, no " signed" suffix).
+// ───────────────────────────────────────────────────────────────────────
+const CMMC_AUDIT_EXPECTED = [
+  // 14 NIST SP 800-171 Rev 2 domain policies
+  { domain: 'AC',  label: 'AC — Access Control',                     doc_name: 'AC Policy',  expected: 1 },
+  { domain: 'AT',  label: 'AT — Awareness & Training',               doc_name: 'AT Policy',  expected: 2 },
+  { domain: 'AU',  label: 'AU — Audit & Accountability',             doc_name: 'AU Policy',  expected: 1 },
+  { domain: 'CA',  label: 'CA — Security Assessment',                doc_name: 'CA Policy',  expected: 2 },
+  { domain: 'CM',  label: 'CM — Configuration Management',           doc_name: 'CM Policy',  expected: 1 },
+  { domain: 'IA',  label: 'IA — Identification & Authentication',    doc_name: 'MFA Policy', expected: 2 },
+  { domain: 'IR',  label: 'IR — Incident Response',                  doc_name: 'IR Policy',  expected: 1 },
+  { domain: 'MA',  label: 'MA — Maintenance',                        doc_name: 'MA Policy',  expected: 1 },
+  { domain: 'MP',  label: 'MP — Media Protection',                   doc_name: 'MP Policy',  expected: 1 },
+  { domain: 'PE',  label: 'PE — Physical Protection',                doc_name: 'PE Policy',  expected: 1 },
+  { domain: 'PS',  label: 'PS — Personnel Security',                 doc_name: 'PS Policy',  expected: 1 },
+  { domain: 'RA',  label: 'RA — Risk Assessment',                    doc_name: 'RA Policy',  expected: 1 },
+  { domain: 'SC',  label: 'SC — System & Communications Protection', doc_name: 'SC Policy',  expected: 3 },
+  { domain: 'SI',  label: 'SI — System & Information Integrity',     doc_name: 'SI Policy',  expected: 1 },
+  // 3 SSP supplements
+  { domain: 'SUP', label: 'Break-Glass Procedure (companion to MFA)',doc_name: 'Break-Glass Procedure', expected: 1 },
+  { domain: 'SUP', label: 'ESP Inventory',                           doc_name: 'ESP Inventory',         expected: 1 },
+  { domain: 'SUP', label: 'SSP Asset Inventory',                     doc_name: 'SSP Asset Inventory',   expected: 1 },
+];
+
+let docAuditExpanded = false;
+
+
 // Domain labels for SSP policies — used to auto-categorize by filename
 const DOC_DOMAIN_MAP = {
   'AC': 'Access Control',
@@ -3752,6 +3787,9 @@ async function _renderDocumentsTab() {
         </div>
       </div>
 
+      <!-- Document Status Audit -->
+      ${_renderAuditDashboard()}
+
       <div class="comp-policy-banner">
         <span class="comp-policy-icon">📌</span>
         <div>
@@ -3802,6 +3840,152 @@ function _getLatestVersions() {
   });
   return Object.values(latest);
 }
+
+// ───────────────────────────────────────────────────────────────────────
+// Audit Dashboard
+// ───────────────────────────────────────────────────────────────────────
+
+// Build the per-row audit status from docRecords + CMMC_AUDIT_EXPECTED
+function _buildAuditRows() {
+  // Map of doc_name -> latest version number
+  const latestMap = {};
+  docRecords.forEach(r => {
+    if (!latestMap[r.doc_name] || r.version_number > latestMap[r.doc_name]) {
+      latestMap[r.doc_name] = r.version_number;
+    }
+  });
+
+  return CMMC_AUDIT_EXPECTED.map(entry => {
+    const inBucket = latestMap[entry.doc_name]; // undefined if not uploaded yet
+    let status;
+    if (inBucket == null)              status = 'missing';
+    else if (inBucket >= entry.expected) status = 'current';
+    else                                  status = 'pending';
+    return { ...entry, inBucket, status };
+  });
+}
+
+// Render the collapsible audit dashboard
+function _renderAuditDashboard() {
+  const rows = _buildAuditRows();
+  const currentCount = rows.filter(r => r.status === 'current').length;
+  const pendingCount = rows.filter(r => r.status === 'pending').length;
+  const missingCount = rows.filter(r => r.status === 'missing').length;
+  const attentionCount = pendingCount + missingCount;
+  const total = rows.length;
+
+  // Header summary chip — always visible
+  const attentionChip = attentionCount > 0
+    ? `<span style="background:rgba(232,162,52,0.15);color:var(--amber);padding:3px 10px;border-radius:10px;font-size:11.5px;font-weight:600">${attentionCount} need attention</span>`
+    : `<span style="background:rgba(76,175,125,0.15);color:var(--green);padding:3px 10px;border-radius:10px;font-size:11.5px;font-weight:600">All current</span>`;
+
+  const summaryBar = `
+    <div style="display:flex;align-items:center;gap:12px;cursor:pointer;user-select:none;padding:14px 18px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;transition:border-color var(--transition)"
+      onmouseover="this.style.borderColor='var(--amber-dim)'" onmouseout="this.style.borderColor='var(--border)'"
+      onclick="docAuditExpanded=!docAuditExpanded;_refreshDocumentsTab()">
+      <span style="font-size:18px">${docAuditExpanded ? '▾' : '▸'}</span>
+      <span style="font-size:14.5px;font-weight:600;color:var(--text)">📊 Document Status Audit</span>
+      <span style="font-size:12.5px;color:var(--muted)">${currentCount}/${total} current</span>
+      ${attentionChip}
+      <span style="margin-left:auto;font-size:11px;color:var(--muted)">Click to ${docAuditExpanded ? 'collapse' : 'expand'}</span>
+    </div>`;
+
+  if (!docAuditExpanded) {
+    return `<div style="margin-bottom:18px">${summaryBar}</div>`;
+  }
+
+  // Expanded view — render the full table
+  return `<div style="margin-bottom:18px">${summaryBar}${_renderAuditExpanded(rows)}</div>`;
+}
+
+function _renderAuditExpanded(rows) {
+  const statusCell = (r) => {
+    if (r.status === 'current') {
+      return `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;background:rgba(76,175,125,0.12);color:var(--green);border-radius:6px;font-size:11px;font-weight:600">✓ Current</span>`;
+    }
+    if (r.status === 'pending') {
+      return `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;background:rgba(232,162,52,0.15);color:var(--amber);border-radius:6px;font-size:11px;font-weight:600">⚠ Upload pending</span>`;
+    }
+    return `<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 9px;background:rgba(224,92,92,0.12);color:var(--red);border-radius:6px;font-size:11px;font-weight:600">✕ Not uploaded</span>`;
+  };
+
+  const versionCell = (r) => {
+    if (r.inBucket == null) return `<span style="color:var(--muted);font-family:'JetBrains Mono',monospace">—</span>`;
+    const colored = r.inBucket >= r.expected ? 'var(--green)' : 'var(--amber)';
+    return `<span style="font-family:'JetBrains Mono',monospace;color:${colored};font-weight:600">v${r.inBucket}</span>`;
+  };
+
+  // Action button for pending/missing rows — opens upload modal for that doc_name
+  const actionCell = (r) => {
+    if (r.status === 'current') return '';
+    // Determine category (SSP Policy for domain rows, SSP Policy for SUP rows as well)
+    const cat = 'SSP Policy';
+    const domain = r.domain === 'SUP' ? '' : r.label;
+    return `<button onclick="event.stopPropagation();openDocUploadModal('${_esc(r.doc_name)}','${cat}','${_esc(domain)}')"
+      style="padding:4px 10px;border:1px solid var(--amber-dim);border-radius:6px;background:transparent;font-size:11px;color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600"
+      onmouseover="this.style.background='var(--amber-glow)'"
+      onmouseout="this.style.background='transparent'">⬆ Upload</button>`;
+  };
+
+  const onRowClick = (r) => {
+    // Click row → scroll to matching doc in the list below (if it exists)
+    if (r.status === 'missing') return '';
+    return `onclick="_scrollToAuditDoc('${_esc(r.doc_name)}')"`;
+  };
+
+  // Group rows: domain policies first, then supplements
+  const domainRows  = rows.filter(r => r.domain !== 'SUP');
+  const supRows     = rows.filter(r => r.domain === 'SUP');
+
+  const renderGroup = (groupRows, groupLabel) => `
+    <div style="margin-top:14px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;padding:0 4px 6px">${groupLabel}</div>
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        ${groupRows.map((r, i) => `
+          <div ${onRowClick(r)}
+            style="display:grid;grid-template-columns:1fr 70px 70px 130px 100px;gap:14px;align-items:center;padding:10px 14px;${i>0?'border-top:1px solid var(--border);':''}${r.status==='missing'?'':'cursor:pointer;'}transition:background var(--transition)"
+            ${r.status!=='missing' ? `onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='transparent'"` : ''}>
+            <div style="font-size:12.5px;color:var(--text);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${_esc(r.label)}</div>
+            <div style="font-size:11.5px;color:var(--muted);font-family:'JetBrains Mono',monospace;text-align:center">v${r.expected}</div>
+            <div style="text-align:center">${versionCell(r)}</div>
+            <div>${statusCell(r)}</div>
+            <div style="text-align:right">${actionCell(r)}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+
+  return `
+    <div style="margin-top:2px;padding:14px 18px 18px;background:var(--surface2);border:1.5px solid var(--border);border-top:none;border-radius:0 0 10px 10px;margin-top:-10px;padding-top:18px">
+      <div style="display:grid;grid-template-columns:1fr 70px 70px 130px 100px;gap:14px;padding:0 14px 6px;font-size:10.5px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.8px">
+        <div>Policy / Document</div>
+        <div style="text-align:center">Expected</div>
+        <div style="text-align:center">In Bucket</div>
+        <div>Status</div>
+        <div></div>
+      </div>
+      ${renderGroup(domainRows, 'Domain Policies (14)')}
+      ${supRows.length ? renderGroup(supRows, 'SSP Supplements') : ''}
+      <div style="margin-top:14px;font-size:11px;color:var(--muted);font-style:italic;line-height:1.55">
+        Expected versions are configured in <code style="background:var(--surface3);padding:1px 5px;border-radius:3px;font-family:'JetBrains Mono',monospace">CMMC_AUDIT_EXPECTED</code> in compliance.js.
+        Update when you draft a new policy version.
+      </div>
+    </div>`;
+}
+
+// Scroll to and briefly highlight the matching document card in the list
+function _scrollToAuditDoc(docName) {
+  const target = document.querySelector(`[data-audit-doc-name="${docName.replace(/"/g,'&quot;')}"]`);
+  if (!target) return;
+  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const origBorder = target.style.borderColor;
+  target.style.borderColor = 'var(--amber)';
+  target.style.boxShadow = '0 0 0 3px var(--amber-glow)';
+  setTimeout(() => {
+    target.style.borderColor = origBorder;
+    target.style.boxShadow = '';
+  }, 1800);
+}
+
 
 function _renderDocumentsList() {
   const wrap = document.getElementById('documentsListWrap');
@@ -3873,7 +4057,8 @@ function _docCard(r) {
   const versionCount = docRecords.filter(d => d.doc_name === r.doc_name).length;
 
   return `
-    <div style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;transition:border-color var(--transition)"
+    <div data-audit-doc-name="${_esc(r.doc_name)}"
+      style="display:flex;align-items:center;gap:12px;padding:12px 16px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;transition:border-color var(--transition),box-shadow var(--transition)"
       onmouseover="this.style.borderColor='var(--amber-dim)'" onmouseout="this.style.borderColor='var(--border)'">
       <div style="font-size:22px;flex-shrink:0">${extIcon}</div>
       <div style="flex:1;min-width:0">
