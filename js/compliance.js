@@ -4007,6 +4007,20 @@ function _renderDocumentsList() {
   grouped['Other'] = grouped['Other'] || [];
   latest.forEach(r => { (grouped[r.category] || grouped['Other']).push(r); });
 
+  // Sort each group by domain code (AC, AT, AU, CA, CM, IA, IR, ...) — the first
+  // two characters of the domain field. Documents without a domain (manual,
+  // training materials, etc.) sort to the end alphabetically by doc_name.
+  Object.keys(grouped).forEach(cat => {
+    grouped[cat].sort((a, b) => {
+      const ac = (a.domain || '').slice(0, 2).toUpperCase();
+      const bc = (b.domain || '').slice(0, 2).toUpperCase();
+      if (ac && !bc) return -1;
+      if (!ac && bc) return 1;
+      if (ac && bc && ac !== bc) return ac < bc ? -1 : 1;
+      return (a.doc_name || '').localeCompare(b.doc_name || '');
+    });
+  });
+
   if (!latest.length) {
     wrap.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px">
       ${q || docCategoryFilter!=='all'
