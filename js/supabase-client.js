@@ -349,12 +349,19 @@ async function loadAllData() {
         tsData[ohKey][r.overhead_cat] = JSON.parse(r.hours_json || '{}');
       } else {
         if (!tsData[storeKey]) tsData[storeKey] = [];
-        tsData[storeKey].push({
-          _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
-          taskId: r.task_id||null,
-          isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
-          hours: JSON.parse(r.hours_json||'{}'),
-        });
+        // Dedup guard: loadAllData() can fire more than once per session
+        // (startup + doLogin + admin re-init). Without this, every re-run
+        // appends a fresh copy of each row, doubling/tripling the totals the
+        // Approvals cards read from tsData[storeKey]. Matches the guard already
+        // used by the two sibling loaders below. Keeps the loader idempotent.
+        if (!tsData[storeKey].find(x => x._id === r.id)) {
+          tsData[storeKey].push({
+            _id: r.id, projId: r.project_id||'', taskName: r.task_name||'',
+            taskId: r.task_id||null,
+            isOverhead: r.is_overhead||false, overheadCat: r.overhead_cat||'',
+            hours: JSON.parse(r.hours_json||'{}'),
+          });
+        }
       }
     });
 
