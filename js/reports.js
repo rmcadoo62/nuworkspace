@@ -712,9 +712,72 @@ function renderInProgressReport() {
   const totalValue = ipTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
   const projectCount = new Set(ipTasks.map(t => t.projId)).size;
 
-  // Reports & Procedures subset (cat 41-44)
-  const repTasks = ipTasks.filter(t => REPORT_CATS.has(t.catKey));
-  const repValue = repTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
+  // ── Reports & Procedures (Cat 41–44) — status-aware "what's owed" list ────
+  // 41 Lab Report · 42 Lab Procedure · 43 EMI Report · 44 EMI Procedure.
+  // Built straight from taskStore (NOT limited to in-progress) so we catch
+  // items that are owed but not yet started:
+  //   • Procedures (42/44) are owed the moment a job is open.
+  //   • Reports (41/43) surface only once all OTHER work in scope is done
+  //     (complete/billed/cancelled). Scope = the report's section if it has
+  //     one, otherwise the whole job. Procedures count toward that gate (a
+  //     procedure has to happen before its report); other report tasks do
+  //     NOT (so two reports in one scope can't deadlock each other).
+  const REPORT_DELIV_CATS = new Set(['41','43']);   // report deliverables
+  const PROCEDURE_CATS    = new Set(['42','44']);   // procedures
+  const DONE_STATUSES     = new Set(['complete','billed','cancelled']);
+  const _secIds = new Set((typeof sectionStore !== 'undefined' ? sectionStore : []).map(s => s._id));
+  const _isDone = t => DONE_STATUSES.has(t.status);
+  const _catOf  = t => (t.salesCat || '').toString().trim();
+
+  // A report is owed only when everything else it depends on is finished.
+  function reportOwed(r) {
+    const sectioned = r.sectionId && _secIds.has(r.sectionId);
+    const scope = taskStore.filter(t =>
+      t.proj === r.proj &&
+      t._id !== r._id &&
+      (sectioned ? t.sectionId === r.sectionId : true) &&
+      !REPORT_DELIV_CATS.has(_catOf(t))            // ignore sibling reports
+    );
+    if (scope.length === 0) return true;            // nothing else to wait on
+    return scope.every(_isDone);
+  }
+
+  // Candidates: cat 41-44, open project, not done. Then apply the per-type rule.
+  const STATUS_RANK = { new:0, prohold:1, accthold:1, inprogress:2 };
+  const repTasks = taskStore
+    .filter(t => openProjIds.has(t.proj) && REPORT_CATS.has(_catOf(t)) && !_isDone(t))
+    .filter(t => PROCEDURE_CATS.has(_catOf(t)) ? true : reportOwed(t))
+    .map(t => {
+      const proj = projects.find(p => p.id === t.proj) || {};
+      const info = projectInfo[t.proj] || {};
+      const emp  = employees.find(e => e.initials === t.assign) || {};
+      const cat  = _catOf(t);
+      return {
+        ...t,
+        projName:   proj.name || '—',
+        projId:     t.proj,
+        clientName: info.clientName || info.client || '—',
+        pm:         info.pm || '',
+        empName:    emp.name || t.assign || '—',
+        catKey:     cat,
+        statusRank: (STATUS_RANK[t.status] != null ? STATUS_RANK[t.status] : 3),
+      };
+    })
+    .sort((a,b) =>
+      (a.projName||'').localeCompare(b.projName||'') ||
+      a.statusRank - b.statusRank ||
+      (a.name||'').localeCompare(b.name||'')
+    );
+
+  const repValue    = repTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
+  const owedCount   = repTasks.filter(t => t.status === 'new').length;
+  const inProgCount = repTasks.filter(t => t.status === 'inprogress').length;
+  const holdCount   = repTasks.filter(t => t.status === 'prohold' || t.status === 'accthold').length;
+  const _repParts = [];
+  if (owedCount)   _repParts.push(`${owedCount} owed`);
+  if (inProgCount) _repParts.push(`${inProgCount} in progress`);
+  if (holdCount)   _repParts.push(`${holdCount} on hold`);
+  const repCountLine = (_repParts.length ? _repParts.join(' · ') : '0 owed') + ' · ' + fmt$(repValue);
 
   // Everything else (excludes cat 41-44 — those live in their own subsection)
   const mainTasks = ipTasks.filter(t => !REPORT_CATS.has(t.catKey));
@@ -722,8 +785,23 @@ function renderInProgressReport() {
   const mainValue = mainTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
   const mainProjectCount = new Set(mainTasks.map(t => t.projId)).size;
 
+  // ---- Helper: pill badge for an owed/in-progress/on-hold status ----------
+  function statusBadge(st) {
+    const map = {
+      new:        { label:'Owed',        bg:'rgba(232,162,52,0.16)',  fg:'#e8a234' },
+      inprogress: { label:'In Progress', bg:'rgba(76,175,125,0.16)',  fg:'#4caf7d' },
+      prohold:    { label:'On Hold',     bg:'rgba(122,122,133,0.16)', fg:'#9a9aa5' },
+      accthold:   { label:'Acct Hold',   bg:'rgba(122,122,133,0.16)', fg:'#9a9aa5' },
+    };
+    const m = map[st] || { label: st || '—', bg:'rgba(122,122,133,0.16)', fg:'#9a9aa5' };
+    return `<span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.3px;background:${m.bg};color:${m.fg}">${m.label}</span>`;
+  }
+
   // ---- Helper: render a grouped-by-project table for a given task list ----
-  function renderGroupedTable(tasks, emptyMsg) {
+  // opts.showStatus → adds Type + Status columns (used by Reports & Procedures).
+  function renderGroupedTable(tasks, emptyMsg, opts) {
+    opts = opts || {};
+    const showStatus = !!opts.showStatus;
     if (tasks.length === 0) {
       return `<div style="text-align:center;padding:32px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:10px;font-size:13px">${emptyMsg}</div>`;
     }
@@ -751,7 +829,7 @@ function renderInProgressReport() {
       // Project header row
       rows += `
         <tr style="background:var(--surface2);border-top:1px solid var(--border);cursor:pointer" onclick="ipOpenProject('${g.projId}')" title="Open project">
-          <td colspan="3" style="padding:10px 14px">
+          <td colspan="${showStatus ? 4 : 3}" style="padding:10px 14px">
             <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
               <div style="font-weight:600;font-size:13.5px;color:var(--text)">📁 ${escapeHtml(g.projName)}</div>
               <div style="font-size:11.5px;color:var(--muted)">${escapeHtml(g.clientName)}</div>
@@ -774,7 +852,10 @@ function renderInProgressReport() {
         rows += `
           <tr style="border-top:1px solid var(--border)">
             <td style="padding:9px 14px 9px 32px;font-size:12.5px;color:var(--text)">↳ ${escapeHtml(t.name||'Untitled')}</td>
-            <td style="padding:9px 14px;font-size:11.5px;color:var(--muted);font-family:'JetBrains Mono',monospace">${escapeHtml(t.catKey || '—')}</td>
+            ${showStatus
+              ? `<td style="padding:9px 14px;font-size:11.5px;color:var(--muted);font-family:'JetBrains Mono',monospace">${escapeHtml(t.catKey || '—')}</td>
+                 <td style="padding:9px 14px">${statusBadge(t.status)}</td>`
+              : `<td style="padding:9px 14px;font-size:11.5px;color:var(--muted);font-family:'JetBrains Mono',monospace">${escapeHtml(t.catKey || '—')}</td>`}
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px">${_hrsDisplay}</td>
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.fixedPrice>0?'var(--text)':'var(--muted)'}">${t.fixedPrice ? fmt$(t.fixedPrice) : '—'}</td>
           </tr>
@@ -788,7 +869,10 @@ function renderInProgressReport() {
           <thead>
             <tr style="background:var(--surface2)">
               <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Task / Project</th>
-              <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>
+              ${showStatus
+                ? `<th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>
+                   <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>`
+                : `<th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>`}
               <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Hours</th>
               <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>
             </tr>
@@ -840,9 +924,10 @@ function renderInProgressReport() {
       <div style="margin-top:28px">
         <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px">
           <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text)">📄 Reports & Procedures <span style="font-size:13px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41–44)</span></div>
-          <div style="font-size:11.5px;color:var(--muted)">${repTasks.length} task${repTasks.length!==1?'s':''} • ${fmt$(repValue)}</div>
+          <div style="font-size:11.5px;color:var(--muted)">${repCountLine}</div>
         </div>
-        ${renderGroupedTable(repTasks, 'No in-progress reports or procedures.')}
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;font-style:italic">Procedures appear once a job is open; reports appear once all other work in their scope (section, or whole job) is complete. Done items drop off.</div>
+        ${renderGroupedTable(repTasks, 'No reports or procedures owed or in progress.', { showStatus: true })}
       </div>
     </div>
   `;
