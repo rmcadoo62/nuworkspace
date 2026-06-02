@@ -1568,25 +1568,36 @@ const AUDIT_FIELD_DEFS = {
   ],
 };
 
-// Load tracked fields from localStorage (default: status, assignee, revenue_type for tasks)
-function getAuditSettings() {
+// ── Tracked-fields config (shared, DB-backed) ───────────────────────────
+// Single source of truth: the audit_config table (one row, id=1). Database
+// triggers (fn_audit_track) read it directly to decide what to log; this
+// cache only backs the Setup → Audit Log checkboxes. Owners edit it here
+// (the RLS policy on audit_config blocks non-owner writes). Replaces the old
+// per-browser localStorage settings so tracking is one shared policy.
+const AUDIT_DEFAULTS = {
+  tasks:     ['status','assignee','revenue_type','fixed_price'],
+  projects:  ['status','credit_hold','need_updated_po'],
+  employees: ['permission_level','termination_date'],
+  shipping:  ['received','shipped'],
+};
+let _auditConfig = null;   // populated by loadAuditConfig()
+
+async function loadAuditConfig() {
+  if (!sb) { _auditConfig = JSON.parse(JSON.stringify(AUDIT_DEFAULTS)); return _auditConfig; }
   try {
-    const saved = JSON.parse(localStorage.getItem('auditSettings') || '{}');
-    if (!saved.tasks)     saved.tasks     = ['status','assignee','revenue_type','fixed_price'];
-    if (!saved.projects)  saved.projects  = ['status','credit_hold','need_updated_po'];
-    if (!saved.employees) saved.employees = ['permission_level','termination_date'];
-    if (!saved.shipping)  saved.shipping  = ['received','shipped'];
-    return saved;
-  } catch(e) { return {tasks:['status','assignee','revenue_type','fixed_price'],projects:['status','credit_hold','need_updated_po'],employees:['permission_level','termination_date'],shipping:['received','shipped']}; }
+    const { data, error } = await sb.from('audit_config').select('config').eq('id', 1).single();
+    if (error) throw error;
+    _auditConfig = (data && data.config) ? data.config : JSON.parse(JSON.stringify(AUDIT_DEFAULTS));
+  } catch (e) {
+    console.warn('Audit config load failed, using defaults:', e);
+    _auditConfig = JSON.parse(JSON.stringify(AUDIT_DEFAULTS));
+  }
+  return _auditConfig;
 }
 
-function saveAuditSettings(settings) {
-  localStorage.setItem('auditSettings', JSON.stringify(settings));
-}
-
-function isFieldTracked(recordType, field) {
-  const settings = getAuditSettings();
-  return (settings[recordType] || []).includes(field);
+// In-memory tracked-fields config (defaults until loadAuditConfig runs).
+function getAuditSettings() {
+  return _auditConfig || AUDIT_DEFAULTS;
 }
 
 async function logActivity(recordType, recordId, recordLabel, action) {
@@ -1605,23 +1616,10 @@ async function logActivity(recordType, recordId, recordLabel, action) {
   } catch(e) { console.warn('Activity log error:', e); }
 }
 
-async function logAuditChange(recordType, recordId, recordLabel, field, oldValue, newValue) {
-  if (!isFieldTracked(recordType, field)) return;
-  if (oldValue === newValue) return;
-  if (!sb || !currentEmployee) return;
-  try {
-    await sb.from('activity_log').insert({
-      employee_id: currentEmployee.id,
-      employee_name: currentEmployee.name,
-      record_type: recordType,
-      record_id: recordId,
-      record_label: recordLabel,
-      field_changed: field,
-      old_value: oldValue != null ? String(oldValue) : null,
-      new_value: newValue != null ? String(newValue) : null,
-    });
-  } catch(e) { console.warn('Audit log error:', e); }
-}
+// Field-change logging is now handled by database triggers (fn_audit_track)
+// reading audit_config — there is no app-layer logAuditChange anymore.
+// Discrete *action* events (record created, shipped, etc.) still go through
+// logActivity above.
 
 function openAuditLogPanel(el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -1724,6 +1722,10 @@ function _switchAuditTab(tab) {
 async function _renderAuditFieldChangesTab() {
   const body = document.getElementById('auditTabBody');
   if (!body) return;
+
+  // Pull the shared tracked-fields config from the DB so the checkboxes
+  // reflect the live policy, not a stale per-browser copy.
+  await loadAuditConfig();
 
   // Static chrome (filters bar + tracked-fields settings card + empty list
   // container). Filters/sort changes only re-render the list, not the chrome.
@@ -1986,12 +1988,24 @@ function _renderAuditFieldRows(logs, filtersActive) {
     '</tbody></table></div>';
 }
 
-function toggleAuditField(type, key, checked) {
-  const settings = getAuditSettings();
-  if (!settings[type]) settings[type] = [];
-  if (checked) { if (!settings[type].includes(key)) settings[type].push(key); }
-  else { settings[type] = settings[type].filter(k => k !== key); }
-  saveAuditSettings(settings);
+async function toggleAuditField(type, key, checked) {
+  const cfg = JSON.parse(JSON.stringify(getAuditSettings()));
+  if (!cfg[type]) cfg[type] = [];
+  if (checked) { if (!cfg[type].includes(key)) cfg[type].push(key); }
+  else { cfg[type] = cfg[type].filter(k => k !== key); }
+  _auditConfig = cfg;                       // optimistic local update
+  if (!sb) return;
+  try {
+    const { error } = await sb.from('audit_config')
+      .update({ config: cfg,
+                updated_at: new Date().toISOString(),
+                updated_by: (currentEmployee && currentEmployee.id) || null })
+      .eq('id', 1);
+    if (error) throw error;
+  } catch (e) {
+    console.error('Audit config save failed:', e);
+    if (typeof toast === 'function') toast('⚠ Could not save tracked-fields change — you may not have permission.');
+  }
 }
 
 // ── Tab 2: Chatter Activity ───────────────────────────────────────────

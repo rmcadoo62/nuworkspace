@@ -1039,8 +1039,6 @@ async function toggleCreditHold(projId) {
   const newVal = !oldVal;
   projectInfo[projId].creditHold = newVal;
   renderProjStickyHeader(projId);
-  const proj = projects.find(p => p.id === projId);
-  logAuditChange('projects', projId, proj?.name||projId, 'credit_hold', oldVal, newVal);
   try {
     await sb.from('project_info')
       .upsert({ project_id: projId, credit_hold: newVal }, { onConflict: 'project_id' });
@@ -1053,8 +1051,6 @@ async function toggleNeedUpdatedPo(projId) {
   const newVal = !oldVal;
   projectInfo[projId].needUpdatedPo = newVal;
   renderProjStickyHeader(projId);
-  const proj = projects.find(p => p.id === projId);
-  logAuditChange('projects', projId, proj?.name||projId, 'need_updated_po', oldVal, newVal);
   try {
     if (sb) await sb.from('project_info')
       .upsert({ project_id: projId, need_updated_po: newVal }, { onConflict: 'project_id' });

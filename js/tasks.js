@@ -824,10 +824,8 @@ async function inlineSave(taskId, projId, field, value) {
 
   // Update local store first
   if (field === 'status') {
-    const _oldStatus = t.status;
     t.status = value;
     t.done = (value === 'complete' || value === 'done' || value === 'billed');
-    logAuditChange('tasks', taskId, t.name, 'status', _oldStatus, value);
 
     // Auto-set dates on status transitions
     const extraUpdates = {};
@@ -1237,21 +1235,6 @@ async function saveEditTask() {
   };
 
   if (sb && editingTaskId) {
-    const _editTask = taskStore.find(t => t._id === editingTaskId);
-    if (_editTask) {
-      const _fieldMap = {name:'name',assignee:'assign',status:'status',sales_category:'salesCat',
-        fixed_price:'fixedPrice',revenue_type:'revenueType',priority:'priority',description:'desc',
-        completed_date:'completedDate'};
-      Object.entries(updates).forEach(([dbCol, newVal]) => {
-        const storeKey = _fieldMap[dbCol];
-        if (storeKey) {
-          const oldVal = _editTask[storeKey];
-          if (String(oldVal||'') !== String(newVal||'')) {
-            logAuditChange('tasks', editingTaskId, _editTask.name, dbCol, oldVal, newVal);
-          }
-        }
-      });
-    }
     const { error } = await sb.from('tasks').update(updates).eq('id', editingTaskId);
     if (error) { toast('⚠ Could not save changes'); console.error(error); return; }
   }
