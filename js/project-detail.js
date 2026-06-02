@@ -2916,7 +2916,7 @@ function switchProjTab(subId) {
   }
   if (subId === 'sub-expenses' && activeProjectId) renderExpensesPanel(activeProjectId);
   if (subId === 'sub-chatter' && activeProjectId) loadChatter(activeProjectId);
-  if (subId === 'sub-activity' && activeProjectId) renderActivityPanel(activeProjectId);
+  if (subId === 'sub-activity' && activeProjectId) renderActivityPanel(activeProjectId, true);
   if (subId === 'sub-invoicing' && activeProjectId) renderInvoicingPanel(activeProjectId);
   if (subId === 'sub-shipping' && activeProjectId) renderShippingProjTab(activeProjectId);
   if (subId === 'sub-jobpack'  && activeProjectId) renderJobPackPanel(activeProjectId);
@@ -3539,7 +3539,7 @@ async function syncProjActualHours(projId) {
 }
 
 // ── ACTIVITY PANEL ─────────────────────────────────────────────────────────
-async function renderActivityPanel(projId) {
+async function renderActivityPanel(projId, forceRefresh) {
   const el = document.getElementById('activityPanelBody');
   if (!el) return;
   el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">Loading activity...</div>';
@@ -3552,9 +3552,10 @@ async function renderActivityPanel(projId) {
   // Build all relevant record IDs
   const allIds = [projId, ...taskIds, ...articleIds];
 
-  // Use cached logs if already fetched (filter button click), otherwise fetch
+  // Cache is reused only for in-tab filter clicks; entering the tab passes
+  // forceRefresh so changes made since last view show without a full reload.
   let logs = [];
-  if (el._cachedLogs && el._cachedProjId === projId) {
+  if (!forceRefresh && el._cachedLogs && el._cachedProjId === projId) {
     logs = el._cachedLogs;
   } else if (sb) {
     const { data } = await sb.from('activity_log')
@@ -3569,7 +3570,8 @@ async function renderActivityPanel(projId) {
 
   // Friendly labels
   const typeLabel = { tasks: 'Task', projects: 'Project', shipping: 'Shipping' };
-  const fieldLabel = {
+  // Fallback labels for any field key not present in AUDIT_FIELD_DEFS.
+  const fieldLabelFallback = {
     status:       'Status Changed',
     fixed_price:  'Price Changed',
     assignee:     'Assignee Changed',
@@ -3579,7 +3581,12 @@ async function renderActivityPanel(projId) {
     const fc = row.field_changed || '';
     if (fc.startsWith('Task Created')) return 'Task Created';
     if (fc.startsWith('Project Created')) return 'Project Created';
-    return fieldLabel[fc] || fc;
+    // Use the same labels as the global audit log so both views read alike.
+    if (typeof AUDIT_FIELD_DEFS !== 'undefined') {
+      const def = (AUDIT_FIELD_DEFS[row.record_type] || []).find(d => d.key === fc);
+      if (def) return def.label;
+    }
+    return fieldLabelFallback[fc] || fc;
   };
   const fmtDetail = (row) => {
     if (row.old_value && row.new_value) return `${row.old_value} → ${row.new_value}`;
