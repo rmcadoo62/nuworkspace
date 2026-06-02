@@ -746,7 +746,14 @@ function renderInProgressReport() {
   const STATUS_RANK = { new:0, prohold:1, accthold:1, inprogress:2 };
   const repTasks = taskStore
     .filter(t => openProjIds.has(t.proj) && REPORT_CATS.has(_catOf(t)) && !_isDone(t))
-    .filter(t => PROCEDURE_CATS.has(_catOf(t)) ? true : reportOwed(t))
+    // Procedures always show when open. Reports: if already started (in
+    // progress / on hold) always show; only NEW reports are gated on the rest
+    // of the work being done — that's the "owed when it's time" rule.
+    .filter(t => {
+      if (PROCEDURE_CATS.has(_catOf(t))) return true;
+      if (t.status !== 'new') return true;
+      return reportOwed(t);
+    })
     .map(t => {
       const proj = projects.find(p => p.id === t.proj) || {};
       const info = projectInfo[t.proj] || {};
@@ -769,15 +776,26 @@ function renderInProgressReport() {
       (a.name||'').localeCompare(b.name||'')
     );
 
-  const repValue    = repTasks.reduce((s,t) => s + (t.fixedPrice||0), 0);
-  const owedCount   = repTasks.filter(t => t.status === 'new').length;
-  const inProgCount = repTasks.filter(t => t.status === 'inprogress').length;
-  const holdCount   = repTasks.filter(t => t.status === 'prohold' || t.status === 'accthold').length;
-  const _repParts = [];
-  if (owedCount)   _repParts.push(`${owedCount} owed`);
-  if (inProgCount) _repParts.push(`${inProgCount} in progress`);
-  if (holdCount)   _repParts.push(`${holdCount} on hold`);
-  const repCountLine = (_repParts.length ? _repParts.join(' · ') : '0 owed') + ' · ' + fmt$(repValue);
+  // Separate, bold summaries for Reports (41/43) and Procedures (42/44).
+  function rpBreakdown(list) {
+    const owed = list.filter(t => t.status === 'new').length;
+    const inp  = list.filter(t => t.status === 'inprogress').length;
+    const hold = list.filter(t => t.status === 'prohold' || t.status === 'accthold').length;
+    const val  = list.reduce((s,t) => s + (t.fixedPrice||0), 0);
+    const parts = [];
+    if (owed) parts.push(`${owed} new`);
+    if (inp)  parts.push(`${inp} in progress`);
+    if (hold) parts.push(`${hold} on hold`);
+    return { text: parts.length ? parts.join(' · ') : 'none', val };
+  }
+  const _repB  = rpBreakdown(repTasks.filter(t => REPORT_DELIV_CATS.has(t.catKey)));
+  const _procB = rpBreakdown(repTasks.filter(t => PROCEDURE_CATS.has(t.catKey)));
+  const rpStatCard = (label, b) =>
+    `<div class="report-stat">` +
+      `<div class="report-stat-label" style="white-space:nowrap">${label}</div>` +
+      `<div class="report-stat-val" style="color:var(--amber)">${fmt$(b.val)}</div>` +
+      `<div style="font-size:11px;color:var(--muted);margin-top:4px">${b.text}</div>` +
+    `</div>`;
 
   // Everything else (excludes cat 41-44 — those live in their own subsection)
   const mainTasks = ipTasks.filter(t => !REPORT_CATS.has(t.catKey));
@@ -788,7 +806,7 @@ function renderInProgressReport() {
   // ---- Helper: pill badge for an owed/in-progress/on-hold status ----------
   function statusBadge(st) {
     const map = {
-      new:        { label:'Owed',        bg:'rgba(232,162,52,0.16)',  fg:'#e8a234' },
+      new:        { label:'New',         bg:'rgba(232,162,52,0.16)',  fg:'#e8a234' },
       inprogress: { label:'In Progress', bg:'rgba(76,175,125,0.16)',  fg:'#4caf7d' },
       prohold:    { label:'On Hold',     bg:'rgba(122,122,133,0.16)', fg:'#9a9aa5' },
       accthold:   { label:'Acct Hold',   bg:'rgba(122,122,133,0.16)', fg:'#9a9aa5' },
@@ -922,9 +940,10 @@ function renderInProgressReport() {
 
       <!-- Subsection: Reports & Procedures (Cat 41-44) -->
       <div style="margin-top:28px">
-        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:10px">
-          <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text)">📄 Reports & Procedures <span style="font-size:13px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41–44)</span></div>
-          <div style="font-size:11.5px;color:var(--muted)">${repCountLine}</div>
+        <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text);margin-bottom:12px">📄 Reports & Procedures <span style="font-size:13px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41–44)</span></div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;max-width:540px;margin-bottom:20px">
+          ${rpStatCard('Reports (41 / 43)', _repB)}
+          ${rpStatCard('Procedures (42 / 44)', _procB)}
         </div>
         <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;font-style:italic">Procedures appear once a job is open; reports appear once all other work in their scope (section, or whole job) is complete. Done items drop off.</div>
         ${renderGroupedTable(repTasks, 'No reports or procedures owed or in progress.', { showStatus: true })}
