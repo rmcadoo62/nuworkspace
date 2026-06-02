@@ -37,6 +37,7 @@ function renderInfoSheet(projId) {
     'onhold':{label:'On Hold',bg:'rgba(122,122,133,0.15)',color:'#7a7a85',dot:'#7a7a85'},
     'complete':{label:'Complete',bg:'rgba(91,156,246,0.15)',color:'#5b9cf6',dot:'#5b9cf6'},
     'testcomplete':{label:'Testing Complete',bg:'rgba(76,175,125,0.15)',color:'#4caf7d',dot:'#4caf7d'},
+    'closing':{label:'Closing (Pending)',bg:'rgba(232,162,52,0.15)',color:'#e8a234',dot:'#e8a234'},
     'closed':{label:'Closed',bg:'rgba(85,85,102,0.15)',color:'#555566',dot:'#555566'},
   };
   const phaseColors = {
@@ -101,8 +102,8 @@ function renderInfoSheet(projId) {
             ${[
               ['jobprep','Job Preparation'],['pending','Pending'],['pendretest','Pending - ReTest'],
               ['active','Active'],['onhold','On Hold'],['complete','Complete'],
-              ['testcomplete','Testing Complete'],['closed','Closed']
-            ].map(([k,l]) => '<option value="'+k+'" '+(info.status===k?'selected':'')+'>'+l+'</option>').join('')}
+              ['testcomplete','Testing Complete'],['closing','Closing (Pending)'],['closed','Closed']
+            ].map(([k,l]) => '<option value="'+k+'" '+(info.status===k?'selected':'')+(k==='closing'?' disabled':'')+'>'+l+'</option>').join('')}
           </select>
           ${(()=>{
             const inHouse = articleStore.filter(a => a.projId === projId && !a.shippedDate);
