@@ -86,6 +86,14 @@ function _myTasksList() {
 
 function myTasksCount() { return _myTasksRaw().length; }
 
+// Call after any task change (assign, status, add, delete): refreshes the nav
+// count and re-renders the page if it's the one being viewed.
+function myTasksRefresh() {
+  updateMyTasksNav();
+  const p = document.getElementById('panel-mytasks');
+  if (p && p.classList.contains('active')) renderMyTasksPanel();
+}
+
 // Show/hide the nav item and update its count badge. Safe to call anytime;
 // call it on load and whenever tasks change (assignment, status, add, delete).
 function updateMyTasksNav() {
@@ -261,19 +269,19 @@ function renderMyTasksPanel() {
     + '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
 }
 
-// Reveal the nav item once data has loaded. Self-contained so it works without
-// touching app.js; for tighter live updates, also call updateMyTasksNav() from
-// wherever updateClosingBadge() runs (initial load + realtime task handlers).
-(function _mtInit() {
-  let tries = 0;
-  const iv = setInterval(function () {
-    tries++;
-    if (typeof currentEmployee !== 'undefined' && currentEmployee
-        && typeof taskStore !== 'undefined' && Array.isArray(taskStore)) {
-      updateMyTasksNav();
-      clearInterval(iv);
-    } else if (tries > 40) {
-      clearInterval(iv);
+// Keep the nav in sync with the effective user. This reveals the item once
+// data has loaded AND catches "View as" enter/exit — when currentEmployee is
+// swapped (in code we don't hook directly), the next tick notices the changed
+// id and refreshes, so the count never gets stuck on the impersonated person.
+(function _mtWatch() {
+  let lastKey = '\u0000';   // sentinel so the first real value always triggers
+  setInterval(function () {
+    if (typeof currentEmployee === 'undefined'
+        || typeof taskStore === 'undefined' || !Array.isArray(taskStore)) return;
+    const key = (currentEmployee && currentEmployee.id) || '';
+    if (key !== lastKey) {
+      lastKey = key;
+      myTasksRefresh();
     }
-  }, 500);
+  }, 1000);
 })();

@@ -980,6 +980,7 @@ async function inlineSave(taskId, projId, field, value) {
 
   // Notify the assignee once the change is persisted (bell + email, no chatter).
   if (_assignNotifyAfterSave) notifyAssignee(_assignNotifyAfterSave.assigneeId, _assignNotifyAfterSave.taskName, _assignNotifyAfterSave.projId);
+  if (typeof myTasksRefresh === 'function') myTasksRefresh();
 
   renderInfoTasks(projId, currentTaskFilter);
   renderTasksPanel(projId);
@@ -1321,6 +1322,7 @@ async function saveEditTask() {
   toast('Task updated');
   // Notify the assignee if the assignment changed to a new person.
   if (assignId && assignId !== _prevAssignId) notifyAssignee(assignId, title, _editProjId);
+  if (typeof myTasksRefresh === 'function') myTasksRefresh();
   syncProjBilledRevenue(editingTaskId ? taskStore.find(t=>t._id===editingTaskId)?.proj || activeProjectId : activeProjectId);
   renderAllViews();
   if (activeProjectId) {
@@ -1340,6 +1342,7 @@ async function deleteTask() {
   taskStore = taskStore.filter(t => t._id !== editingTaskId);
   closeEditTaskModal();
   toast('Task deleted');
+  if (typeof myTasksRefresh === 'function') myTasksRefresh();
   renderAllViews();
   if (activeProjectId) {
     renderTasksPanel(activeProjectId);
@@ -1700,6 +1703,7 @@ window.saveTask = async function(another=false) {
   if (!fixedPrice) notifyLindaNoPriceTask(saved.id, title, projId);
   // Notify the assignee if this task was created already assigned to someone.
   if (assignId) notifyAssignee(assignId, title, projId);
+  if (typeof myTasksRefresh === 'function') myTasksRefresh();
   syncProjBilledRevenue(projId); // sync expected revenue to projects list
 
   // Targeted render — avoid renderAllViews() which can cause double-render with realtime
