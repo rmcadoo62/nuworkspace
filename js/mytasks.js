@@ -269,19 +269,22 @@ function renderMyTasksPanel() {
     + '</tr></thead><tbody>' + rowsHtml + '</tbody></table></div>';
 }
 
-// Keep the nav in sync with the effective user. This reveals the item once
-// data has loaded AND catches "View as" enter/exit — when currentEmployee is
-// swapped (in code we don't hook directly), the next tick notices the changed
-// id and refreshes, so the count never gets stuck on the impersonated person.
+// Keep the nav in sync with the effective user. Recompute the badge/visibility
+// every tick — it's cheap and idempotent, so a transient empty state (e.g. data
+// mid-swap during "View as") can't latch the item hidden, and exiting "View as"
+// reverts the count on the next tick. Only re-render the open panel when the
+// effective user actually changes, so open dropdowns/scroll aren't disturbed.
 (function _mtWatch() {
-  let lastKey = '\u0000';   // sentinel so the first real value always triggers
+  let lastKey = '\u0000';
   setInterval(function () {
     if (typeof currentEmployee === 'undefined'
         || typeof taskStore === 'undefined' || !Array.isArray(taskStore)) return;
+    updateMyTasksNav();
     const key = (currentEmployee && currentEmployee.id) || '';
     if (key !== lastKey) {
       lastKey = key;
-      myTasksRefresh();
+      const p = document.getElementById('panel-mytasks');
+      if (p && p.classList.contains('active')) renderMyTasksPanel();
     }
   }, 1000);
 })();
