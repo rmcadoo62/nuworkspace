@@ -141,6 +141,7 @@
   </div>
   <div class="nav-section">
     <div class="nav-item active" id="navHome" onclick="openHomePanel(this)"><span class="icon">&#x1F3E1;</span> Home</div>
+    <div class="nav-item" id="navMyTasks" style="display:none" onclick="openMyTasksPanel(this)"><span class="icon survey-count" id="myTasksBadge">0</span> My Tasks</div>
     <div class="nav-item" id="navDashboard" onclick="openDashboardPanel(this)"><span class="icon">&#x1F4C8;</span> Dashboard</div>
     <div class="nav-item" id="navProjects" onclick="openProjectsTable(this)"><span class="icon">&#x1F4C1;</span> Projects</div>
     <div class="nav-item" onclick="openTimesheetPanel(this)"><span class="icon">&#x23F1;</span> Timesheet</div>
@@ -237,6 +238,13 @@
     <div class="view-panel" id="panel-home">
       <div style="flex:1;overflow-y:auto;">
         <div id="homeWrap"></div>
+      </div>
+    </div>
+
+    <!-- MY TASKS PANEL -->
+    <div class="view-panel" id="panel-mytasks" style="flex-direction:column;overflow:hidden;">
+      <div style="flex:1;overflow-y:auto;padding:24px 28px;">
+        <div id="myTasksWrap"></div>
       </div>
     </div>
 
@@ -1220,6 +1228,7 @@
   <script src="js/dashboard.js"></script>
   <script src="js/clients.js"></script>
   <script src="js/reports.js"></script>
+  <script src="js/mytasks.js"></script>
   <script src="js/search.js"></script>
   <script src="js/chatter.js"></script>
   <script src="js/dm.js"></script>
