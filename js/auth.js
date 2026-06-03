@@ -1159,6 +1159,16 @@ function _applyIdentityNav() {
     navIssueTracker.style.display = (eEmail === 'rmcadoo@nulabs.com') ? 'flex' : 'none';
   }
 
+  // My Tasks — personal queue; visible whenever the current identity has at
+  // least one open task assigned. Gated here (rather than in applyPermissions)
+  // so it follows currentEmployee through View-As enter/exit like the other
+  // identity-dependent items, instead of relying on mytasks.js's own timer.
+  const navMyTasks = document.getElementById('navMyTasks');
+  if (navMyTasks) {
+    const n = (typeof myTasksCount === 'function') ? myTasksCount() : 0;
+    navMyTasks.style.display = n > 0 ? '' : 'none';
+  }
+
   // After identity-dependent items are set, collapse any sections that no
   // longer have visible children (and hide the Vibrato brand if Quotes is off).
   if (typeof _autoCollapseNavSections === 'function') _autoCollapseNavSections();
