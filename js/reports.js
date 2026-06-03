@@ -13,6 +13,14 @@ function rpToggleSort() {
   if (typeof renderInProgressReport === 'function') renderInProgressReport();
 }
 
+// Reports & Procedures status filter: 'all' or 'active' (New + In Progress only,
+// hiding on-hold / acct-hold items that are parked waiting on something).
+let rpFilter = 'all';
+function rpToggleFilter() {
+  rpFilter = (rpFilter === 'all') ? 'active' : 'all';
+  if (typeof renderInProgressReport === 'function') renderInProgressReport();
+}
+
 async function renderBillingQueue() {
   const el = document.getElementById('tab-billing');
   if (!el) return;
@@ -844,10 +852,14 @@ function renderInProgressReport() {
     if (hold) parts.push(`${hold} on hold`);
     return { text: parts.length ? parts.join(' · ') : 'none', val };
   }
-  const _repRows  = repTasks.filter(t => REPORT_DELIV_CATS.has(t.catKey));
-  const _procRows = repTasks.filter(t => PROCEDURE_CATS.has(t.catKey));
-  const _repB  = rpBreakdown(_repRows);
-  const _procB = rpBreakdown(_procRows);
+  const _repAll  = repTasks.filter(t => REPORT_DELIV_CATS.has(t.catKey));
+  const _procAll = repTasks.filter(t => PROCEDURE_CATS.has(t.catKey));
+  const _repB  = rpBreakdown(_repAll);    // cards always show the full picture
+  const _procB = rpBreakdown(_procAll);
+  // Table rows respect the status filter (active = New + In Progress only).
+  const _passFilter = t => rpFilter === 'all' || t.status === 'new' || t.status === 'inprogress';
+  const _repRows  = _repAll.filter(_passFilter);
+  const _procRows = _procAll.filter(_passFilter);
   const rpStatCard = (label, b) =>
     `<div class="report-stat">` +
       `<div class="report-stat-label" style="white-space:nowrap">${label}</div>` +
@@ -1026,9 +1038,14 @@ function renderInProgressReport() {
       <div style="margin-top:28px">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap">
           <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text)">📄 Reports & Procedures <span style="font-size:13px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41–44)</span></div>
-          <button class="btn btn-ghost" style="font-size:11.5px;padding:5px 12px" onclick="rpToggleSort()" title="Toggle sort order">
-            Sort: ${rpSort === 'age' ? 'Oldest first' : 'Project A–Z'}&nbsp;&#x21C5;
-          </button>
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost" style="font-size:11.5px;padding:5px 12px" onclick="rpToggleFilter()" title="Toggle which statuses show">
+              Show: ${rpFilter === 'all' ? 'All' : 'New &amp; In progress'}&nbsp;&#x2699;
+            </button>
+            <button class="btn btn-ghost" style="font-size:11.5px;padding:5px 12px" onclick="rpToggleSort()" title="Toggle sort order">
+              Sort: ${rpSort === 'age' ? 'Oldest first' : 'Project A–Z'}&nbsp;&#x21C5;
+            </button>
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;max-width:540px;margin-bottom:20px">
           ${rpStatCard('Reports (41 / 43)', _repB)}
@@ -1039,13 +1056,13 @@ function renderInProgressReport() {
         <!-- Reports (41/43) -->
         <div style="margin-bottom:28px">
           <div style="font-family:'DM Serif Display',serif;font-size:15px;color:var(--text);margin-bottom:12px">📑 Reports <span style="font-size:12px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41 / 43)</span></div>
-          ${renderGroupedTable(_repRows, 'No reports owed or in progress.', { showStatus: true, sortByAge: rpSort === 'age' })}
+          ${renderGroupedTable(_repRows, rpFilter === 'active' ? 'No active reports — some may be on hold (switch Show to All).' : 'No reports owed or in progress.', { showStatus: true, sortByAge: rpSort === 'age' })}
         </div>
 
         <!-- Procedures (42/44) -->
         <div>
           <div style="font-family:'DM Serif Display',serif;font-size:15px;color:var(--text);margin-bottom:12px">📋 Procedures <span style="font-size:12px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 42 / 44)</span></div>
-          ${renderGroupedTable(_procRows, 'No procedures owed or in progress.', { showStatus: true, sortByAge: rpSort === 'age' })}
+          ${renderGroupedTable(_procRows, rpFilter === 'active' ? 'No active procedures — some may be on hold (switch Show to All).' : 'No procedures owed or in progress.', { showStatus: true, sortByAge: rpSort === 'age' })}
         </div>
       </div>
     </div>
