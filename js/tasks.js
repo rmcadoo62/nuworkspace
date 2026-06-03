@@ -100,6 +100,56 @@ async function notifyLindaNoPriceTask(taskId, taskName, projId) {
   }
 }
 
+// ── Task assignment notification ───────────────────────────────────────────
+// Bell-only push to the assignee (NO chatter post, so the home feed stays
+// clean) plus an email via the existing edge function. Mirrors the safe
+// msg_id:null shape used by notifyJordanOfClosing. Skips self-assignment and
+// no-ops if the assignee can't be resolved. Best-effort: errors are logged.
+async function notifyAssignee(assigneeId, taskName, projId) {
+  if (!sb || !assigneeId) return;
+
+  const assignee = employees.find(e => e.id === assigneeId);
+  if (!assignee) return;                                  // can't resolve recipient
+  if (currentEmployee && currentEmployee.id === assigneeId) return;  // no self-notify
+
+  const proj      = projects.find(p => p.id === projId);
+  const projLabel = proj ? (proj.emoji + ' ' + proj.name) : 'a project';
+  const fromName     = currentEmployee?.name     || currentUser?.email?.split('@')[0] || 'System';
+  const fromInitials = currentEmployee?.initials || '?';
+  const fromColor    = currentEmployee?.color    || '#5b9cf6';
+  const msgText = `\u{1F4CC} ${fromName} assigned you to: ${taskName} (${projLabel})`;
+
+  try {
+    // Bell notification only — no chatter row, so nothing hits Recent Chatter.
+    await sb.from('chatter_notifs').insert([{
+      employee_id:   assigneeId,
+      msg_id:        null,
+      proj_id:       projId || null,
+      from_name:     fromName,
+      from_initials: fromInitials,
+      from_color:    fromColor,
+      preview:       msgText.slice(0, 120),
+      is_read:       false,
+      created_at:    new Date().toISOString(),
+    }]);
+
+    // Email via the existing edge function (reuses the mention path).
+    await sb.functions.invoke('send-notification', {
+      body: {
+        type: 'chatter_mention',
+        data: {
+          mentionedIds: [assigneeId],
+          authorName:   fromName,
+          projectName:  projLabel,
+          messageText:  msgText,
+        }
+      }
+    });
+  } catch(e) {
+    console.warn('notifyAssignee failed:', e);
+  }
+}
+
 function rebuildProjDropdown(){
   const sel=document.getElementById('taskProject');
   const cur=sel.value;
@@ -820,6 +870,7 @@ async function inlineSave(taskId, projId, field, value) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
 
+  let _assignNotifyAfterSave = null;
   const today = new Date().toISOString().split('T')[0];
 
   // Update local store first
@@ -902,7 +953,13 @@ async function inlineSave(taskId, projId, field, value) {
   else if (field === 'billedDate')    { t.billedDate = value; }
   else if (field === 'quoteNum')      { t.quoteNum = value; }
   else if (field === 'poNumber')      { t.poNumber = value; }
-  else if (field === 'assign')        { t.assign = value; t.assignId = (employees.find(e => e.initials === value)||{}).id || ''; }
+  else if (field === 'assign')        {
+    const _prevAssignId = t.assignId || '';
+    t.assign = value;
+    t.assignId = (employees.find(e => e.initials === value)||{}).id || '';
+    // Fire after the DB write below, only if the assignee actually changed.
+    if (t.assignId && t.assignId !== _prevAssignId) _assignNotifyAfterSave = { assigneeId: t.assignId, taskName: t.name, projId };
+  }
 
   // Persist non-status fields to Supabase
   if (field !== 'status' && sb) {
@@ -920,6 +977,9 @@ async function inlineSave(taskId, projId, field, value) {
       if (error) console.error('inline save', error);
     }
   }
+
+  // Notify the assignee once the change is persisted (bell + email, no chatter).
+  if (_assignNotifyAfterSave) notifyAssignee(_assignNotifyAfterSave.assigneeId, _assignNotifyAfterSave.taskName, _assignNotifyAfterSave.projId);
 
   renderInfoTasks(projId, currentTaskFilter);
   renderTasksPanel(projId);
@@ -1215,6 +1275,9 @@ async function saveEditTask() {
   const assignId   = [...etAssign][0] || '';
   const assignEmp  = employees.find(e => e.id === assignId) || employees.find(e => e.initials === assignId);
   const assign     = assignEmp ? assignEmp.initials : assignId;
+  const _prevTask     = taskStore.find(t => t._id === editingTaskId) || {};
+  const _prevAssignId = _prevTask.assignId || (employees.find(e => e.initials === _prevTask.assign)||{}).id || '';
+  const _editProjId   = _prevTask.proj || activeProjectId;
   const desc       = document.getElementById('etDesc').value.trim();
   const dueLabel   = due ? new Date(due + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'}) : '';
   const isOverdue  = due ? new Date(due + 'T00:00:00') < new Date() && status !== 'done' : false;
@@ -1248,7 +1311,7 @@ async function saveEditTask() {
   if (idx > -1) {
     taskStore[idx] = {
       ...taskStore[idx],
-      name: title, desc, assign, due: dueLabel, due_raw: '', completedDate: completedDate||'',
+      name: title, desc, assign, assignId, due: dueLabel, due_raw: '', completedDate: completedDate||'',
       status, priority: etPri, salesCat, fixedPrice, revenueType,
       done: status === 'complete', overdue: isOverdue,
     };
@@ -1256,6 +1319,8 @@ async function saveEditTask() {
 
   closeEditTaskModal();
   toast('Task updated');
+  // Notify the assignee if the assignment changed to a new person.
+  if (assignId && assignId !== _prevAssignId) notifyAssignee(assignId, title, _editProjId);
   syncProjBilledRevenue(editingTaskId ? taskStore.find(t=>t._id===editingTaskId)?.proj || activeProjectId : activeProjectId);
   renderAllViews();
   if (activeProjectId) {
@@ -1633,6 +1698,8 @@ window.saveTask = async function(another=false) {
   logActivity('tasks', saved.id, title, 'Task Created' + (_proj ? ' on ' + _proj.name : ''));
   // Notify Linda if task was created with no price
   if (!fixedPrice) notifyLindaNoPriceTask(saved.id, title, projId);
+  // Notify the assignee if this task was created already assigned to someone.
+  if (assignId) notifyAssignee(assignId, title, projId);
   syncProjBilledRevenue(projId); // sync expected revenue to projects list
 
   // Targeted render — avoid renderAllViews() which can cause double-render with realtime
