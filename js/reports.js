@@ -6,6 +6,13 @@
 // ===== BILLING QUEUE REPORT =====
 let bqSelected = new Set();
 
+// Reports & Procedures subsection sort: 'age' (oldest owed first) or 'project' (A–Z).
+let rpSort = 'age';
+function rpToggleSort() {
+  rpSort = (rpSort === 'age') ? 'project' : 'age';
+  if (typeof renderInProgressReport === 'function') renderInProgressReport();
+}
+
 async function renderBillingQueue() {
   const el = document.getElementById('tab-billing');
   if (!el) return;
@@ -729,17 +736,52 @@ function renderInProgressReport() {
   const _isDone = t => DONE_STATUSES.has(t.status);
   const _catOf  = t => (t.salesCat || '').toString().trim();
 
-  // A report is owed only when everything else it depends on is finished.
-  function reportOwed(r) {
-    const sectioned = r.sectionId && _secIds.has(r.sectionId);
-    const scope = taskStore.filter(t =>
+  // The exact set of sibling work a report waits on. Normally scoped to the
+  // report's own section, but reports are often bucketed into a dedicated
+  // "Test Reports" section that holds no actual work. In that case the section
+  // scope is empty and the report's real dependency is the whole job — so fall
+  // back to job scope. Either way, sibling report deliverables are excluded so
+  // two reports in one scope can't deadlock or anchor off each other.
+  function reportScope(r) {
+    const base = t =>
       t.proj === r.proj &&
       t._id !== r._id &&
-      (sectioned ? t.sectionId === r.sectionId : true) &&
-      !REPORT_DELIV_CATS.has(_catOf(t))            // ignore sibling reports
-    );
+      !REPORT_DELIV_CATS.has(_catOf(t));            // ignore sibling reports
+    const sectioned = r.sectionId && _secIds.has(r.sectionId);
+    let scope = sectioned
+      ? taskStore.filter(t => base(t) && t.sectionId === r.sectionId)
+      : taskStore.filter(base);
+    // Reports-only section (no work to wait on) → real scope is the whole job.
+    if (sectioned && scope.length === 0) scope = taskStore.filter(base);
+    return scope;
+  }
+
+  // A report is owed only when everything else it depends on is finished.
+  function reportOwed(r) {
+    const scope = reportScope(r);
     if (scope.length === 0) return true;            // nothing else to wait on
     return scope.every(_isDone);
+  }
+
+  // The date a report became eligible = the latest completion among the very
+  // same scope siblings the gate checks. That last-to-finish task is the event
+  // that flipped the report onto this list, so its date is the report's "age 0".
+  // (YYYY-MM-DD strings sort chronologically, so a plain max works.)
+  function reportEligibleDate(r) {
+    const dates = reportScope(r)
+      .map(t => t.completedDate || t.billedDate)    // done siblings carry a date
+      .filter(Boolean);
+    if (!dates.length) return '';                   // per spec: no testing → no report, so shouldn't happen
+    return dates.reduce((a, b) => (a > b ? a : b));
+  }
+
+  // Whole days from a YYYY-MM-DD anchor to today (local midnight to midnight).
+  function ageDaysFrom(isoDate) {
+    if (!isoDate) return null;
+    const start = new Date(isoDate + 'T00:00:00');
+    if (isNaN(start)) return null;
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    return Math.max(0, Math.round((now - start) / 86400000));
   }
 
   // Candidates: cat 41-44, open project, not done. Then apply the per-type rule.
@@ -759,6 +801,11 @@ function renderInProgressReport() {
       const info = projectInfo[t.proj] || {};
       const emp  = employees.find(e => e.initials === t.assign) || {};
       const cat  = _catOf(t);
+      // Age anchor differs by type: a procedure is owed from the day the job
+      // opened (created), a report from the day it became eligible (last scope
+      // sibling completed). Both reduce to a single YYYY-MM-DD anchor + days.
+      const ageAnchor = PROCEDURE_CATS.has(cat) ? t.createdAt : reportEligibleDate(t);
+      const ageDays   = ageDaysFrom(ageAnchor);
       return {
         ...t,
         projName:   proj.name || '—',
@@ -767,14 +814,23 @@ function renderInProgressReport() {
         pm:         info.pm || '',
         empName:    emp.name || t.assign || '—',
         catKey:     cat,
+        ageAnchor,
+        ageDays,
         statusRank: (STATUS_RANK[t.status] != null ? STATUS_RANK[t.status] : 3),
       };
     })
-    .sort((a,b) =>
-      (a.projName||'').localeCompare(b.projName||'') ||
-      a.statusRank - b.statusRank ||
-      (a.name||'').localeCompare(b.name||'')
-    );
+    .sort((a,b) => {
+      if (rpSort === 'age') {
+        const av = (a.ageDays == null ? -1 : a.ageDays);
+        const bv = (b.ageDays == null ? -1 : b.ageDays);
+        return bv - av ||                                   // oldest (largest age) first
+          (a.projName||'').localeCompare(b.projName||'') ||
+          (a.name||'').localeCompare(b.name||'');
+      }
+      return (a.projName||'').localeCompare(b.projName||'') ||
+        a.statusRank - b.statusRank ||
+        (a.name||'').localeCompare(b.name||'');
+    });
 
   // Separate, bold summaries for Reports (41/43) and Procedures (42/44).
   function rpBreakdown(list) {
@@ -788,8 +844,10 @@ function renderInProgressReport() {
     if (hold) parts.push(`${hold} on hold`);
     return { text: parts.length ? parts.join(' · ') : 'none', val };
   }
-  const _repB  = rpBreakdown(repTasks.filter(t => REPORT_DELIV_CATS.has(t.catKey)));
-  const _procB = rpBreakdown(repTasks.filter(t => PROCEDURE_CATS.has(t.catKey)));
+  const _repRows  = repTasks.filter(t => REPORT_DELIV_CATS.has(t.catKey));
+  const _procRows = repTasks.filter(t => PROCEDURE_CATS.has(t.catKey));
+  const _repB  = rpBreakdown(_repRows);
+  const _procB = rpBreakdown(_procRows);
   const rpStatCard = (label, b) =>
     `<div class="report-stat">` +
       `<div class="report-stat-label" style="white-space:nowrap">${label}</div>` +
@@ -813,6 +871,25 @@ function renderInProgressReport() {
     };
     const m = map[st] || { label: st || '—', bg:'rgba(122,122,133,0.16)', fg:'#9a9aa5' };
     return `<span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:10.5px;font-weight:700;letter-spacing:.3px;background:${m.bg};color:${m.fg}">${m.label}</span>`;
+  }
+
+  // ---- Helper: age badge for a report/procedure row -----------------------
+  // Days the item has been owed. Procedure age counts from job open (created);
+  // report age counts from the day it became eligible. Gentle color escalation
+  // flags items that have been sitting a while. Tooltip spells out the anchor
+  // so the number is never ambiguous.
+  function ageBadge(t) {
+    const d = t.ageDays;
+    if (d == null) return '<span style="color:var(--muted)">—</span>';
+    const label = d === 0 ? 'today' : d + 'd';
+    let color = 'var(--text)';
+    if (d >= 45) color = 'var(--red)';
+    else if (d >= 14) color = '#e8a234';
+    const isProc = PROCEDURE_CATS.has(t.catKey);
+    const tip = isProc
+      ? 'Days since job opened — procedure created ' + (t.ageAnchor || '?')
+      : (t.ageAnchor ? 'Days eligible — last scope item completed ' + t.ageAnchor : 'Eligible date unknown');
+    return '<span title="' + tip.replace(/"/g, '&quot;') + '" style="font-family:\'JetBrains Mono\',monospace;font-size:11.5px;color:' + color + '">' + label + '</span>';
   }
 
   // ---- Helper: render a grouped-by-project table for a given task list ----
@@ -839,15 +916,20 @@ function renderInProgressReport() {
       }
       groups[t.projId].tasks.push(t);
       groups[t.projId].subtotal += (t.fixedPrice || 0);
+      const a = (t.ageDays == null ? -1 : t.ageDays);
+      if (groups[t.projId].maxAge == null || a > groups[t.projId].maxAge) groups[t.projId].maxAge = a;
     });
-    const ordered = Object.values(groups).sort((a,b) => (a.projName||'').localeCompare(b.projName||''));
+    const ordered = Object.values(groups).sort((a,b) =>
+      (opts.sortByAge ? (b.maxAge||-1) - (a.maxAge||-1) : 0) ||   // stalest job first
+      (a.projName||'').localeCompare(b.projName||'')
+    );
 
     let rows = '';
     ordered.forEach(g => {
       // Project header row
       rows += `
         <tr style="background:var(--surface2);border-top:1px solid var(--border);cursor:pointer" onclick="ipOpenProject('${g.projId}')" title="Open project">
-          <td colspan="${showStatus ? 4 : 3}" style="padding:10px 14px">
+          <td colspan="${showStatus ? 5 : 3}" style="padding:10px 14px">
             <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
               <div style="font-weight:600;font-size:13.5px;color:var(--text)">📁 ${escapeHtml(g.projName)}</div>
               <div style="font-size:11.5px;color:var(--muted)">${escapeHtml(g.clientName)}</div>
@@ -872,7 +954,8 @@ function renderInProgressReport() {
             <td style="padding:9px 14px 9px 32px;font-size:12.5px;color:var(--text)">↳ ${escapeHtml(t.name||'Untitled')}</td>
             ${showStatus
               ? `<td style="padding:9px 14px;font-size:11.5px;color:var(--muted);font-family:'JetBrains Mono',monospace">${escapeHtml(t.catKey || '—')}</td>
-                 <td style="padding:9px 14px">${statusBadge(t.status)}</td>`
+                 <td style="padding:9px 14px">${statusBadge(t.status)}</td>
+                 <td style="padding:9px 14px;text-align:right">${ageBadge(t)}</td>`
               : `<td style="padding:9px 14px;font-size:11.5px;color:var(--muted);font-family:'JetBrains Mono',monospace">${escapeHtml(t.catKey || '—')}</td>`}
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px">${_hrsDisplay}</td>
             <td style="padding:9px 14px;text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.fixedPrice>0?'var(--text)':'var(--muted)'}">${t.fixedPrice ? fmt$(t.fixedPrice) : '—'}</td>
@@ -889,7 +972,8 @@ function renderInProgressReport() {
               <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Task / Project</th>
               ${showStatus
                 ? `<th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>
-                   <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>`
+                   <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>
+                   <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)" title="Procedures: days since job opened. Reports: days since eligible.">Age</th>`
                 : `<th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>`}
               <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Hours</th>
               <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>
@@ -940,13 +1024,29 @@ function renderInProgressReport() {
 
       <!-- Subsection: Reports & Procedures (Cat 41-44) -->
       <div style="margin-top:28px">
-        <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text);margin-bottom:12px">📄 Reports & Procedures <span style="font-size:13px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41–44)</span></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+          <div style="font-family:'DM Serif Display',serif;font-size:17px;color:var(--text)">📄 Reports & Procedures <span style="font-size:13px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41–44)</span></div>
+          <button class="btn btn-ghost" style="font-size:11.5px;padding:5px 12px" onclick="rpToggleSort()" title="Toggle sort order">
+            Sort: ${rpSort === 'age' ? 'Oldest first' : 'Project A–Z'}&nbsp;&#x21C5;
+          </button>
+        </div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;max-width:540px;margin-bottom:20px">
           ${rpStatCard('Reports (41 / 43)', _repB)}
           ${rpStatCard('Procedures (42 / 44)', _procB)}
         </div>
-        <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;font-style:italic">Procedures appear once a job is open; reports appear once all other work in their scope (section, or whole job) is complete. Done items drop off.</div>
-        ${renderGroupedTable(repTasks, 'No reports or procedures owed or in progress.', { showStatus: true })}
+        <div style="font-size:11.5px;color:var(--muted);margin-bottom:20px;font-style:italic">Procedures appear once a job is open; reports appear once all other work in their scope (section, or whole job) is complete. Done items drop off.</div>
+
+        <!-- Reports (41/43) -->
+        <div style="margin-bottom:28px">
+          <div style="font-family:'DM Serif Display',serif;font-size:15px;color:var(--text);margin-bottom:12px">📑 Reports <span style="font-size:12px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 41 / 43)</span></div>
+          ${renderGroupedTable(_repRows, 'No reports owed or in progress.', { showStatus: true, sortByAge: rpSort === 'age' })}
+        </div>
+
+        <!-- Procedures (42/44) -->
+        <div>
+          <div style="font-family:'DM Serif Display',serif;font-size:15px;color:var(--text);margin-bottom:12px">📋 Procedures <span style="font-size:12px;color:var(--muted);font-family:'DM Sans',sans-serif">(Cat 42 / 44)</span></div>
+          ${renderGroupedTable(_procRows, 'No procedures owed or in progress.', { showStatus: true, sortByAge: rpSort === 'age' })}
+        </div>
       </div>
     </div>
   `;
