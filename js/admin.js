@@ -2268,6 +2268,7 @@ const CAPABILITY_DEFS = [
   { key: 'view_cmmc',          label: 'View CMMC Compliance',  group: 'Compliance' },
   { key: 'access_nuforce',     label: 'Access NUForce',        group: 'Apps' },
   { key: 'nuforce_approve_quotes', label: 'Approve Quotes (NUForce)', group: 'Apps' },
+  { key: 'nuforce_send_quotes',    label: 'Send Approved Quotes (NUForce)', group: 'Apps' },
 ];
 
 function openPermissionsPanel() {
