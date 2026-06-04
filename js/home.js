@@ -356,19 +356,50 @@ function _homeEsc(s) {
 }
 
 // ---- Weather ----
+// Cached across reloads in localStorage (30-min TTL) so we don't re-hit
+// Open-Meteo on every page load — repeated calls were tripping their rate
+// limit (HTTP 429). On any failure we fall back to the last good value
+// (even if stale) so the card keeps showing a temperature instead of
+// "unavailable". At most ~2 calls/hour per browser.
+const WEATHER_TTL_MS = 30 * 60 * 1000;
+const WEATHER_LS_KEY = 'nulabs_home_weather_v1';
+
+function _readWeatherCache() {
+  try {
+    const raw = localStorage.getItem(WEATHER_LS_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+
 async function fetchHomeWeather() {
   if (_homeWeatherCache) return _homeWeatherCache;
+
+  // Fresh enough cache from a previous load? Use it, skip the network.
+  const cached = _readWeatherCache();
+  if (cached && cached.data && cached.ts && (Date.now() - cached.ts) < WEATHER_TTL_MS) {
+    _homeWeatherCache = cached.data;
+    return _homeWeatherCache;
+  }
+
   try {
-    // Spotswood NJ coordinates
+    // Annandale NJ coordinates
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=40.6426&longitude=-74.8774' +
       '&current=temperature_2m,apparent_temperature,weathercode,windspeed_10m,relative_humidity_2m' +
       '&daily=weathercode,temperature_2m_max,temperature_2m_min,precipitation_probability_max&temperature_unit=fahrenheit' +
       '&wind_speed_unit=mph&timezone=America%2FNew_York&forecast_days=4';
     const res  = await fetch(url);
+    if (!res.ok) throw new Error('weather HTTP ' + res.status);   // 429 etc. → don't cache a bad body
     const data = await res.json();
     _homeWeatherCache = data;
+    try { localStorage.setItem(WEATHER_LS_KEY, JSON.stringify({ ts: Date.now(), data })); } catch (e) {}
     return data;
-  } catch { return null; }
+  } catch (e) {
+    console.warn('fetchHomeWeather failed:', e);
+    // Rate-limited or offline — show the last good reading rather than nothing.
+    if (cached && cached.data) { _homeWeatherCache = cached.data; return cached.data; }
+    return null;
+  }
 }
 
 function weatherIcon(code) {
