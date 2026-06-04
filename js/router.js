@@ -55,6 +55,11 @@ function routerNavigate(hash) {
         }
         break;
       }
+      case 'tasklog': {
+        const tlId = parts[1];
+        if (tlId && typeof openTaskLogPanel === 'function') openTaskLogPanel(tlId);
+        break;
+      }
       // Admin / misc panels
       case 'setup':       if (typeof openSetupPanel         === 'function') openSetupPanel();         break;
       case 'myinfo':      if (typeof openMyInfoPanel        === 'function') openMyInfoPanel();        break;
@@ -132,6 +137,16 @@ function routerHookFunctions() {
     window.selectProject = function (id, el) {
       const r = origSelect(id, el);
       routerPush('project/' + id);
+      return r;
+    };
+  }
+
+  // openTaskLogPanel → #tasklog/{taskId}
+  const origOpenTaskLog = window.openTaskLogPanel;
+  if (typeof origOpenTaskLog === 'function') {
+    window.openTaskLogPanel = function (taskId, ...rest) {
+      const r = origOpenTaskLog(taskId, ...rest);
+      routerPush('tasklog/' + taskId);
       return r;
     };
   }
