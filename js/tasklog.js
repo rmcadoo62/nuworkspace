@@ -105,6 +105,7 @@
       .tlog-page-title .sub{font-family:'DM Sans',sans-serif;font-size:12.5px;color:var(--muted);font-weight:500;}
 
       .tlog-recorded{font-size:11px;color:var(--muted);}
+      .tlog-conditions{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin:1px 0 4px;}
       .tlog-edited{font-size:11px;color:var(--amber);cursor:pointer;font-weight:600;}
       .tlog-history{margin-top:8px;border-left:3px solid var(--border);padding:4px 0 4px 12px;
         display:none;flex-direction:column;gap:8px;}
@@ -219,7 +220,7 @@
     try {
       const { data: rows, error } = await sb
         .from('task_log_entries')
-        .select('id, entry_group_id, version, body, author_id, author_name, created_at, event_at')
+        .select('id, entry_group_id, version, body, author_id, author_name, created_at, event_at, lab_conditions')
         .eq('task_id', S.taskId)
         .order('entry_group_id', { ascending: true })
         .order('version', { ascending: true });
@@ -242,6 +243,7 @@
           groupId: versions[0].entry_group_id, versions, current,
           eventAt: current.event_at || current.created_at,
           ownerId: versions[0].author_id,
+          labConditions: (versions[0] && versions[0].lab_conditions) || null,
           media: mediaByGroup[versions[0].entry_group_id] || [],
         };
       }).sort((a, b) => new Date(b.eventAt) - new Date(a.eventAt)); // newest first, like chatter
@@ -282,6 +284,23 @@
       const rec = c.created_at;
       const showRec = evt && rec && Math.abs(new Date(rec) - new Date(evt)) > 90 * 1000;
 
+      // lab conditions stamped on the original entry (SensorPush, via cache)
+      let condHtml = '';
+      const lc = g.labConditions;
+      if (lc) {
+        const bits = [];
+        if (lc.temp != null)     bits.push(`${Number(lc.temp).toFixed(1)}°F`);
+        if (lc.humidity != null) bits.push(`${Number(lc.humidity).toFixed(0)}% RH`);
+        let label = bits.join(' · ');
+        if (lc.sensor) label += (label ? ' · ' : '') + lc.sensor;
+        // if the reading was sampled well away from the event time (e.g. a
+        // rolled-back entry), surface the actual sample time so it's honest
+        if (lc.sampled_at && evt && Math.abs(new Date(lc.sampled_at) - new Date(evt)) > 10 * 60 * 1000) {
+          label += ` · sampled ${_fmtClock(lc.sampled_at)}`;
+        }
+        if (label) condHtml = `<div class="tlog-conditions">🌡 ${_esc(label)}</div>`;
+      }
+
       const histHtml = edited ? `
         <div class="tlog-history" id="${histId}">
           ${g.versions.slice(0, -1).reverse().map(v => `
@@ -309,6 +328,7 @@
               ${showRec ? `<span class="tlog-recorded">· logged ${_fmtClock(rec)}</span>` : ''}
               ${edited ? `<span class="tlog-edited" onclick="tlogToggleHistory('${histId}')">edited (${g.versions.length-1}) ▾</span>` : ''}
             </div>
+            ${condHtml}
             <div class="chatter-msg-text tlog-msg-text ${isDeleted ? 'deleted' : ''}">${_nl2br(c.body)}</div>
             ${mediaHtml}
             ${histHtml}
@@ -429,6 +449,28 @@
     _resetEventControls();
   }
 
+  // ---- lab conditions (SensorPush, read from cache table) -------------------
+  // EMI sensor applies ONLY to sales category 51 tasks; everything else (incl.
+  // null/blank category) reads the High Bay sensor.
+  function _sensorForTask(task) {
+    const cat = String((task && task.salesCat) || '').trim();
+    return cat === '51' ? 'EMI' : 'High Bay';
+  }
+  // Returns {sensor, temp, humidity, sampled_at} or null. Never throws — a
+  // failure here must never block posting a log entry.
+  async function _fetchLabConditions() {
+    try {
+      const sensor = _sensorForTask(S.task);
+      const { data, error } = await sb
+        .from('lab_conditions_latest')
+        .select('sensor, temp, humidity, sampled_at')
+        .eq('sensor', sensor)
+        .maybeSingle();
+      if (error || !data) return null;
+      return { sensor: data.sensor, temp: data.temp, humidity: data.humidity, sampled_at: data.sampled_at };
+    } catch (_) { return null; }
+  }
+
   // ---- post / edit / delete -------------------------------------------------
   async function tlogPost() {
     const ta = document.getElementById('tlogTa'), btn = document.getElementById('tlogPostBtn');
@@ -447,10 +489,13 @@
         }).select('id, entry_group_id').single();
         if (error) throw error; row = data;
       } else {
-        const { data, error } = await sb.from('task_log_entries').insert({
+        const lab = await _fetchLabConditions(); // null-safe; never blocks the post
+        const ins = {
           task_id: S.taskId, version: 1, body: text,
           author_id: currentUser.id, author_name: _authorName(), event_at: eventISO,
-        }).select('id, entry_group_id').single();
+        };
+        if (lab) ins.lab_conditions = lab;
+        const { data, error } = await sb.from('task_log_entries').insert(ins).select('id, entry_group_id').single();
         if (error) throw error; row = data;
       }
       if (!S.isCui && S.pending.length && row && row.id) { for (const f of S.pending) { await _uploadOne(f, row.id); } }
