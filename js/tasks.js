@@ -614,7 +614,6 @@ function renderTasksPanel(projId) {
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         ${isManager() ? `<button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="addSectionHeader('${projId}')">+ Section</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="openBulkAddModal('${projId}',null)" title="Add multiple tasks at once">+ Bulk</button>` : ''}
-        <button class="btn btn-ghost" style="font-size:12px;border:1px solid var(--border)" onclick="copyTasksToClipboard('${projId}')" title="Copy task list to clipboard for pasting into Word">&#x1F4CB; Copy List</button>
       </div>
     </div>
     <div class="itt-head" id="ittHead">
@@ -1722,38 +1721,6 @@ window.saveTask = async function(another=false) {
 };
 
 // Patch toggleInfoTask to persist
-
-// ===== COPY TASKS TO CLIPBOARD =====
-function copyTasksToClipboard(projId) {
-  const tasks = taskStore
-    .filter(t => t.proj === projId)
-    .sort((a, b) => (a.taskNum || 0) - (b.taskNum || 0));
-
-  if (tasks.length === 0) { toast('No tasks to copy'); return; }
-
-  // Tab-separated so it pastes into Word as a table
-  const header = '#\tTask\tBudget Hrs';
-  const rows = tasks.map(t =>
-    `${t.taskNum || '—'}\t${t.name}\t${t.budgetHours > 0 ? t.budgetHours : '—'}`
-  );
-
-  const text = [header, ...rows].join('\n');
-
-  navigator.clipboard.writeText(text).then(() => {
-    toast('✓ Task list copied — paste into Word to create a table');
-  }).catch(() => {
-    // Fallback for older browsers
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    toast('✓ Task list copied — paste into Word to create a table');
-  });
-}
 
 // ===== BULK ADD TASKS =====
 // ===== BULK ADD TASKS =====
