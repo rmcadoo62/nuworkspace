@@ -122,6 +122,13 @@
       /* textarea must fill the flex wrap (a contenteditable div does this on its own) */
       #tlogTa{display:block;width:100%;box-sizing:border-box;}
 
+      .tlog-dl-btn{font-size:11.5px;border:1px solid var(--border);background:var(--surface2);
+        color:var(--muted);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap;}
+      .tlog-dl-btn:hover{border-color:var(--amber-dim);color:var(--amber);}
+      .tlog-pending-name{border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:11px;
+        font-family:'DM Sans',sans-serif;color:var(--text);background:var(--surface);max-width:170px;}
+      .tlog-pending-ext{font-size:11px;color:var(--muted);}
+
       .tlog-evt-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
         padding:0 0 10px 0;font-size:12px;color:var(--muted);}
       .tlog-evt-label{font-weight:600;color:var(--text);}
@@ -172,6 +179,9 @@
       <div class="tlog-page-head">
         ${project ? `<span class="tlog-back" onclick="tlogBack()">← ${_esc(projLabel)}</span>` : ''}
         <div class="tlog-page-title">📋 Test Log <span class="sub">· ${_esc(S.task.name)}</span></div>
+        <span style="flex:1"></span>
+        <button class="tlog-dl-btn" onclick="tlogExport('task')" title="Download this task's log + photos as a ZIP">⬇ This task</button>
+        <button class="tlog-dl-btn" onclick="tlogExport('job')" title="Download the whole job's logs + photos as a ZIP">⬇ Whole job</button>
       </div>
       <div class="chatter-composer" id="tlogComposer">
         <div class="tlog-evt-row">
@@ -422,12 +432,17 @@
   }
 
   // ---- attachments ----------------------------------------------------------
-  function tlogAttachChange(input) { Array.from(input.files || []).forEach(f => S.pending.push(f)); input.value=''; _renderPending(); }
+  function _splitName(name){ const i=(name||'').lastIndexOf('.'); return (i>0)?{base:name.slice(0,i),ext:name.slice(i)}:{base:name||'file',ext:''}; }
+  function tlogAttachChange(input) {
+    Array.from(input.files || []).forEach(f => { const sp=_splitName(f.name); S.pending.push({ file:f, base:sp.base, ext:sp.ext }); });
+    input.value=''; _renderPending();
+  }
   function tlogRemovePending(i) { S.pending.splice(i,1); _renderPending(); }
+  function tlogRenamePending(i, val) { if (S.pending[i]) S.pending[i].base = val; }
   function _renderPending() {
     const el = document.getElementById('tlogPending'); if (!el) return;
-    el.innerHTML = S.pending.map((f,i) =>
-      `<span class="chatter-preview-chip">${_esc(f.name)} <button onclick="tlogRemovePending(${i})">✕</button></span>`).join('');
+    el.innerHTML = S.pending.map((p,i) =>
+      `<span class="chatter-preview-chip"><input class="tlog-pending-name" value="${_esc(p.base)}" oninput="tlogRenamePending(${i}, this.value)" title="Rename before posting">${p.ext ? `<span class="tlog-pending-ext">${_esc(p.ext)}</span>` : ''} <button onclick="tlogRemovePending(${i})">✕</button></span>`).join('');
   }
 
   // ---- edit mode ------------------------------------------------------------
@@ -498,7 +513,7 @@
         const { data, error } = await sb.from('task_log_entries').insert(ins).select('id, entry_group_id').single();
         if (error) throw error; row = data;
       }
-      if (!S.isCui && S.pending.length && row && row.id) { for (const f of S.pending) { await _uploadOne(f, row.id); } }
+      if (!S.isCui && S.pending.length && row && row.id) { for (const p of S.pending) { await _uploadOne(p, row.id); } }
       S.pending = []; S.editingGroupId = null;
       if (ta) ta.value = '';
       const note = document.getElementById('tlogEditNote'); if (note) note.classList.remove('show');
@@ -522,18 +537,149 @@
     } catch (err) { if (typeof toast === 'function') toast('⚠ ' + (err.message || 'Failed')); }
   }
 
-  async function _uploadOne(file, entryId) {
-    const safe = (file.name || 'file').replace(/[^\w.\-]+/g, '_');
+  async function _uploadOne(p, entryId) {
+    const file = p.file;
+    const finalName = ((p.base || '').trim() || 'file') + (p.ext || '');
+    const safe = finalName.replace(/[^\w.\-]+/g, '_');
     const key = `${S.taskId}/${entryId}/${crypto.randomUUID()}-${safe}`;
     const { error: upErr } = await sb.storage.from(BUCKET).upload(key, file, { contentType: file.type || undefined, upsert: false });
     if (upErr) throw upErr;
     const { error: insErr } = await sb.from('task_log_media').insert({
-      entry_id: entryId, bucket: BUCKET, object_key: key, filename: file.name, mime_type: file.type || null, size_bytes: file.size || null,
+      entry_id: entryId, bucket: BUCKET, object_key: key, filename: finalName, mime_type: file.type || null, size_bytes: file.size || null,
     });
     if (insErr) throw insErr;
   }
 
   function tlogToggleHistory(id) { const el = document.getElementById(id); if (el) el.classList.toggle('open'); }
+
+  // ---- export (ZIP: oldest-first PDF log + original media files) -----------
+  function _dlBlob(blob, name) {
+    const u = URL.createObjectURL(blob); const a = document.createElement('a');
+    a.href = u; a.download = name; document.body.appendChild(a); a.click();
+    document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(u), 1500);
+  }
+  function _sanitize(s){ return String(s||'').replace(/[^\w.\- ]+/g,'_').replace(/\s+/g,'_').slice(0,80) || 'item'; }
+
+  async function _fetchTaskEntries(taskId) {
+    const { data: rows } = await sb.from('task_log_entries')
+      .select('id, entry_group_id, version, body, author_name, created_at, event_at, lab_conditions')
+      .eq('task_id', taskId).order('entry_group_id').order('version');
+    const map = new Map();
+    (rows||[]).forEach(r => { if (!map.has(r.entry_group_id)) map.set(r.entry_group_id, []); map.get(r.entry_group_id).push(r); });
+    const ids = (rows||[]).map(r => r.id); let media = [];
+    if (ids.length) { const { data:m } = await sb.from('task_log_media').select('*').in('entry_id', ids); media = m||[]; }
+    const idToGroup = {}; (rows||[]).forEach(r => idToGroup[r.id] = r.entry_group_id);
+    const mByG = {}; media.forEach(mm => { const g = idToGroup[mm.entry_id]; if (g) (mByG[g]=mByG[g]||[]).push(mm); });
+    return Array.from(map.values()).map(vs => { const c = vs[vs.length-1];
+      return { current:c, eventAt: c.event_at || c.created_at, labConditions: (vs[0] && vs[0].lab_conditions) || null, media: mByG[vs[0].entry_group_id] || [] }; })
+      .sort((a,b) => new Date(a.eventAt) - new Date(b.eventAt));
+  }
+
+  function _blobToThumb(blob, maxW) {
+    return new Promise(resolve => {
+      const url = URL.createObjectURL(blob); const img = new Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxW / (img.naturalWidth || maxW));
+        const w = Math.max(1, Math.round((img.naturalWidth || maxW) * scale));
+        const h = Math.max(1, Math.round((img.naturalHeight || maxW) * scale));
+        const c = document.createElement('canvas'); c.width = w; c.height = h;
+        try { c.getContext('2d').drawImage(img, 0, 0, w, h); URL.revokeObjectURL(url);
+          resolve({ dataUrl: c.toDataURL('image/jpeg', 0.82), w, h }); }
+        catch (e) { URL.revokeObjectURL(url); resolve(null); }
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+      img.src = url;
+    });
+  }
+
+  function _labLine(lc) {
+    if (!lc) return '';
+    const bits = [];
+    if (lc.temp != null)     bits.push(Number(lc.temp).toFixed(1) + '\u00B0F');
+    if (lc.humidity != null) bits.push(Number(lc.humidity).toFixed(0) + '% RH');
+    let label = bits.join('  ');
+    if (lc.sensor) label += (label ? ' \u00B7 ' : '') + lc.sensor;
+    return label;
+  }
+
+  async function tlogExport(scope) {
+    if (!window.JSZip) { if (typeof toast==='function') toast('\u26A0 ZIP library not loaded'); return; }
+    if (!window.jspdf || !window.jspdf.jsPDF) { if (typeof toast==='function') toast('\u26A0 PDF library not loaded'); return; }
+    const tasks = (scope === 'job' && S.project)
+      ? (typeof taskStore !== 'undefined' ? taskStore : []).filter(t => t.proj === S.project.id)
+      : [S.task];
+    if (!tasks.length) { if (typeof toast==='function') toast('Nothing to export'); return; }
+    if (typeof toast === 'function') toast('Building bundle\u2026');
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit:'pt', format:'letter' });
+    const M = 54, PW = 612, PH = 792, CW = PW - 2*M; let y = M;
+    const ensure = h => { if (y + h > PH - M) { doc.addPage(); y = M; } };
+    const heading = (txt, size, gap) => { doc.setFont('helvetica','bold'); doc.setFontSize(size); doc.setTextColor(0); ensure(size + (gap||6)); doc.text(String(txt||''), M, y); y += size + (gap||6); };
+    const para = (txt, size, color) => { doc.setFont('helvetica','normal'); doc.setFontSize(size); doc.setTextColor(color==null?0:color); (doc.splitTextToSize(String(txt||''), CW)).forEach(ln => { ensure(size+4); doc.text(ln, M, y); y += size+4; }); doc.setTextColor(0); };
+
+    const zip = new JSZip();
+    const jobName = (S.project && S.project.name) ? S.project.name : 'job';
+
+    heading('Test Log', 20, 12);
+    para('Job: ' + jobName, 11);
+    para(scope === 'job' ? 'Scope: all tasks' : ('Task: ' + S.task.name), 11);
+    para('Exported: ' + _fmtDateTime(new Date().toISOString()) + ' by ' + _authorName(), 10, 110);
+    y += 10;
+
+    let mediaCount = 0;
+    try {
+      for (const task of tasks) {
+        const groups = await _fetchTaskEntries(task._id);
+        if (scope === 'job') { y += 8; heading(task.name || 'Task', 14, 8); }
+        if (!groups.length) { para('\u2014 no entries \u2014', 10, 130); continue; }
+
+        const keys = []; groups.forEach(g => g.media.forEach(m => keys.push(m.object_key)));
+        const signed = {};
+        if (keys.length) { try { const { data } = await sb.storage.from(BUCKET).createSignedUrls(keys, URL_TTL);
+          (data||[]).forEach(s => { if (s && s.signedUrl && !s.error) signed[s.path] = s.signedUrl; }); } catch (_) {} }
+
+        const folder = (scope === 'job' ? _sanitize(task.name) + '/' : '') + 'photos/';
+        let fileSeq = 0;
+
+        for (const g of groups) {
+          const c = g.current;
+          if ((c.body || '').trim() === 'ENTRY DELETED') continue; // clean export omits deleted entries
+          const recNote = (g.eventAt && c.created_at && Math.abs(new Date(c.created_at) - new Date(g.eventAt)) > 90000)
+            ? '  (logged ' + _fmtClock(c.created_at) + ')' : '';
+          doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(0); ensure(14);
+          doc.text((c.author_name || '') + ' \u2014 ' + _fmtDateTime(g.eventAt) + recNote, M, y); y += 14;
+          const labLn = _labLine(g.labConditions);
+          if (labLn) para('Lab conditions: ' + labLn, 9, 120);
+          para(c.body || '', 11);
+
+          for (const m of g.media) {
+            const url = signed[m.object_key]; if (!url) continue;
+            let blob = null; try { blob = await (await fetch(url)).blob(); } catch (_) {}
+            if (!blob) continue;
+            mediaCount++; fileSeq++;
+            const safeName = String(fileSeq).padStart(2,'0') + '_' + _sanitize(m.filename);
+            zip.file(folder + safeName, blob);
+            if (_kind(m.mime_type) === 'image') {
+              const thumb = await _blobToThumb(blob, 220);
+              if (thumb) { ensure(thumb.h + 16); doc.addImage(thumb.dataUrl, 'JPEG', M, y, thumb.w, thumb.h); y += thumb.h + 2; }
+              para(m.filename, 8, 120);
+            } else { para('File: ' + m.filename, 9, 120); }
+          }
+          y += 8;
+        }
+      }
+
+      const stamp = new Date().toISOString().slice(0,10).replace(/-/g,'');
+      const base = 'TestLog_' + _sanitize(jobName) + '_' + (scope === 'job' ? 'ALL' : _sanitize(S.task.name)) + '_' + stamp;
+      zip.file(base + '.pdf', doc.output('blob'));
+      const out = await zip.generateAsync({ type:'blob' });
+      _dlBlob(out, base + '.zip');
+      if (typeof toast === 'function') toast('\u2713 Downloaded (' + mediaCount + ' file' + (mediaCount===1?'':'s') + ')');
+    } catch (err) {
+      if (typeof toast === 'function') toast('\u26A0 Export failed: ' + (err.message || err));
+    }
+  }
 
   // ---- expose ---------------------------------------------------------------
   window.openTaskLogPanel  = openTaskLogPanel;
@@ -549,4 +695,6 @@
   window.tlogEvtSlide       = tlogEvtSlide;
   window.tlogEvtManualToggle= tlogEvtManualToggle;
   window.tlogEvtManualChange= tlogEvtManualChange;
+  window.tlogRenamePending  = tlogRenamePending;
+  window.tlogExport         = tlogExport;
 })();
