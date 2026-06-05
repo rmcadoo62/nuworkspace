@@ -33,8 +33,38 @@
       taskId, task, project, isCui,
       groups: [], editingGroupId: null,
       pending: [], signedByKey: {}, mediaByKey: {},
+      pendingForms: [],     // [{ form_type, data }] filled but not yet linked to an entry
+      formEditor: null,     // transient editor context while a form modal is open
     };
   }
+
+  // ---- "task has a log" indicator -------------------------------------------
+  // A lightweight set of task ids that have at least one log entry, so task
+  // rows can show a green circle on the 📋 icon. Loaded once (lazily, from the
+  // tasks panel), topped up live on post, and re-fetchable via force=true.
+  const taskLogIds = new Set();
+  let _taskLogIdsLoaded = false, _taskLogIdsLoading = false;
+  async function ensureTaskLogIds(force) {
+    if (typeof sb === 'undefined' || !sb) return;
+    if (_taskLogIdsLoading || (_taskLogIdsLoaded && !force)) return;
+    _taskLogIdsLoading = true;
+    try {
+      const { data } = await sb.from('task_log_entries').select('task_id');
+      taskLogIds.clear();
+      (data || []).forEach(r => { if (r.task_id) taskLogIds.add(r.task_id); });
+      _taskLogIdsLoaded = true;
+    } catch (_) { /* leave whatever we have; never block the tasks panel */ }
+    finally { _taskLogIdsLoading = false; }
+    // repaint the tasks panel once the set is ready (guarded: second pass is a no-op)
+    try {
+      if (typeof renderTasksPanel === 'function' && typeof activeProjectId !== 'undefined' && activeProjectId) {
+        const p = document.getElementById('panel-tasks');
+        if (p && p.classList.contains('active')) renderTasksPanel(activeProjectId);
+      }
+    } catch (_) {}
+  }
+  function taskLogHas(id) { return taskLogIds.has(id); }
+
 
   // ---- utils ---------------------------------------------------------------
   function _esc(s) {
@@ -95,6 +125,10 @@
       .itt-row-actions{display:flex !important;}
       .itt-row-actions > button:not(.tlog-log-btn){display:none;}
       .itt-row:hover .itt-row-actions > button:not(.tlog-log-btn){display:inline-flex;}
+      /* green circle = this task has a test log started */
+      .tlog-log-btn.has-log{background:var(--green,#1D9E75);border:none;padding:0;border-radius:50%;
+        width:24px;height:24px;line-height:24px;display:inline-flex;align-items:center;justify-content:center;
+        box-shadow:0 0 0 2px rgba(29,158,117,.22);}
 
       .tlog-page-head{display:flex;align-items:center;gap:14px;padding:16px 28px 12px;
         border-bottom:1px solid var(--border);flex-shrink:0;}
@@ -152,9 +186,243 @@
       .tlog-spinner{width:26px;height:26px;border:3px solid var(--border);
         border-top-color:var(--amber);border-radius:50%;animation:tlogspin .8s linear infinite;margin:40px auto;}
       @keyframes tlogspin{to{transform:rotate(360deg);}}
+
+      /* ---- attached forms ---------------------------------------------- */
+      .tlog-addform-wrap{position:relative;display:inline-flex;}
+      .tlog-addform-btn{font-size:11.5px;font-weight:600;border:1px solid var(--border);
+        background:var(--surface2);color:var(--muted);border-radius:6px;padding:5px 10px;
+        cursor:pointer;white-space:nowrap;}
+      .tlog-addform-btn:hover{border-color:var(--amber-dim);color:var(--amber);}
+      .tlog-addform-menu{position:absolute;bottom:calc(100% + 6px);left:0;z-index:50;
+        min-width:230px;background:var(--surface);border:1px solid var(--border);border-radius:8px;
+        box-shadow:0 8px 24px rgba(0,0,0,.18);padding:5px;display:none;}
+      .tlog-addform-menu.open{display:block;}
+      .tlog-addform-item{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:6px;
+        font-size:12.5px;color:var(--text);cursor:pointer;}
+      .tlog-addform-item:hover{background:var(--surface2);}
+      .tlog-addform-item .sug{margin-left:auto;font-size:9.5px;font-weight:700;color:var(--amber);
+        border:1px solid var(--amber-dim);border-radius:3px;padding:1px 5px;}
+
+      .tlog-form-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);
+        background:var(--surface2);color:var(--text);border-radius:6px;padding:3px 9px;font-size:11.5px;
+        cursor:pointer;white-space:nowrap;}
+      .tlog-form-chip:hover{border-color:var(--amber-dim);color:var(--amber);}
+      .tlog-form-chip .rm{color:var(--muted);font-weight:700;border:none;background:none;cursor:pointer;padding:0 0 0 2px;}
+      .tlog-form-chip .rm:hover{color:var(--red);}
+      .chatter-msg .tlog-form-chip{margin-top:6px;}
+
+      /* ---- form modal -------------------------------------------------- */
+      .tlog-fm-overlay{position:fixed;inset:0;z-index:10002;background:rgba(0,0,0,.45);
+        display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:34px 16px;}
+      .tlog-fm{background:var(--surface);border-radius:12px;width:100%;max-width:760px;
+        box-shadow:0 20px 60px rgba(0,0,0,.3);overflow:hidden;}
+      .tlog-fm-head{display:flex;align-items:center;gap:10px;padding:15px 20px;
+        border-bottom:1px solid var(--border);}
+      .tlog-fm-title{font-family:'DM Serif Display',serif;font-size:17px;color:var(--text);}
+      .tlog-fm-body{padding:18px 20px;}
+      .tlog-fm-foot{display:flex;align-items:center;gap:10px;padding:13px 20px;
+        border-top:1px solid var(--border);}
+      .tlog-fm-cancel{font-size:12.5px;color:var(--muted);background:none;border:none;cursor:pointer;}
+      .tlog-fm-cancel:hover{color:var(--text);}
+      .tlog-fm-save{font-size:13px;font-weight:700;border:none;background:var(--amber);color:#fff;
+        border-radius:8px;padding:8px 18px;cursor:pointer;}
+
+      .tlog-fm-meta{display:grid;grid-template-columns:1fr 1fr;gap:7px 18px;margin-bottom:14px;}
+      .tlog-fm-fld{display:flex;flex-direction:column;gap:2px;}
+      .tlog-fm-fld label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
+      .tlog-fm-ro{font-size:13px;color:var(--text);padding:5px 0;min-height:22px;border-bottom:1px solid var(--border);}
+      .tlog-fm-in{font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text);background:var(--surface);
+        border:1.5px solid var(--border);border-radius:6px;padding:6px 9px;}
+      .tlog-fm-in:focus{outline:none;border-color:var(--amber);}
+
+      .tlog-fm-steps{width:100%;border-collapse:collapse;font-size:12.5px;}
+      .tlog-fm-steps th{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);
+        text-align:left;padding:5px 8px;border-bottom:1.5px solid var(--border);}
+      .tlog-fm-steps td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top;line-height:1.45;}
+      .tlog-fm-steps td.num{text-align:center;font-weight:700;color:var(--muted);width:30px;}
+      .tlog-fm-steps td.init{width:96px;}
+      .tlog-fm-steps input{width:100%;font-family:'DM Sans',sans-serif;font-size:12.5px;color:var(--text);
+        background:var(--surface);border:1.5px solid var(--border);border-radius:5px;padding:4px 7px;box-sizing:border-box;}
+      .tlog-fm-steps input:focus{outline:none;border-color:var(--amber);}
+      .tlog-fm-notes{margin-top:14px;display:flex;flex-direction:column;gap:6px;}
+      .tlog-fm-notes label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);}
     `;
     document.head.appendChild(st);
   })();
+
+  // ---- attached forms: registry + helpers ----------------------------------
+  // Each form defines its editable UI (build), how to read it back (collect),
+  // a blank/autofilled record (newData), and a jsPDF page renderer (draw).
+  // Only the Receiving Checklist is wired today; add entries here as each
+  // form's fill-UI + renderer pair is built. salesCats[] floats a form to the
+  // top of the ADD FORM menu with a "suggested" tag when it matches the task.
+  const RECEIVING_STEPS = [
+    'Mark receipt in shipping log, place shipping documents in box next to log book',
+    'Take photo of all packages, crates, pallets, etc.',
+    'Mark all containers that will be disassembled so they can be reassembled as received',
+    'Open all containers and photograph contents before removing',
+    'Remove and photograph contents from all containers',
+    'Make an inventory list, if not included with shipment',
+    'Take photos of test item from all angles and closeup of any nameplates, labels, or markings',
+    'Identify test item with job number and customer name using tape, marker, or tag',
+    'Weigh test item, if applicable, and mark weight on item using tape, marker, or tag',
+    'Store packing materials out of the way until testing is completed',
+  ];
+
+  // Header autofill snapshot, taken at fill time so the record is point-in-time.
+  function _formContext() {
+    const proj = S.project || {};
+    const info = (typeof projectInfo !== 'undefined' && projectInfo) ? (projectInfo[proj.id] || {}) : {};
+    let spec = '';
+    try { if (typeof extractSpecs === 'function') spec = extractSpecs(info.desc || '') || ''; } catch (_) {}
+    return {
+      client:    info.client || '',
+      jobNo:     proj.name || '',
+      test:      info.testDesc || '',
+      spec:      spec,
+      materials: info.testArticleDesc || '',
+    };
+  }
+
+  const FORM_DEFS = {
+    receiving: {
+      id: 'receiving', name: 'Receiving Checklist', icon: '📦', salesCats: [],
+      newData() {
+        return Object.assign(_formContext(), {
+          date: '', initials: '',
+          steps: RECEIVING_STEPS.map(() => ''),
+          notes: ['', '', ''],
+        });
+      },
+      build(d) {
+        const ro = v => `<div class="tlog-fm-ro">${_esc(v || '')}</div>`;
+        const meta = `
+          <div class="tlog-fm-meta">
+            <div class="tlog-fm-fld"><label>Client</label>${ro(d.client)}</div>
+            <div class="tlog-fm-fld"><label>Job No.</label>${ro(d.jobNo)}</div>
+            <div class="tlog-fm-fld"><label>Test</label>${ro(d.test)}</div>
+            <div class="tlog-fm-fld"><label>Date</label>
+              <input class="tlog-fm-in" type="date" id="rcvDate" value="${_esc(d.date || '')}"></div>
+            <div class="tlog-fm-fld"><label>Spec.</label>${ro(d.spec)}</div>
+            <div class="tlog-fm-fld"><label>Initials</label>
+              <input class="tlog-fm-in" id="rcvInit" maxlength="6" value="${_esc(d.initials || '')}"></div>
+            <div class="tlog-fm-fld" style="grid-column:1/-1"><label>Materials</label>${ro(d.materials)}</div>
+          </div>`;
+        const rows = RECEIVING_STEPS.map((s, i) => `
+          <tr><td class="num">${i + 1}</td><td>${_esc(s)}</td>
+          <td class="init"><input id="rcvStep${i}" value="${_esc((d.steps && d.steps[i]) || '')}" placeholder="init."></td></tr>`).join('');
+        const notes = (d.notes || ['', '', '']).map((n, i) =>
+          `<input class="tlog-fm-in" id="rcvNote${i}" value="${_esc(n || '')}">`).join('');
+        return meta +
+          `<table class="tlog-fm-steps"><thead><tr><th>Step</th><th>Description</th><th>Init.</th></tr></thead><tbody>${rows}</tbody></table>` +
+          `<div class="tlog-fm-notes"><label>Notes</label>${notes}</div>`;
+      },
+      collect(prev) {
+        const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+        return Object.assign({}, prev, {
+          date: val('rcvDate'), initials: val('rcvInit'),
+          steps: RECEIVING_STEPS.map((_, i) => val('rcvStep' + i)),
+          notes: [0, 1, 2].map(i => val('rcvNote' + i)),
+        });
+      },
+      summary(d) {
+        const done = (d.steps || []).filter(s => (s || '').trim()).length;
+        return `${done}/${RECEIVING_STEPS.length} steps`;
+      },
+      draw(doc, d) { _drawReceivingForm(doc, d); },
+    },
+  };
+
+  function _formName(t) { return (FORM_DEFS[t] && FORM_DEFS[t].name) || t; }
+  function _formIcon(t) { return (FORM_DEFS[t] && FORM_DEFS[t].icon) || '📄'; }
+
+  // ---- ADD FORM menu --------------------------------------------------------
+  function _availableForms() {
+    const cat = String((S.task && S.task.salesCat) || '').trim();
+    return Object.values(FORM_DEFS)
+      .map(f => ({ f, suggested: cat && Array.isArray(f.salesCats) && f.salesCats.includes(cat) }))
+      .sort((a, b) => (b.suggested ? 1 : 0) - (a.suggested ? 1 : 0));
+  }
+  function tlogFormMenuToggle() {
+    const m = document.getElementById('tlogFormMenu'); if (m) m.classList.toggle('open');
+  }
+  function tlogFormPick(formType) {
+    const m = document.getElementById('tlogFormMenu'); if (m) m.classList.remove('open');
+    const def = FORM_DEFS[formType]; if (!def) return;
+    // If this form is already pending on the composer, re-open that draft.
+    const existing = S.pendingForms.find(p => p.form_type === formType);
+    _openFormEditor({
+      formType,
+      data: existing ? existing.data : def.newData(),
+      onSave: (data) => {
+        const idx = S.pendingForms.findIndex(p => p.form_type === formType);
+        if (idx >= 0) S.pendingForms[idx].data = data;
+        else S.pendingForms.push({ form_type: formType, data });
+        _renderPendingForms();
+      },
+    });
+  }
+  function tlogRemovePendingForm(i) { S.pendingForms.splice(i, 1); _renderPendingForms(); }
+  function _renderPendingForms() {
+    const el = document.getElementById('tlogPendingForms'); if (!el) return;
+    el.innerHTML = S.pendingForms.map((p, i) => {
+      const def = FORM_DEFS[p.form_type];
+      const sub = def && def.summary ? ' · ' + def.summary(p.data) : '';
+      return `<span class="tlog-form-chip" onclick="tlogFormPick('${p.form_type}')" title="Edit before posting">
+        ${_formIcon(p.form_type)} ${_esc(_formName(p.form_type))}<span style="color:var(--muted)">${_esc(sub)}</span>
+        <button class="rm" onclick="event.stopPropagation();tlogRemovePendingForm(${i})">✕</button></span>`;
+    }).join('');
+  }
+
+  // ---- form editor modal ----------------------------------------------------
+  function _openFormEditor(ctx) {
+    const def = FORM_DEFS[ctx.formType]; if (!def) return;
+    S.formEditor = ctx;
+    _closeFormEditor();
+    const ov = document.createElement('div');
+    ov.className = 'tlog-fm-overlay'; ov.id = 'tlogFmOverlay';
+    ov.onclick = (e) => { if (e.target === ov) _closeFormEditor(); };
+    ov.innerHTML = `
+      <div class="tlog-fm">
+        <div class="tlog-fm-head"><span style="font-size:18px">${_formIcon(ctx.formType)}</span>
+          <span class="tlog-fm-title">${_esc(def.name)}</span></div>
+        <div class="tlog-fm-body" id="tlogFmBody">${def.build(ctx.data)}</div>
+        <div class="tlog-fm-foot">
+          <span style="flex:1"></span>
+          <button class="tlog-fm-cancel" onclick="tlogFormEditorCancel()">Cancel</button>
+          <button class="tlog-fm-save" onclick="tlogFormEditorSave()">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+  function _closeFormEditor() { const el = document.getElementById('tlogFmOverlay'); if (el) el.remove(); }
+  function tlogFormEditorCancel() { S.formEditor = null; _closeFormEditor(); }
+  function tlogFormEditorSave() {
+    const ctx = S.formEditor; if (!ctx) { _closeFormEditor(); return; }
+    const def = FORM_DEFS[ctx.formType];
+    const data = def.collect(ctx.data);
+    _closeFormEditor(); S.formEditor = null;
+    if (typeof ctx.onSave === 'function') ctx.onSave(data);
+  }
+
+  // Open a form already attached to a posted entry (editable in place).
+  async function tlogOpenForm(groupId, formType) {
+    const g = S.groups.find(x => x.groupId === groupId); if (!g) return;
+    const rec = (g.forms || []).find(f => f.form_type === formType);
+    if (!rec) return;
+    _openFormEditor({
+      formType,
+      data: rec.data || {},
+      onSave: async (data) => {
+        try {
+          const { error } = await sb.from('task_log_forms')
+            .update({ data, updated_at: new Date().toISOString() }).eq('id', rec.id);
+          if (error) throw error;
+          await _loadEntries();
+        } catch (err) { if (typeof toast === 'function') toast('⚠ ' + (err.message || 'Save failed')); }
+      },
+    });
+  }
 
   // ---- open panel -----------------------------------------------------------
   function openTaskLogPanel(taskId) {
@@ -205,6 +473,15 @@
                <input type="file" id="tlogFile" multiple style="display:none"
                  accept="image/*,video/*,application/pdf,text/plain,text/csv,.csv,.txt" onchange="tlogAttachChange(this)">
                <div class="chatter-attachments-preview" id="tlogPending"></div>`}
+          <span class="tlog-addform-wrap">
+            <button class="tlog-addform-btn" onclick="tlogFormMenuToggle()" title="Attach a form to this entry">＋ Add form</button>
+            <div class="tlog-addform-menu" id="tlogFormMenu">
+              ${_availableForms().map(({ f, suggested }) =>
+                `<div class="tlog-addform-item" onclick="tlogFormPick('${f.id}')">
+                   <span>${f.icon}</span><span>${_esc(f.name)}</span>${suggested ? '<span class="sug">SUGGESTED</span>' : ''}</div>`).join('')}
+            </div>
+          </span>
+          <div class="chatter-attachments-preview" id="tlogPendingForms" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
           <span style="flex:1"></span>
           <button class="tlog-post-btn" id="tlogPostBtn" onclick="tlogPost()">Post</button>
         </div>
@@ -257,6 +534,19 @@
           media: mediaByGroup[versions[0].entry_group_id] || [],
         };
       }).sort((a, b) => new Date(b.eventAt) - new Date(a.eventAt)); // newest first, like chatter
+
+      // attached forms (editable in place; keyed on entry_group_id)
+      const groupIds = S.groups.map(g => g.groupId);
+      if (groupIds.length) {
+        try {
+          const { data: forms } = await sb.from('task_log_forms')
+            .select('id, entry_group_id, form_type, data, author_name, updated_at')
+            .in('entry_group_id', groupIds);
+          const byGroup = {};
+          (forms || []).forEach(f => { (byGroup[f.entry_group_id] = byGroup[f.entry_group_id] || []).push(f); });
+          S.groups.forEach(g => { g.forms = byGroup[g.groupId] || []; });
+        } catch (_) { S.groups.forEach(g => { g.forms = g.forms || []; }); }
+      }
 
       const previewKeys = [];
       S.groups.forEach(g => g.media.forEach(mm => { const k = _kind(mm.mime_type); if (k==='image'||k==='video') previewKeys.push(mm.object_key); }));
@@ -319,6 +609,12 @@
         </div>` : '';
 
       const mediaHtml = g.media.length ? `<div class="chatter-msg-attachments">${g.media.map(_mediaHtml).join('')}</div>` : '';
+      const formsHtml = (g.forms && g.forms.length) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${g.forms.map(f => {
+        const def = FORM_DEFS[f.form_type];
+        const sub = def && def.summary ? ' · ' + def.summary(f.data || {}) : '';
+        return `<span class="tlog-form-chip" onclick="tlogOpenForm('${g.groupId}','${f.form_type}')" title="Open / edit form">
+          ${_formIcon(f.form_type)} ${_esc(_formName(f.form_type))}<span style="color:var(--muted)">${_esc(sub)}</span></span>`;
+      }).join('')}</div>` : '';
       const actions = (isMine && !isDeleted) ? `
         <div class="chatter-msg-actions">
           <button class="chatter-action-btn" onclick="tlogStartEdit('${g.groupId}')">Edit</button>
@@ -341,6 +637,7 @@
             ${condHtml}
             <div class="chatter-msg-text tlog-msg-text ${isDeleted ? 'deleted' : ''}">${_nl2br(c.body)}</div>
             ${mediaHtml}
+            ${formsHtml}
             ${histHtml}
             ${actions}
           </div>
@@ -490,7 +787,7 @@
   async function tlogPost() {
     const ta = document.getElementById('tlogTa'), btn = document.getElementById('tlogPostBtn');
     const text = (ta && ta.value || '').trim();
-    if (!text && !S.pending.length) return;
+    if (!text && !S.pending.length && !S.pendingForms.length) return;
     if (S.editingGroupId && !text) { if (typeof toast==='function') toast('⚠ Entry text required'); return; }
     const eventISO = _resolvedEventISO();
     if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
@@ -514,10 +811,22 @@
         if (error) throw error; row = data;
       }
       if (!S.isCui && S.pending.length && row && row.id) { for (const p of S.pending) { await _uploadOne(p, row.id); } }
-      S.pending = []; S.editingGroupId = null;
+      if (S.pendingForms.length && row && row.entry_group_id) {
+        for (const pf of S.pendingForms) {
+          const { error: fErr } = await sb.from('task_log_forms').upsert({
+            entry_group_id: row.entry_group_id, task_id: S.taskId,
+            form_type: pf.form_type, data: pf.data,
+            author_id: currentUser.id, author_name: _authorName(),
+            updated_at: new Date().toISOString(),
+          }, { onConflict: 'entry_group_id,form_type' });
+          if (fErr) throw fErr;
+        }
+      }
+      S.pending = []; S.pendingForms = []; S.editingGroupId = null;
+      taskLogIds.add(S.taskId); // this task now has a log → green circle on next tasks render
       if (ta) ta.value = '';
       const note = document.getElementById('tlogEditNote'); if (note) note.classList.remove('show');
-      _renderPending(); _resetEventControls();
+      _renderPending(); _renderPendingForms(); _resetEventControls();
       await _loadEntries();
     } catch (err) {
       if (typeof toast === 'function') toast('⚠ ' + (err.message || 'Post failed')); else alert('Post failed: ' + (err.message || err));
@@ -570,8 +879,14 @@
     if (ids.length) { const { data:m } = await sb.from('task_log_media').select('*').in('entry_id', ids); media = m||[]; }
     const idToGroup = {}; (rows||[]).forEach(r => idToGroup[r.id] = r.entry_group_id);
     const mByG = {}; media.forEach(mm => { const g = idToGroup[mm.entry_id]; if (g) (mByG[g]=mByG[g]||[]).push(mm); });
-    return Array.from(map.values()).map(vs => { const c = vs[vs.length-1];
-      return { current:c, eventAt: c.event_at || c.created_at, labConditions: (vs[0] && vs[0].lab_conditions) || null, media: mByG[vs[0].entry_group_id] || [] }; })
+    const groupIds = Array.from(map.keys()); const fByG = {};
+    if (groupIds.length) {
+      const { data: forms } = await sb.from('task_log_forms')
+        .select('entry_group_id, form_type, data').in('entry_group_id', groupIds);
+      (forms||[]).forEach(f => { (fByG[f.entry_group_id]=fByG[f.entry_group_id]||[]).push(f); });
+    }
+    return Array.from(map.values()).map(vs => { const c = vs[vs.length-1]; const gid = vs[0].entry_group_id;
+      return { current:c, eventAt: c.event_at || c.created_at, labConditions: (vs[0] && vs[0].lab_conditions) || null, media: mByG[gid] || [], forms: fByG[gid] || [] }; })
       .sort((a,b) => new Date(a.eventAt) - new Date(b.eventAt));
   }
 
@@ -600,6 +915,76 @@
     let label = bits.join('  ');
     if (lc.sensor) label += (label ? ' \u00B7 ' : '') + lc.sensor;
     return label;
+  }
+
+  // Draw a filled Receiving Checklist as a single Letter page (caller supplies
+  // a fresh page + start y). Returns the y after the form. Mirrors the paper
+  // sheet's layout; values come straight from the saved record.
+  function _drawReceivingForm(doc, d, y0) {
+    const M = 54, PH = 792, CW = 504;
+    let y = (y0 == null ? M : y0);
+    d = d || {};
+    doc.setLineWidth(0.6);
+    const border = (x, w, h) => { doc.setDrawColor(110); doc.rect(x, y, w, h); };
+    const txt = (t, x, yy, style, size, opt) => {
+      doc.setFont('helvetica', style || 'normal'); doc.setFontSize(size || 10); doc.setTextColor(0);
+      doc.text(String(t == null ? '' : t), x, yy, opt || {});
+    };
+    const ensure = h => { if (y + h > PH - M) { doc.addPage(); y = M; } };
+
+    // title band
+    const tH = 28, leftW = 212, rightW = CW - leftW;
+    border(M, leftW, tH); border(M + leftW, rightW, tH);
+    txt('NU LABORATORIES', M + 6, y + 18, 'bold', 11);
+    txt('RECEIVING CHECKLIST', M + leftW + rightW / 2, y + 19, 'bold', 13, { align: 'center' });
+    y += tH;
+
+    // meta grid
+    const rH = 20, lw = 70, vw = 182;
+    const cut = v => { const s = String(v == null ? '' : v); return s.length > 46 ? s.slice(0, 45) + '…' : s; };
+    const metaRow = (l1, v1, l2, v2) => {
+      border(M, lw, rH);            txt(l1, M + 5, y + 13, 'bold', 8.5);
+      border(M + lw, vw, rH);       txt(cut(v1), M + lw + 5, y + 13, 'normal', 10);
+      border(M + lw + vw, lw, rH);  txt(l2, M + lw + vw + 5, y + 13, 'bold', 8.5);
+      border(M + lw + vw + lw, vw, rH); txt(cut(v2), M + lw + vw + lw + 5, y + 13, 'normal', 10);
+      y += rH;
+    };
+    metaRow('Client', d.client, 'Job No.', d.jobNo);
+    metaRow('Test', d.test, 'Date', d.date);
+    metaRow('Spec.', d.spec, 'Initials', d.initials);
+    border(M, lw, rH); txt('Materials', M + 5, y + 13, 'bold', 8.5);
+    border(M + lw, CW - lw, rH); txt(cut(d.materials), M + lw + 5, y + 13, 'normal', 10);
+    y += rH;
+
+    // steps header
+    const cStep = 40, cInit = 80, cDesc = CW - cStep - cInit, hH = 16;
+    border(M, cStep, hH);                 txt('Step', M + 5, y + 11, 'bold', 8.5);
+    border(M + cStep, cDesc, hH);         txt('Description', M + cStep + 5, y + 11, 'bold', 8.5);
+    border(M + cStep + cDesc, cInit, hH); txt('Init.', M + cStep + cDesc + 5, y + 11, 'bold', 8.5);
+    y += hH;
+
+    // steps
+    RECEIVING_STEPS.forEach((s, i) => {
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+      const lines = doc.splitTextToSize(String(s), cDesc - 16);
+      const rh = Math.max(18, lines.length * 11 + 7);
+      ensure(rh);
+      border(M, cStep, rh);                 txt(i + 1, M + cStep / 2, y + 13, 'bold', 9.5, { align: 'center' });
+      border(M + cStep, cDesc, rh);         txt(lines, M + cStep + 6, y + 12, 'normal', 9);
+      border(M + cStep + cDesc, cInit, rh); txt((d.steps && d.steps[i]) || '', M + cStep + cDesc + 6, y + 13, 'normal', 10);
+      y += rh;
+    });
+
+    // notes
+    const notes = (d.notes || []).filter(n => (n || '').trim());
+    if (notes.length) {
+      y += 8; ensure(16); txt('NOTES', M, y + 10, 'bold', 8.5); y += 14;
+      notes.forEach(n => {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+        doc.splitTextToSize(String(n), CW).forEach(l => { ensure(14); doc.text(l, M, y + 10); y += 14; });
+      });
+    }
+    return y;
   }
 
   async function tlogExport(scope) {
@@ -666,6 +1051,13 @@
               para(m.filename, 8, 120);
             } else { para('File: ' + m.filename, 9, 120); }
           }
+          for (const f of (g.forms || [])) {
+            const def = FORM_DEFS[f.form_type];
+            if (!def || typeof def.draw !== 'function') continue;
+            doc.addPage(); y = M;            // each form on its own page
+            def.draw(doc, f.data || {}, M);
+            y = PH - M;                      // form owns its page; next content starts fresh
+          }
           y += 8;
         }
       }
@@ -697,4 +1089,12 @@
   window.tlogEvtManualChange= tlogEvtManualChange;
   window.tlogRenamePending  = tlogRenamePending;
   window.tlogExport         = tlogExport;
+  window.tlogFormMenuToggle    = tlogFormMenuToggle;
+  window.tlogFormPick          = tlogFormPick;
+  window.tlogRemovePendingForm = tlogRemovePendingForm;
+  window.tlogOpenForm          = tlogOpenForm;
+  window.tlogFormEditorCancel  = tlogFormEditorCancel;
+  window.tlogFormEditorSave    = tlogFormEditorSave;
+  window.ensureTaskLogIds      = ensureTaskLogIds;
+  window.taskLogHas            = taskLogHas;
 })();

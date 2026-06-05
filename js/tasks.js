@@ -401,6 +401,8 @@ function renderTasksPanel(projId) {
   const wrap = document.getElementById('tasksPanelWrap');
   if (!wrap || !projId) return;
 
+  if (typeof ensureTaskLogIds === 'function') ensureTaskLogIds(); // loads once; repaints when ready
+
   let tasks = taskStore.filter(t => t.proj === projId).sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
   const total   = tasks.length;
   const isDone  = t => t.status === 'complete' || t.status === 'billed' || t.status === 'cancelled' || !!t.done;
@@ -597,7 +599,7 @@ function renderTasksPanel(projId) {
         <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()"`:''}  style="font-size:12px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};font-weight:700;${canEditTask?'cursor:text':''}">${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
         <div class="itt-row-actions">
           ${can('edit_tasks') ? '<button class="itt-row-action-btn" onclick="openEditTaskModal(\''+t._id+'\');event.stopPropagation()">&#x270E;</button>' : ''}
-          <button class="itt-row-action-btn tlog-log-btn" onclick="openTaskLogPanel('${t._id}');event.stopPropagation()" title="Test log">&#x1F4CB;</button>
+          <button class="itt-row-action-btn tlog-log-btn${(typeof taskLogHas==='function' && taskLogHas(t._id)) ? ' has-log' : ''}" onclick="openTaskLogPanel('${t._id}');event.stopPropagation()" title="Test log">&#x1F4CB;</button>
         </div>
       </div>`;
   }).join('');
