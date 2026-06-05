@@ -616,6 +616,7 @@ function renderTasksPanel(projId) {
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
+        ${isManager() ? `<button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="openAllLogsPanel('${projId}')" title="View all test logs for this job (read-only)">📋 Show all Logs</button>` : ''}
         ${isManager() ? `<button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="addSectionHeader('${projId}')">+ Section</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="openBulkAddModal('${projId}',null)" title="Add multiple tasks at once">+ Bulk</button>` : ''}
       </div>
     </div>

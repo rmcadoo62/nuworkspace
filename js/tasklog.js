@@ -204,6 +204,25 @@
       .tlog-pinned-head{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
         color:var(--amber);margin-bottom:4px;}
 
+      /* read-only "All Logs" roll-up (manager view) */
+      .tlog-all-overlay{position:fixed;inset:0;z-index:10003;background:rgba(0,0,0,.45);
+        display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:28px 16px;}
+      .tlog-all{background:var(--surface);border-radius:12px;width:100%;max-width:880px;
+        box-shadow:0 20px 60px rgba(0,0,0,.3);display:flex;flex-direction:column;
+        max-height:calc(100vh - 56px);overflow:hidden;}
+      .tlog-all-head{display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--border);}
+      .tlog-all-title{font-family:'DM Serif Display',serif;font-size:18px;color:var(--text);}
+      .tlog-all-sub{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+        color:var(--muted);border:1px solid var(--border);border-radius:4px;padding:1px 6px;}
+      .tlog-all-close{background:none;border:none;font-size:18px;color:var(--muted);cursor:pointer;line-height:1;}
+      .tlog-all-close:hover{color:var(--text);}
+      .tlog-all-body{padding:14px 20px 20px;overflow-y:auto;}
+      .tlog-all-task{margin-bottom:18px;}
+      .tlog-all-taskname{font-size:13px;font-weight:700;color:var(--amber);
+        border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:8px;
+        position:sticky;top:0;background:var(--surface);z-index:1;}
+      .tlog-all-att{font-size:11px;color:var(--muted);margin-top:4px;}
+
       /* textarea must fill the flex wrap (a contenteditable div does this on its own) */
       #tlogTa{display:block;width:100%;box-sizing:border-box;min-height:46px;max-height:460px;
         overflow-y:auto;resize:vertical;line-height:1.5;}
@@ -1283,6 +1302,120 @@
   window.openTaskLogPanel  = openTaskLogPanel;
   window.tlogBack          = tlogBack;
   window.tlogPost          = tlogPost;
+  // ---- read-only "All Logs" roll-up (managers/owners) -----------------------
+  // Every test log entry across the current job's tasks, grouped by task. Pure
+  // review: checkboxes/fields render their state but aren't clickable; no pin,
+  // edit, delete, or composer.
+  function _closeAllLogs() { const el = document.getElementById('tlogAllOverlay'); if (el) el.remove(); }
+  function tlogCloseAllLogs() { _closeAllLogs(); }
+
+  function _allLogEntryHtml(g) {
+    const c = g.current;
+    const av = _avatar(c.author_name);
+    const evt = g.eventAt;
+    const edited = g.versions.length > 1;
+    let condHtml = '';
+    const lc = g.labConditions;
+    if (lc) {
+      const bits = [];
+      if (lc.temp != null)     bits.push(`${Number(lc.temp).toFixed(1)}°F`);
+      if (lc.humidity != null) bits.push(`${Number(lc.humidity).toFixed(0)}% RH`);
+      let label = bits.join(' · ');
+      if (lc.sensor) label += (label ? ' · ' : '') + lc.sensor;
+      if (label) condHtml = `<div class="tlog-conditions">🌡 ${_esc(label)}</div>`;
+    }
+    const att = g.mc ? `<div class="tlog-all-att">📎 ${g.mc} attachment${g.mc !== 1 ? 's' : ''} — open the task log to view</div>` : '';
+    return `
+      <div class="chatter-msg">
+        <div class="chatter-msg-avatar" style="background:${av.color}">${_esc(av.initials)}</div>
+        <div class="chatter-msg-body">
+          <div class="chatter-msg-header">
+            <span class="chatter-msg-name">${_esc(c.author_name || '')}</span>
+            <span class="chatter-msg-time">${_fmtDateTime(evt)}</span>
+            ${edited ? `<span class="tlog-recorded">· edited (${g.versions.length - 1})</span>` : ''}
+          </div>
+          ${condHtml}
+          <div class="chatter-msg-text tlog-msg-text">${_renderBody(c.body, g.groupId, false, false)}</div>
+          ${att}
+        </div>
+      </div>`;
+  }
+
+  async function openAllLogsPanel(projId) {
+    if (typeof sb === 'undefined' || !sb) return;
+    _closeAllLogs();
+    const projName = (typeof projects !== 'undefined' && projects)
+      ? ((projects.find(p => p.id === projId) || {}).name || '') : '';
+    const ov = document.createElement('div');
+    ov.className = 'tlog-all-overlay'; ov.id = 'tlogAllOverlay';
+    ov.onclick = (e) => { if (e.target === ov) _closeAllLogs(); };
+    ov.innerHTML = `
+      <div class="tlog-all">
+        <div class="tlog-all-head">
+          <span class="tlog-all-title">📋 All Logs${projName ? ' — ' + _esc(projName) : ''}</span>
+          <span class="tlog-all-sub">read-only</span>
+          <span style="flex:1"></span>
+          <button class="tlog-all-close" onclick="tlogCloseAllLogs()" title="Close">✕</button>
+        </div>
+        <div class="tlog-all-body" id="tlogAllBody"><div class="tlog-spinner"></div></div>
+      </div>`;
+    document.body.appendChild(ov);
+
+    const body = () => document.getElementById('tlogAllBody');
+    try {
+      const tasks = ((typeof taskStore !== 'undefined' && taskStore) ? taskStore : []).filter(t => t.proj === projId);
+      const taskIds = tasks.map(t => t._id);
+      if (!taskIds.length) {
+        const b = body(); if (b) b.innerHTML = `<div class="chatter-empty"><div class="chatter-empty-icon">📋</div>No tasks in this job.</div>`;
+        return;
+      }
+      const { data: rows } = await sb.from('task_log_entries')
+        .select('id, entry_group_id, task_id, version, body, author_name, created_at, event_at, lab_conditions')
+        .in('task_id', taskIds).order('entry_group_id').order('version');
+
+      const byTask = {}; // taskId -> Map(groupId -> versions[])
+      (rows || []).forEach(r => {
+        const t = byTask[r.task_id] || (byTask[r.task_id] = new Map());
+        if (!t.has(r.entry_group_id)) t.set(r.entry_group_id, []);
+        t.get(r.entry_group_id).push(r);
+      });
+
+      // lightweight attachment counts (no signed URLs — review view)
+      const idToGroup = {}; (rows || []).forEach(r => idToGroup[r.id] = r.entry_group_id);
+      const allIds = (rows || []).map(r => r.id);
+      const mc = {};
+      if (allIds.length) {
+        try {
+          const { data: media } = await sb.from('task_log_media').select('entry_id').in('entry_id', allIds);
+          (media || []).forEach(m => { const gid = idToGroup[m.entry_id]; if (gid) mc[gid] = (mc[gid] || 0) + 1; });
+        } catch (_) {}
+      }
+
+      let html = '', any = false;
+      tasks.forEach(t => {
+        const gmap = byTask[t._id]; if (!gmap || !gmap.size) return;
+        const groups = Array.from(gmap.values()).map(vs => {
+          const cur = vs[vs.length - 1];
+          const gid = vs[0].entry_group_id;
+          return { groupId: gid, current: cur, versions: vs,
+                   eventAt: cur.event_at || cur.created_at,
+                   labConditions: (vs[0] && vs[0].lab_conditions) || null,
+                   mc: mc[gid] || 0 };
+        }).filter(g => (g.current.body || '').trim() !== 'ENTRY DELETED')
+          .sort((a, b) => new Date(b.eventAt) - new Date(a.eventAt));
+        if (!groups.length) return;
+        any = true;
+        html += `<div class="tlog-all-task"><div class="tlog-all-taskname">${_esc(t.name || '(untitled task)')}</div>` +
+                groups.map(_allLogEntryHtml).join('') + `</div>`;
+      });
+      const b = body();
+      if (b) b.innerHTML = any ? html : `<div class="chatter-empty"><div class="chatter-empty-icon">📋</div>No test logs in this job yet.</div>`;
+    } catch (err) {
+      const b = body();
+      if (b) b.innerHTML = `<div class="chatter-empty">Couldn't load logs${err && err.message ? ': ' + _esc(err.message) : ''}.</div>`;
+    }
+  }
+
   window.tlogStartEdit     = tlogStartEdit;
   window.tlogCancelEdit    = tlogCancelEdit;
   window.tlogMarkDeleted   = tlogMarkDeleted;
@@ -1308,4 +1441,6 @@
   window.tlogFillField         = tlogFillField;
   window.tlogTogglePin         = tlogTogglePin;
   window.tlogToggleLegend      = tlogToggleLegend;
+  window.openAllLogsPanel      = openAllLogsPanel;
+  window.tlogCloseAllLogs      = tlogCloseAllLogs;
 })();
