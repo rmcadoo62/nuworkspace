@@ -171,7 +171,38 @@
       .tlog-chk.na{background:var(--surface);border-color:var(--muted);color:var(--muted);font-weight:700;}
       .tlog-chk.ro{cursor:default;opacity:.7;}
       .tlog-chk-txt.done{color:var(--muted);}
+      /* inline fill-in fields (runs of underscores) */
+      .tlog-field{color:var(--amber);cursor:text;border-radius:2px;padding:0 1px;}
+      .tlog-field:hover{background:var(--amber-glow,rgba(232,162,52,.12));}
+      .tlog-field.ro{color:var(--muted);cursor:default;}
+      .tlog-field.ro:hover{background:none;}
+      .tlog-field-input{font:inherit;color:var(--text);background:var(--surface);
+        border:none;border-bottom:1.5px solid var(--amber);outline:none;padding:0 2px;min-width:90px;}
       .tlog-bodyline{line-height:1.55;min-height:1.05em;}
+
+      /* blue collapsible legend */
+      .tlog-legend-btn{width:20px;height:20px;flex:none;border-radius:50%;border:1.5px solid #2f6fed;
+        background:transparent;color:#2f6fed;font-size:12px;font-weight:700;font-style:italic;
+        font-family:Georgia,'Times New Roman',serif;cursor:pointer;display:inline-flex;
+        align-items:center;justify-content:center;line-height:1;}
+      .tlog-legend-btn:hover{background:rgba(47,111,237,.12);}
+      .tlog-legend{display:none;margin:8px 0 0;padding:10px 12px;border:1px solid #cfe0ff;
+        background:#f2f7ff;border-radius:8px;font-size:12px;color:var(--text);line-height:1.6;}
+      .tlog-legend.open{display:block;}
+      .tlog-legend code{background:var(--surface2);border:1px solid var(--border);border-radius:3px;
+        padding:0 4px;font-family:'JetBrains Mono',monospace;font-size:11px;}
+
+      /* pin to top (per-user) */
+      .tlog-pin{cursor:pointer;opacity:.22;font-size:13px;margin-left:auto;flex:none;
+        filter:grayscale(1);transition:opacity .12s;}
+      .tlog-pin:hover{opacity:.6;}
+      .tlog-pin.on{opacity:1;filter:none;}
+      .chatter-msg:hover .tlog-pin{opacity:.5;}
+      .chatter-msg:hover .tlog-pin.on{opacity:1;}
+      .tlog-pinned-strip{border:1px solid var(--amber-dim);background:rgba(232,162,52,.06);
+        border-radius:10px;padding:8px 12px 4px;margin-bottom:14px;}
+      .tlog-pinned-head{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+        color:var(--amber);margin-bottom:4px;}
 
       /* textarea must fill the flex wrap (a contenteditable div does this on its own) */
       #tlogTa{display:block;width:100%;box-sizing:border-box;min-height:46px;max-height:460px;
@@ -501,9 +532,14 @@
             <button class="tlog-addform-btn" onclick="tlogFormMenuToggle()" title="Stamp a template into this entry">＋ Add form</button>
             <div class="tlog-addform-menu" id="tlogFormMenu">${_formMenuItemsHtml()}</div>
           </span>
+          <button class="tlog-legend-btn" onclick="tlogToggleLegend()" title="How checkboxes & blanks work">i</button>
           <div class="chatter-attachments-preview" id="tlogPendingForms" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
           <span style="flex:1"></span>
           <button class="tlog-post-btn" id="tlogPostBtn" onclick="tlogPost()">Post</button>
+        </div>
+        <div class="tlog-legend" id="tlogLegend">
+          <div style="margin-bottom:5px;"><code>[ ]</code> in a template = a <b>checkbox</b>. Tap it to cycle: <b style="color:var(--green,#1D9E75)">✓</b> done · <b>–</b> not required · blank = to-do.</div>
+          <div><code>____</code> (underscores) = a <b>fill-in blank</b>. Tap the amber blank and type a value.</div>
         </div>
       </div>
       <div class="chatter-feed" id="tlogFeed"><div class="tlog-spinner"></div></div>`;
@@ -567,6 +603,14 @@
           (forms || []).forEach(f => { (byGroup[f.entry_group_id] = byGroup[f.entry_group_id] || []).push(f); });
           S.groups.forEach(g => { g.forms = byGroup[g.groupId] || []; });
         } catch (_) { S.groups.forEach(g => { g.forms = g.forms || []; }); }
+
+        // per-user pins (personal "come back to it" bookmark)
+        try {
+          const { data: pins } = await sb.from('task_log_pins')
+            .select('entry_group_id').eq('user_id', currentUser.id).in('entry_group_id', groupIds);
+          const pinned = new Set((pins || []).map(p => p.entry_group_id));
+          S.groups.forEach(g => { g.pinned = pinned.has(g.groupId); });
+        } catch (_) { S.groups.forEach(g => { g.pinned = g.pinned || false; }); }
       }
 
       const previewKeys = [];
@@ -583,13 +627,15 @@
     }
   }
 
-  // Render an entry body. Lines beginning with [ ] / [x] / [-] become 3-state
-  // checkboxes (blank → ✓ yes → – not required), clickable only for the entry's
-  // author. Plain entries fall through to the normal newline render.
+  // Render an entry body. Checklist lines ([ ]/[x]/[-]) become 3-state checkboxes;
+  // runs of 3+ underscores become clickable fill-in fields. Both edit in place and
+  // are interactive only for the entry's author. Plain entries fall through.
   function _renderBody(body, groupId, interactive, deleted) {
     const text = String(body == null ? '' : body);
     if (deleted) return _nl2br(text);
-    if (!/^[ \t]*\[( |x|X|-)\]/m.test(text)) return _nl2br(text);
+    const hasChk = /^[ \t]*\[( |x|X|-)\]/m.test(text);
+    const hasField = /_{3,}/.test(text);
+    if (!hasChk && !hasField) return _nl2br(text);
     return text.split('\n').map((ln, i) => {
       const m = ln.match(/^([ \t]*)\[( |x|X|-)\][ \t]?(.*)$/);
       if (m) {
@@ -600,11 +646,66 @@
         const handler = interactive ? ` onclick="tlogToggleCheck('${groupId}',${i})"` : '';
         const done = (tok === 'x' || tok === '-') ? ' done' : '';
         return `<div class="tlog-chkline"><span class="tlog-chk ${cls}${ro}" role="checkbox"${handler}>${glyph}</span>` +
-               `<span class="tlog-chk-txt${done}">${_esc(m[3])}</span></div>`;
+               `<span class="tlog-chk-txt${done}">${_renderFields(m[3], groupId, i, interactive)}</span></div>`;
       }
       if (ln.trim() === '') return `<div class="tlog-bodyline">&nbsp;</div>`;
-      return `<div class="tlog-bodyline">${_esc(ln)}</div>`;
+      return `<div class="tlog-bodyline">${_renderFields(ln, groupId, i, interactive)}</div>`;
     }).join('');
+  }
+
+  // Replace each run of 3+ underscores in a line with a clickable fill-in field
+  // (interactive only for the author). Returns escaped HTML for the whole line.
+  function _renderFields(rawLine, groupId, lineIdx, interactive) {
+    const re = /_{3,}/g; let out = '', last = 0, fi = 0, mm;
+    while ((mm = re.exec(rawLine)) !== null) {
+      out += _esc(rawLine.slice(last, mm.index));
+      const ro = interactive ? '' : ' ro';
+      const handler = interactive ? ` onclick="tlogFillField('${groupId}',${lineIdx},${fi},event)"` : '';
+      out += `<span class="tlog-field${ro}"${handler} title="${interactive ? 'Click to fill' : ''}">${_esc(mm[0])}</span>`;
+      last = mm.index + mm[0].length; fi++;
+    }
+    out += _esc(rawLine.slice(last));
+    return out;
+  }
+
+  // Click a blank → inline input → save the typed value into the entry in place
+  // (replaces that underscore run). Empty/cancel leaves the blank untouched.
+  function tlogFillField(groupId, lineIdx, fieldIdx, ev) {
+    if (ev) ev.stopPropagation();
+    const span = ev && ev.currentTarget; if (!span || span.querySelector('input')) return;
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'tlog-field-input';
+    span.textContent = ''; span.appendChild(inp); inp.focus();
+    let settled = false;
+    const finish = (save) => {
+      if (settled) return; settled = true;
+      const val = inp.value.replace(/[\r\n]+/g, ' ').trim();
+      if (save && val) { _fillFieldSave(groupId, lineIdx, fieldIdx, val); }
+      else { _renderEntries(); } // cancel or empty → restore the blank
+    };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    inp.addEventListener('blur', () => finish(true));
+  }
+  async function _fillFieldSave(groupId, lineIdx, fieldIdx, val) {
+    const g = S.groups.find(x => x.groupId === groupId); if (!g || !g.current) { _renderEntries(); return; }
+    const cur = g.current;
+    const lines = String(cur.body || '').split('\n');
+    if (lines[lineIdx] == null) { _renderEntries(); return; }
+    let n = -1;
+    lines[lineIdx] = lines[lineIdx].replace(/_{3,}/g, run => { n++; return n === fieldIdx ? val : run; });
+    const newBody = lines.join('\n');
+    cur.body = newBody; // optimistic (current === latest version object)
+    _renderEntries();
+    try {
+      const { error } = await sb.from('task_log_entries').update({ body: newBody }).eq('id', cur.id);
+      if (error) throw error;
+    } catch (err) {
+      if (typeof toast === 'function') toast('⚠ ' + (err.message || 'Could not save'));
+      await _loadEntries();
+    }
   }
 
   // Cycle one checkbox token in place on the current version and save (no new
@@ -630,6 +731,76 @@
     }
   }
 
+  // Render a single entry's card (no date divider — the feed adds those).
+  function _entryHtml(g) {
+    const myId = currentUser && currentUser.id;
+    const c = g.current;
+    const isDeleted = (c.body || '').trim() === 'ENTRY DELETED';
+    const isMine = myId && g.ownerId === myId;
+    const edited = g.versions.length > 1;
+    const av = _avatar(c.author_name);
+    const histId = 'hist_' + g.groupId;
+
+    const evt = g.eventAt;
+    const rec = c.created_at;
+    const showRec = evt && rec && Math.abs(new Date(rec) - new Date(evt)) > 90 * 1000;
+
+    let condHtml = '';
+    const lc = g.labConditions;
+    if (lc) {
+      const bits = [];
+      if (lc.temp != null)     bits.push(`${Number(lc.temp).toFixed(1)}°F`);
+      if (lc.humidity != null) bits.push(`${Number(lc.humidity).toFixed(0)}% RH`);
+      let label = bits.join(' · ');
+      if (lc.sensor) label += (label ? ' · ' : '') + lc.sensor;
+      if (lc.sampled_at && evt && Math.abs(new Date(lc.sampled_at) - new Date(evt)) > 10 * 60 * 1000) {
+        label += ` · sampled ${_fmtClock(lc.sampled_at)}`;
+      }
+      if (label) condHtml = `<div class="tlog-conditions">🌡 ${_esc(label)}</div>`;
+    }
+
+    const histHtml = edited ? `
+      <div class="tlog-history" id="${histId}">
+        ${g.versions.slice(0, -1).reverse().map(v => `
+          <div class="tlog-hist-item">v${v.version} · ${_esc(v.author_name||'')} · ${_fmtDateTime(v.event_at || v.created_at)}
+            <div class="hbody">${_nl2br(v.body)}</div></div>`).join('')}
+      </div>` : '';
+
+    const mediaHtml = g.media.length ? `<div class="chatter-msg-attachments">${g.media.map(_mediaHtml).join('')}</div>` : '';
+    const formsHtml = (g.forms && g.forms.length) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${g.forms.map(f => {
+      const def = FORM_DEFS[f.form_type];
+      const sub = def && def.summary ? ' · ' + def.summary(f.data || {}) : '';
+      return `<span class="tlog-form-chip" onclick="tlogOpenForm('${g.groupId}','${f.form_type}')" title="Open / edit form">
+        ${_formIcon(f.form_type)} ${_esc(_formName(f.form_type))}<span style="color:var(--muted)">${_esc(sub)}</span></span>`;
+    }).join('')}</div>` : '';
+    const actions = (isMine && !isDeleted) ? `
+      <div class="chatter-msg-actions">
+        <button class="chatter-action-btn" onclick="tlogStartEdit('${g.groupId}')">Edit</button>
+        <button class="chatter-action-btn" onclick="tlogMarkDeleted('${g.groupId}')">Delete</button>
+      </div>` : '';
+    const pin = `<span class="tlog-pin${g.pinned ? ' on' : ''}" onclick="tlogTogglePin('${g.groupId}')" title="${g.pinned ? 'Unpin' : 'Pin to top'}">📌</span>`;
+
+    return `
+      <div class="chatter-msg">
+        <div class="chatter-msg-avatar" style="background:${av.color}">${_esc(av.initials)}</div>
+        <div class="chatter-msg-body">
+          <div class="chatter-msg-header">
+            <span class="chatter-msg-name">${_esc(c.author_name || '')}</span>
+            <span class="chatter-msg-time">${_fmtDateTime(evt)}</span>
+            ${showRec ? `<span class="tlog-recorded">· logged ${_fmtClock(rec)}</span>` : ''}
+            ${edited ? `<span class="tlog-edited" onclick="tlogToggleHistory('${histId}')">edited (${g.versions.length-1}) ▾</span>` : ''}
+            ${pin}
+          </div>
+          ${condHtml}
+          <div class="chatter-msg-text tlog-msg-text ${isDeleted ? 'deleted' : ''}">${_renderBody(c.body, g.groupId, isMine, isDeleted)}</div>
+          ${mediaHtml}
+          ${formsHtml}
+          ${histHtml}
+          ${actions}
+        </div>
+      </div>`;
+  }
+
   function _renderEntries() {
     const feed = document.getElementById('tlogFeed');
     if (!feed) return;
@@ -637,86 +808,52 @@
       feed.innerHTML = `<div class="chatter-empty"><div class="chatter-empty-icon">📋</div>No entries yet. Add the first log entry below.</div>`;
       return;
     }
-    const myId = currentUser && currentUser.id;
+    const pinned = S.groups.filter(g => g.pinned);
+    const rest   = S.groups.filter(g => !g.pinned);
+    let html = '';
+    if (pinned.length) {
+      html += `<div class="tlog-pinned-strip"><div class="tlog-pinned-head">📌 Pinned</div>${pinned.map(_entryHtml).join('')}</div>`;
+    }
     let _lastDate = '';
-    feed.innerHTML = S.groups.map(g => {
-      const c = g.current;
-      const isDeleted = (c.body || '').trim() === 'ENTRY DELETED';
-      const isMine = myId && g.ownerId === myId;
-      const edited = g.versions.length > 1;
-      const av = _avatar(c.author_name);
-      const histId = 'hist_' + g.groupId;
-
-      // event time is the headline; show record time only if it differs notably
-      const evt = g.eventAt;
-      const rec = c.created_at;
-      const showRec = evt && rec && Math.abs(new Date(rec) - new Date(evt)) > 90 * 1000;
-
-      // lab conditions stamped on the original entry (SensorPush, via cache)
-      let condHtml = '';
-      const lc = g.labConditions;
-      if (lc) {
-        const bits = [];
-        if (lc.temp != null)     bits.push(`${Number(lc.temp).toFixed(1)}°F`);
-        if (lc.humidity != null) bits.push(`${Number(lc.humidity).toFixed(0)}% RH`);
-        let label = bits.join(' · ');
-        if (lc.sensor) label += (label ? ' · ' : '') + lc.sensor;
-        // if the reading was sampled well away from the event time (e.g. a
-        // rolled-back entry), surface the actual sample time so it's honest
-        if (lc.sampled_at && evt && Math.abs(new Date(lc.sampled_at) - new Date(evt)) > 10 * 60 * 1000) {
-          label += ` · sampled ${_fmtClock(lc.sampled_at)}`;
-        }
-        if (label) condHtml = `<div class="tlog-conditions">🌡 ${_esc(label)}</div>`;
-      }
-
-      const histHtml = edited ? `
-        <div class="tlog-history" id="${histId}">
-          ${g.versions.slice(0, -1).reverse().map(v => `
-            <div class="tlog-hist-item">v${v.version} · ${_esc(v.author_name||'')} · ${_fmtDateTime(v.event_at || v.created_at)}
-              <div class="hbody">${_nl2br(v.body)}</div></div>`).join('')}
-        </div>` : '';
-
-      const mediaHtml = g.media.length ? `<div class="chatter-msg-attachments">${g.media.map(_mediaHtml).join('')}</div>` : '';
-      const formsHtml = (g.forms && g.forms.length) ? `<div style="display:flex;gap:6px;flex-wrap:wrap;">${g.forms.map(f => {
-        const def = FORM_DEFS[f.form_type];
-        const sub = def && def.summary ? ' · ' + def.summary(f.data || {}) : '';
-        return `<span class="tlog-form-chip" onclick="tlogOpenForm('${g.groupId}','${f.form_type}')" title="Open / edit form">
-          ${_formIcon(f.form_type)} ${_esc(_formName(f.form_type))}<span style="color:var(--muted)">${_esc(sub)}</span></span>`;
-      }).join('')}</div>` : '';
-      const actions = (isMine && !isDeleted) ? `
-        <div class="chatter-msg-actions">
-          <button class="chatter-action-btn" onclick="tlogStartEdit('${g.groupId}')">Edit</button>
-          <button class="chatter-action-btn" onclick="tlogMarkDeleted('${g.groupId}')">Delete</button>
-        </div>` : '';
-
+    html += rest.map(g => {
       const _dStr = new Date(g.eventAt).toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric', year:'numeric' });
       const _div = _dStr !== _lastDate ? `<div class="chatter-date-divider">${_dStr}</div>` : '';
       _lastDate = _dStr;
-      return _div + `
-        <div class="chatter-msg">
-          <div class="chatter-msg-avatar" style="background:${av.color}">${_esc(av.initials)}</div>
-          <div class="chatter-msg-body">
-            <div class="chatter-msg-header">
-              <span class="chatter-msg-name">${_esc(c.author_name || '')}</span>
-              <span class="chatter-msg-time">${_fmtDateTime(evt)}</span>
-              ${showRec ? `<span class="tlog-recorded">· logged ${_fmtClock(rec)}</span>` : ''}
-              ${edited ? `<span class="tlog-edited" onclick="tlogToggleHistory('${histId}')">edited (${g.versions.length-1}) ▾</span>` : ''}
-            </div>
-            ${condHtml}
-            <div class="chatter-msg-text tlog-msg-text ${isDeleted ? 'deleted' : ''}">${_renderBody(c.body, g.groupId, isMine, isDeleted)}</div>
-            ${mediaHtml}
-            ${formsHtml}
-            ${histHtml}
-            ${actions}
-          </div>
-        </div>`;
+      return _div + _entryHtml(g);
     }).join('');
+    feed.innerHTML = html;
 
     feed.querySelectorAll('[data-tlog-key]').forEach(el => {
       const url = S.signedByKey[el.getAttribute('data-tlog-key')];
       if (url) el.src = url;
     });
     feed.scrollTop = 0; // newest at top, like chatter
+  }
+
+  // Pin/unpin an entry for the current user (personal bookmark). Optimistic.
+  async function tlogTogglePin(groupId) {
+    const g = S.groups.find(x => x.groupId === groupId); if (!g) return;
+    const want = !g.pinned;
+    g.pinned = want; _renderEntries();
+    try {
+      if (want) {
+        const { error } = await sb.from('task_log_pins').upsert(
+          { entry_group_id: groupId, task_id: S.taskId, user_id: currentUser.id },
+          { onConflict: 'entry_group_id,user_id', ignoreDuplicates: true });
+        if (error) throw error;
+      } else {
+        const { error } = await sb.from('task_log_pins').delete()
+          .eq('entry_group_id', groupId).eq('user_id', currentUser.id);
+        if (error) throw error;
+      }
+    } catch (err) {
+      g.pinned = !want; _renderEntries();
+      if (typeof toast === 'function') toast('⚠ ' + (err.message || 'Could not update pin'));
+    }
+  }
+
+  function tlogToggleLegend() {
+    const el = document.getElementById('tlogLegend'); if (el) el.classList.toggle('open');
   }
 
   function _mediaHtml(m) {
@@ -1168,4 +1305,7 @@
   window.taskLogHas            = taskLogHas;
   window.tlogAutoGrow          = tlogAutoGrow;
   window.tlogToggleCheck       = tlogToggleCheck;
+  window.tlogFillField         = tlogFillField;
+  window.tlogTogglePin         = tlogTogglePin;
+  window.tlogToggleLegend      = tlogToggleLegend;
 })();
