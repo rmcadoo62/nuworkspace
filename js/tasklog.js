@@ -161,8 +161,17 @@
 
       .tlog-msg-text.deleted{font-style:italic;color:var(--red);}
 
+      /* in-entry checklist checkboxes */
+      .tlog-chkline{display:flex;align-items:flex-start;gap:8px;line-height:1.55;padding:1px 0;}
+      .tlog-chk{margin-top:3px;width:15px;height:15px;accent-color:var(--green,#1D9E75);
+        cursor:pointer;flex:none;}
+      .tlog-chk:disabled{cursor:default;opacity:.65;}
+      .tlog-chk-txt.done{color:var(--muted);}
+      .tlog-bodyline{line-height:1.55;min-height:1.05em;}
+
       /* textarea must fill the flex wrap (a contenteditable div does this on its own) */
-      #tlogTa{display:block;width:100%;box-sizing:border-box;}
+      #tlogTa{display:block;width:100%;box-sizing:border-box;min-height:46px;max-height:460px;
+        overflow-y:auto;resize:vertical;line-height:1.5;}
 
       .tlog-dl-btn{font-size:11.5px;border:1px solid var(--border);background:var(--surface2);
         color:var(--muted);border-radius:6px;padding:5px 10px;cursor:pointer;white-space:nowrap;}
@@ -295,49 +304,13 @@
   const FORM_DEFS = {
     receiving: {
       id: 'receiving', name: 'Receiving Checklist', icon: '📦', salesCats: [],
-      newData() {
-        return Object.assign(_formContext(), {
-          date: '', initials: '',
-          steps: RECEIVING_STEPS.map(() => ''),
-          notes: ['', '', ''],
-        });
+      // Boilerplate stamped straight into the entry body. Tech checks items by
+      // changing [ ] to [x]. Job No. is the only cross-reference (Scott's call).
+      boilerplate() {
+        const job = (S.project && S.project.name) ? ` — Job ${S.project.name}` : '';
+        const lines = RECEIVING_STEPS.map((s, i) => `[ ] ${i + 1}. ${s}`);
+        return `RECEIVING CHECKLIST${job}\n\n${lines.join('\n')}\n\nNotes:\n`;
       },
-      build(d) {
-        const ro = v => `<div class="tlog-fm-ro">${_esc(v || '')}</div>`;
-        const meta = `
-          <div class="tlog-fm-meta">
-            <div class="tlog-fm-fld"><label>Client</label>${ro(d.client)}</div>
-            <div class="tlog-fm-fld"><label>Job No.</label>${ro(d.jobNo)}</div>
-            <div class="tlog-fm-fld"><label>Test</label>${ro(d.test)}</div>
-            <div class="tlog-fm-fld"><label>Date</label>
-              <input class="tlog-fm-in" type="date" id="rcvDate" value="${_esc(d.date || '')}"></div>
-            <div class="tlog-fm-fld"><label>Spec.</label>${ro(d.spec)}</div>
-            <div class="tlog-fm-fld"><label>Initials</label>
-              <input class="tlog-fm-in" id="rcvInit" maxlength="6" value="${_esc(d.initials || '')}"></div>
-            <div class="tlog-fm-fld" style="grid-column:1/-1"><label>Materials</label>${ro(d.materials)}</div>
-          </div>`;
-        const rows = RECEIVING_STEPS.map((s, i) => `
-          <tr><td class="num">${i + 1}</td><td>${_esc(s)}</td>
-          <td class="init"><input id="rcvStep${i}" value="${_esc((d.steps && d.steps[i]) || '')}" placeholder="init."></td></tr>`).join('');
-        const notes = (d.notes || ['', '', '']).map((n, i) =>
-          `<input class="tlog-fm-in" id="rcvNote${i}" value="${_esc(n || '')}">`).join('');
-        return meta +
-          `<table class="tlog-fm-steps"><thead><tr><th>Step</th><th>Description</th><th>Init.</th></tr></thead><tbody>${rows}</tbody></table>` +
-          `<div class="tlog-fm-notes"><label>Notes</label>${notes}</div>`;
-      },
-      collect(prev) {
-        const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
-        return Object.assign({}, prev, {
-          date: val('rcvDate'), initials: val('rcvInit'),
-          steps: RECEIVING_STEPS.map((_, i) => val('rcvStep' + i)),
-          notes: [0, 1, 2].map(i => val('rcvNote' + i)),
-        });
-      },
-      summary(d) {
-        const done = (d.steps || []).filter(s => (s || '').trim()).length;
-        return `${done}/${RECEIVING_STEPS.length} steps`;
-      },
-      draw(doc, d) { _drawReceivingForm(doc, d); },
     },
   };
 
@@ -354,22 +327,34 @@
   function tlogFormMenuToggle() {
     const m = document.getElementById('tlogFormMenu'); if (m) m.classList.toggle('open');
   }
+  // Inject the form's boilerplate into the entry textarea at the cursor.
   function tlogFormPick(formType) {
     const m = document.getElementById('tlogFormMenu'); if (m) m.classList.remove('open');
-    const def = FORM_DEFS[formType]; if (!def) return;
-    // If this form is already pending on the composer, re-open that draft.
-    const existing = S.pendingForms.find(p => p.form_type === formType);
-    _openFormEditor({
-      formType,
-      data: existing ? existing.data : def.newData(),
-      onSave: (data) => {
-        const idx = S.pendingForms.findIndex(p => p.form_type === formType);
-        if (idx >= 0) S.pendingForms[idx].data = data;
-        else S.pendingForms.push({ form_type: formType, data });
-        _renderPendingForms();
-      },
-    });
+    const def = FORM_DEFS[formType]; if (!def || typeof def.boilerplate !== 'function') return;
+    const ta = document.getElementById('tlogTa'); if (!ta) return;
+    const text = def.boilerplate();
+    const start = (ta.selectionStart != null) ? ta.selectionStart : ta.value.length;
+    const end   = (ta.selectionEnd   != null) ? ta.selectionEnd   : ta.value.length;
+    const before = ta.value.slice(0, start);
+    const after  = ta.value.slice(end);
+    // separate from any preceding content with a blank line
+    const sep = (!before) ? '' : (before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n');
+    const insert = sep + text;
+    ta.value = before + insert + after;
+    ta.focus();
+    const pos = (before + insert).length;
+    try { ta.setSelectionRange(pos, pos); } catch (_) {}
+    tlogAutoGrow(ta);
   }
+
+  // Grow the composer to fit its content (capped; scrolls past the cap). Also
+  // user-draggable via CSS resize. Called on input, inject, edit-load, clear.
+  function tlogAutoGrow(el) {
+    el = el || document.getElementById('tlogTa'); if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight + 2, 460) + 'px';
+  }
+
   function tlogRemovePendingForm(i) { S.pendingForms.splice(i, 1); _renderPendingForms(); }
   function _renderPendingForms() {
     const el = document.getElementById('tlogPendingForms'); if (!el) return;
@@ -470,7 +455,7 @@
         <div class="chatter-composer-top">
           <div class="chatter-avatar-self" style="background:${me.color}">${_esc(me.initials)}</div>
           <div class="chatter-input-wrap">
-            <textarea class="chatter-input" id="tlogTa" placeholder="Add a log entry…"></textarea>
+            <textarea class="chatter-input" id="tlogTa" placeholder="Add a log entry…" oninput="tlogAutoGrow(this)"></textarea>
           </div>
         </div>
         <div class="chatter-composer-actions">
@@ -570,6 +555,49 @@
     }
   }
 
+  // Render an entry body. Lines beginning with [ ] / [x] become real checkboxes
+  // (clickable only for the entry's author, matching the Edit affordance). Plain
+  // entries fall through to the normal newline render so nothing else changes.
+  function _renderBody(body, groupId, interactive, deleted) {
+    const text = String(body == null ? '' : body);
+    if (deleted) return _nl2br(text);
+    if (!/^[ \t]*\[( |x|X)\]/m.test(text)) return _nl2br(text);
+    return text.split('\n').map((ln, i) => {
+      const m = ln.match(/^([ \t]*)\[( |x|X)\][ \t]?(.*)$/);
+      if (m) {
+        const checked = m[2].toLowerCase() === 'x';
+        const dis = interactive ? '' : ' disabled';
+        const handler = interactive ? ` onclick="tlogToggleCheck('${groupId}',${i})"` : '';
+        return `<div class="tlog-chkline"><input type="checkbox" class="tlog-chk"${checked ? ' checked' : ''}${dis}${handler}>` +
+               `<span class="tlog-chk-txt${checked ? ' done' : ''}">${_esc(m[3])}</span></div>`;
+      }
+      if (ln.trim() === '') return `<div class="tlog-bodyline">&nbsp;</div>`;
+      return `<div class="tlog-bodyline">${_esc(ln)}</div>`;
+    }).join('');
+  }
+
+  // Flip one checkbox token in place on the current version and save (no new
+  // version). Optimistic; reverts from the server on failure.
+  async function tlogToggleCheck(groupId, lineIdx) {
+    const g = S.groups.find(x => x.groupId === groupId); if (!g || !g.current) return;
+    const cur = g.current;
+    const lines = String(cur.body || '').split('\n');
+    const ln = lines[lineIdx]; if (ln == null) return;
+    const m = ln.match(/^([ \t]*)\[( |x|X)\]/); if (!m) return;
+    const checked = m[2].toLowerCase() === 'x';
+    lines[lineIdx] = ln.replace(/^([ \t]*)\[( |x|X)\]/, `$1[${checked ? ' ' : 'x'}]`);
+    const newBody = lines.join('\n');
+    cur.body = newBody;          // optimistic (current === latest version object)
+    _renderEntries();
+    try {
+      const { error } = await sb.from('task_log_entries').update({ body: newBody }).eq('id', cur.id);
+      if (error) throw error;
+    } catch (err) {
+      if (typeof toast === 'function') toast('⚠ ' + (err.message || 'Could not save check'));
+      await _loadEntries();      // revert to server truth
+    }
+  }
+
   function _renderEntries() {
     const feed = document.getElementById('tlogFeed');
     if (!feed) return;
@@ -643,7 +671,7 @@
               ${edited ? `<span class="tlog-edited" onclick="tlogToggleHistory('${histId}')">edited (${g.versions.length-1}) ▾</span>` : ''}
             </div>
             ${condHtml}
-            <div class="chatter-msg-text tlog-msg-text ${isDeleted ? 'deleted' : ''}">${_nl2br(c.body)}</div>
+            <div class="chatter-msg-text tlog-msg-text ${isDeleted ? 'deleted' : ''}">${_renderBody(c.body, g.groupId, isMine, isDeleted)}</div>
             ${mediaHtml}
             ${formsHtml}
             ${histHtml}
@@ -754,7 +782,7 @@
   function tlogStartEdit(groupId) {
     const g = S.groups.find(x => x.groupId === groupId); if (!g) return;
     S.editingGroupId = groupId;
-    const ta = document.getElementById('tlogTa'); if (ta) { ta.value = g.current.body; ta.focus(); }
+    const ta = document.getElementById('tlogTa'); if (ta) { ta.value = g.current.body; ta.focus(); tlogAutoGrow(ta); }
     // carry forward the entry's event time via the manual field
     const man = document.getElementById('tlogEvtManual'), sl = document.getElementById('tlogEvtSlider');
     if (sl) sl.value = 0;
@@ -764,7 +792,7 @@
   }
   function tlogCancelEdit() {
     S.editingGroupId = null;
-    const ta = document.getElementById('tlogTa'); if (ta) ta.value = '';
+    const ta = document.getElementById('tlogTa'); if (ta) { ta.value = ''; tlogAutoGrow(ta); }
     const note = document.getElementById('tlogEditNote'); if (note) note.classList.remove('show');
     _resetEventControls();
   }
@@ -833,7 +861,7 @@
       S.pending = []; S.pendingForms = []; S.editingGroupId = null;
       taskLogIds.add(S.taskId); // this task now has a log → green circle on next tasks render
       _paintTaskLogDots();
-      if (ta) ta.value = '';
+      if (ta) { ta.value = ''; tlogAutoGrow(ta); }
       const note = document.getElementById('tlogEditNote'); if (note) note.classList.remove('show');
       _renderPending(); _renderPendingForms(); _resetEventControls();
       await _loadEntries();
@@ -1106,4 +1134,6 @@
   window.tlogFormEditorSave    = tlogFormEditorSave;
   window.ensureTaskLogIds      = ensureTaskLogIds;
   window.taskLogHas            = taskLogHas;
+  window.tlogAutoGrow          = tlogAutoGrow;
+  window.tlogToggleCheck       = tlogToggleCheck;
 })();
