@@ -43,8 +43,9 @@
   // rows can show a green circle on the 📋 icon. Loaded once (lazily, from the
   // tasks panel), topped up live on post, and re-fetchable via force=true.
   const taskLogIds = new Set();
-  let _taskLogIdsLoaded = false, _taskLogIdsLoading = false;
-  async function ensureTaskLogIds(force) {
+  let _taskLogIdsLoaded = false, _taskLogIdsLoading = false, _tasksRepaintProj = null;
+  async function ensureTaskLogIds(force, repaintProjId) {
+    if (repaintProjId) _tasksRepaintProj = repaintProjId; // remember which project to repaint
     if (typeof sb === 'undefined' || !sb) return;
     if (_taskLogIdsLoading || (_taskLogIdsLoaded && !force)) return;
     _taskLogIdsLoading = true;
@@ -55,12 +56,19 @@
       _taskLogIdsLoaded = true;
     } catch (_) { /* leave whatever we have; never block the tasks panel */ }
     finally { _taskLogIdsLoading = false; }
-    // repaint the tasks panel once the set is ready (guarded: second pass is a no-op)
+    _paintTaskLogDots(); // paint dots onto whatever rows are already on screen
+  }
+
+  // Toggle the green circle directly on task rows currently in the DOM. Robust
+  // to the id set arriving after the table has already drawn (first-load case),
+  // and independent of which panel is "active".
+  function _paintTaskLogDots() {
     try {
-      if (typeof renderTasksPanel === 'function' && typeof activeProjectId !== 'undefined' && activeProjectId) {
-        const p = document.getElementById('panel-tasks');
-        if (p && p.classList.contains('active')) renderTasksPanel(activeProjectId);
-      }
+      document.querySelectorAll('.itt-row').forEach(row => {
+        const id = row.getAttribute('data-task-id');
+        const btn = row.querySelector('.tlog-log-btn');
+        if (btn) btn.classList.toggle('has-log', !!id && taskLogIds.has(id));
+      });
     } catch (_) {}
   }
   function taskLogHas(id) { return taskLogIds.has(id); }
@@ -824,6 +832,7 @@
       }
       S.pending = []; S.pendingForms = []; S.editingGroupId = null;
       taskLogIds.add(S.taskId); // this task now has a log → green circle on next tasks render
+      _paintTaskLogDots();
       if (ta) ta.value = '';
       const note = document.getElementById('tlogEditNote'); if (note) note.classList.remove('show');
       _renderPending(); _renderPendingForms(); _resetEventControls();
