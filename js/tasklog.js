@@ -161,11 +161,15 @@
 
       .tlog-msg-text.deleted{font-style:italic;color:var(--red);}
 
-      /* in-entry checklist checkboxes */
+      /* in-entry checklist checkboxes (3-state: blank / ✓ yes / – not required) */
       .tlog-chkline{display:flex;align-items:flex-start;gap:8px;line-height:1.55;padding:1px 0;}
-      .tlog-chk{margin-top:3px;width:15px;height:15px;accent-color:var(--green,#1D9E75);
-        cursor:pointer;flex:none;}
-      .tlog-chk:disabled{cursor:default;opacity:.65;}
+      .tlog-chk{margin-top:2px;width:16px;height:16px;flex:none;box-sizing:border-box;
+        border:1.5px solid var(--border);border-radius:3px;background:var(--surface);
+        display:inline-flex;align-items:center;justify-content:center;
+        font-size:12px;line-height:1;cursor:pointer;color:#fff;user-select:none;}
+      .tlog-chk.yes{background:var(--green,#1D9E75);border-color:var(--green,#1D9E75);}
+      .tlog-chk.na{background:var(--surface);border-color:var(--muted);color:var(--muted);font-weight:700;}
+      .tlog-chk.ro{cursor:default;opacity:.7;}
       .tlog-chk-txt.done{color:var(--muted);}
       .tlog-bodyline{line-height:1.55;min-height:1.05em;}
 
@@ -579,37 +583,41 @@
     }
   }
 
-  // Render an entry body. Lines beginning with [ ] / [x] become real checkboxes
-  // (clickable only for the entry's author, matching the Edit affordance). Plain
-  // entries fall through to the normal newline render so nothing else changes.
+  // Render an entry body. Lines beginning with [ ] / [x] / [-] become 3-state
+  // checkboxes (blank → ✓ yes → – not required), clickable only for the entry's
+  // author. Plain entries fall through to the normal newline render.
   function _renderBody(body, groupId, interactive, deleted) {
     const text = String(body == null ? '' : body);
     if (deleted) return _nl2br(text);
-    if (!/^[ \t]*\[( |x|X)\]/m.test(text)) return _nl2br(text);
+    if (!/^[ \t]*\[( |x|X|-)\]/m.test(text)) return _nl2br(text);
     return text.split('\n').map((ln, i) => {
-      const m = ln.match(/^([ \t]*)\[( |x|X)\][ \t]?(.*)$/);
+      const m = ln.match(/^([ \t]*)\[( |x|X|-)\][ \t]?(.*)$/);
       if (m) {
-        const checked = m[2].toLowerCase() === 'x';
-        const dis = interactive ? '' : ' disabled';
+        const tok = m[2].toLowerCase();
+        const cls = tok === 'x' ? 'yes' : tok === '-' ? 'na' : '';
+        const glyph = tok === 'x' ? '✓' : tok === '-' ? '–' : '';
+        const ro = interactive ? '' : ' ro';
         const handler = interactive ? ` onclick="tlogToggleCheck('${groupId}',${i})"` : '';
-        return `<div class="tlog-chkline"><input type="checkbox" class="tlog-chk"${checked ? ' checked' : ''}${dis}${handler}>` +
-               `<span class="tlog-chk-txt${checked ? ' done' : ''}">${_esc(m[3])}</span></div>`;
+        const done = (tok === 'x' || tok === '-') ? ' done' : '';
+        return `<div class="tlog-chkline"><span class="tlog-chk ${cls}${ro}" role="checkbox"${handler}>${glyph}</span>` +
+               `<span class="tlog-chk-txt${done}">${_esc(m[3])}</span></div>`;
       }
       if (ln.trim() === '') return `<div class="tlog-bodyline">&nbsp;</div>`;
       return `<div class="tlog-bodyline">${_esc(ln)}</div>`;
     }).join('');
   }
 
-  // Flip one checkbox token in place on the current version and save (no new
-  // version). Optimistic; reverts from the server on failure.
+  // Cycle one checkbox token in place on the current version and save (no new
+  // version): blank → x (yes) → - (not required) → blank. Optimistic; reverts on error.
   async function tlogToggleCheck(groupId, lineIdx) {
     const g = S.groups.find(x => x.groupId === groupId); if (!g || !g.current) return;
     const cur = g.current;
     const lines = String(cur.body || '').split('\n');
     const ln = lines[lineIdx]; if (ln == null) return;
-    const m = ln.match(/^([ \t]*)\[( |x|X)\]/); if (!m) return;
-    const checked = m[2].toLowerCase() === 'x';
-    lines[lineIdx] = ln.replace(/^([ \t]*)\[( |x|X)\]/, `$1[${checked ? ' ' : 'x'}]`);
+    const m = ln.match(/^([ \t]*)\[( |x|X|-)\]/); if (!m) return;
+    const next = { ' ': 'x', 'x': '-', 'X': '-', '-': ' ' };
+    const nxt = (next[m[2]] != null) ? next[m[2]] : 'x';
+    lines[lineIdx] = ln.replace(/^([ \t]*)\[( |x|X|-)\]/, `$1[${nxt}]`);
     const newBody = lines.join('\n');
     cur.body = newBody;          // optimistic (current === latest version object)
     _renderEntries();
