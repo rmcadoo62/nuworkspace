@@ -222,6 +222,8 @@
         border-bottom:1px solid var(--border);padding-bottom:5px;margin-bottom:8px;
         position:sticky;top:0;background:var(--surface);z-index:1;}
       .tlog-all-att{font-size:11px;color:var(--muted);margin-top:4px;}
+      .tlog-all-att-link{cursor:pointer;color:var(--amber);}
+      .tlog-all-att-link:hover{text-decoration:underline;}
 
       /* textarea must fill the flex wrap (a contenteditable div does this on its own) */
       #tlogTa{display:block;width:100%;box-sizing:border-box;min-height:46px;max-height:460px;
@@ -1309,7 +1311,7 @@
   function _closeAllLogs() { const el = document.getElementById('tlogAllOverlay'); if (el) el.remove(); }
   function tlogCloseAllLogs() { _closeAllLogs(); }
 
-  function _allLogEntryHtml(g) {
+  function _allLogEntryHtml(g, taskId) {
     const c = g.current;
     const av = _avatar(c.author_name);
     const evt = g.eventAt;
@@ -1324,7 +1326,9 @@
       if (lc.sensor) label += (label ? ' · ' : '') + lc.sensor;
       if (label) condHtml = `<div class="tlog-conditions">🌡 ${_esc(label)}</div>`;
     }
-    const att = g.mc ? `<div class="tlog-all-att">📎 ${g.mc} attachment${g.mc !== 1 ? 's' : ''} — open the task log to view</div>` : '';
+    const att = g.mc
+      ? `<div class="tlog-all-att tlog-all-att-link" onclick="tlogCloseAllLogs();openTaskLogPanel('${taskId}')" title="Open this task's log to view attachments">📎 ${g.mc} attachment${g.mc !== 1 ? 's' : ''} — open the task log to view ›</div>`
+      : '';
     return `
       <div class="chatter-msg">
         <div class="chatter-msg-avatar" style="background:${av.color}">${_esc(av.initials)}</div>
@@ -1406,7 +1410,7 @@
         if (!groups.length) return;
         any = true;
         html += `<div class="tlog-all-task"><div class="tlog-all-taskname">${_esc(t.name || '(untitled task)')}</div>` +
-                groups.map(_allLogEntryHtml).join('') + `</div>`;
+                groups.map(g => _allLogEntryHtml(g, t._id)).join('') + `</div>`;
       });
       const b = body();
       if (b) b.innerHTML = any ? html : `<div class="chatter-empty"><div class="chatter-empty-icon">📋</div>No test logs in this job yet.</div>`;
