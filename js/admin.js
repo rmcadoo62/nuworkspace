@@ -807,6 +807,37 @@ function renderTemplatesPanel() {
               </div>` : ''}
             </div>
           </div>`;
+        } else if (category.name === 'Test Templates') {
+          // Test Templates — flat list of snippets stamped into test log entries.
+          // Mirrors the Other Templates card; Edit shows even when empty.
+          const sorted = categoryTemplates.slice().sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+          return `
+          <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
+            <div style="padding:16px 20px;background:var(--surface2);border-bottom:1px solid var(--border);">
+              <div style="font-size:16px;font-weight:700;color:var(--text);margin-bottom:4px;">${category.icon} ${category.name}</div>
+              <div style="font-size:12px;color:var(--muted);">${category.description}</div>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px;">${categoryTemplates.length} total template${categoryTemplates.length !== 1 ? 's' : ''}</div>
+            </div>
+            <div style="padding:16px 20px;">
+              <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--surface2);border-radius:8px;">
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:13px;font-weight:600;color:var(--text);">🧪 Test Log Snippets</div>
+                  <div style="font-size:11px;color:var(--muted);">Stamped into test log entries from the ＋ Add form menu</div>
+                  ${sorted.length > 0 ? `
+                  <div style="font-size:11px;color:var(--text);margin-top:6px;line-height:1.6;">
+                    ${sorted.map(t => {
+                      const label = (t.label || 'Untitled').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                      return `<span style="display:inline-block;margin-right:10px;color:var(--text);font-weight:500;">↳ ${label}</span>`;
+                    }).join('')}
+                  </div>` : ''}
+                </div>
+                <button onclick="editCategoryTemplates('${category.id}')"
+                  style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;flex-shrink:0;margin-left:10px;">
+                  Edit
+                </button>
+              </div>
+            </div>
+          </div>`;
         } else {
           // Other categories (future expansion)
           return `
