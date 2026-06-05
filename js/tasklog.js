@@ -317,27 +317,54 @@
   function _formName(t) { return (FORM_DEFS[t] && FORM_DEFS[t].name) || t; }
   function _formIcon(t) { return (FORM_DEFS[t] && FORM_DEFS[t].icon) || '📄'; }
 
-  // ---- ADD FORM menu --------------------------------------------------------
-  function _availableForms() {
-    const cat = String((S.task && S.task.salesCat) || '').trim();
-    return Object.values(FORM_DEFS)
-      .map(f => ({ f, suggested: cat && Array.isArray(f.salesCats) && f.salesCats.includes(cat) }))
-      .sort((a, b) => (b.suggested ? 1 : 0) - (a.suggested ? 1 : 0));
+  // ---- test-log templates (authored in Setup → Templates → "Test Templates") -
+  // Each template is a snippet stamped into the entry body; {{job}} is swapped
+  // for the project number. Pick one repeatedly to add multiple copies (e.g. a
+  // one-line Witness snippet added once per witness).
+  const TEST_TEMPLATE_CATEGORY = 'Test Templates';
+  let _testTemplates = [], _testTplLoading = false;
+  async function _ensureTestTemplates(force) {
+    if (typeof sb === 'undefined' || !sb || _testTplLoading) return;
+    if (_testTemplates.length && !force) return;
+    _testTplLoading = true;
+    try {
+      const { data: cats } = await sb.from('template_categories').select('id,name').eq('name', TEST_TEMPLATE_CATEGORY);
+      const cat = (cats || [])[0];
+      if (cat) {
+        const { data: tpls } = await sb.from('templates')
+          .select('id,key,label,instructions,sort_order,is_active')
+          .eq('category_id', cat.id).order('sort_order', { ascending: true });
+        _testTemplates = (tpls || []).filter(t => t.is_active !== false);
+      } else { _testTemplates = []; }
+    } catch (_) { /* keep whatever we have; never block the composer */ }
+    finally { _testTplLoading = false; }
+    _refreshFormMenu();
+  }
+  function _formMenuItemsHtml() {
+    if (!_testTemplates.length) {
+      return `<div class="tlog-addform-item" style="color:var(--muted);cursor:default">${_testTplLoading ? 'Loading…' : 'No test templates yet'}</div>`;
+    }
+    return _testTemplates.map(t =>
+      `<div class="tlog-addform-item" onclick="tlogFormPick('${t.id}')"><span>📄</span><span>${_esc(t.label || 'Untitled')}</span></div>`).join('');
+  }
+  function _refreshFormMenu() {
+    const m = document.getElementById('tlogFormMenu'); if (m) m.innerHTML = _formMenuItemsHtml();
   }
   function tlogFormMenuToggle() {
+    _ensureTestTemplates();
     const m = document.getElementById('tlogFormMenu'); if (m) m.classList.toggle('open');
   }
-  // Inject the form's boilerplate into the entry textarea at the cursor.
-  function tlogFormPick(formType) {
+  // Inject a template's body into the entry textarea at the cursor; {{job}} → job no.
+  function tlogFormPick(id) {
     const m = document.getElementById('tlogFormMenu'); if (m) m.classList.remove('open');
-    const def = FORM_DEFS[formType]; if (!def || typeof def.boilerplate !== 'function') return;
+    const t = _testTemplates.find(x => String(x.id) === String(id)); if (!t) return;
     const ta = document.getElementById('tlogTa'); if (!ta) return;
-    const text = def.boilerplate();
+    const job = (S.project && S.project.name) ? S.project.name : '';
+    const text = String(t.instructions || '').replace(/\{\{\s*job\s*\}\}/gi, job);
     const start = (ta.selectionStart != null) ? ta.selectionStart : ta.value.length;
     const end   = (ta.selectionEnd   != null) ? ta.selectionEnd   : ta.value.length;
     const before = ta.value.slice(0, start);
     const after  = ta.value.slice(end);
-    // separate from any preceding content with a blank line
     const sep = (!before) ? '' : (before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n');
     const insert = sep + text;
     ta.value = before + insert + after;
@@ -467,12 +494,8 @@
                  accept="image/*,video/*,application/pdf,text/plain,text/csv,.csv,.txt" onchange="tlogAttachChange(this)">
                <div class="chatter-attachments-preview" id="tlogPending"></div>`}
           <span class="tlog-addform-wrap">
-            <button class="tlog-addform-btn" onclick="tlogFormMenuToggle()" title="Attach a form to this entry">＋ Add form</button>
-            <div class="tlog-addform-menu" id="tlogFormMenu">
-              ${_availableForms().map(({ f, suggested }) =>
-                `<div class="tlog-addform-item" onclick="tlogFormPick('${f.id}')">
-                   <span>${f.icon}</span><span>${_esc(f.name)}</span>${suggested ? '<span class="sug">SUGGESTED</span>' : ''}</div>`).join('')}
-            </div>
+            <button class="tlog-addform-btn" onclick="tlogFormMenuToggle()" title="Stamp a template into this entry">＋ Add form</button>
+            <div class="tlog-addform-menu" id="tlogFormMenu">${_formMenuItemsHtml()}</div>
           </span>
           <div class="chatter-attachments-preview" id="tlogPendingForms" style="display:flex;gap:6px;flex-wrap:wrap;"></div>
           <span style="flex:1"></span>
@@ -481,6 +504,7 @@
       </div>
       <div class="chatter-feed" id="tlogFeed"><div class="tlog-spinner"></div></div>`;
 
+    _ensureTestTemplates(true); // refresh the Add-form menu from Setup → Templates
     _loadEntries(); // hash push is handled by the router hook on openTaskLogPanel
   }
 
