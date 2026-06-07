@@ -48,13 +48,15 @@ function _mtAgeAnchor(t) {
   return MT_REPORT_CATS.has(_mtCatOf(t)) ? _mtReportEligibleDate(t) : t.createdAt;
 }
 
-// True if this task is assigned to the current user (by id, falling back to
-// initials for older rows that predate assignId).
+// True if this task is assigned to the current user. Matches on the durable
+// employee id only — initials are NOT unique (e.g. Russ and Ragen McAdoo both
+// resolve to "RM"), so an initials fallback here leaks one person's tasks onto
+// the other's list. Every assigned task now carries assignId (assignee_id),
+// backfilled for history; unassigned tasks have no id and belong to no one.
 function _mtIsMine(t) {
   if (typeof currentEmployee === 'undefined' || !currentEmployee) return false;
-  if (t.assignId && currentEmployee.id && t.assignId === currentEmployee.id) return true;
-  if (t.assign && currentEmployee.initials && t.assign === currentEmployee.initials) return true;
-  return false;
+  if (!t.assignId || !currentEmployee.id) return false;
+  return t.assignId === currentEmployee.id;
 }
 
 // My open tasks (unsorted) — used for the count.

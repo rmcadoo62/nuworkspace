@@ -5,13 +5,13 @@
 function renderTaskList(tasks,cid){
   document.getElementById(cid).innerHTML=tasks.map((t,i)=>{
     const p=projects.find(x=>x.id===t.proj);
-    const m=employees.find(x=>x.initials===t.assign)||{color:'#555',c:'#555'};
+    const m=(t.assignId&&employees.find(x=>x.id===t.assignId))||employees.find(x=>x.initials===t.assign)||{color:'#555'};
     const pt=p?`<span class="task-proj-tag" style="background:${p.color}22;color:${p.color}">${p.emoji} ${p.name}</span>`:'';
     return`<div class="task-row" style="animation-delay:${i*.04}s">
       <div class="task-check ${t.done?'done':''}" onclick="toggleTask(this)">${t.done?'&#x2713;':''}</div>
       <div class="task-name ${t.done?'done':''}">${t.name}</div>
       ${pt}
-      <div class="task-assign-av" style="background:${m.c};color:#fff">${t.assign}</div>
+      <div class="task-assign-av" style="background:${m.color||'#555'};color:#fff">${m.initials||t.assign||''}</div>
       <div class="task-due ${t.overdue?'overdue':''}">${t.overdue?'&#x26A0; ':''}${t.due}</div>
     </div>`;
   }).join('');
@@ -545,7 +545,7 @@ function renderTasksPanel(projId) {
     if (parentSec && parentSec.collapsed) return '';
 
     const canEditTask = typeof can === 'function' ? can('edit_tasks') : true;
-    const empM = employees.find(e => e.initials === t.assign) || {color:'#555'};
+    const empM = (t.assignId && employees.find(e => e.id === t.assignId)) || employees.find(e => e.initials === t.assign) || {color:'#555'};
     const statusOpts = ['new','inprogress','prohold','accthold','complete','cancelled','billed'].map(s => {
         const labels = {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed'};
         return `<option value="${s}" ${t.status===s?'selected':''}>${labels[s]}</option>`;
@@ -589,10 +589,10 @@ function renderTasksPanel(projId) {
           ${budgetH > 0 ? budgetH+'h' : '—'}
         </div>
         <div onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:4px;overflow:hidden;min-width:0">
-          <div class="itt-av" style="background:${empM.color}" id="av_${t._id}">${t.assign||'?'}</div>
-          <select class="inline-edit-select" style="font-size:10px;padding:2px 0;border:none;background:transparent;color:var(--muted);width:0;flex:1;min-width:0" onchange="inlineSave('${t._id}','${projId}','assign',this.value);document.getElementById('av_${t._id}').style.background=(employees.find(e=>e.initials===this.value)||{color:'#555'}).color;document.getElementById('av_${t._id}').textContent=this.value||'?'" ${canEditTask ? '' : 'disabled'}>
+          <div class="itt-av" style="background:${empM.color}" id="av_${t._id}">${empM.initials||t.assign||'?'}</div>
+          <select class="inline-edit-select" style="font-size:10px;padding:2px 0;border:none;background:transparent;color:var(--muted);width:0;flex:1;min-width:0" onchange="inlineSave('${t._id}','${projId}','assign',this.value);document.getElementById('av_${t._id}').style.background=(employees.find(e=>e.id===this.value)||{color:'#555'}).color;document.getElementById('av_${t._id}').textContent=this.value?((employees.find(e=>e.id===this.value)||{}).initials||'?'):'?'" ${canEditTask ? '' : 'disabled'}>
             <option value="">—</option>
-            ${employees.filter(e=>e.isActive!==false && e.dept!=='Ballantine').map(e => `<option value="${e.initials}" ${t.assign===e.initials?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
+            ${employees.filter(e=>e.isActive!==false && e.dept!=='Ballantine').map(e => `<option value="${e.id}" ${(t.assignId===e.id || (!t.assignId && t.assign===e.initials))?'selected':''}>${e.name.split(' ')[0]}</option>`).join('')}
           </select>
         </div>
         <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()"`:''}  style="font-size:12px;color:var(--muted);font-weight:700;${canEditTask?'cursor:text':''}">${fmtShortDate(t.taskStartDate)}</div>
@@ -958,26 +958,37 @@ async function inlineSave(taskId, projId, field, value) {
   else if (field === 'poNumber')      { t.poNumber = value; }
   else if (field === 'assign')        {
     const _prevAssignId = t.assignId || '';
-    t.assign = value;
-    t.assignId = (employees.find(e => e.initials === value)||{}).id || '';
+    // The dropdown now sends an employee id (tolerate a legacy initials value too).
+    const _emp = employees.find(e => e.id === value) || employees.find(e => e.initials === value) || null;
+    t.assignId = _emp ? _emp.id : '';
+    t.assign   = _emp ? _emp.initials : '';
     // Fire after the DB write below, only if the assignee actually changed.
     if (t.assignId && t.assignId !== _prevAssignId) _assignNotifyAfterSave = { assigneeId: t.assignId, taskName: t.name, projId };
   }
 
   // Persist non-status fields to Supabase
   if (field !== 'status' && sb) {
-    const dbFieldMap = {
-      salesCat: 'sales_category', priority: 'priority',
-      fixedPrice: 'fixed_price', name: 'name',
-      due_raw: 'due_date', assign: 'assignee',
-      taskStartDate: 'task_start_date', completedDate: 'completed_date',
-      billedDate: 'billed_date', budgetHours: 'budget_hours', poNumber: 'po_number',
-      quoteNum: 'quote_number',
-    };
-    const col = dbFieldMap[field];
-    if (col) {
-      const { error } = await sb.from('tasks').update({ [col]: value||null }).eq('id', taskId);
-      if (error) console.error('inline save', error);
+    if (field === 'assign') {
+      // Assignment writes BOTH columns: assignee_id (the durable key) and the
+      // assignee initials text (display/legacy). My Tasks matches on the id.
+      const { error } = await sb.from('tasks')
+        .update({ assignee: t.assign||null, assignee_id: t.assignId||null })
+        .eq('id', taskId);
+      if (error) console.error('inline save assign', error);
+    } else {
+      const dbFieldMap = {
+        salesCat: 'sales_category', priority: 'priority',
+        fixedPrice: 'fixed_price', name: 'name',
+        due_raw: 'due_date',
+        taskStartDate: 'task_start_date', completedDate: 'completed_date',
+        billedDate: 'billed_date', budgetHours: 'budget_hours', poNumber: 'po_number',
+        quoteNum: 'quote_number',
+      };
+      const col = dbFieldMap[field];
+      if (col) {
+        const { error } = await sb.from('tasks').update({ [col]: value||null }).eq('id', taskId);
+        if (error) console.error('inline save', error);
+      }
     }
   }
 
@@ -1157,7 +1168,7 @@ async function openEditTaskModal(taskId) {
   }
   editingTaskId = taskId;
   etPri = t.priority || 'low';
-  etAssign = new Set(t.assign ? [t.assign] : []);
+  etAssign = new Set(t.assignId ? [t.assignId] : (t.assign ? [t.assign] : []));
 
   const p = projects.find(x => x.id === t.proj);
   document.getElementById('etProjDot').style.background = p ? p.color : '#5b9cf6';
@@ -1292,7 +1303,7 @@ async function saveEditTask() {
   const _newSectionId = document.getElementById('etSectionSelect')?.value || null;
 
   const updates = {
-    name: title, description: desc, assignee: assign,
+    name: title, description: desc, assignee: assign, assignee_id: assignEmp ? assignEmp.id : null,
     completed_date: completedDate||null, due_date: null, status, priority: etPri,
     sales_category: salesCat||null,
     fixed_price: fixedPrice||null,
