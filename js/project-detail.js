@@ -19,6 +19,17 @@ function defaultInfo(proj) {
 
 // ===== RENDER INFO SHEET =====
 // ===== RENDER INFO SHEET =====
+// Shared gate for all Project Info edits. The render layer hides edit
+// affordances for users without edit_project_info; this is the belt-and-
+// suspenders guard so a stale-DOM or console-triggered handler still refuses.
+function requireInfoEdit() {
+  if (typeof can === 'function' && !can('edit_project_info')) {
+    if (typeof toast === 'function') toast('View-only access \u2014 you can\u2019t edit project info');
+    return false;
+  }
+  return true;
+}
+
 function renderInfoSheet(projId) {
   const proj = projects.find(p => p.id === projId);
   if (!proj) {
@@ -28,6 +39,7 @@ function renderInfoSheet(projId) {
   }
   if (!projectInfo[projId]) projectInfo[projId] = defaultInfo(proj);
   const info = projectInfo[projId];
+  const canEditInfo = (typeof can === 'function' && can('edit_project_info'));
 
   const statusMap = {
     'jobprep':{label:'Job Preparation',bg:'rgba(167,139,250,0.15)',color:'#a78bfa',dot:'#a78bfa'},
@@ -72,9 +84,8 @@ function renderInfoSheet(projId) {
   const dateField = (label, val, key) => `
     <div class="info-field" data-key="${key}">
       <div class="info-field-label">${label}</div>
-      <div class="info-field-value info-click-edit" id="ifv-${key}"
-        onclick="inlineEditInfoDate('${projId}','${key}',this)"
-        title="Click to set date" style="cursor:text">
+      <div class="info-field-value${canEditInfo ? ' info-click-edit' : ''}" id="ifv-${key}"
+        ${canEditInfo ? `onclick="inlineEditInfoDate('${projId}','${key}',this)" title="Click to set date" style="cursor:text"` : ''}>
         ${val || '<span style="color:var(--border)">—</span>'}
       </div>
     </div>`;
@@ -82,9 +93,8 @@ function renderInfoSheet(projId) {
   const clickField = (label, val, key, placeholder='') => `
     <div class="info-field" data-key="${key}">
       <div class="info-field-label">${label}</div>
-      <div class="info-field-value info-click-edit" id="ifv-${key}"
-        onclick="inlineEditInfoField('${projId}','${key}',this,'${placeholder}')"
-        title="Click to edit" style="cursor:text">
+      <div class="info-field-value${canEditInfo ? ' info-click-edit' : ''}" id="ifv-${key}"
+        ${canEditInfo ? `onclick="inlineEditInfoField('${projId}','${key}',this,'${placeholder}')" title="Click to edit" style="cursor:text"` : ''}>
         ${val || '<span style="color:var(--border)">—</span>'}
       </div>
     </div>`;
@@ -122,11 +132,11 @@ function renderInfoSheet(projId) {
         <div class="desc-cards">
           <div class="desc-card">
             <div class="desc-card-header">Project Description</div>
-            <div class="desc-card-body" id="info-proj-desc" onclick="inlineEditDesc('${projId}','desc',this)" title="Click to edit" style="cursor:text;min-height:40px;white-space:pre-wrap">${(info.desc || proj.desc) || '<span style="color:var(--border)">Click to add project description…</span>'}</div>
+            <div class="desc-card-body" id="info-proj-desc" ${canEditInfo ? `onclick="inlineEditDesc('${projId}','desc',this)" title="Click to edit" style="cursor:text;min-height:40px;white-space:pre-wrap"` : `style="min-height:40px;white-space:pre-wrap"`}>${(info.desc || proj.desc) || (canEditInfo ? '<span style="color:var(--border)">Click to add project description…</span>' : '<span style="color:var(--border)">—</span>')}</div>
           </div>
           <div class="desc-card">
             <div class="desc-card-header">Test Article Description</div>
-            <div class="desc-card-body info-click-edit" id="info-test-article" onclick="inlineEditDesc('${projId}','testArticleDesc',this)" title="Click to edit" style="cursor:text;min-height:40px;white-space:pre-wrap">${info.testArticleDesc || '<span style="color:var(--border)">Click to add test article description…</span>'}</div>
+            <div class="desc-card-body${canEditInfo ? ' info-click-edit' : ''}" id="info-test-article" ${canEditInfo ? `onclick="inlineEditDesc('${projId}','testArticleDesc',this)" title="Click to edit" style="cursor:text;min-height:40px;white-space:pre-wrap"` : `style="min-height:40px;white-space:pre-wrap"`}>${info.testArticleDesc || (canEditInfo ? '<span style="color:var(--border)">Click to add test article description…</span>' : '<span style="color:var(--border)">—</span>')}</div>
           </div>
         </div>
       </div>
@@ -157,6 +167,12 @@ function renderInfoSheet(projId) {
                 const av  = pm ? pm.initials : (info.pm ? info.pm.slice(0,2).toUpperCase() : '?');
                 const col = pm ? pm.color : '#7a7a85';
                 const lbl = info.pm || '<span style="color:var(--border)">—</span>';
+                if (!canEditInfo) {
+                  return `<div class="pm-selected" id="pmSelected" style="cursor:default">
+                    <div class="pm-selected-av" id="pmSelectedAv" style="background:${col}">${av}</div>
+                    <div class="pm-selected-name" id="pmSelectedName">${lbl}</div>
+                  </div>`;
+                }
                 return `<div class="pm-selected" id="pmSelected" onclick="openPmDropdown('${projId}')">
                   <div class="pm-selected-av" id="pmSelectedAv" style="background:${col}">${av}</div>
                   <div class="pm-selected-name" id="pmSelectedName">${lbl}</div>
@@ -185,6 +201,11 @@ function renderInfoSheet(projId) {
               ${(()=>{
                 const cl = clientStore.find(c => c.id === info.clientId);
                 const nm = cl ? cl.name : (info.client || '<span style="color:var(--border)">—</span>');
+                if (!canEditInfo) {
+                  return `<div class="client-picker-selected" id="clientPickerSelected" style="cursor:default">
+                    <div class="client-picker-name">${nm}</div>
+                  </div>`;
+                }
                 return `<div class="client-picker-selected" id="clientPickerSelected" onclick="openClientPicker('${projId}')">
                   <div class="client-picker-name">${nm}</div>
                   <div style="margin-left:auto;font-size:10px;color:var(--muted)">&#x25BE;</div>
@@ -210,6 +231,16 @@ function renderInfoSheet(projId) {
                 const emailBtn = (canEmail && emailValid)
                   ? `<button onclick="event.stopPropagation();openEmailContactModal({projId:'${projId}',contactId:'${ct.id}'})" title="Email ${(ct.firstName+' '+ct.lastName).trim().replace(/"/g,'&quot;')}" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;font-size:13px">&#x2709;</button>`
                   : '';
+                if (!canEditInfo) {
+                  return `<div class="client-picker-selected" id="contactPickerSelected" style="cursor:default">
+                    <div>
+                      <div class="client-picker-name">${nm}</div>
+                      ${ti ? `<div style="font-size:11px;color:var(--muted)">${ti}</div>` : ''}
+                      ${em ? `<div style="font-size:11px;color:var(--muted)">${em}</div>` : ''}
+                    </div>
+                    ${emailBtn ? `<div style="margin-left:auto">${emailBtn}</div>` : ''}
+                  </div>`;
+                }
                 return `<div class="client-picker-selected" id="contactPickerSelected" onclick="openContactPicker('${projId}')">
                   <div>
                     <div class="client-picker-name">${nm}</div>
@@ -246,7 +277,7 @@ function renderInfoSheet(projId) {
                   const emailBtn = (canEmail && emailValid)
                     ? `<button onclick="event.stopPropagation();openEmailContactModal({projId:'${projId}',contactId:'${ct.id}'})" title="Email ${name.replace(/"/g,'&quot;')}" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;font-size:13px">&#x2709;</button>`
                     : '';
-                  const removeBtn = `<button onclick="event.stopPropagation();removeAddlContact('${projId}','${ct.id}')" title="Remove from this project" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;font-size:13px">&#x2715;</button>`;
+                  const removeBtn = canEditInfo ? `<button onclick="event.stopPropagation();removeAddlContact('${projId}','${ct.id}')" title="Remove from this project" style="background:none;border:none;cursor:pointer;color:var(--muted);padding:4px;font-size:13px">&#x2715;</button>` : '';
                   return `<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:6px">
                     <div style="flex:1;min-width:0">
                       <div style="font-size:13px;color:var(--text)">${name}</div>
@@ -256,9 +287,14 @@ function renderInfoSheet(projId) {
                     ${emailBtn}${removeBtn}
                   </div>`;
                 }).join('');
-                const addBtn = hasClient
+                const addBtn = !canEditInfo
+                  ? ''
+                  : (hasClient
                   ? `<button onclick="openAddlContactPicker('${projId}')" style="font-size:12px;color:var(--blue);background:none;border:1px dashed var(--border);border-radius:6px;padding:5px 12px;cursor:pointer">&#x002B; Add contact</button>`
-                  : `<button disabled title="Set a client on this project first" style="font-size:12px;color:var(--muted);background:none;border:1px dashed var(--border);border-radius:6px;padding:5px 12px;cursor:not-allowed;opacity:0.55">&#x002B; Add contact</button>`;
+                  : `<button disabled title="Set a client on this project first" style="font-size:12px;color:var(--muted);background:none;border:1px dashed var(--border);border-radius:6px;padding:5px 12px;cursor:not-allowed;opacity:0.55">&#x002B; Add contact</button>`);
+                if (!canEditInfo) {
+                  return `<div style="display:flex;flex-direction:column;gap:4px">${rowsHtml || '<span style="color:var(--border);font-size:13px">—</span>'}</div>`;
+                }
                 return `<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px">${rowsHtml}</div>
                   ${addBtn}
                   <div class="client-picker-dropdown" id="addlContactPickerDropdown" style="display:none">
@@ -314,7 +350,7 @@ function renderInfoSheet(projId) {
 
     <div class="info-notes-section">
       <div class="info-section-title" style="margin-bottom:12px">Notes &amp; Context</div>
-      <div class="info-notes-body" id="infoNotes" onclick="editNotes('${projId}')">${info.notes || ''}</div>
+      <div class="info-notes-body" id="infoNotes" ${canEditInfo ? `onclick="editNotes('${projId}')"` : ''}>${info.notes || (canEditInfo ? '' : '<span style="color:var(--border)">—</span>')}</div>
     </div>
 
 <!-- tasks moved to Tasks tab -->
@@ -332,6 +368,7 @@ function renderInfoSheet(projId) {
 
 
 async function inlineEditInfoDate(projId, key, el) {
+  if (!requireInfoEdit()) return;
   if (el.querySelector('input')) return;
   const info = projectInfo[projId] || {};
   const current = info[key] || '';
@@ -372,6 +409,7 @@ async function inlineEditInfoDate(projId, key, el) {
 }
 
 async function inlineEditInfoField(projId, key, el, placeholder) {
+  if (!requireInfoEdit()) return;
   if (el.querySelector('input')) return; // already editing
   const info = projectInfo[projId] || {};
   const current = info[key] || '';
@@ -405,6 +443,7 @@ async function inlineEditInfoField(projId, key, el, placeholder) {
 }
 
 async function inlineEditDesc(projId, key, el) {
+  if (!requireInfoEdit()) return;
   if (el.querySelector('textarea')) return; // already editing
   const info = projectInfo[projId] || {};
   const proj = projects.find(p => p.id === projId) || {};
@@ -539,6 +578,7 @@ async function collectAndSave(projId) {
 }
 
 function editNotes(projId) {
+  if (!requireInfoEdit()) return;
   const el = document.getElementById('infoNotes');
   if (!el || el.querySelector('textarea')) return;
   const info = projectInfo[projId];
@@ -2981,7 +3021,7 @@ function renderProjStickyHeader(projId) {
       '<div class="need-po-checkbox-wrap" onclick="toggleNeedUpdatedPo(\''+projId+'\')" ><span>Need Updated PO</span></div>')+
     '<div style="margin-left:auto;display:flex;gap:6px;flex-shrink:0">'+
     
-    '<button class="info-edit-btn" onclick="confirmDeleteProject(\x27'+projId+'\x27)" style="color:var(--red);border-color:rgba(208,64,64,0.3)">&#x1F5D1; Delete</button>'+
+    ((typeof can === 'function' && can('delete_projects')) ? '<button class="info-edit-btn" onclick="confirmDeleteProject(\x27'+projId+'\x27)" style="color:var(--red);border-color:rgba(208,64,64,0.3)">&#x1F5D1; Delete</button>' : '')+
     '</div>';
 
   // Show/hide credit hold banner

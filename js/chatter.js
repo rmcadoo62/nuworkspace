@@ -56,6 +56,26 @@ function renderChatter(projId) {
     selfAv.style.background = emp.color || 'var(--amber)';
     selfAv.style.color = '#fff';
   }
+  // Composer is gated by post_chatter. View-only users see the feed but no
+  // input; show a small note in place of the composer so it doesn't look broken.
+  const composer = document.getElementById('chatterComposer');
+  if (composer) {
+    const canPost = (typeof can === 'function' && can('post_chatter'));
+    composer.style.display = canPost ? '' : 'none';
+    let roNote = document.getElementById('chatterReadonlyNote');
+    if (!canPost) {
+      if (!roNote && composer.parentNode) {
+        roNote = document.createElement('div');
+        roNote.id = 'chatterReadonlyNote';
+        roNote.style.cssText = 'padding:10px 14px;font-size:12px;color:var(--muted);text-align:center';
+        roNote.textContent = 'View-only \u2014 you don\u2019t have permission to post in Chatter.';
+        composer.parentNode.insertBefore(roNote, composer);
+      }
+      if (roNote) roNote.style.display = '';
+    } else if (roNote) {
+      roNote.style.display = 'none';
+    }
+  }
   const msgs = chatterMsgs(projId);
   // Index replies by parent id for O(1) child lookup at any depth
   const childrenByParent = {};
@@ -140,9 +160,10 @@ function chatterMsgHtml(m, depth) {
       '</div>';
   } else {
     const textHtml = (m.text || '').replace(/\n/g,'<br>').replace(/@([\w][\w ]*?)(?=\s|$|<br>)/g, '<span class="mention">@$1</span>');
-    const replyBtn  = '<button class="chatter-action-btn" onclick="chatterStartReply(\x27' + m.id + '\x27,\x27' + (m.authorName||'').replace(/'/g,"\x27") + '\x27)">\u21A9 Reply</button>';
-    const editBtn   = canModify ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterEdit(\x27' + m.id + '\x27)">\u270E Edit</button>' : '';
-    const deleteBtn = canModify ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterDelete(\x27' + m.id + '\x27)">\uD83D\uDDD1 Delete</button>' : '';
+    const canPost = (typeof can === 'function' && can('post_chatter'));
+    const replyBtn  = canPost ? '<button class="chatter-action-btn" onclick="chatterStartReply(\x27' + m.id + '\x27,\x27' + (m.authorName||'').replace(/'/g,"\x27") + '\x27)">\u21A9 Reply</button>' : '';
+    const editBtn   = (canModify && canPost) ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterEdit(\x27' + m.id + '\x27)">\u270E Edit</button>' : '';
+    const deleteBtn = (canModify && canPost) ? '<button class="chatter-action-btn" style="color:var(--muted)" onclick="chatterDelete(\x27' + m.id + '\x27)">\uD83D\uDDD1 Delete</button>' : '';
     bodyContent =
       '<div class="chatter-msg-text">' + textHtml + '</div>' +
       attachHtml +
@@ -198,6 +219,7 @@ function chatterCancelReply() {
 }
 
 async function chatterDelete(msgId) {
+  if (typeof can === 'function' && !can('post_chatter')) { if (typeof toast === 'function') toast('View-only \u2014 you can\u2019t modify Chatter'); return; }
   if (!confirm('Delete this message?')) return;
   if (sb && !msgId.startsWith('local_')) {
     const { error } = await sb.from('chatter').delete().eq('id', msgId);
@@ -230,6 +252,7 @@ function chatterCancelEdit() {
 }
 
 async function chatterSaveEdit(msgId) {
+  if (typeof can === 'function' && !can('post_chatter')) { if (typeof toast === 'function') toast('View-only \u2014 you can\u2019t modify Chatter'); return; }
   const ta = document.getElementById('chatterEditArea_' + msgId);
   if (!ta) return;
   const newText = ta.value.trim();
@@ -257,6 +280,7 @@ async function chatterSaveEdit(msgId) {
 
 // ── Post ───────────────────────────────────────────────────────────────
 async function chatterPost() {
+  if (typeof can === 'function' && !can('post_chatter')) { if (typeof toast === 'function') toast('View-only \u2014 you can\u2019t post in Chatter'); return; }
   const input = document.getElementById('chatterInput');
   if (!input) return;
   const text = input.innerText.trim();
@@ -1059,6 +1083,7 @@ async function toggleNeedUpdatedPo(projId) {
 
 
 async function deleteProject(projId) {
+  if (typeof can === 'function' && !can('delete_projects')) { if (typeof toast === 'function') toast('You don\u2019t have permission to delete projects'); return; }
   const proj = projects.find(p => p.id === projId);
   if (!proj) return;
   if (sb) {

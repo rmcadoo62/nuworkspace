@@ -2654,6 +2654,7 @@ async function saveEmployee() {
 let pmDropdownProjId = null;
 
 function openPmDropdown(projId) {
+  if (typeof requireInfoEdit === 'function' && !requireInfoEdit()) return;
   pmDropdownProjId = projId;
   const info = projectInfo[projId];
   const drop = document.getElementById('pmDropdown');
@@ -2702,6 +2703,7 @@ function renderPmOptions(query) {
 }
 
 window.selectPm = function selectPm(empId) {
+  if (typeof requireInfoEdit === 'function' && !requireInfoEdit()) return;
   const emp = employees.find(e => e.id === empId);
   if (!emp || !pmDropdownProjId) return;
   if (!projectInfo[pmDropdownProjId]) projectInfo[pmDropdownProjId] = defaultInfo(projects.find(p=>p.id===pmDropdownProjId)||{});
@@ -2716,6 +2718,7 @@ window.selectPm = function selectPm(empId) {
 }
 
 function clearPm() {
+  if (typeof requireInfoEdit === 'function' && !requireInfoEdit()) return;
   if (!pmDropdownProjId) return;
   if (projectInfo[pmDropdownProjId]) projectInfo[pmDropdownProjId].pm = '';
   closePmDropdown();
@@ -2748,12 +2751,19 @@ function renderSidebarTeam() {
 function pickField(label, val, key, projId, options) {
   const cur = options.find(o => o.value === val);
   const color = cur ? (cur.color || 'var(--text)') : 'var(--muted)';
-  const opts = options.map(o =>
-    '<option value="' + o.value + '" ' + (val === o.value ? 'selected' : '') + ' style="color:' + o.color + '">' + o.label + '</option>'
-  ).join('');
-  const sel = '<select class="yn-select" onchange="setYnField(\'' + projId + '\',\'' + key + '\',this.value)" style="color:' + color + '">' +
-    '<option value="">—</option>' + opts + '</select>';
-  return '<div class="info-field" data-key="' + key + '"><div class="info-field-label">' + label + '</div><div class="info-field-value">' + sel + '</div></div>';
+  const canEditInfo = (typeof can === 'function' && can('edit_project_info'));
+  let valueHtml;
+  if (canEditInfo) {
+    const opts = options.map(o =>
+      '<option value="' + o.value + '" ' + (val === o.value ? 'selected' : '') + ' style="color:' + o.color + '">' + o.label + '</option>'
+    ).join('');
+    valueHtml = '<select class="yn-select" onchange="setYnField(\'' + projId + '\',\'' + key + '\',this.value)" style="color:' + color + '">' +
+      '<option value="">—</option>' + opts + '</select>';
+  } else {
+    const lbl = cur ? cur.label : '—';
+    valueHtml = '<span class="yn-static" style="color:' + color + ';font-size:13px">' + lbl + '</span>';
+  }
+  return '<div class="info-field" data-key="' + key + '"><div class="info-field-label">' + label + '</div><div class="info-field-value">' + valueHtml + '</div></div>';
 }
 
 function ynField(label, val, key, projId) {
@@ -2764,6 +2774,7 @@ function ynField(label, val, key, projId) {
 }
 
 function setYnField(projId, key, val) {
+  if (typeof requireInfoEdit === 'function' && !requireInfoEdit()) return;
   if (!projectInfo[projId]) return;
   projectInfo[projId][key] = val;
   if (sb) {
@@ -2791,6 +2802,7 @@ window.deleteEmployee = async function(id) {
 // Patch selectPm
 const _origSelectPm = typeof selectPm !== "undefined" ? selectPm : ()=>{};
 window.selectPm = async function(empId) {
+  if (typeof requireInfoEdit === 'function' && !requireInfoEdit()) return;
   const emp = employees.find(e => e.id === empId);
   if (!emp || !pmDropdownProjId) return;
   if (!projectInfo[pmDropdownProjId]) projectInfo[pmDropdownProjId] = defaultInfo(projects.find(p=>p.id===pmDropdownProjId)||{});
