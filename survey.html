@@ -2,18 +2,21 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>Customer Satisfaction Survey — NU Laboratories</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/survey.css">
+<script>
+  // Legacy survey URL. Forward to the /portal/survey zone, preserving the token.
+  // Self-contained on purpose — no external assets, so the existing
+  // /survey.html Cloudflare Access bypass covers it as-is.
+  (function () {
+    var p = new URLSearchParams(window.location.search);
+    var t = p.get('t') || p.get('token') || '';
+    var dest = '/portal/survey/' + (t ? '?t=' + encodeURIComponent(t) : '');
+    window.location.replace(dest);
+  })();
+</script>
 </head>
 <body>
-<div id="surveyRoot">
-  <div class="loading">Loading…</div>
-</div>
-<script src="js/survey-public.js"></script>
+  <noscript><a href="/portal/survey/">Continue to the survey</a></noscript>
 </body>
 </html>
