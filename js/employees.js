@@ -2480,10 +2480,7 @@ function buildEmpColorSwatches() {
 
 function updateEmpPreview() {
   const name = document.getElementById('empName').value.trim();
-  const parts = name.split(' ').filter(Boolean);
-  const initials = parts.length >= 2
-    ? (parts[0][0] + parts[parts.length-1][0]).toUpperCase()
-    : (name.slice(0,2).toUpperCase() || '?');
+  const initials = (name ? uniqueInitials(name, editingEmpId) : '') || '?';
   const el = document.getElementById('empAvPreview');
   el.textContent = initials;
   el.style.background = empColor;
@@ -2494,6 +2491,41 @@ function getInitials(name) {
   return parts.length >= 2
     ? (parts[0][0] + parts[parts.length-1][0]).toUpperCase()
     : name.slice(0,2).toUpperCase();
+}
+
+// Returns an uppercase initials string that no OTHER employee already uses.
+// Initials are the assignee/display key across the app, so collisions must be
+// avoided. Resolution order:
+//   1. first-initial + last-initial          (Ragen McAdoo -> RM)
+//   2. first two letters of the FIRST name    (Russ McAdoo -> RU, Robert Miller -> RO)
+//   3. first-initial + each later first-name letter (R+S, R+B, ...)
+//   4. numeric suffix on the base             (RM2, RM3, ...)
+// excludeId = the employee being edited, so they don't clash with themselves.
+// Checks against ALL employees (active and inactive), since historical tasks
+// can still point at an inactive person's initials.
+function uniqueInitials(name, excludeId) {
+  const clean = s => (s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const parts = (name || '').trim().split(/\s+/).filter(Boolean);
+  const first = parts[0] || '';
+
+  const taken = new Set(
+    employees
+      .filter(e => e.id !== excludeId)
+      .map(e => clean(e.initials))
+      .filter(Boolean)
+  );
+
+  const cands = [getInitials(name)];                    // 1
+  if (first.length >= 2) cands.push(first.slice(0, 2)); // 2
+  for (let i = 2; i < first.length; i++) cands.push(first[0] + first[i]); // 3
+
+  for (const c of cands) {
+    const v = clean(c);
+    if (v && !taken.has(v)) return v;
+  }
+  const base = clean(getInitials(name)) || clean(first).slice(0, 2) || 'X'; // 4
+  for (let n = 2; n < 100; n++) { const v = base + n; if (!taken.has(v)) return v; }
+  return base;
 }
 
 async function saveEmployee() {
@@ -2525,8 +2557,16 @@ async function saveEmployee() {
     return;
   }
 
+  // Initials are the assignee key — auto-derive and force uniqueness so two
+  // people can never collide (e.g. Ragen McAdoo = RM, Russ McAdoo = RU).
+  const _baseInitials  = getInitials(_name);
+  const _finalInitials = uniqueInitials(_name, _editingId);
+  const _adjNote = (_finalInitials && _finalInitials !== _baseInitials)
+    ? ` — initials saved as ${_finalInitials} (${_baseInitials} already in use)`
+    : '';
+
   const data = {
-    name: _name, initials: getInitials(_name),
+    name: _name, initials: _finalInitials,
     role: _role, dept: _dept, email: _email, phone: _phone, personalEmail: _personalEmail,
     hireDate: _hireDate, sickBank: _sickBank, vacBank: _vacBank, color: _color,
   };
@@ -2576,7 +2616,7 @@ async function saveEmployee() {
         };
       }
     }
-    toast('Employee updated');
+    toast('Employee updated' + _adjNote);
   } else {
     if (sb) {
       const { data: d, error } = await sb.from('employees').insert(dbPayload).select().single();
@@ -2601,7 +2641,7 @@ async function saveEmployee() {
     } else {
       employees.push({id: 'emp'+Date.now(), ...data, roleId: _roleId});
     }
-    toast(data.name + ' added');
+    toast(data.name + ' added' + _adjNote);
   }
   closeEmployeeModal();
   renderEmployeesPanel('');
