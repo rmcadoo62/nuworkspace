@@ -606,7 +606,7 @@ function renderTasksPanel(projId) {
 
   wrap.setAttribute('data-filter', activeFilter);
   wrap.innerHTML = `
-    <div style="position:sticky;top:0;z-index:20;background:var(--bg);padding:20px 0 4px;margin-bottom:0;border-bottom:2px solid var(--border);">
+    <div class="itt-toolbar">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:10px">
       <div style="display:flex;align-items:center;gap:8px">
         <div class="info-task-filters" style="margin:0">
@@ -620,6 +620,9 @@ function renderTasksPanel(projId) {
         ${isManager() ? `<button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="addSectionHeader('${projId}')">+ Section</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="openBulkAddModal('${projId}',null)" title="Add multiple tasks at once">+ Bulk</button>` : ''}
       </div>
     </div>
+    </div>
+    <div class="itt-hscroll">
+    <div class="itt-table">
     <div class="itt-head" id="ittHead">
       <div class="itt-head-cell"></div><div class="itt-head-cell" style="color:var(--muted);font-size:10px">#<span class="itt-resizer" data-col="num"></span></div>
       <div class="itt-head-cell">Cat.<span class="itt-resizer" data-col="pri"></span></div>
@@ -637,10 +640,11 @@ function renderTasksPanel(projId) {
       <div class="itt-head-cell"><span class="itt-resizer" data-col="comp"></span></div>
       <div class="itt-head-cell"></div>
     </div>
-    </div>
     ${tasks.length === 0
       ? `<div class="info-tasks-empty"><div class="eico">${activeFilter==='done'?'✅':activeFilter==='overdue'?'🎉':'📋'}</div>${activeFilter==='done'?'No completed tasks yet':activeFilter==='overdue'?'No overdue tasks — great work!':'No tasks yet — add one above'}</div>`
       : taskRows}
+    </div>
+    </div>
   `;
   setTimeout(ittInitResizers, 0);
 }
