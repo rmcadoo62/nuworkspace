@@ -942,6 +942,17 @@ function openTemplateEditModal(categoryId, subgroup = null) {
     }
   }
   
+  // Option 1 pairing: offboarding steps that have an onboarding partner (same
+  // track + key) are managed from the onboarding screen, so hide them here.
+  // Only standalone offboarding-only steps remain visible in this modal.
+  if (subgroup === 'nulabs-offboarding' || subgroup === 'ballantine-offboarding') {
+    const trk = subgroup.startsWith('nulabs') ? 'nulabs' : 'ballantine';
+    const onbKeys = new Set(
+      templates.filter(t => t.track === trk && t.type === 'onboarding').map(t => t.key)
+    );
+    filteredTemplates = filteredTemplates.filter(t => !onbKeys.has(t.key));
+  }
+  
   editingTemplateData = filteredTemplates.sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
   
   const modal = document.getElementById('templateEditModal');
@@ -1028,6 +1039,10 @@ function renderTemplateEditModal(category, subgroup = null) {
         modalDescription = 'Email templates used by the 📧 button on Project Info pages and on Client cards. Set the Audience on each template to control where it shows up. Available variables: {{contactFirstName}}, {{contactFullName}}, {{contactEmail}}, {{clientName}}, {{projectName}}, {{po}}, {{quoteNumber}}, {{testCompleteDate}}, {{tentativeTestDate}}, {{lastProjectName}}, {{lastProjectClosedDate}}, {{senderName}}, {{senderEmail}}. Project-specific variables ({{projectName}}, {{po}}, {{quoteNumber}}, test dates) are blank when the template is used from a Client card. {{lastProjectName}} and {{lastProjectClosedDate}} resolve to the most recent project for the client.';
       }
     }
+  }
+  
+  if (subgroup === 'nulabs-offboarding' || subgroup === 'ballantine-offboarding') {
+    modalDescription += ' Steps paired with an onboarding item are managed from the matching Onboarding screen (the "Include offboarding step" checkbox there). Only standalone offboarding-only steps appear here.';
   }
   
   if (title) title.textContent = modalTitle;
@@ -1236,6 +1251,47 @@ function renderTemplateEditRow(template, index) {
   const domainOptions = ['AC','AT','AU','CA','CM','IA','IR','MA','MP','PE','PS','RA','SC','SI'].map(domain => 
     `<option value="${domain}" ${(template.domain || '').toUpperCase() === domain ? 'selected' : ''}>${domain}</option>`).join('');
   
+  // ── Option 1 onboarding↔offboarding pairing ──────────────────────────
+  // Only HR onboarding items can carry a paired offboarding step. The partner
+  // is a separate row in `templates` sharing this item's key + track, and is
+  // managed entirely from here (it is hidden from the offboarding modal).
+  let offboardingPairBlock = '';
+  if (template.type === 'onboarding') {
+    const partner = templates.find(t =>
+      t.key === template.key && t.track === template.track && t.type === 'offboarding');
+    const esc = s => (s || '').replace(/"/g, '&quot;');
+    offboardingPairBlock = `
+      <div style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;font-weight:600;color:var(--text);">
+          <input type="checkbox" ${partner ? 'checked' : ''}
+            onchange="toggleOffboardingPair('${template.id}', this.checked)"
+            style="margin:0;">
+          Include offboarding step
+        </label>
+        ${partner ? `
+        <div style="margin-top:10px;padding:12px;background:rgba(224,92,92,0.06);border:1px solid rgba(224,92,92,0.25);border-radius:6px;">
+          <div style="font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:#e05c5c;margin-bottom:8px;">● Offboarding (returned / revoked)</div>
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Offboarding Label</div>
+            <input type="text" value="${esc(partner.label)}"
+              onchange="updateTemplateField('${partner.id}', 'label', this.value)"
+              style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;box-sizing:border-box;">
+          </div>
+          <div style="margin-bottom:10px;">
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Offboarding Instructions</div>
+            <textarea onchange="updateTemplateField('${partner.id}', 'instructions', this.value)"
+              style="width:100%;min-height:90px;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;resize:vertical;box-sizing:border-box;">${partner.instructions || ''}</textarea>
+          </div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text);">
+            <input type="checkbox" ${partner.notes_enabled ? 'checked' : ''}
+              onchange="updateTemplateField('${partner.id}', 'notes_enabled', this.checked)"
+              style="margin:0;">
+            Notes field enabled (offboarding)
+          </label>
+        </div>` : ''}
+      </div>`;
+  }
+  
   return `
     <div class="template-edit-row" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:12px;">
       <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px;">
@@ -1315,8 +1371,18 @@ function renderTemplateEditRow(template, index) {
             style="margin:0;">
           Notes field enabled
         </label>
+        ${(template.type === 'onboarding' || template.type === 'offboarding') ? `
+        <span style="display:flex;align-items:center;gap:6px;margin-left:16px;font-size:11px;color:var(--muted);">
+          Section:
+          <select onchange="updateTemplateField('${template.id}', 'lifecycle_group', this.value)"
+            style="background:var(--surface);border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
+            <option value="it" ${template.lifecycle_group === 'it' ? 'selected' : ''}>IT / Computer</option>
+            <option value="hr" ${(template.lifecycle_group || 'hr') === 'hr' ? 'selected' : ''}>HR / Building</option>
+          </select>
+        </span>` : ''}
         <div style="margin-left:auto;font-size:11px;color:var(--muted);">Key: <code style="font-family:'JetBrains Mono',monospace;background:var(--surface);padding:2px 6px;border-radius:3px;">${template.key}</code></div>
       </div>
+      ${offboardingPairBlock}
     </div>`;
 }
 
@@ -1412,50 +1478,78 @@ async function deleteTemplate(templateId) {
   }
 }
 
-async function addNewTemplate() {
+// ── Option 1: create/remove the offboarding partner from the onboarding card ──
+async function toggleOffboardingPair(onboardingId, checked) {
+  const onb = templates.find(t => t.id === onboardingId);
+  if (!onb) return;
   const category = templateCategories.find(c => c.id === editingCategoryId);
-  if (!category) return;
-  
-  const newTemplate = {
-    category_id: editingCategoryId,
-    key: 'new_template_' + Date.now(),
-    label: 'New Template',
-    instructions: 'Enter template instructions here...',
-    notes_enabled: false,
-    track: 'nulabs',
-    type: 'onboarding',
-    sort_order: editingTemplateData.length,
-    is_active: true
-  };
-  
-  try {
-    const { data, error } = await sb.from('templates')
-      .insert([newTemplate])
-      .select()
-      .single();
-    
-    if (error) {
-      console.error('Template create error:', error);
-      toast('⚠ Create failed: ' + error.message);
+  const existing = templates.find(t =>
+    t.key === onb.key && t.track === onb.track && t.type === 'offboarding');
+
+  if (checked) {
+    if (existing) return;
+    const newOff = {
+      category_id: onb.category_id,
+      key: onb.key,
+      label: onb.label,
+      instructions: 'Enter offboarding instructions here...',
+      notes_enabled: false,
+      track: onb.track,
+      type: 'offboarding',
+      sort_order: onb.sort_order || 0,
+      lifecycle_group: onb.lifecycle_group || 'hr',
+      is_active: true
+    };
+    try {
+      const { data, error } = await sb.from('templates').insert([newOff]).select().single();
+      if (error) {
+        console.error('Offboarding pair create error:', error);
+        toast('⚠ Could not add offboarding step: ' + error.message);
+      } else {
+        templates.push(data);
+        toast('✓ Offboarding step added');
+      }
+    } catch (e) {
+      console.error('Offboarding pair create failed:', e);
+      toast('⚠ Could not add offboarding step');
+    }
+  } else {
+    if (!existing) return;
+    // Warn if employees already have an offboarding date logged under this key.
+    let used = 0;
+    try {
+      const { count } = await sb.from('employee_lifecycle')
+        .select('id', { count: 'exact', head: true })
+        .eq('template_key', onb.key)
+        .not('offboarding_date', 'is', null);
+      used = count || 0;
+    } catch (e) { /* count is best-effort; fall through to generic confirm */ }
+    const msg = used > 0
+      ? `Remove the offboarding step "${existing.label}"?\n\n⚠ ${used} employee record(s) already have an offboarding date logged under this item. Deleting removes its label and instructions from the offboarding column (the logged dates themselves stay in the data). This cannot be undone.`
+      : `Remove the offboarding step "${existing.label}"? This cannot be undone.`;
+    if (!confirm(msg)) {
+      if (category) renderTemplateEditModal(category, editingSubgroup);
       return;
     }
-    
-    // Add to local data
-    templates.push(data);
-    editingTemplateData.push(data);
-    
-    // Re-render modal
-    renderTemplateEditModal(category);
-    
-    // Update main templates panel
-    renderTemplatesPanel();
-    
-    toast('✓ Template added');
-    
-  } catch (e) {
-    console.error('Template create failed:', e);
-    toast('⚠ Create failed');
+    try {
+      const { error } = await sb.from('templates').delete().eq('id', existing.id);
+      if (error) {
+        console.error('Offboarding pair delete error:', error);
+        toast('⚠ Could not remove offboarding step: ' + error.message);
+      } else {
+        const gi = templates.findIndex(t => t.id === existing.id);
+        if (gi > -1) templates.splice(gi, 1);
+        const ei = editingTemplateData.findIndex(t => t.id === existing.id);
+        if (ei > -1) editingTemplateData.splice(ei, 1);
+        toast('✓ Offboarding step removed');
+      }
+    } catch (e) {
+      console.error('Offboarding pair delete failed:', e);
+      toast('⚠ Could not remove offboarding step');
+    }
   }
+  if (category) renderTemplateEditModal(category, editingSubgroup);
+  renderTemplatesPanel();
 }
 
 

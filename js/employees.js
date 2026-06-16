@@ -1565,6 +1565,21 @@ async function _loadLifecycleTab(empId, emp) {
       return (aTemplate?.sort_order || 0) - (bTemplate?.sort_order || 0);
     });
 
+  // Partition keys into the two lifecycle sections. A key's section comes from
+  // its onboarding template (falls back to the offboarding template); anything
+  // unset defaults to HR / Building, the catch-all bucket.
+  const _grpOf = (key) => {
+    const ob = applicableTemplates.find(t => t.key === key && t.type === 'onboarding');
+    const of = applicableTemplates.find(t => t.key === key && t.type === 'offboarding');
+    const g = (ob?.lifecycle_group || of?.lifecycle_group || '').toLowerCase();
+    return g === 'it' ? 'it' : 'hr';
+  };
+  const itKeys = templateKeys.filter(k => _grpOf(k) === 'it');
+  const hrKeys = templateKeys.filter(k => _grpOf(k) === 'hr');
+  const orderedRows = [];
+  if (itKeys.length) { orderedRows.push({ __section: 'IT / Computer' }); itKeys.forEach(k => orderedRows.push({ key: k })); }
+  if (hrKeys.length) { orderedRows.push({ __section: 'HR / Building' }); hrKeys.forEach(k => orderedRows.push({ key: k })); }
+
   // Calculate progress
   const applicableItems = templateKeys.filter(key => !lifecycleData[key]?.is_na);
   const onboardingComplete = applicableItems.filter(key => lifecycleData[key]?.onboarding_date).length;
@@ -1606,7 +1621,11 @@ async function _loadLifecycleTab(empId, emp) {
           </tr>
         </thead>
         <tbody>
-          ${templateKeys.map(key => {
+          ${orderedRows.map(row => {
+            if (row.__section) {
+              return `<tr><td colspan="5" style="padding:10px 16px;background:var(--surface2);font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">${row.__section}</td></tr>`;
+            }
+            const key = row.key;
             const onboardingTemplate = applicableTemplates.find(t => t.key === key && t.type === 'onboarding');
             const offboardingTemplate = applicableTemplates.find(t => t.key === key && t.type === 'offboarding');
             const record = lifecycleData[key] || {};
@@ -1620,7 +1639,7 @@ async function _loadLifecycleTab(empId, emp) {
             
             return `
               <tr style="border-bottom:${(showOnbNotes || showOffNotes) ? 'none' : '1px solid var(--border)'};${isNA ? 'opacity:0.5;' : ''}" data-key="${key}">
-                <td style="padding:12px 16px;font-size:13px;color:var(--text)">${onboardingTemplate?.label || key}</td>
+                <td style="padding:12px 16px;font-size:13px;color:var(--text)">${onboardingTemplate?.label || offboardingTemplate?.label || key}${(onboardingTemplate && offboardingTemplate && offboardingTemplate.label && offboardingTemplate.label !== onboardingTemplate.label) ? `<div style="font-size:11px;color:#e05c5c;margin-top:3px">● ${offboardingTemplate.label}</div>` : ''}</td>
                 <td style="text-align:center;padding:12px 16px">
                   ${isNA ? `<span style="color:var(--muted);font-size:12px">N/A</span>` : 
                     canEdit ? `
