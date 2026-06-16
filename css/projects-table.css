@@ -117,3 +117,25 @@
 }
 .proj-col-filter-clear:hover { color: var(--text); background: var(--surface3, var(--surface2)); }
 .proj-col-filter-wrap[data-filled] .proj-col-filter-clear { display: flex; }
+
+/* ===== INLINE CELL EDITING ===== */
+/* Editable Project List cells (double-click to edit). Affordance is a subtle ring on hover. */
+.projtbl-editable { cursor: pointer; }
+.projtbl-editable:hover { box-shadow: inset 0 0 0 1.5px var(--amber-dim); border-radius: 4px; }
+.projtbl-inline-input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface);
+  border: 1px solid var(--amber-dim);
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 11px;
+  font-family: 'DM Sans', sans-serif;
+  padding: 2px 4px;
+  margin: 0;
+  outline: none;
+}
+.projtbl-inline-input:focus { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber-glow); }
+input.projtbl-inline-input[type="date"] { color-scheme: light; font-family: 'JetBrains Mono', monospace; }
+input.projtbl-inline-input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0); opacity: .8; cursor: pointer; }
+input.projtbl-inline-input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }

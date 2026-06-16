@@ -155,6 +155,95 @@ function inHouseColor(v) {
   return null;
 }
 
+// ===== INLINE PROJECT-LIST EDITING =====
+// Double-click a cell in the Project List to edit it in place, instead of opening the job.
+// Scope: the five plain project_info fields below. Status is intentionally excluded — its
+// transitions are gated by mark_complete/mark_closing/mark_closed in changeProjectStatus, so
+// it stays editable only from the detail view. Company and Project/Job Number are excluded by
+// design; derived columns (revenue, hours, remaining) are never editable. Every inline edit is
+// gated by the same capability the detail Info sheet uses: edit_project_info.
+
+// col key (PROJ_COL_DEFS) -> editor type
+const PROJ_INLINE_TYPE   = { dcas:'enum', witness:'enum', tpApproval:'enum', cui:'enum', tentativeTest:'date' };
+// col key -> projectInfo field name
+const PROJ_INLINE_FIELD  = { dcas:'dcas', witness:'customerWitness', tpApproval:'tpApproval', cui:'cui', tentativeTest:'tentativeTestDate' };
+// projectInfo field name -> project_info DB column
+const PROJ_INLINE_COLMAP = { dcas:'dcas', customerWitness:'customer_witness', tpApproval:'tp_approval', cui:'cui', tentativeTestDate:'tentative_test_date' };
+// enum option sets — mirror the detail Info sheet (pickField) exactly: same values, same colors
+const PROJ_INLINE_OPTS = {
+  dcas:            [{value:'No',label:'No',color:'var(--muted)'},{value:'Yes',label:'Yes',color:'var(--green)'},{value:'CNF',label:'CNF',color:'var(--blue)'}],
+  customerWitness: [{value:'Yes',label:'Yes',color:'var(--green)'},{value:'No',label:'No',color:'var(--muted)'},{value:'CNF',label:'CNF',color:'var(--blue)'}],
+  tpApproval:      [{value:'Yes',label:'Yes',color:'var(--green)'},{value:'No',label:'No',color:'var(--red)'},{value:'Partial',label:'Partial',color:'var(--amber)'},{value:'Not Required',label:'Not Required',color:'var(--muted)'}],
+  cui:             [{value:'No',label:'No',color:'var(--muted)'},{value:'Yes',label:'Yes',color:'var(--red)'}],
+};
+
+// Same gate as the detail Info sheet (renderInfoSheet / requireInfoEdit).
+function projCanEditInline() {
+  return typeof can === 'function' && can('edit_project_info');
+}
+
+// Opens an in-place editor in a Project List cell. `td` carries data-col + data-proj-id.
+// Enums commit on change (Esc/blur-away cancels); dates commit on blur/Enter (Esc cancels).
+// On commit we update the in-memory projectInfo, persist to project_info, then re-render the
+// table so sort/filter and any cell color tint stay consistent.
+async function startProjInlineEdit(td) {
+  if (!projCanEditInline()) {
+    if (typeof toast === 'function') toast('View-only access \u2014 you can\u2019t edit project info');
+    return;
+  }
+  if (!td || td.querySelector('select,input')) return; // already editing
+  const colKey   = td.dataset.col;
+  const projId   = td.dataset.projId;
+  const fieldKey = PROJ_INLINE_FIELD[colKey];
+  const type     = PROJ_INLINE_TYPE[colKey];
+  if (!fieldKey || !projId) return;
+  if (!projectInfo[projId]) projectInfo[projId] = {};
+  const info    = projectInfo[projId];
+  const current = info[fieldKey] || '';
+  const dbCol   = PROJ_INLINE_COLMAP[fieldKey];
+
+  let committed = false;
+  const persist = async (val) => {
+    if (committed) return;
+    committed = true;
+    info[fieldKey] = val;
+    if (sb) {
+      try { await sb.from('project_info').update({ [dbCol]: val || null }).eq('project_id', projId); }
+      catch (e) { console.error('inline project edit save failed', e); if (typeof toast === 'function') toast('Save failed'); }
+    }
+    if (typeof toast === 'function') toast('Saved');
+    renderProjectsTable();
+  };
+  const cancel = () => { if (committed) return; committed = true; renderProjectsTable(); };
+
+  td.innerHTML = '';
+
+  if (type === 'date') {
+    const input = document.createElement('input');
+    input.type = 'date';
+    input.className = 'projtbl-inline-input';
+    input.value = current;
+    td.appendChild(input);
+    input.focus();
+    input.addEventListener('blur', () => persist(input.value));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') input.blur();
+      else if (e.key === 'Escape') cancel();
+    });
+  } else {
+    const opts = PROJ_INLINE_OPTS[fieldKey] || [];
+    const sel = document.createElement('select');
+    sel.className = 'projtbl-inline-input';
+    sel.innerHTML = '<option value="">\u2014</option>' +
+      opts.map(o => '<option value="' + o.value + '"' + (current === o.value ? ' selected' : '') + '>' + o.label + '</option>').join('');
+    td.appendChild(sel);
+    sel.focus();
+    sel.addEventListener('change', () => persist(sel.value));
+    sel.addEventListener('blur', cancel);
+    sel.addEventListener('keydown', e => { if (e.key === 'Escape') cancel(); });
+  }
+}
+
 // Default order = order as declared in PROJ_COL_DEFS above
 const DEFAULT_COL_ORDER = PROJ_COL_DEFS.map(c => c.key);
 
@@ -513,7 +602,16 @@ function renderProjectsTable() {
         if (rule.color) cellStyle += `;color:${rule.color}`;
       }
     }
-    return `<td${cellStyle?` style="${cellStyle}"`:''}>${val}</td>`;
+    // Inline double-click editing for editable project_info fields (gated by edit_project_info).
+    // Editable cells swallow single clicks so the row's navigation doesn't fire, and open an
+    // in-place editor on double-click. Users without the capability get the normal navigating cell.
+    let editAttrs = '';
+    if (PROJ_INLINE_TYPE[c.key] && projCanEditInline()) {
+      editAttrs = ` class="projtbl-editable" data-col="${c.key}" data-proj-id="${p.id}"`
+        + ` onclick="event.stopPropagation()" ondblclick="event.stopPropagation();startProjInlineEdit(this)"`
+        + ` title="Double-click to edit"`;
+    }
+    return `<td${editAttrs}${cellStyle?` style="${cellStyle}"`:''}>${val}</td>`;
   }
 
   const rows = filtered.map(p => {
