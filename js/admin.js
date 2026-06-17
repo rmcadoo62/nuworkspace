@@ -626,7 +626,7 @@ function renderTemplatesPanel() {
           const nulabsOffboarding = categoryTemplates.filter(t => t.track === 'nulabs' && t.type === 'offboarding');
           const ballantineOnboarding = categoryTemplates.filter(t => t.track === 'ballantine' && t.type === 'onboarding');
           const ballantineOffboarding = categoryTemplates.filter(t => t.track === 'ballantine' && t.type === 'offboarding');
-          const generalTemplates = categoryTemplates.filter(t => !t.track || (t.track !== 'nulabs' && t.track !== 'ballantine'));
+          const generalTemplates = categoryTemplates.filter(t => t.type !== 'onboarding' && t.type !== 'offboarding');
           
           return `
           <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;overflow:hidden;">
@@ -908,7 +908,9 @@ function openTemplateEditModal(categoryId, subgroup = null) {
           )
         );
       } else if (subgroup === 'general') {
-        filteredTemplates = filteredTemplates.filter(t => !t.track || (t.track !== 'nulabs' && t.track !== 'ballantine'));
+        // General HR = HR templates that are NOT lifecycle items. Filtering by
+        // type (not track) keeps merged 'both' onboarding/offboarding out.
+        filteredTemplates = filteredTemplates.filter(t => t.type !== 'onboarding' && t.type !== 'offboarding');
       } else {
         // Legacy support for old subgroup names
         filteredTemplates = filteredTemplates.filter(t => t.track === subgroup);
