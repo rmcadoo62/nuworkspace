@@ -1073,6 +1073,12 @@ function renderLifecycleEditModal(category) {
     { id: 'hr', label: 'HR / Building' }
   ];
 
+  // A paired offboarding step is managed inside its onboarding card, so never
+  // render it as a standalone card here — hide offboarding items whose key
+  // also has an onboarding item present.
+  const _onbKeys = new Set(editingTemplateData.filter(t => t.type === 'onboarding').map(t => t.key));
+  const visibleItems = editingTemplateData.filter(t => !(t.type === 'offboarding' && _onbKeys.has(t.key)));
+
   const seg = (val, label) => `
     <button onclick="switchLifecycleTrack('${val}')"
       style="flex:1;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border:none;font-family:'DM Sans',sans-serif;
@@ -1081,7 +1087,7 @@ function renderLifecycleEditModal(category) {
     </button>`;
 
   const sectionHtml = sections.map(sec => {
-    const items = editingTemplateData.filter(t => grpOf(t) === sec.id);
+    const items = visibleItems.filter(t => grpOf(t) === sec.id);
     if (!items.length) return '';
     return `
       <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin:18px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border);">${sec.label}</div>
@@ -1100,7 +1106,7 @@ function renderLifecycleEditModal(category) {
         ${seg('nulabs', 'NU Labs')}
         ${seg('ballantine', 'Ballantine')}
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">${editingTemplateData.length} item${editingTemplateData.length !== 1 ? 's' : ''} in ${companyLabel}</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">${visibleItems.length} item${visibleItems.length !== 1 ? 's' : ''} in ${companyLabel}</div>
 
       <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:16px;background:var(--amber-glow);border:1px solid var(--amber-dim);border-radius:6px;font-size:12px;color:var(--text);">
         <span style="font-size:14px;">💾</span>
@@ -1108,7 +1114,7 @@ function renderLifecycleEditModal(category) {
       </div>
 
       <div id="templateEditList">
-        ${editingTemplateData.length === 0
+        ${visibleItems.length === 0
           ? `<div style="text-align:center;padding:40px;color:var(--muted);">No lifecycle items for ${companyLabel} yet.</div>`
           : sectionHtml}
       </div>
