@@ -748,6 +748,7 @@ function renderTemplatesPanel() {
                       const audienceLabel =
                         t.audience === 'client_outreach' ? 'Client card'
                         : t.audience === 'general'       ? 'Both'
+                        : t.audience === 'staff_closure' ? 'Closure (staff)'
                         : 'Project page';
                       return `<span style="display:inline-block;margin-right:10px;"><span style="color:var(--text);font-weight:500;">↳ ${label}</span> <span style="color:var(--muted);font-size:10.5px;">(${audienceLabel})</span></span>`;
                     }).join('')}

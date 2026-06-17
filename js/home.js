@@ -31,16 +31,18 @@ async function renderHomePage() {
   if (!wrap) return;
   wrap.innerHTML = '<div class="home-loading">Loading...</div>';
 
-  const [weather, announcements, whosOut, mySubmissions] = await Promise.all([
+  const [weather, announcements, closureAnn, whosOut, mySubmissions] = await Promise.all([
     fetchHomeWeather(),
     fetchAnnouncements(),
+    fetchClosureAnnouncement(),
     getWhosOut(),
     fetchMySubmissions(),
   ]);
 
-  const holidays  = getUpcomingHolidays(3);
-  const chatter   = await fetchRecentChatter(8);
-  const canPost   = currentEmployee && (currentEmployee.isOwner || isManager());
+  const holidays   = getUpcomingHolidays(3);
+  const chatter    = await fetchRecentChatter(8);
+  const canPost    = currentEmployee && (currentEmployee.isOwner || isManager());
+  const canClosure = !!(currentEmployee && currentEmployee.isOwner);  // owners only
 
   const now = new Date();
   const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -48,7 +50,12 @@ async function renderHomePage() {
   wrap.innerHTML = `
     <div class="home-grid">
 
-      <div class="home-date-header">${dateStr}</div>
+      <div class="home-date-header" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <span>${dateStr}</span>
+        ${renderClosureButton(canClosure)}
+      </div>
+
+      ${renderClosureBanner(closureAnn, canClosure)}
 
       ${renderAnnouncementSection(announcements, canPost)}
 
@@ -69,6 +76,10 @@ async function renderHomePage() {
 }
 
 // ---- Announcements ----
+// General announcements only — closure notices (kind='closure') are pinned
+// separately above the board and must not count toward the ANN_MAX_ACTIVE cap.
+// Closure rows are filtered client-side (not via .neq) because a server-side
+// .neq('kind','closure') would silently drop any legacy null-kind rows.
 async function fetchAnnouncements() {
   if (!sb) return [];
   const today = new Date().toISOString().slice(0, 10);
@@ -77,10 +88,71 @@ async function fetchAnnouncements() {
       .select('*')
       .gte('expires_at', today)
       .order('created_at', { ascending: false })
-      .limit(ANN_MAX_ACTIVE);
+      .limit(20);
     if (error) { console.error('fetchAnnouncements:', error); return []; }
-    return data || [];
+    return (data || [])
+      .filter(a => (a.kind || 'general') !== 'closure')
+      .slice(0, ANN_MAX_ACTIVE);
   } catch (e) { console.error('fetchAnnouncements:', e); return []; }
+}
+
+// The single active closure/snow notice, if any. Pinned above the board,
+// independent of the 3-announcement cap. Auto-expires the day after closure.
+async function fetchClosureAnnouncement() {
+  if (!sb) return null;
+  const today = new Date().toISOString().slice(0, 10);
+  try {
+    const { data, error } = await sb.from('announcements')
+      .select('*')
+      .eq('kind', 'closure')
+      .gte('expires_at', today)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (error) { console.error('fetchClosureAnnouncement:', error); return null; }
+    return (data && data[0]) || null;
+  } catch (e) { console.error('fetchClosureAnnouncement:', e); return null; }
+}
+
+// ---- Closure / Snow Notice ----
+// Pinned banner shown above the regular announcement board. Owners always see
+// the "Send Closure Notice" button; everyone sees the active banner if one is up.
+function renderClosureBanner(ann, canClosure) {
+  let html = '';
+
+  if (ann) {
+    const emp     = (typeof employees !== 'undefined' ? employees : []).find(e => e.id === ann.posted_by);
+    const poster  = emp ? emp.name : 'Management';
+    const expires = new Date(ann.expires_at + 'T00:00:00');
+    const expStr  = expires.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const title   = (ann.title || '').trim();
+    const message = (ann.message || '').trim();
+    const clearBtn = canClosure
+      ? `<button onclick="clearAnnouncement('${ann.id}')" title="Clear notice"
+           style="background:transparent;border:1px solid var(--blue);border-radius:6px;padding:4px 10px;font-size:11px;color:var(--blue);cursor:pointer;font-family:'DM Sans',sans-serif;flex-shrink:0;">&#x2715; Clear</button>`
+      : '';
+
+    html += `<div id="homeClosureBanner"
+      style="display:flex;align-items:flex-start;gap:12px;background:rgba(58,127,212,0.08);border:1px solid rgba(58,127,212,0.35);border-left:4px solid var(--blue);border-radius:0 8px 8px 0;padding:14px 16px;margin-bottom:12px;">
+      <div style="font-size:22px;line-height:1;flex-shrink:0;">&#x2744;&#xFE0F;</div>
+      <div style="flex:1;min-width:0;">
+        ${title ? `<div style="font-size:15px;font-weight:700;color:var(--text);margin-bottom:4px;">${_homeEsc(title)}</div>` : ''}
+        ${message ? `<div style="font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.5;">${_homeEsc(message)}</div>` : ''}
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;">Posted by ${_homeEsc(poster)} &middot; Clears ${expStr}</div>
+      </div>
+      ${clearBtn}
+    </div>`;
+  }
+
+  return html;
+}
+
+// Owner-only "Send Closure Notice" button — rendered inline with the date header.
+function renderClosureButton(canClosure) {
+  if (!canClosure) return '';
+  return `<button onclick="openClosureNotice()"
+    style="background:var(--surface);border:1px solid var(--blue);border-radius:8px;padding:7px 14px;font-size:12px;font-weight:600;color:var(--blue);cursor:pointer;font-family:'DM Sans',sans-serif;display:inline-flex;align-items:center;gap:7px;flex-shrink:0;">
+    &#x2744;&#xFE0F; Send Closure Notice
+  </button>`;
 }
 
 function renderAnnouncementSection(anns, canPost) {
@@ -740,6 +812,300 @@ function timeAgo(ts) {
   if (diff < 86400)return Math.floor(diff/3600) + 'h ago';
   return Math.floor(diff/86400) + 'd ago';
 }
+
+// ============================================================================
+// Closure / Snow Notice composer  (owners only)
+// ----------------------------------------------------------------------------
+// Emails every active employee (NU Labs + Ballantine) who has a personal email
+// on file, via the send-client-email Edge Function with BCC so home addresses
+// are never exposed to each other. Optionally pins a snow banner to Home and
+// always logs the send to the closure_notices audit table.
+// ============================================================================
+
+// Fallback wording if the DB templates (audience='staff_closure') aren't found.
+const CLOSURE_DEFAULTS = {
+  closed: {
+    subject: 'NU Labs & Ballantine — Closed {date}',
+    body: 'Hi All,\n\nDue to current weather conditions, NU Labs and Ballantine Labs will be closed on {date}.\n\nPlease stay safe and watch your email and the Home page for any updates.\n\n{note}\n\n— NU Laboratories Management',
+  },
+  delayed: {
+    subject: 'NU Labs & Ballantine — {delay} delayed opening {date}',
+    body: 'Hi All,\n\nDue to the current weather conditions, NU Labs and Ballantine Labs will operate on a {delay} delayed opening tomorrow, {date}.\n\nIf the weather continues overnight, we will reassess and send further information in the morning, so please monitor your email addresses so you don\'t miss potential closure information.\n\n{note}\n\n— NU Laboratories Management',
+  },
+};
+
+let _closureTemplates = null;        // { closed:{subject,body}, delayed:{subject,body} }
+let _closureType      = 'delayed';   // 'closed' | 'delayed'
+
+function _closureRecipients() {
+  return (typeof employees !== 'undefined' ? employees : [])
+    .filter(e => e && e.isActive && e.personalEmail && String(e.personalEmail).trim());
+}
+function _closureFmtDate(iso) {
+  try { const p = iso.split('-'); const d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  } catch (e) { return iso; }
+}
+function _closureFmtDateShort(iso) {
+  try { const p = iso.split('-'); const d = new Date(+p[0], +p[1] - 1, +p[2]);
+    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  } catch (e) { return iso; }
+}
+function _closureEscHandler(e) { if (e.key === 'Escape') closeClosureNotice(); }
+
+window.openClosureNotice = async function() {
+  if (!currentEmployee || !currentEmployee.isOwner) {
+    if (typeof toast === 'function') toast('⚠ Owners only');
+    return;
+  }
+
+  // Load editable templates (fall back to built-in wording on any miss)
+  const tpl = { closed: { ...CLOSURE_DEFAULTS.closed }, delayed: { ...CLOSURE_DEFAULTS.delayed } };
+  try {
+    const { data } = await sb.from('templates')
+      .select('key,subject,instructions')
+      .eq('audience', 'staff_closure');
+    (data || []).forEach(r => {
+      if (r.key === 'closure_closed')  tpl.closed  = { subject: r.subject || tpl.closed.subject,  body: r.instructions || tpl.closed.body };
+      if (r.key === 'closure_delayed') tpl.delayed = { subject: r.subject || tpl.delayed.subject, body: r.instructions || tpl.delayed.body };
+    });
+  } catch (e) { console.error('closure templates fetch:', e); }
+  _closureTemplates = tpl;
+  _closureType = 'delayed';
+
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const tomorrowIso = tomorrow.toISOString().slice(0, 10);
+  const recipCount  = _closureRecipients().length;
+
+  let overlay = document.getElementById('homeClosureModalOverlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'homeClosureModalOverlay';
+    overlay.className = 'home-ann-modal-overlay';
+    document.body.appendChild(overlay);
+  }
+
+  overlay.innerHTML = `
+    <div class="home-ann-modal" role="dialog" aria-modal="true" aria-labelledby="cnHeading" style="max-width:480px;">
+      <div class="home-ann-modal-header">
+        <div class="home-ann-modal-heading" id="cnHeading">&#x2744;&#xFE0F; Send Closure Notice</div>
+        <button class="home-ann-modal-close" onclick="closeClosureNotice()" aria-label="Close">&#x2715;</button>
+      </div>
+      <div class="home-ann-modal-body">
+
+        <label class="home-ann-modal-label" style="margin-bottom:4px;">Notice type</label>
+        <div style="display:flex;margin-bottom:14px;">
+          <button class="cn-seg" data-type="closed" onclick="setClosureType('closed')"
+            style="flex:1;height:38px;border:1px solid var(--border);border-right:none;border-radius:8px 0 0 8px;background:var(--surface);color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">Closed</button>
+          <button class="cn-seg" data-type="delayed" onclick="setClosureType('delayed')"
+            style="flex:1;height:38px;border:1px solid var(--border);border-radius:0 8px 8px 0;background:var(--surface);color:var(--muted);font-size:13px;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;">Delayed opening</button>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-bottom:14px;">
+          <label class="home-ann-modal-label" style="flex:1;margin:0;">
+            Date
+            <input type="date" class="home-ann-modal-date" id="cnDate" value="${tomorrowIso}" oninput="_cnBuild()" />
+          </label>
+          <div id="cnDelayRow" style="flex:1;">
+            <label class="home-ann-modal-label" style="margin:0;">
+              Delay
+              <select id="cnDelay" class="home-ann-modal-input" onchange="_cnBuild()" style="height:38px;">
+                <option value="1-hour">1-hour</option>
+                <option value="2-hour" selected>2-hour</option>
+                <option value="3-hour">3-hour</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <label class="home-ann-modal-label">
+          Additional note <span class="home-ann-modal-label-muted">— optional</span>
+          <textarea class="home-ann-modal-textarea" id="cnNote" rows="2" placeholder="e.g. Lab leads, please check the freezers remotely." oninput="_cnBuild()"></textarea>
+        </label>
+
+        <div style="display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin:6px 0 14px;">
+          <span style="font-size:12px;color:var(--muted);">Sending to <span style="color:var(--text);font-weight:600;">${recipCount}</span> active employee${recipCount !== 1 ? 's' : ''} (NU Labs + Ballantine) with a personal email on file.</span>
+        </div>
+
+        <label class="home-ann-modal-label" style="margin-bottom:4px;">Preview <span class="home-ann-modal-label-muted">— editable before send</span></label>
+        <input type="text" class="home-ann-modal-input" id="cnSubj" style="font-weight:600;margin-bottom:8px;" />
+        <textarea class="home-ann-modal-textarea" id="cnBody" rows="9"></textarea>
+
+        <label style="display:flex;align-items:flex-start;gap:9px;cursor:pointer;margin-top:14px;">
+          <input type="checkbox" id="cnAnn" checked style="margin-top:2px;width:15px;height:15px;flex-shrink:0;" />
+          <span style="font-size:13px;color:var(--text);">Also post to the Home announcements board
+            <span style="display:block;font-size:11px;color:var(--muted);margin-top:1px;">Pinned as a snow banner, clears the day after the closure.</span>
+          </span>
+        </label>
+
+      </div>
+      <div class="home-ann-modal-footer">
+        <button class="home-ann-cancel-btn" onclick="closeClosureNotice()">Cancel</button>
+        <button class="home-ann-save-btn" id="cnSendBtn" onclick="sendClosureNotice()" ${recipCount === 0 ? 'disabled' : ''}>Send to ${recipCount}</button>
+      </div>
+    </div>
+  `;
+
+  overlay.classList.add('active');
+  overlay.onclick = (e) => { if (e.target === overlay) closeClosureNotice(); };
+  document.addEventListener('keydown', _closureEscHandler);
+
+  setClosureType('delayed');  // sets segment styling, delay visibility, builds preview
+};
+
+window.setClosureType = function(t) {
+  _closureType = (t === 'closed') ? 'closed' : 'delayed';
+  const overlay = document.getElementById('homeClosureModalOverlay');
+  if (!overlay) return;
+  overlay.querySelectorAll('.cn-seg').forEach(b => {
+    const on = b.getAttribute('data-type') === _closureType;
+    b.style.background  = on ? 'var(--blue)' : 'var(--surface)';
+    b.style.color       = on ? '#fff'        : 'var(--muted)';
+    b.style.borderColor = on ? 'var(--blue)' : 'var(--border)';
+  });
+  const dr = overlay.querySelector('#cnDelayRow');
+  if (dr) dr.style.visibility = (_closureType === 'delayed') ? 'visible' : 'hidden';
+  _cnBuild();
+};
+
+// Rebuild the editable subject/body preview from the current fields.
+window._cnBuild = function() {
+  const overlay = document.getElementById('homeClosureModalOverlay');
+  if (!overlay) return;
+  const dateV  = overlay.querySelector('#cnDate').value;
+  const delaySel = overlay.querySelector('#cnDelay');
+  const delayV = delaySel ? delaySel.value : '';
+  const noteV  = (overlay.querySelector('#cnNote').value || '').trim();
+  const dateStr = dateV ? _closureFmtDate(dateV) : '{date}';
+  const tpl = (_closureTemplates && _closureTemplates[_closureType]) || CLOSURE_DEFAULTS[_closureType];
+
+  const subject = String(tpl.subject || '')
+    .split('{date}').join(dateStr)
+    .split('{delay}').join(delayV);
+  let body = String(tpl.body || '')
+    .split('{date}').join(dateStr)
+    .split('{delay}').join(delayV)
+    .split('{note}').join(noteV)
+    .replace(/\n{3,}/g, '\n\n');
+
+  overlay.querySelector('#cnSubj').value = subject;
+  overlay.querySelector('#cnBody').value = body;
+};
+
+window.closeClosureNotice = function() {
+  const overlay = document.getElementById('homeClosureModalOverlay');
+  if (overlay) overlay.classList.remove('active');
+  document.removeEventListener('keydown', _closureEscHandler);
+};
+
+window.sendClosureNotice = async function() {
+  if (!currentEmployee || !currentEmployee.isOwner) {
+    if (typeof toast === 'function') toast('⚠ Owners only');
+    return;
+  }
+  const overlay = document.getElementById('homeClosureModalOverlay');
+  if (!overlay) return;
+
+  const btn     = overlay.querySelector('#cnSendBtn');
+  const dateV   = overlay.querySelector('#cnDate').value;
+  const delaySel= overlay.querySelector('#cnDelay');
+  const delayV  = delaySel ? delaySel.value : '';
+  const noteV   = (overlay.querySelector('#cnNote').value || '').trim();
+  const subject = (overlay.querySelector('#cnSubj').value || '').trim();
+  const body    = (overlay.querySelector('#cnBody').value || '').trim();
+  const postAnn = overlay.querySelector('#cnAnn').checked;
+
+  if (!dateV)            { if (typeof toast === 'function') toast('⚠ Pick a date'); return; }
+  if (!subject || !body) { if (typeof toast === 'function') toast('⚠ Subject and body are required'); return; }
+
+  const recips = _closureRecipients();
+  if (recips.length === 0) {
+    if (typeof toast === 'function') toast('⚠ No active employees have a personal email on file');
+    return;
+  }
+
+  if (!confirm(`Send this ${_closureType === 'closed' ? 'closure' : 'delayed-opening'} notice to ${recips.length} employee${recips.length !== 1 ? 's' : ''}?`)) return;
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+
+  // To = sender's real inbox (keeps a copy); all staff go in BCC so personal
+  // addresses are never exposed to each other.
+  const SEND_DOMAIN = 'mail.nulabs.com';
+  const realEmail = currentEmployee.email;
+  const fromEmail = realEmail.split('@')[0] + '@' + SEND_DOMAIN;
+  const bcc = recips.map(r => String(r.personalEmail).trim());
+
+  let resendId = null, status = 'sent', errorMsg = null;
+  try {
+    const { data, error } = await sb.functions.invoke('send-client-email', {
+      body: {
+        to:           [realEmail],
+        bcc:          bcc,
+        subject:      subject,
+        body:         body,
+        fromName:     currentEmployee.name || 'NU Laboratories Management',
+        fromEmail:    fromEmail,
+        replyToEmail: realEmail,
+      },
+    });
+    if (error) throw error;
+    if (data && data.error) throw new Error(data.error);
+    resendId = (data && data.id) ? data.id : null;
+  } catch (e) {
+    console.error('sendClosureNotice failed:', e);
+    status = 'failed';
+    errorMsg = (e && e.message) ? e.message : 'Unknown error';
+  }
+
+  // Audit log — one row per send (recipient_count rather than per-recipient rows)
+  try {
+    await sb.from('closure_notices').insert({
+      sent_by:         currentEmployee.id,
+      notice_type:     _closureType === 'closed' ? 'closed' : 'delayed',
+      notice_date:     dateV,
+      delay_label:     _closureType === 'delayed' ? (delayV || null) : null,
+      note:            noteV || null,
+      subject:         subject,
+      body:            body,
+      recipient_count: recips.length,
+      resend_id:       resendId,
+      status:          status,
+      error:           errorMsg,
+    });
+  } catch (e) { console.error('closure_notices insert:', e); }
+
+  if (status === 'failed') {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send to ' + recips.length; }
+    if (typeof toast === 'function') toast('⚠ Send failed: ' + (errorMsg || ''));
+    return;
+  }
+
+  // Auto-post the pinned snow banner (replaces any prior closure notice).
+  if (postAnn) {
+    try {
+      const dateShort = _closureFmtDateShort(dateV);
+      const annTitle = _closureType === 'closed'
+        ? ('Closed ' + dateShort)
+        : ((delayV || 'Delayed') + ' delayed opening ' + dateShort);
+      const exp = new Date(dateV + 'T00:00:00');
+      exp.setDate(exp.getDate() + 1);  // clears the day after the closure
+      const expIso = exp.toISOString().slice(0, 10);
+      await sb.from('announcements').delete().eq('kind', 'closure');
+      await sb.from('announcements').insert({
+        title:      annTitle,
+        message:    body,
+        posted_by:  currentEmployee.id,
+        expires_at: expIso,
+        kind:       'closure',
+      });
+    } catch (e) { console.error('closure announcement post:', e); }
+  }
+
+  if (typeof toast === 'function') toast('✓ Notice sent to ' + recips.length + (recips.length === 1 ? ' employee' : ' employees'));
+  closeClosureNotice();
+  renderHomePage();
+};
 
 function attachHomeEvents() {
   // nothing extra needed — all wired via onclick
