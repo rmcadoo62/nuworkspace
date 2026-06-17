@@ -1560,8 +1560,10 @@ async function _loadLifecycleTab(empId, emp) {
   // Get unique template keys (each key appears in both onboarding and offboarding)
   const templateKeys = [...new Set(applicableTemplates.map(t => t.key))]
     .sort((a, b) => {
-      const aTemplate = applicableTemplates.find(t => t.key === a && t.type === 'onboarding');
-      const bTemplate = applicableTemplates.find(t => t.key === b && t.type === 'onboarding');
+      const aTemplate = applicableTemplates.find(t => t.key === a && t.type === 'onboarding')
+        || applicableTemplates.find(t => t.key === a && t.type === 'offboarding');
+      const bTemplate = applicableTemplates.find(t => t.key === b && t.type === 'onboarding')
+        || applicableTemplates.find(t => t.key === b && t.type === 'offboarding');
       return (aTemplate?.sort_order || 0) - (bTemplate?.sort_order || 0);
     });
 
