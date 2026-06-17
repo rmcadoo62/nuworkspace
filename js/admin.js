@@ -636,49 +636,13 @@ function renderTemplatesPanel() {
               <div style="font-size:11px;color:var(--muted);margin-top:4px;">${categoryTemplates.length} total templates</div>
             </div>
             <div style="padding:16px 20px;">
-              ${nulabsOnboarding.length > 0 ? `
+              ${(nulabsOnboarding.length + nulabsOffboarding.length + ballantineOnboarding.length + ballantineOffboarding.length) > 0 ? `
                 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
                   <div>
-                    <div style="font-size:13px;font-weight:600;color:var(--text);">NU Labs Onboarding</div>
-                    <div style="font-size:11px;color:var(--muted);">${nulabsOnboarding.length} templates</div>
+                    <div style="font-size:13px;font-weight:600;color:var(--text);">Onboarding / Offboarding Lifecycle</div>
+                    <div style="font-size:11px;color:var(--muted);">NU Labs + Ballantine • paired in one window</div>
                   </div>
-                  <button onclick="editTemplateSubgroup('${category.id}', 'nulabs-onboarding')" 
-                    style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
-                    Edit
-                  </button>
-                </div>` : ''}
-
-              ${nulabsOffboarding.length > 0 ? `
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
-                  <div>
-                    <div style="font-size:13px;font-weight:600;color:var(--text);">NU Labs Offboarding</div>
-                    <div style="font-size:11px;color:var(--muted);">${nulabsOffboarding.length} templates</div>
-                  </div>
-                  <button onclick="editTemplateSubgroup('${category.id}', 'nulabs-offboarding')" 
-                    style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
-                    Edit
-                  </button>
-                </div>` : ''}
-              
-              ${ballantineOnboarding.length > 0 ? `
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
-                  <div>
-                    <div style="font-size:13px;font-weight:600;color:var(--text);">Ballantine Onboarding</div>
-                    <div style="font-size:11px;color:var(--muted);">${ballantineOnboarding.length} templates</div>
-                  </div>
-                  <button onclick="editTemplateSubgroup('${category.id}', 'ballantine-onboarding')" 
-                    style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
-                    Edit
-                  </button>
-                </div>` : ''}
-
-              ${ballantineOffboarding.length > 0 ? `
-                <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;padding:8px 12px;background:var(--surface2);border-radius:8px;">
-                  <div>
-                    <div style="font-size:13px;font-weight:600;color:var(--text);">Ballantine Offboarding</div>
-                    <div style="font-size:11px;color:var(--muted);">${ballantineOffboarding.length} templates</div>
-                  </div>
-                  <button onclick="editTemplateSubgroup('${category.id}', 'ballantine-offboarding')" 
+                  <button onclick="editTemplateSubgroup('${category.id}', 'lifecycle')" 
                     style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--text);cursor:pointer;font-family:'DM Sans',sans-serif;">
                     Edit
                   </button>
@@ -899,6 +863,7 @@ function editCategoryTemplates(categoryId) {
 }
 
 function editTemplateSubgroup(categoryId, subgroup) {
+  if (subgroup === 'lifecycle') lifecycleEditTrack = 'nulabs';
   openTemplateEditModal(categoryId, subgroup);
 }
 
@@ -906,6 +871,7 @@ function editTemplateSubgroup(categoryId, subgroup) {
 let editingTemplateData = [];
 let editingCategoryId = null;
 let editingSubgroup = null;
+let lifecycleEditTrack = 'nulabs'; // company selector for the consolidated lifecycle modal
 
 function openTemplateEditModal(categoryId, subgroup = null) {
   editingCategoryId = categoryId;
@@ -926,6 +892,21 @@ function openTemplateEditModal(categoryId, subgroup = null) {
         filteredTemplates = filteredTemplates.filter(t => t.track === 'ballantine' && t.type === 'onboarding');
       } else if (subgroup === 'ballantine-offboarding') {
         filteredTemplates = filteredTemplates.filter(t => t.track === 'ballantine' && t.type === 'offboarding');
+      } else if (subgroup === 'lifecycle') {
+        // Consolidated lifecycle view for the selected company. Show onboarding
+        // items (which carry their paired offboarding inline) plus any
+        // offboarding-only items that have no onboarding partner.
+        const trk = lifecycleEditTrack;
+        const matchesCo = (t) => t.track === trk || t.track === 'both';
+        const onbKeys = new Set(
+          filteredTemplates.filter(t => matchesCo(t) && t.type === 'onboarding').map(t => t.key)
+        );
+        filteredTemplates = filteredTemplates.filter(t =>
+          matchesCo(t) && (
+            t.type === 'onboarding' ||
+            (t.type === 'offboarding' && !onbKeys.has(t.key))
+          )
+        );
       } else if (subgroup === 'general') {
         filteredTemplates = filteredTemplates.filter(t => !t.track || (t.track !== 'nulabs' && t.track !== 'ballantine'));
       } else {
@@ -994,6 +975,11 @@ function createTemplateEditModal() {
 function renderTemplateEditModal(category, subgroup = null) {
   const body = document.getElementById('templateEditBody');
   const title = document.getElementById('templateEditTitle');
+  
+  if (subgroup === 'lifecycle') {
+    renderLifecycleEditModal(category);
+    return;
+  }
   
   // Generate appropriate title and description
   let modalTitle = `Edit ${category.name}`;
@@ -1071,6 +1057,181 @@ function renderTemplateEditModal(category, subgroup = null) {
     </div>`;
 }
 
+// Consolidated onboarding/offboarding lifecycle editor — one window, company
+// toggle, items grouped by IT/Computer and HR/Building sections.
+function renderLifecycleEditModal(category) {
+  const body = document.getElementById('templateEditBody');
+  const title = document.getElementById('templateEditTitle');
+  const trk = lifecycleEditTrack;
+  const companyLabel = trk === 'ballantine' ? 'Ballantine' : 'NU Labs';
+  if (title) title.textContent = 'Edit Onboarding / Offboarding Lifecycle';
+  if (!body) return;
+
+  const grpOf = (t) => ((t.lifecycle_group || 'hr').toLowerCase() === 'it' ? 'it' : 'hr');
+  const sections = [
+    { id: 'it', label: 'IT / Computer' },
+    { id: 'hr', label: 'HR / Building' }
+  ];
+
+  const seg = (val, label) => `
+    <button onclick="switchLifecycleTrack('${val}')"
+      style="flex:1;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;border:none;font-family:'DM Sans',sans-serif;
+        background:${trk === val ? 'var(--amber)' : 'transparent'};color:${trk === val ? 'var(--bg)' : 'var(--muted)'};">
+      ${label}
+    </button>`;
+
+  const sectionHtml = sections.map(sec => {
+    const items = editingTemplateData.filter(t => grpOf(t) === sec.id);
+    if (!items.length) return '';
+    return `
+      <div style="font-size:11px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin:18px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border);">${sec.label}</div>
+      ${items.map((t, i) => renderTemplateEditRow(t, i)).join('')}
+    `;
+  }).join('');
+
+  body.innerHTML = `
+    <div style="padding:24px;">
+      <div style="margin-bottom:16px;">
+        <div style="font-size:16px;font-weight:600;color:var(--text);margin-bottom:6px;">${category.icon} Onboarding / Offboarding Lifecycle</div>
+        <div style="font-size:13px;color:var(--muted);">Each item's onboarding and offboarding steps are managed together — check "Include offboarding step" on an item to add its return/revoke step. Set the Section to control where it lands in the employee lifecycle grid.</div>
+      </div>
+
+      <div style="display:flex;border:1px solid var(--amber);border-radius:8px;overflow:hidden;margin-bottom:8px;max-width:320px;">
+        ${seg('nulabs', 'NU Labs')}
+        ${seg('ballantine', 'Ballantine')}
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:16px;">${editingTemplateData.length} item${editingTemplateData.length !== 1 ? 's' : ''} in ${companyLabel}</div>
+
+      <div style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:16px;background:var(--amber-glow);border:1px solid var(--amber-dim);border-radius:6px;font-size:12px;color:var(--text);">
+        <span style="font-size:14px;">💾</span>
+        <span><strong>Changes save automatically</strong> when you click or tab out of a field. Watch for the <em>"✓ Template updated"</em> confirmation at the bottom.</span>
+      </div>
+
+      <div id="templateEditList">
+        ${editingTemplateData.length === 0
+          ? `<div style="text-align:center;padding:40px;color:var(--muted);">No lifecycle items for ${companyLabel} yet.</div>`
+          : sectionHtml}
+      </div>
+
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+        <button onclick="addLifecycleOffboardingOnly()"
+          style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;">
+          + Add offboarding-only step
+        </button>
+      </div>
+    </div>`;
+}
+
+// Toggle which company (nulabs/ballantine/both) a lifecycle item belongs to.
+// Expanding coverage to a company that already has a separate same-key item
+// absorbs that duplicate (deletes it and its paired offboarding step).
+async function setLifecycleCompany(templateId, company, checked) {
+  const t = templates.find(x => x.id === templateId);
+  if (!t) return;
+  const category = templateCategories.find(c => c.id === editingCategoryId);
+  const reRender = () => { if (category) renderTemplateEditModal(category, editingSubgroup); };
+
+  const cur = new Set(t.track === 'both' ? ['nulabs', 'ballantine'] : [t.track]);
+  if (checked) cur.add(company); else cur.delete(company);
+  if (cur.size === 0) {
+    toast('⚠ An item must belong to at least one company');
+    reRender();
+    return;
+  }
+  const newTrack = cur.size === 2 ? 'both' : [...cur][0];
+  const covSet = (tr) => tr === 'both' ? new Set(['nulabs', 'ballantine']) : new Set([tr]);
+  const newSet = covSet(newTrack);
+  const intersects = (a, b) => [...a].some(x => b.has(x));
+
+  // Other rows of the same key+type whose coverage now overlaps -> duplicates.
+  const conflicts = templates.filter(x =>
+    x.id !== t.id && x.key === t.key && x.type === t.type && intersects(covSet(x.track), newSet));
+
+  if (conflicts.length) {
+    const ok = confirm(
+      `Both companies have a "${t.label}" item. Merging keeps the version you're editing and deletes the other copy (and its offboarding step). The other wording will be lost. Continue?`);
+    if (!ok) { reRender(); return; }
+    const toDelete = [];
+    for (const c of conflicts) {
+      toDelete.push(c.id);
+      if (c.type === 'onboarding') {
+        const cp = templates.find(p => p.key === c.key && p.track === c.track && p.type === 'offboarding');
+        if (cp) toDelete.push(cp.id);
+      }
+    }
+    try {
+      const { error } = await sb.from('templates').delete().in('id', toDelete);
+      if (error) { console.error('Merge delete error:', error); toast('⚠ Merge failed: ' + error.message); reRender(); return; }
+      toDelete.forEach(id => {
+        const i = templates.findIndex(x => x.id === id); if (i > -1) templates.splice(i, 1);
+        const j = editingTemplateData.findIndex(x => x.id === id); if (j > -1) editingTemplateData.splice(j, 1);
+      });
+    } catch (e) { console.error('Merge delete failed:', e); toast('⚠ Merge failed'); reRender(); return; }
+  }
+
+  // Update this item (and its offboarding partner, if any) to the new track.
+  const partnerOld = t.type === 'onboarding'
+    ? templates.find(p => p.key === t.key && p.track === t.track && p.type === 'offboarding')
+    : null;
+  const ids = [t.id].concat(partnerOld ? [partnerOld.id] : []);
+  try {
+    const { error } = await sb.from('templates').update({ track: newTrack }).in('id', ids);
+    if (error) {
+      console.error('Track update error:', error);
+      const hint = /(check|constraint|invalid|violat)/i.test(error.message || '')
+        ? ' — the track column may not allow "both" yet.' : '';
+      toast('⚠ Save failed: ' + error.message + hint);
+      reRender();
+      return;
+    }
+    t.track = newTrack;
+    if (partnerOld) partnerOld.track = newTrack;
+    toast('✓ Companies updated');
+  } catch (e) { console.error('Track update failed:', e); toast('⚠ Save failed'); }
+  reRender();
+  renderTemplatesPanel();
+}
+
+function switchLifecycleTrack(trk) {
+  lifecycleEditTrack = (trk === 'ballantine') ? 'ballantine' : 'nulabs';
+  openTemplateEditModal(editingCategoryId, 'lifecycle');
+}
+
+// Create a standalone offboarding-only step (no onboarding partner) for the
+// currently selected company in the lifecycle editor.
+async function addLifecycleOffboardingOnly() {
+  const category = templateCategories.find(c => c.id === editingCategoryId);
+  if (!category) return;
+  const newOff = {
+    category_id: editingCategoryId,
+    key: 'new_template_' + Date.now(),
+    label: 'New Offboarding Step',
+    instructions: 'Enter offboarding instructions here...',
+    notes_enabled: false,
+    track: lifecycleEditTrack,
+    type: 'offboarding',
+    lifecycle_group: 'hr',
+    sort_order: editingTemplateData.length,
+    is_active: true
+  };
+  try {
+    const { data, error } = await sb.from('templates').insert([newOff]).select().single();
+    if (error) {
+      console.error('Offboarding-only create error:', error);
+      toast('⚠ Create failed: ' + error.message);
+      return;
+    }
+    templates.push(data);
+    editingTemplateData.push(data);
+    renderTemplateEditModal(category, editingSubgroup);
+    renderTemplatesPanel();
+    toast('✓ Offboarding-only step added');
+  } catch (e) {
+    console.error('Offboarding-only create failed:', e);
+    toast('⚠ Create failed');
+  }
+}
+
 async function addNewTemplate() {
   const category = templateCategories.find(c => c.id === editingCategoryId);
   if (!category) return;
@@ -1094,6 +1255,9 @@ async function addNewTemplate() {
       } else if (editingSubgroup === 'ballantine-offboarding') {
         defaultTrack = 'ballantine';
         defaultType = 'offboarding';
+      } else if (editingSubgroup === 'lifecycle') {
+        defaultTrack = lifecycleEditTrack;
+        defaultType = 'onboarding';
       } else if (editingSubgroup === 'general') {
         defaultTrack = 'general';
         defaultType = 'general';
@@ -1292,6 +1456,31 @@ function renderTemplateEditRow(template, index) {
       </div>`;
   }
   
+  // Lifecycle items (onboarding/offboarding) use company checkboxes instead of
+  // the single Track dropdown. track='both' means it applies to both companies.
+  const isLifecycleType = template.type === 'onboarding' || template.type === 'offboarding';
+  const inNu = template.track === 'nulabs' || template.track === 'both';
+  const inBa = template.track === 'ballantine' || template.track === 'both';
+  const companyControl = isLifecycleType ? `
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Companies</div>
+            <div style="display:flex;gap:12px;align-items:center;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:9px 12px;">
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--text);">
+                <input type="checkbox" ${inNu ? 'checked' : ''} onchange="setLifecycleCompany('${template.id}','nulabs',this.checked)" style="margin:0;"> NU Labs
+              </label>
+              <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:var(--text);">
+                <input type="checkbox" ${inBa ? 'checked' : ''} onchange="setLifecycleCompany('${template.id}','ballantine',this.checked)" style="margin:0;"> Ballantine
+              </label>
+            </div>
+          </div>` : `
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Track</div>
+            <select onchange="updateTemplateField('${template.id}', 'track', this.value)"
+              style="background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
+              ${trackOptions}
+            </select>
+          </div>`;
+  
   return `
     <div class="template-edit-row" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:12px;">
       <div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:12px;">
@@ -1302,13 +1491,7 @@ function renderTemplateEditRow(template, index) {
             style="width:100%;background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
         </div>
         <div style="display:flex;gap:8px;align-items:flex-end;">
-          <div>
-            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Track</div>
-            <select onchange="updateTemplateField('${template.id}', 'track', this.value)"
-              style="background:var(--surface);border:1.5px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;">
-              ${trackOptions}
-            </select>
-          </div>
+          ${companyControl}
           <div>
             <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Type</div>
             <select onchange="updateTemplateField('${template.id}', 'type', this.value)"

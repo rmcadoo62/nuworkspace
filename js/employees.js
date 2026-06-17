@@ -1553,7 +1553,7 @@ async function _loadLifecycleTab(empId, emp) {
 
   // Get applicable templates for this track
   const applicableTemplates = templates.filter(t => 
-    t.track === track && 
+    (t.track === track || t.track === 'both') && 
     (t.type === 'onboarding' || t.type === 'offboarding')
   );
   
