@@ -1643,7 +1643,8 @@ async function _loadLifecycleTab(empId, emp) {
               <tr style="border-bottom:${(showOnbNotes || showOffNotes) ? 'none' : '1px solid var(--border)'};${isNA ? 'opacity:0.5;' : ''}" data-key="${key}">
                 <td style="padding:12px 16px;font-size:13px;color:var(--text)">${onboardingTemplate?.label || offboardingTemplate?.label || key}${(onboardingTemplate && offboardingTemplate && offboardingTemplate.label && offboardingTemplate.label !== onboardingTemplate.label) ? `<div style="font-size:11px;color:#e05c5c;margin-top:3px">● ${offboardingTemplate.label}</div>` : ''}</td>
                 <td style="text-align:center;padding:12px 16px">
-                  ${isNA ? `<span style="color:var(--muted);font-size:12px">N/A</span>` : 
+                  ${!onboardingTemplate ? `<span style="color:var(--border);font-size:14px">—</span>` :
+                    isNA ? `<span style="color:var(--muted);font-size:12px">N/A</span>` : 
                     canEdit ? `
                       <div style="display:inline-flex;align-items:center;gap:6px">
                         <span style="font-size:14px;font-weight:700;line-height:1;color:${onboardingDate ? '#4caf7d' : 'var(--border)'}">${onboardingDate ? '✓' : '○'}</span>
@@ -1656,7 +1657,8 @@ async function _loadLifecycleTab(empId, emp) {
                   }
                 </td>
                 <td style="text-align:center;padding:12px 16px">
-                  ${isNA ? `<span style="color:var(--muted);font-size:12px">N/A</span>` : 
+                  ${!offboardingTemplate ? `<span style="color:var(--border);font-size:14px">—</span>` :
+                    isNA ? `<span style="color:var(--muted);font-size:12px">N/A</span>` : 
                     canEdit ? `
                       <div style="display:inline-flex;align-items:center;gap:6px">
                         <span style="font-size:14px;font-weight:700;line-height:1;color:${offboardingDate ? '#e05c5c' : 'var(--border)'}">${offboardingDate ? '●' : '○'}</span>
