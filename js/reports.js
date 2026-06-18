@@ -291,6 +291,7 @@ function switchReportsTab(el) {
   if (el.dataset.tab === 'tab-timesheets') renderTimesheetsReport();
   if (el.dataset.tab === 'tab-employees') renderReportsEmployees();
   if (el.dataset.tab === 'tab-stale') renderStaleProjects();
+  if (el.dataset.tab === 'tab-closedjobs') renderClosedJobsReport();
 }
 
 async function renderTimesheetsReport(filterDept, filterStatus) {
@@ -2445,4 +2446,271 @@ function rejectClosing(projId) {
   toast('Closing rejected — project returned to Ready to Close.' + (reason ? ' Reason: ' + reason : ''));
   if (typeof updateClosingBadge === 'function') updateClosingBadge();
   renderClosingReport();
+}
+
+
+// ===== CLOSED JOBS REPORT =====
+// Pooled job-rate reporting for closed jobs, by month within a year, plus a
+// year total. Pooled rate = SUM(billed - expenses) / SUM(hours) across jobs --
+// NOT the mean of per-job rates (which over-weights tiny high-rate jobs).
+// Sources mirror the per-project Job Rate card exactly:
+//   billed   = sum of fixedPrice on the job's 'billed' tasks
+//   hours    = projectInfo[id].actualHours (stored total across timesheet weeks)
+//   expenses = sum of 'actual' on the job's expenseStore rows
+// A job is "closed in <year>" when projectInfo.status === 'closed' and its
+// endDate falls in that calendar year. Zero-hour jobs are excluded from the
+// pooled rate (can't attribute a rate) but still counted in Jobs/Billed.
+
+const CJ_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+let cjExpanded = new Set();
+
+function cjFmt$(n) { return '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+function cjFmtH(n) { return (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:1}) + 'h'; }
+function cjRateColor(r) { return r === null ? 'var(--muted)' : r >= 150 ? 'var(--green)' : r >= 75 ? 'var(--amber)' : 'var(--red)'; }
+function cjRateStr(r) { return r === null ? '\u2014' : '$' + Math.round(r) + '/hr'; }
+
+function cjGetYear() {
+  const el = document.getElementById('tab-closedjobs');
+  const y = el && el.dataset.year ? parseInt(el.dataset.year, 10) : NaN;
+  return isNaN(y) ? new Date().getFullYear() : y;
+}
+
+function cjSetYear(delta) {
+  const el = document.getElementById('tab-closedjobs');
+  if (!el) return;
+  el.dataset.year = String(cjGetYear() + delta);
+  cjExpanded.clear();
+  renderClosedJobsReport();
+}
+
+function cjToggleMonth(m) {
+  m = parseInt(m, 10);
+  if (cjExpanded.has(m)) cjExpanded.delete(m); else cjExpanded.add(m);
+  renderClosedJobsReport();
+}
+
+// Collect closed-job records for a given calendar year.
+function cjCollectJobs(year) {
+  return projects.map(function(p) {
+    const info = projectInfo[p.id] || {};
+    if (info.status !== 'closed') return null;
+    // Exclude overhead/internal jobs whose number starts with a letter (e.g.
+    // N2025 Lab Maintenance) — these track hours but have no customer billing.
+    if (/^[A-Za-z]/.test((p.name || '').trim())) return null;
+    const cd = info.endDate;
+    if (!cd) return null;
+    const d = new Date(cd + 'T00:00:00');
+    if (isNaN(d.getTime()) || d.getFullYear() !== year) return null;
+    // Closed projects' tasks are NOT loaded into taskStore (only open projects
+    // are), so billed comes from the stored project_info.billed_revenue total --
+    // the same column the dashboard revenue chart uses.
+    const billed = info.billedRevenue || 0;
+    const hours = info.actualHours || 0;
+    const expenses = expenseStore.filter(function(e){ return e.projId === p.id; })
+                                 .reduce(function(s,e){ return s + (e.actual||0); }, 0);
+    return { p: p, info: info, closeDate: cd, month: d.getMonth(),
+             billed: billed, hours: hours, expenses: expenses, margin: billed - expenses };
+  }).filter(Boolean);
+}
+
+// Aggregate a list of job records into totals + a pooled rate.
+function cjAgg(list) {
+  const billed   = list.reduce(function(s,j){ return s + j.billed; }, 0);
+  const expenses = list.reduce(function(s,j){ return s + j.expenses; }, 0);
+  const hours    = list.reduce(function(s,j){ return s + j.hours; }, 0);
+  const rated    = list.filter(function(j){ return j.hours > 0; });
+  const rHours   = rated.reduce(function(s,j){ return s + j.hours; }, 0);
+  const rMargin  = rated.reduce(function(s,j){ return s + j.margin; }, 0);
+  return {
+    count: list.length,
+    billed: billed,
+    expenses: expenses,
+    margin: billed - expenses,
+    hours: hours,
+    rate: rHours > 0 ? rMargin / rHours : null,
+    excluded: list.length - rated.length
+  };
+}
+
+function renderClosedJobsReport() {
+  const el = document.getElementById('tab-closedjobs');
+  if (!el) return;
+
+  const year = cjGetYear();
+  const jobs = cjCollectJobs(year);
+  const yr = cjAgg(jobs);
+
+  const byMonth = {};
+  jobs.forEach(function(j){ (byMonth[j.month] = byMonth[j.month] || []).push(j); });
+  const monthsWithJobs = Object.keys(byMonth).map(Number).sort(function(a,b){ return a - b; });
+
+  const thStyle = 'text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)';
+  const thR = thStyle + ';text-align:right';
+  const thC = thStyle + ';text-align:center';
+
+  const chips =
+    '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:22px">' +
+      '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:12px 20px;min-width:130px">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">Jobs Closed</div>' +
+        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:var(--text)">' + yr.count + '</div>' +
+      '</div>' +
+      '<div style="background:rgba(91,156,246,0.08);border:1px solid rgba(91,156,246,0.3);border-radius:10px;padding:12px 20px;min-width:130px">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--blue);margin-bottom:4px">Billed</div>' +
+        '<div style="font-size:24px;font-family:DM Serif Display,serif;color:var(--text)">' + cjFmt$(yr.billed) + '</div>' +
+      '</div>' +
+      '<div style="background:rgba(232,162,52,0.08);border:1px solid rgba(232,162,52,0.3);border-radius:10px;padding:12px 20px;min-width:130px">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--amber);margin-bottom:4px">Expenses</div>' +
+        '<div style="font-size:24px;font-family:DM Serif Display,serif;color:var(--text)">' + cjFmt$(yr.expenses) + '</div>' +
+      '</div>' +
+      '<div style="background:rgba(76,175,125,0.08);border:1px solid rgba(76,175,125,0.3);border-radius:10px;padding:12px 20px;min-width:130px">' +
+        '<div style="font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:#4caf7d;margin-bottom:4px">Pooled Rate</div>' +
+        '<div style="font-size:28px;font-family:DM Serif Display,serif;color:' + cjRateColor(yr.rate) + '">' + cjRateStr(yr.rate) + '</div>' +
+      '</div>' +
+    '</div>';
+
+  const header =
+    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">' +
+      '<div>' +
+        '<div style="font-family:DM Serif Display,serif;font-size:22px;color:var(--text)">\uD83D\uDCCA Closed Jobs \u2014 Pooled Rate</div>' +
+        '<div style="font-size:12px;color:var(--muted);margin-top:2px">(Billed \u2212 Expenses) \u00F7 Hours, pooled across jobs closed each period</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px">' +
+        '<div style="display:flex;align-items:center;gap:4px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:4px">' +
+          '<button class="btn btn-ghost" style="font-size:14px;padding:4px 10px" onclick="cjSetYear(-1)" title="Previous year">\u25C0</button>' +
+          '<span style="font-family:JetBrains Mono,monospace;font-size:15px;font-weight:700;color:var(--text);min-width:48px;text-align:center">' + year + '</span>' +
+          '<button class="btn btn-ghost" style="font-size:14px;padding:4px 10px" onclick="cjSetYear(1)" title="Next year">\u25B6</button>' +
+        '</div>' +
+        '<button class="btn btn-ghost" style="font-size:12px" onclick="cjExportPdf()">\uD83D\uDCC4 PDF</button>' +
+      '</div>' +
+    '</div>';
+
+  if (jobs.length === 0) {
+    el.innerHTML = header + chips +
+      '<div style="text-align:center;padding:48px;color:var(--muted)">' +
+        '<div style="font-size:40px;margin-bottom:12px">\uD83D\uDCED</div>' +
+        '<div style="font-size:15px;font-weight:600;color:var(--text);margin-bottom:6px">No jobs closed in ' + year + '</div>' +
+        '<div style="font-size:13px">Use the year arrows to look at another year.</div>' +
+      '</div>';
+    return;
+  }
+
+  const rows = monthsWithJobs.map(function(m) {
+    const a = cjAgg(byMonth[m]);
+    const open = cjExpanded.has(m);
+    const main =
+      '<tr style="border-bottom:1px solid var(--border);cursor:pointer;background:' + (open ? 'var(--surface2)' : 'transparent') + '" onclick="cjToggleMonth(' + m + ')">' +
+        '<td style="padding:11px 14px;font-size:13px;font-weight:600;color:var(--text)"><span style="display:inline-block;width:14px;color:var(--muted)">' + (open ? '\u25BE' : '\u25B8') + '</span> ' + CJ_MONTHS[m] + '</td>' +
+        '<td style="padding:11px 14px;text-align:center;font-size:13px;color:var(--text)">' + a.count + '</td>' +
+        '<td style="padding:11px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:12px;color:var(--blue)">' + cjFmt$(a.billed) + '</td>' +
+        '<td style="padding:11px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:12px;color:var(--amber)">' + cjFmt$(a.expenses) + '</td>' +
+        '<td style="padding:11px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:12px;color:var(--text)">' + cjFmt$(a.margin) + '</td>' +
+        '<td style="padding:11px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:12px;color:var(--text)">' + cjFmtH(a.hours) + '</td>' +
+        '<td style="padding:11px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:' + cjRateColor(a.rate) + '">' + cjRateStr(a.rate) + (a.excluded ? '<span style="font-size:9px;color:var(--red);font-family:DM Sans,sans-serif;font-weight:600"> *' + a.excluded + '</span>' : '') + '</td>' +
+      '</tr>';
+
+    if (!open) return main;
+
+    const jobRows = byMonth[m].slice().sort(function(x,y){ return x.closeDate.localeCompare(y.closeDate); }).map(function(j) {
+      const r = j.hours > 0 ? j.margin / j.hours : null;
+      return '<tr style="border-bottom:1px solid var(--border);background:var(--surface)">' +
+        '<td style="padding:8px 14px 8px 34px;font-size:12px;color:var(--text)">' + (j.p.emoji ? j.p.emoji + ' ' : '') + j.p.name +
+          '<span style="font-size:11px;color:var(--muted);margin-left:6px">' + (j.info.client || '') + '</span></td>' +
+        '<td style="padding:8px 14px;text-align:center;font-size:11px;color:var(--muted);font-family:JetBrains Mono,monospace">' + new Date(j.closeDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) + '</td>' +
+        '<td style="padding:8px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--blue)">' + cjFmt$(j.billed) + '</td>' +
+        '<td style="padding:8px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--amber)">' + cjFmt$(j.expenses) + '</td>' +
+        '<td style="padding:8px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:11px;color:var(--muted)">' + cjFmt$(j.margin) + '</td>' +
+        '<td style="padding:8px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:11px;color:' + (j.hours>0?'var(--text)':'var(--red)') + '">' + (j.hours>0?cjFmtH(j.hours):'0h *') + '</td>' +
+        '<td style="padding:8px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:12px;color:' + cjRateColor(r) + '">' + cjRateStr(r) + '</td>' +
+      '</tr>';
+    }).join('');
+    return main + jobRows;
+  }).join('');
+
+  const totalRow =
+    '<tr style="border-top:2px solid var(--border);background:var(--surface2)">' +
+      '<td style="padding:12px 14px;font-size:12px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text)">' + year + ' Total</td>' +
+      '<td style="padding:12px 14px;text-align:center;font-size:13px;font-weight:700;color:var(--text)">' + yr.count + '</td>' +
+      '<td style="padding:12px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:var(--blue)">' + cjFmt$(yr.billed) + '</td>' +
+      '<td style="padding:12px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:var(--amber)">' + cjFmt$(yr.expenses) + '</td>' +
+      '<td style="padding:12px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:var(--text)">' + cjFmt$(yr.margin) + '</td>' +
+      '<td style="padding:12px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:var(--text)">' + cjFmtH(yr.hours) + '</td>' +
+      '<td style="padding:12px 14px;text-align:right;font-family:JetBrains Mono,monospace;font-size:14px;font-weight:800;color:' + cjRateColor(yr.rate) + '">' + cjRateStr(yr.rate) + '</td>' +
+    '</tr>';
+
+  const table =
+    '<div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden">' +
+      '<table style="width:100%;border-collapse:collapse">' +
+        '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
+          '<th style="' + thStyle + '">Month</th>' +
+          '<th style="' + thC + '">Jobs</th>' +
+          '<th style="' + thR + '">Billed</th>' +
+          '<th style="' + thR + '">Expenses</th>' +
+          '<th style="' + thR + '">Margin</th>' +
+          '<th style="' + thR + '">Hours</th>' +
+          '<th style="' + thR + '">Pooled Rate</th>' +
+        '</tr></thead>' +
+        '<tbody>' + rows + '</tbody>' +
+        '<tfoot>' + totalRow + '</tfoot>' +
+      '</table>' +
+    '</div>';
+
+  const note = yr.excluded
+    ? '<div style="font-size:11px;color:var(--red);margin-top:10px">* ' + yr.excluded + ' closed job' + (yr.excluded>1?'s':'') + ' had no logged hours and ' + (yr.excluded>1?'are':'is') + ' excluded from the pooled rate (still counted in Jobs and Billed). Click a month to see which.</div>'
+    : '<div style="font-size:11px;color:var(--muted);margin-top:10px">Pooled rate = total (Billed \u2212 Expenses) \u00F7 total Hours across jobs closed in the period. Click any month to expand its jobs.</div>';
+
+  el.innerHTML = header + chips + table + note;
+}
+
+function cjExportPdf() {
+  const year = cjGetYear();
+  const jobs = cjCollectJobs(year);
+  const yr = cjAgg(jobs);
+  const byMonth = {};
+  jobs.forEach(function(j){ (byMonth[j.month] = byMonth[j.month] || []).push(j); });
+  const monthsWithJobs = Object.keys(byMonth).map(Number).sort(function(a,b){ return a - b; });
+
+  if (jobs.length === 0) { toast('No jobs closed in ' + year + ' to export.', 'error'); return; }
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const margin = 48;
+  const fmt$ = function(n){ return '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}); };
+  const fmtH = function(n){ return (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:1}) + 'h'; };
+  const rateStr = function(r){ return r === null ? '\u2014' : '$' + Math.round(r) + '/hr'; };
+
+  doc.setFillColor(30, 30, 40);
+  doc.rect(0, 0, pageW, 72, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(18);
+  doc.text('CLOSED JOBS - POOLED RATE', margin, 30);
+  doc.setFontSize(11); doc.setFont('helvetica', 'normal');
+  doc.text('Year ' + year, margin, 48);
+  doc.text('Generated: ' + new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}), margin, 63);
+
+  const body = monthsWithJobs.map(function(m){
+    const a = cjAgg(byMonth[m]);
+    return [CJ_MONTHS[m], String(a.count), fmt$(a.billed), fmt$(a.expenses), fmt$(a.margin), fmtH(a.hours), rateStr(a.rate)];
+  });
+  body.push([year + ' TOTAL', String(yr.count), fmt$(yr.billed), fmt$(yr.expenses), fmt$(yr.margin), fmtH(yr.hours), rateStr(yr.rate)]);
+
+  doc.autoTable({
+    startY: 92,
+    margin: { left: margin, right: margin },
+    head: [['Month','Jobs','Billed','Expenses','Margin','Hours','Pooled Rate']],
+    body: body,
+    styles: { fontSize: 9, cellPadding: 5 },
+    headStyles: { fillColor: [50, 50, 65], textColor: 255, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [248, 248, 252] },
+    columnStyles: { 1:{halign:'center'}, 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'}, 5:{halign:'right'}, 6:{halign:'right'} },
+    didParseCell: function(d){ if (d.section === 'body' && d.row.index === body.length - 1) { d.cell.styles.fontStyle = 'bold'; d.cell.styles.fillColor = [235,235,242]; } }
+  });
+
+  let y = doc.lastAutoTable.finalY + 16;
+  if (yr.excluded) {
+    doc.setTextColor(200, 60, 60); doc.setFont('helvetica','italic'); doc.setFontSize(9);
+    doc.text(yr.excluded + ' closed job' + (yr.excluded>1?'s':'') + ' had no logged hours and ' + (yr.excluded>1?'were':'was') + ' excluded from the pooled rate.', margin, y);
+  }
+
+  doc.save('closed_jobs_pooled_rate_' + year + '.pdf');
 }
