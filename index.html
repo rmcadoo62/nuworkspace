@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>NUWorkspace &mdash; Project Management</title>
 <link rel="icon" type="image/png" href="favicon.png">
+<link rel="icon" type="image/x-icon" href="favicon.ico">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <!-- External libraries -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -514,7 +516,6 @@
           <div class="reports-tab" data-tab="tab-employees" onclick="switchReportsTab(this)">&#x1F465; Employees</div>
           <div class="reports-tab" data-tab="tab-timesheets" onclick="switchReportsTab(this)">&#x1F4C5; Timesheets</div>
           <div class="reports-tab" data-tab="tab-stale" onclick="switchReportsTab(this)">&#x1F4A4; Stale Projects</div>
-          <div class="reports-tab" data-tab="tab-closedjobs" onclick="switchReportsTab(this)">&#x1F4CA; Closed Jobs</div>
           <div class="reports-tab" data-tab="tab-ai" onclick="switchReportsTab(this)">&#x2728; AI Analysis</div>
         </div>
       </div>
@@ -531,8 +532,6 @@
         <div class="reports-tab-panel" id="tab-timesheets"></div>
         <!-- Stale Projects Tab -->
         <div class="reports-tab-panel" id="tab-stale"></div>
-        <!-- Closed Jobs Tab -->
-        <div class="reports-tab-panel" id="tab-closedjobs"></div>
         <!-- AI Analysis Tab -->
         <div class="reports-tab-panel" id="tab-ai">
           <div style="max-width:860px">
