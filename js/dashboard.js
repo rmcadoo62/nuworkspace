@@ -156,7 +156,12 @@ function renderDashboard() {
   const _yearReversals = {}; // { mo: { cat: amount } }
   for (let m = 0; m <= _curMonth; m++) { _yearBookings[m] = {}; _yearReversals[m] = {}; }
 
-  taskStore.forEach(t => {
+  // Booking data spans open projects (live taskStore) + a current-year snapshot of
+  // closed-project tasks (window._bookingClosedTasks). Without the latter, closing a
+  // job mid-year silently erases its bookings AND its cancellation reversals here.
+  const _bkTasks = taskStore.concat(window._bookingClosedTasks || []);
+
+  _bkTasks.forEach(t => {
     const cat = t.salesCat || 'Uncategorized';
     // Positive booking — created this year, not currently cancelled
     const createdMo = (t.createdAt||'').slice(0,7);
@@ -314,8 +319,8 @@ function renderDashboard() {
 
     // ── By Job ────────────────────────────────────────────────────────────
     const moKey = _curYear + '-' + String(mo+1).padStart(2,'0');
-    const cancelledInMo = new Set(taskStore.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
-    const bookedTasks = taskStore.filter(t =>
+    const cancelledInMo = new Set(_bkTasks.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
+    const bookedTasks = _bkTasks.filter(t =>
       ((t.createdAt||'').slice(0,7) === moKey && t.status !== 'cancelled') || cancelledInMo.has(t._id)
     );
     if (!bookedTasks.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No bookings in ${_monthNames[mo]} ${_curYear}.</div>`;
@@ -359,10 +364,10 @@ function renderDashboard() {
   function buildMonthTaskDetail(mo) {
     const sort = window._bkMonthSort || 'category';
     const moKey = _curYear + '-' + String(mo+1).padStart(2,'0');
-    const cancelledMo = new Set(taskStore.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
+    const cancelledMo = new Set(_bkTasks.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
     const tasks = [
-      ...taskStore.filter(t => (t.createdAt||'').slice(0,7) === moKey && t.status !== 'cancelled'),
-      ...taskStore.filter(t => cancelledMo.has(t._id)),
+      ..._bkTasks.filter(t => (t.createdAt||'').slice(0,7) === moKey && t.status !== 'cancelled'),
+      ..._bkTasks.filter(t => cancelledMo.has(t._id)),
     ].sort((a,b) => {
       if (sort === 'job') {
         const pA = (projects.find(p=>p.id===a.proj)||{}).name||'';

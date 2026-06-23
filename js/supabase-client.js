@@ -112,7 +112,7 @@ async function loadAllData() {
       .map(p => p.id);
 
     // Phase 2: load remaining tables in parallel, filtering tasks to open projects only
-    const [taskRows, empRows, clientRows, contactRows, expRows, , sectionRows, roleRows, billedMonthlyRows, billedCatRows, articleRows, projectContactRows] = await Promise.all([
+    const [taskRows, empRows, clientRows, contactRows, expRows, , sectionRows, roleRows, billedMonthlyRows, billedCatRows, articleRows, projectContactRows, bookingTaskRows] = await Promise.all([
       (async () => {
         // Only load tasks for open projects (145 open vs 2252 closed)
         let rows = [], page = 0;
@@ -163,6 +163,26 @@ async function loadAllData() {
       })(),
       fetchAllPages('test_articles', '*', 'created_at'),
       dbFetch('project_contacts'),
+      (async () => {
+        // Booking report needs current-year activity from CLOSED projects too.
+        // taskStore is open-projects-only (the 145-vs-2252 perf cutoff), so closing a
+        // job mid-year would erase its bookings/reversals from the dashboard. Pull a
+        // bounded slice — created OR cancelled in the current year, across ALL projects.
+        const ys = new Date().getFullYear() + '-01-01';
+        let rows = [], page = 0;
+        while (true) {
+          const { data } = await sb.from('tasks')
+            .select('id,project_id,status,sales_category,fixed_price,cancelled_date,created_at,name')
+            .or(`created_at.gte.${ys},cancelled_date.gte.${ys}`)
+            .order('id', { ascending: true })
+            .range(page * 1000, page * 1000 + 999);
+          if (!data || data.length === 0) break;
+          rows = rows.concat(data);
+          if (data.length < 1000) break;
+          page++;
+        }
+        return rows;
+      })(),
     ]);
 
     // Projects
@@ -233,6 +253,24 @@ async function loadAllData() {
       createdAt: r.created_at ? r.created_at.split('T')[0] : '',
       revenueType: r.revenue_type||'fixed',
     }));
+
+    // Booking report supplement — current-year tasks from CLOSED projects only.
+    // Open-project tasks already live in taskStore (and stay live-editable); here we
+    // keep just the closed-project rows so the dashboard booking grid stays whole
+    // after a job is closed mid-year. Project names resolve via the global `projects`
+    // array, which loads all projects (open + closed).
+    {
+      const _openSet = new Set(openProjIds);
+      window._bookingClosedTasks = (bookingTaskRows || [])
+        .filter(r => !_openSet.has(r.project_id))
+        .map(r => ({
+          _id: r.id, proj: r.project_id||'', status: r.status||'new',
+          salesCat: r.sales_category||'', name: r.name||'',
+          fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
+          cancelledDate: r.cancelled_date||'',
+          createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+        }));
+    }
 
     // Task Sections
     sectionStore = sectionRows.map(r => ({
