@@ -584,11 +584,17 @@ async function _fetchPendingVacationCount() {
 }
 
 async function updateApprovalsBadge() {
-  if (!isApprover || !currentEmployee) return;
+  const _mgr = (typeof isManager === 'function') && isManager();
+  if ((!isApprover && !_mgr) || !currentEmployee) return;
   const tsPending = _pendingTimesheetCountForApprover();
   // Refresh the cached vacation count, then sum for the badge total.
   _cachedPendingVacationCount = await _fetchPendingVacationCount();
-  const total = tsPending + _cachedPendingVacationCount;
+  // Managers/HR also see pending performance reviews awaiting approval.
+  let revPending = 0;
+  if (_mgr && typeof _fetchPendingReviewCount === 'function') revPending = await _fetchPendingReviewCount();
+  let discPending = 0;
+  if (_mgr && typeof _fetchPendingDisciplineCount === 'function') discPending = await _fetchPendingDisciplineCount();
+  const total = tsPending + _cachedPendingVacationCount + revPending + discPending;
   const badge = document.getElementById('approvalsBadge');
   if (badge) {
     badge.textContent = total;
@@ -644,6 +650,12 @@ function renderApprovalsPanel() {
   // refreshes the cache as it runs, and the per-tab renderer below pulls
   // fresh data when its tab is selected.
   const vacCount = _cachedPendingVacationCount || 0;
+  // Reviews tab is for managers/HR only (supervisors submit, they don't approve).
+  const showReviews = (typeof isManager === 'function') && isManager();
+  const revCount = (typeof _cachedPendingReviewCount !== 'undefined') ? (_cachedPendingReviewCount || 0) : 0;
+  const discCount = (typeof _cachedPendingDisciplineCount !== 'undefined') ? (_cachedPendingDisciplineCount || 0) : 0;
+  // A non-manager can't land on the manager-only tabs.
+  if ((activeTab === 'reviews' || activeTab === 'discipline') && !showReviews) { window._approvalsActiveTab = 'timesheets'; }
 
   const tabBtn = (id, label, count, isActive) => {
     const badgeHtml = count > 0
@@ -652,22 +664,29 @@ function renderApprovalsPanel() {
     return `<button id="approvalsTab-${id}" onclick="switchApprovalsTab('${id}')" class="approvals-tab${isActive ? ' active-tab' : ''}">${label}${badgeHtml}</button>`;
   };
 
+  const activeNow = window._approvalsActiveTab;
   body.innerHTML = `
     <div class="approvals-shell">
       <div class="approvals-header">
         <div class="approval-queue-title" style="margin-bottom:0">Approvals</div>
       </div>
       <div class="approvals-tab-bar">
-        ${tabBtn('timesheets', '⏰ Timesheets',        tsCount,  activeTab === 'timesheets')}
-        ${tabBtn('vacation',   '✈️ Vacation Requests', vacCount, activeTab === 'vacation')}
+        ${tabBtn('timesheets', '⏰ Timesheets',        tsCount,  activeNow === 'timesheets')}
+        ${tabBtn('vacation',   '✈️ Vacation Requests', vacCount, activeNow === 'vacation')}
+        ${showReviews ? tabBtn('reviews', '📝 Reviews', revCount, activeNow === 'reviews') : ''}
+        ${showReviews ? tabBtn('discipline', '⚠️ Discipline', discCount, activeNow === 'discipline') : ''}
       </div>
       <div id="approvalsTabContent" class="approvals-tab-content"></div>
     </div>`;
 
-  if (activeTab === 'timesheets') {
+  if (activeNow === 'timesheets') {
     _renderApprovalsTimesheetTab();
-  } else if (activeTab === 'vacation') {
+  } else if (activeNow === 'vacation') {
     _renderApprovalsVacationTab();
+  } else if (activeNow === 'reviews' && typeof _renderApprovalsReviewsTab === 'function') {
+    _renderApprovalsReviewsTab();
+  } else if (activeNow === 'discipline' && typeof _renderApprovalsDisciplineTab === 'function') {
+    _renderApprovalsDisciplineTab();
   }
 }
 

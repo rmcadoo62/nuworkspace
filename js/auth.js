@@ -42,6 +42,7 @@ function can(capability) {
     view_hours: true, view_expenses: mgr, view_invoicing: mgr,
     view_proj_shipping: true, view_clients: mgr, view_quotes: mgr,
     view_surveys: mgr, view_closing_report: mgr,
+    supervise_team: false,
   };
   return !!(fallbacks[capability]);
 }
@@ -1144,7 +1145,7 @@ function _recomputeIsApprover() {
 // (login, View-As enter, View-As exit) so sidebar items match currentEmployee.
 function _applyIdentityNav() {
   const navApp = document.getElementById('navApprovals');
-  if (navApp) navApp.style.display = isApprover ? 'flex' : 'none';
+  if (navApp) navApp.style.display = (isApprover || (typeof isManager === 'function' && isManager())) ? 'flex' : 'none';
   const navTs = document.getElementById('navTimesheetItem');
   if (navTs) navTs.style.display = (currentEmployee && currentEmployee.isOwner) ? 'none' : 'flex';
 
@@ -1167,6 +1168,17 @@ function _applyIdentityNav() {
   if (navMyTasks) {
     const n = (typeof myTasksCount === 'function') ? myTasksCount() : 0;
     navMyTasks.style.display = n > 0 ? '' : 'none';
+  }
+
+  // My Team — supervisor surface; visible when the current identity holds the
+  // supervise_team capability AND is the Supervisor/Approver of at least one active
+  // employee. Gated here (like My Tasks) so it follows currentEmployee through View-As.
+  const navMyTeam = document.getElementById('navMyTeam');
+  if (navMyTeam) {
+    const canSup = (typeof can === 'function') && can('supervise_team');
+    const hasReports = Array.isArray(employees) && currentEmployee &&
+      employees.some(e => e.isActive !== false && e.approverId && e.approverId === currentEmployee.id);
+    navMyTeam.style.display = (canSup && hasReports) ? '' : 'none';
   }
 
   // After identity-dependent items are set, collapse any sections that no

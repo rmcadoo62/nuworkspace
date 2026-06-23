@@ -2577,6 +2577,7 @@ const CAPABILITY_DEFS = [
   { key: 'manage_employees',   label: 'Manage Employees',      group: 'Admin' },
   { key: 'manage_permissions', label: 'Manage Permissions',    group: 'Admin' },
   { key: 'manage_templates',   label: 'Manage Templates',      group: 'Admin' },
+  { key: 'supervise_team',     label: 'Supervise Team (Reviews & Discipline)', group: 'Team' },
   { key: 'view_chatter',       label: 'View Chatter',          group: 'Communication' },
   { key: 'send_client_email',  label: 'Send Client Emails',    group: 'Communication' },
   { key: 'post_chatter',       label: 'Post in Chatter',       group: 'Communication' },

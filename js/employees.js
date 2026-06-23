@@ -3659,15 +3659,11 @@ function _renderHrRecordsTab(empId, emp) {
     return { ...c, countAll: data.discipline.filter(d => d.category === c.key).length };
   }).filter(c => c.countAll > 0);
 
-  // Status pill helper
+  // Status pill helper — shared status logic, plus the acknowledged date when present
   const statusPill = (rec) => {
-    if (rec.employee_acknowledged_at) {
-      return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:rgba(76,175,125,0.15);color:#4caf7d;font-size:10.5px;font-weight:600">🟢 Acknowledged ${_hrFmtDate(rec.employee_acknowledged_at)}</span>`;
-    }
-    if (rec.released_to_employee_at) {
-      return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:rgba(91,156,246,0.15);color:#5b9cf6;font-size:10.5px;font-weight:600">🔵 Released</span>`;
-    }
-    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:rgba(232,162,52,0.15);color:#e8a234;font-size:10.5px;font-weight:600">🟡 Draft</span>`;
+    const m = _reviewStatusMeta(rec);
+    const dateSuffix = rec.employee_acknowledged_at ? ` ${_hrFmtDate(rec.employee_acknowledged_at)}` : '';
+    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:10px;background:${m.bg};color:${m.color};font-size:10.5px;font-weight:600">${m.icon} ${m.label}${dateSuffix}</span>`;
   };
 
   // Counter card markup
@@ -4014,6 +4010,187 @@ async function releaseHrRecord(table, id, empId) {
   toast('🔓 Released to employee');
 }
 
+// ============================================================================
+// Phase 3 — HR review approval queue (surfaces as a tab in the Approvals panel)
+// ----------------------------------------------------------------------------
+// Managers/HR approve a supervisor-submitted review (which sets hr_approved_* and
+// auto-posts it to the employee) or return it with a note (which clears the
+// submission and reopens it for the supervisor). Mirrors the timesheet
+// approve / reject-with-note flow. Rendering lives here; the Approvals panel in
+// timesheet.js calls _renderApprovalsReviewsTab() and reads _cachedPendingReviewCount.
+// ============================================================================
+
+let _cachedPendingReviewCount = 0;
+
+async function _fetchPendingReviewCount() {
+  if (typeof isManager !== 'function' || !isManager()) return 0;
+  try {
+    const { count, error } = await sb.from('performance_reviews')
+      .select('id', { count: 'exact', head: true })
+      .not('submitted_for_approval_at', 'is', null)
+      .is('hr_approved_at', null);
+    if (error) { console.warn('[approvals] review count error:', error.message); return 0; }
+    _cachedPendingReviewCount = count || 0;
+    return _cachedPendingReviewCount;
+  } catch (e) { console.warn('[approvals] review count exception:', e); return 0; }
+}
+
+async function _renderApprovalsReviewsTab() {
+  const content = document.getElementById('approvalsTabContent');
+  if (!content) return;
+  content.innerHTML = `<div style="font-size:13px;color:var(--muted)">Loading…</div>`;
+
+  let pending = [], approved = [];
+  try {
+    const [pRes, aRes] = await Promise.all([
+      sb.from('performance_reviews').select('*').not('submitted_for_approval_at', 'is', null).is('hr_approved_at', null).order('submitted_for_approval_at', { ascending: true }),
+      sb.from('performance_reviews').select('*').not('hr_approved_at', 'is', null).order('hr_approved_at', { ascending: false }).limit(10),
+    ]);
+    if (pRes.error) throw pRes.error;
+    pending  = pRes.data || [];
+    approved = aRes.data || [];
+  } catch (err) {
+    content.innerHTML = `<div style="padding:14px;color:var(--red);font-size:13px">Could not load reviews: ${(err.message || err)}</div>`;
+    return;
+  }
+  _cachedPendingReviewCount = pending.length;
+  window._apprReviews = [...pending, ...approved]; // for seeding the modal on Open
+
+  const empName  = (id) => { const e = employees.find(x => x.id === id); return e ? e.name : 'Employee'; };
+  const fmt      = (d)  => (typeof _hrFmtDate === 'function') ? _hrFmtDate(d) : d;
+  const esc      = (s)  => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const formOf   = (t)  => (typeof _reviewFormLabel === 'function') ? _reviewFormLabel(t) : 'Staff';
+
+  const pendingHtml = pending.length === 0
+    ? `<div style="font-size:13px;color:var(--muted);font-style:italic">Nothing waiting for approval.</div>`
+    : pending.map(r => `
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px;background:var(--surface)">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:200px">
+              <div style="font-size:13.5px;font-weight:600;color:var(--text)">${esc(empName(r.employee_id))}</div>
+              <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${formOf(r.form_type)} Review · ${fmt(r.review_date)} · by ${esc(r.reviewer_name || '—')}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              ${r.total_score != null ? `<span style="padding:2px 8px;border-radius:10px;background:rgba(91,156,246,0.12);color:#5b9cf6;font-size:11px;font-weight:600">Score ${r.total_score}/100</span>` : ''}
+              ${r.performance_rating != null ? `<span style="padding:2px 8px;border-radius:10px;background:rgba(232,162,52,0.15);color:var(--amber);font-size:11px;font-weight:700">Rating ${r.performance_rating}/9</span>` : ''}
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
+            <button onclick="_apprOpenReview('${r.employee_id}','${r.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;color:var(--text);cursor:pointer">👁 Open</button>
+            <button onclick="approveReview('${r.id}','${r.employee_id}')" style="background:rgba(76,175,125,0.15);border:1px solid #4caf7d;border-radius:6px;padding:5px 12px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600">✓ Approve &amp; Post</button>
+            <button onclick="showReviewReturnInput('${r.id}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e05c5c;cursor:pointer">↩ Return</button>
+          </div>
+          <div id="revReturnWrap_${r.id}" style="display:none;margin-top:10px;gap:8px;align-items:center">
+            <input id="revReturnNote_${r.id}" placeholder="Reason for return (optional)…" style="flex:1;min-width:220px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none" />
+            <button onclick="confirmReturnReview('${r.id}','${r.employee_id}')" style="background:rgba(224,92,92,0.15);border:1px solid #e05c5c;border-radius:6px;padding:6px 12px;font-size:12px;color:#e05c5c;cursor:pointer;font-weight:600">Send back</button>
+            <button onclick="hideReviewReturnInput('${r.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--muted);cursor:pointer">Cancel</button>
+          </div>
+        </div>`).join('');
+
+  const approvedHtml = approved.length === 0
+    ? `<div style="font-size:13px;color:var(--muted);font-style:italic">No approved reviews yet.</div>`
+    : approved.map(r => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dotted var(--border)">
+          <div style="flex:1"><span style="font-size:12.5px;color:var(--text);font-weight:500">${esc(empName(r.employee_id))}</span> <span style="font-size:11.5px;color:var(--muted)">· ${formOf(r.form_type)} · ${fmt(r.review_date)}</span></div>
+          <span style="font-size:11px;color:#4caf7d">✓ ${fmt(r.hr_approved_at)}</span>
+        </div>`).join('');
+
+  content.innerHTML = `
+    <div style="font-size:14px;color:var(--muted);margin-bottom:14px">${pending.length} pending</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">⏳ Pending Approval</div>
+      ${pendingHtml}
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">📋 Recently Approved</div>
+      ${approvedHtml}
+    </div>`;
+}
+
+// Seed hrRecordsCache from the queue's data so the modal finds the existing record.
+function _apprOpenReview(empId, id) {
+  if (typeof hrRecordsCache !== 'undefined' && Array.isArray(window._apprReviews)) {
+    hrRecordsCache[empId] = hrRecordsCache[empId] || { reviews: [], discipline: [] };
+    hrRecordsCache[empId].reviews = window._apprReviews.filter(r => r.employee_id === empId);
+  }
+  if (typeof openReviewModal === 'function') openReviewModal(empId, id);
+}
+
+function showReviewReturnInput(id) {
+  const w = document.getElementById('revReturnWrap_' + id);
+  if (w) { w.style.display = 'flex'; document.getElementById('revReturnNote_' + id)?.focus(); }
+}
+function hideReviewReturnInput(id) {
+  const w = document.getElementById('revReturnWrap_' + id);
+  if (w) w.style.display = 'none';
+}
+
+// Approve = stamp HR approval AND auto-post to the employee in one action.
+async function approveReview(id, empId) {
+  const now = new Date().toISOString();
+  const me  = currentEmployee?.id || null;
+  const { error } = await sb.from('performance_reviews').update({
+    hr_approved_at: now, hr_approved_by: me,
+    released_to_employee_at: now, released_by: me,
+    hr_returned_at: null, hr_returned_by: null, hr_rejection_note: null,
+  }).eq('id', id);
+  if (error) { alert('Approve failed: ' + error.message); return; }
+
+  // Notify the employee (review posted) and the submitting supervisor (approved).
+  try {
+    const subj = employees.find(e => e.id === empId);
+    const rows = [{
+      employee_id: empId, proj_id: null, msg_id: null,
+      from_name: currentEmployee?.name || 'HR', from_initials: currentEmployee?.initials || 'HR', from_color: currentEmployee?.color || '#888',
+      preview: `📋 Your performance review is ready. Please review and acknowledge.||myinfo:hrrecords`,
+      is_read: false, created_at: now,
+    }];
+    if (subj && subj.approverId && subj.approverId !== me) {
+      rows.push({
+        employee_id: subj.approverId, proj_id: null, msg_id: null,
+        from_name: currentEmployee?.name || 'HR', from_initials: currentEmployee?.initials || 'HR', from_color: currentEmployee?.color || '#888',
+        preview: `✓ Review for ${subj.name} approved and posted to the employee.||empHr:${empId}`,
+        is_read: false, created_at: now,
+      });
+    }
+    await sb.from('chatter_notifs').insert(rows);
+  } catch (e) { console.warn('approve notif failed:', e); }
+
+  if (typeof hrRecordsCache !== 'undefined') delete hrRecordsCache[empId];
+  toast('✓ Review approved and posted to employee');
+  if (typeof renderApprovalsPanel === 'function') renderApprovalsPanel();
+  if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
+}
+
+// Return = clear the submission and reopen for the supervisor, with a note.
+async function confirmReturnReview(id, empId) {
+  const note = (document.getElementById('revReturnNote_' + id)?.value || '').trim();
+  const now  = new Date().toISOString();
+  const { error } = await sb.from('performance_reviews').update({
+    hr_returned_at: now, hr_returned_by: currentEmployee?.id || null,
+    hr_rejection_note: note || null,
+    submitted_for_approval_at: null, submitted_by: null,
+  }).eq('id', id);
+  if (error) { alert('Return failed: ' + error.message); return; }
+
+  try {
+    const subj = employees.find(e => e.id === empId);
+    if (subj && subj.approverId && subj.approverId !== currentEmployee?.id) {
+      await sb.from('chatter_notifs').insert([{
+        employee_id: subj.approverId, proj_id: null, msg_id: null,
+        from_name: currentEmployee?.name || 'HR', from_initials: currentEmployee?.initials || 'HR', from_color: currentEmployee?.color || '#888',
+        preview: `↩ Review for ${subj.name} was returned${note ? ': ' + note : ''}. Please revise and resubmit.||empHr:${empId}`,
+        is_read: false, created_at: now,
+      }]);
+    }
+  } catch (e) { console.warn('return notif failed:', e); }
+
+  if (typeof hrRecordsCache !== 'undefined') delete hrRecordsCache[empId];
+  toast('↩ Review returned to supervisor');
+  if (typeof renderApprovalsPanel === 'function') renderApprovalsPanel();
+  if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
+}
+
 async function deleteHrRecord(table, id, empId) {
   const typeLabel = table === 'performance_reviews' ? 'performance review' : 'disciplinary action';
   if (!confirm(`Delete this ${typeLabel}? This cannot be undone.`)) return;
@@ -4030,6 +4207,18 @@ async function deleteHrRecord(table, id, empId) {
 //   manager_edit   — admin/manager editing an existing draft or released (not yet acked) review
 //   employee_ack   — subject employee viewing their released, unacknowledged review
 //   readonly       — anything else (acknowledged, or viewer not allowed to edit)
+// Canonical status for a review/discipline record. Used by the modal badge,
+// the HR-records card pill, and the My Team surface so all three agree.
+// Precedence: acknowledged > posted(released) > submitted-to-HR > returned > draft.
+function _reviewStatusMeta(rec) {
+  rec = rec || {};
+  if (rec.employee_acknowledged_at) return { label:'Acknowledged', icon:'🟢', color:'#4caf7d', bg:'rgba(76,175,125,0.15)' };
+  if (rec.released_to_employee_at)  return { label:'Released',     icon:'🔵', color:'#5b9cf6', bg:'rgba(91,156,246,0.15)' };
+  if (rec.submitted_for_approval_at && !rec.hr_approved_at) return { label:'Submitted to HR', icon:'🟠', color:'#e8a234', bg:'rgba(232,162,52,0.20)' };
+  if (rec.hr_returned_at)            return { label:'Returned by HR', icon:'↩', color:'#e05c5c', bg:'rgba(224,92,92,0.15)' };
+  return { label:'Draft', icon:'🟡', color:'#e8a234', bg:'rgba(232,162,52,0.15)' };
+}
+
 function openReviewModal(empId, reviewId, formType) {
   const emp = employees.find(e => e.id === empId);
   if (!emp) return;
@@ -4041,21 +4230,32 @@ function openReviewModal(empId, reviewId, formType) {
 
   const isSelf = currentEmployee && currentEmployee.id === emp.id;
   const isMgr  = isManager() && !_myInfoReadOnly;
+  // Supervisor author: a non-manager who is this employee's Supervisor/Approver and
+  // holds the supervise_team capability. They may author/edit only while the record is
+  // still in their hands — not submitted to HR, not approved, not acknowledged. This
+  // mirrors the timesheet submit lock and the RLS supervisor-update policy.
+  const isSup = !isMgr && !_myInfoReadOnly && typeof can === 'function' && can('supervise_team')
+                && emp.approverId && currentEmployee && emp.approverId === currentEmployee.id;
+  const supEditable = isSup && !existing?.submitted_for_approval_at && !existing?.hr_approved_at && !existing?.employee_acknowledged_at;
   let mode;
-  if (!existing && isMgr)                                                            mode = 'manager_new';
+  if (!existing && (isMgr || isSup))                                                 mode = 'manager_new';
   else if (existing && isMgr && !existing.employee_acknowledged_at)                  mode = 'manager_edit';
+  else if (existing && supEditable)                                                  mode = 'manager_edit';
   else if (existing && isSelf && existing.released_to_employee_at && !existing.employee_acknowledged_at) mode = 'employee_ack';
   else                                                                                mode = 'readonly';
 
-  const mgrs = employees.filter(e => ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) && e.isActive !== false);
+  let mgrs = employees.filter(e => ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) && e.isActive !== false);
+  // A supervisor authoring their own report's review is the reviewer — make sure they're selectable.
+  if (isSup && currentEmployee && !mgrs.some(m => m.id === currentEmployee.id)) mgrs = [currentEmployee, ...mgrs];
 
   // Modal state lives on window for inline handlers
   const state = window._reviewState = {
     empId, reviewId: existing?.id || null, mode,
     formType: resolvedFormType,
     scores: {}, comments: {}, expandedCat: categories[0].key,
+    actorIsSupervisor:       isSup && !isMgr,
     reviewDate:              existing?.review_date || new Date().toISOString().slice(0,10),
-    reviewerId:              existing?.reviewer_id || (isMgr ? currentEmployee?.id : null),
+    reviewerId:              existing?.reviewer_id || ((isMgr || isSup) ? currentEmployee?.id : null),
     jobTitle:                existing?.job_title || emp.role || '',
     division:                existing?.division  || emp.dept || '',
     listedObjectives:        existing?.listed_objectives || '',
@@ -4075,11 +4275,8 @@ function openReviewModal(empId, reviewId, formType) {
   backdrop.id = 'reviewModal';
   backdrop.onclick = e => { if(e.target===backdrop) closeReviewModal(); };
 
-  const statusBadge = existing?.employee_acknowledged_at
-    ? `<span class="rev-status-pill" style="background:rgba(76,175,125,0.15);color:#4caf7d">Acknowledged</span>`
-    : existing?.released_to_employee_at
-      ? `<span class="rev-status-pill" style="background:rgba(91,156,246,0.15);color:#5b9cf6">Released</span>`
-      : `<span class="rev-status-pill" style="background:rgba(232,162,52,0.15);color:var(--amber)">Draft</span>`;
+  const _sm = _reviewStatusMeta(existing || {});
+  const statusBadge = `<span class="rev-status-pill" style="background:${_sm.bg};color:${_sm.color}">${_sm.label}</span>`;
 
   backdrop.innerHTML = `
     <div class="modal rev-modal" style="width:900px;max-width:95vw;max-height:92vh;display:flex;flex-direction:column">
@@ -4310,6 +4507,12 @@ function _renderReviewFooter(state) {
   if (state.mode === 'readonly') {
     return `${cancelBtn}${pdfBtn}`;
   }
+  // Supervisor author — Save Draft + Submit to HR (no Release; posting is HR's, via approval).
+  if (state.actorIsSupervisor) {
+    const submitBtn  = `<button id="revSaveBtnSubmit" class="rev-btn rev-btn-release" onclick="saveReview('submit')">📤 Submit to HR</button>`;
+    const draftLabel = state.reviewId ? 'Save Changes' : 'Save Draft';
+    return `${cancelBtn}${pdfBtn}${submitBtn}<button id="revSaveBtnDraft" class="rev-btn rev-btn-primary" onclick="saveReview('draft')" style="margin-left:auto">${draftLabel}</button>`;
+  }
   // manager_new / manager_edit — Save & Release available anytime (no draft-first requirement)
   const releaseBtn = !state.released
     ? `<button id="revSaveBtnRelease" class="rev-btn rev-btn-release" onclick="saveReview('release')">🔓 Save &amp; Release</button>`
@@ -4386,7 +4589,7 @@ async function saveReview(action) {
   if (window._reviewSaving) return;
   window._reviewSaving = true;
   // Visually disable all save buttons during the save
-  ['revSaveBtnDraft','revSaveBtnRelease','revSaveBtnAck'].forEach(id => {
+  ['revSaveBtnDraft','revSaveBtnRelease','revSaveBtnAck','revSaveBtnSubmit'].forEach(id => {
     const b = document.getElementById(id);
     if (b) { b.disabled = true; b.style.opacity = '.55'; b.style.cursor = 'wait'; }
   });
@@ -4395,7 +4598,7 @@ async function saveReview(action) {
   } finally {
     window._reviewSaving = false;
     // Buttons are either gone (modal closed) or still in DOM (error path); re-enable if still present
-    ['revSaveBtnDraft','revSaveBtnRelease','revSaveBtnAck'].forEach(id => {
+    ['revSaveBtnDraft','revSaveBtnRelease','revSaveBtnAck','revSaveBtnSubmit'].forEach(id => {
       const b = document.getElementById(id);
       if (b) { b.disabled = false; b.style.opacity = ''; b.style.cursor = ''; }
     });
@@ -4486,6 +4689,16 @@ async function _saveReviewInner(action, s) {
     payload.released_by             = currentEmployee?.id || null;
   }
 
+  if (action === 'submit') {
+    if (!allScored) { alert(`Please score all ${categories.length} categories before submitting to HR.`); return; }
+    payload.submitted_for_approval_at = new Date().toISOString();
+    payload.submitted_by              = currentEmployee?.id || null;
+    // Resubmission after an HR return clears the prior return marker so the status reads "Submitted to HR".
+    payload.hr_returned_at   = null;
+    payload.hr_returned_by   = null;
+    payload.hr_rejection_note = null;
+  }
+
   let err;
   if (s.reviewId) {
     ({ error: err } = await sb.from('performance_reviews').update(payload).eq('id', s.reviewId));
@@ -4513,10 +4726,41 @@ async function _saveReviewInner(action, s) {
     } catch(e) { console.warn('review-release notif insert failed:', e); }
   }
 
+  // On submit, notify managers/HR (the approvers) so it lands in their queue.
+  if (action === 'submit') {
+    try {
+      const subject = employees.find(e => e.id === s.empId);
+      const recipients = employees.filter(e =>
+        e.isActive !== false &&
+        ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) &&
+        e.id !== currentEmployee?.id);
+      if (recipients.length) {
+        const rows = recipients.map(rcp => ({
+          employee_id:   rcp.id,
+          proj_id:       null,
+          msg_id:        null,
+          from_name:     currentEmployee?.name || 'Supervisor',
+          from_initials: currentEmployee?.initials || 'S',
+          from_color:    currentEmployee?.color || '#888',
+          preview:       `📤 ${currentEmployee?.name || 'A supervisor'} submitted a review for ${subject?.name || 'an employee'} for your approval||empHr:${s.empId}`,
+          is_read:       false,
+          created_at:    new Date().toISOString(),
+        }));
+        const { error: notifErr } = await sb.from('chatter_notifs').insert(rows);
+        if (notifErr) console.error('review-submit notif insert error:', notifErr);
+      }
+    } catch(e) { console.warn('review-submit notif insert failed:', e); }
+  }
+
   closeReviewModal();
   delete hrRecordsCache[s.empId];
   await _loadHrRecordsTab(s.empId, employees.find(e => e.id === s.empId));
-  toast(action === 'release' ? '🔓 Review released to employee' : (s.reviewId ? '✓ Review updated' : '✓ Review created'));
+  // If the My Team surface is open, refresh its review list too.
+  if (typeof window._myTeamAfterSave === 'function') { try { window._myTeamAfterSave(s.empId); } catch(_e) {} }
+  const _doneMsg = action === 'release' ? '🔓 Review released to employee'
+                 : action === 'submit'  ? '📤 Review submitted to HR for approval'
+                 : (s.reviewId ? '✓ Review updated' : '✓ Review created');
+  toast(_doneMsg);
 }
 
 // ── PDF export (mirrors NUI #28 Staff / NUI #29 Supervisor paper forms) ───
@@ -4629,7 +4873,18 @@ function openDisciplineModal(empId, actionId) {
   const emp = employees.find(e => e.id === empId);
   if (!emp) return;
   const existing = actionId ? (hrRecordsCache[empId]?.discipline || []).find(d => d.id === actionId) : null;
-  const mgrs = employees.filter(e => ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) && e.isActive !== false);
+  let mgrs = employees.filter(e => ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) && e.isActive !== false);
+
+  // Actor context (mirrors the review modal). A supervisor may author/edit a report's
+  // disciplinary action only while it's still in their hands (not submitted, approved,
+  // or acknowledged); after that it's read-only for them. Managers edit as before.
+  const isMgr = isManager() && !_myInfoReadOnly;
+  const isSup = !isMgr && !_myInfoReadOnly && typeof can === 'function' && can('supervise_team')
+                && emp.approverId && currentEmployee && emp.approverId === currentEmployee.id;
+  const supEditable = isSup && !existing?.submitted_for_approval_at && !existing?.hr_approved_at && !existing?.employee_acknowledged_at;
+  const locked = isSup && !supEditable;   // supervisor viewing a submitted/approved record
+  window._discCtx = { actorIsSupervisor: isSup && !isMgr, locked };
+  if (isSup && currentEmployee && !mgrs.some(m => m.id === currentEmployee.id)) mgrs = [currentEmployee, ...mgrs];
 
   const backdrop = document.createElement('div');
   backdrop.className = 'modal-backdrop';
@@ -4705,16 +4960,24 @@ function openDisciplineModal(empId, actionId) {
         </div>
       </div>
       <div class="modal-footer">
-        <button class="modal-close" style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 16px;font-size:12.5px;color:var(--text);cursor:pointer" onclick="document.getElementById('discModal').remove()">Cancel</button>
-        <button onclick="saveDiscipline()" style="background:var(--red);color:#fff;border:none;border-radius:7px;padding:8px 18px;font-size:12.5px;font-weight:600;cursor:pointer">${existing?'Save Changes':'Create Action'}</button>
+        <button class="modal-close" style="margin-left:auto;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 16px;font-size:12.5px;color:var(--text);cursor:pointer" onclick="document.getElementById('discModal').remove()">${locked ? 'Close' : 'Cancel'}</button>
+        ${locked ? '' : (window._discCtx && window._discCtx.actorIsSupervisor
+          ? `<button onclick="saveDiscipline('draft')" style="background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 16px;font-size:12.5px;color:var(--text);cursor:pointer">${existing?'Save Changes':'Save Draft'}</button>
+             <button id="discSubmitBtn" onclick="saveDiscipline('submit')" style="background:var(--red);color:#fff;border:none;border-radius:7px;padding:8px 18px;font-size:12.5px;font-weight:600;cursor:pointer">📤 Submit to HR</button>`
+          : `<button onclick="saveDiscipline('save')" style="background:var(--red);color:#fff;border:none;border-radius:7px;padding:8px 18px;font-size:12.5px;font-weight:600;cursor:pointer">${existing?'Save Changes':'Create Action'}</button>`)}
       </div>
     </div>
   `;
   document.body.appendChild(backdrop);
   requestAnimationFrame(() => backdrop.classList.add('open'));
 
+  // Lock the form when a supervisor is viewing a record that's already past their hands.
+  if (locked) {
+    backdrop.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = true; });
+  }
+
   // Auto-fill policy if new and category default selected
-  if (!existing) _hrPolicyAutoFill();
+  if (!existing && !locked) _hrPolicyAutoFill();
 }
 
 function _hrPolicyAutoFill() {
@@ -4727,7 +4990,9 @@ function _hrPolicyAutoFill() {
   polIn.value = suggested;
 }
 
-async function saveDiscipline() {
+async function saveDiscipline(action) {
+  action = action || 'save';                       // 'save' (manager) | 'draft' | 'submit' (supervisor)
+  const isSupAction = (action === 'draft' || action === 'submit');
   const id    = document.getElementById('disc_id').value || null;
   const empId = document.getElementById('disc_empId').value;
   const date  = document.getElementById('disc_date').value;
@@ -4735,8 +5000,10 @@ async function saveDiscipline() {
   const cat   = document.getElementById('disc_category').value;
   const desc  = document.getElementById('disc_desc').value.trim();
   const issuerSel = document.getElementById('disc_issuer');
-  const issuerId  = issuerSel.value || null;
-  const issuerName = issuerSel.selectedOptions[0]?.dataset.name || null;
+  let issuerId   = issuerSel.value || null;
+  let issuerName = issuerSel.selectedOptions[0]?.dataset.name || null;
+  // A supervisor authoring is the issuer by default if none chosen.
+  if (!issuerId && isSupAction && currentEmployee) { issuerId = currentEmployee.id; issuerName = currentEmployee.name; }
 
   if (!date)    { alert('Incident date is required'); return; }
   if (!tier)    { alert('Warning tier is required'); return; }
@@ -4758,6 +5025,14 @@ async function saveDiscipline() {
     emp_ack_date:   document.getElementById('disc_ackDate').value || null,
   };
 
+  if (action === 'submit') {
+    payload.submitted_for_approval_at = new Date().toISOString();
+    payload.submitted_by              = currentEmployee?.id || null;
+    payload.hr_returned_at   = null;
+    payload.hr_returned_by   = null;
+    payload.hr_rejection_note = null;
+  }
+
   let err;
   if (id) {
     ({ error: err } = await sb.from('disciplinary_actions').update(payload).eq('id', id));
@@ -4766,8 +5041,293 @@ async function saveDiscipline() {
   }
   if (err) { alert('Save failed: ' + err.message); return; }
 
+  // On submit, notify managers/HR so it lands in the Discipline approval tab.
+  if (action === 'submit') {
+    try {
+      const subject = employees.find(e => e.id === empId);
+      const recipients = employees.filter(e =>
+        e.isActive !== false &&
+        ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) &&
+        e.id !== currentEmployee?.id);
+      if (recipients.length) {
+        const rows = recipients.map(rcp => ({
+          employee_id: rcp.id, proj_id: null, msg_id: null,
+          from_name: currentEmployee?.name || 'Supervisor', from_initials: currentEmployee?.initials || 'S', from_color: currentEmployee?.color || '#888',
+          preview: `📤 ${currentEmployee?.name || 'A supervisor'} submitted a disciplinary action for ${subject?.name || 'an employee'} for your approval||empHr:${empId}`,
+          is_read: false, created_at: new Date().toISOString(),
+        }));
+        await sb.from('chatter_notifs').insert(rows);
+      }
+    } catch (e) { console.warn('discipline-submit notif failed:', e); }
+  }
+
   document.getElementById('discModal')?.remove();
   delete hrRecordsCache[empId];
   await _loadHrRecordsTab(empId, employees.find(e => e.id === empId));
-  toast(id ? '✓ Action updated' : '✓ Action created');
+  if (typeof window._myTeamAfterSave === 'function') { try { window._myTeamAfterSave(empId); } catch(_e) {} }
+  toast(action === 'submit' ? '📤 Disciplinary action submitted to HR'
+        : action === 'draft' ? (id ? '✓ Draft updated' : '✓ Draft saved')
+        : (id ? '✓ Action updated' : '✓ Action created'));
+}
+
+// ============================================================================
+// Phase 4 — Time-off summary (read-only, shared with My Team)
+// ----------------------------------------------------------------------------
+// Faithful reproduction of the vacation/sick bank math in showEmpProfile, factored
+// into a pure read-only helper so the My Team panel shows the SAME numbers as the
+// employee card. Reuses the exact same helpers (getTimeOffUsed, getVacationAllotment,
+// getQuarterlyAccrual, _sickAllotmentAsOf, _collectSickEntriesInRange, _dropIsCreditable),
+// which read the globally-loaded tsData. Returns hours.
+// ============================================================================
+function _computeTimeOffSummary(emp, annivOffset) {
+  annivOffset = annivOffset || 0;
+  if (!emp) return null;
+  const year = new Date().getFullYear() + annivOffset;
+  const today = new Date();
+  const _annivRange = (() => {
+    if (!emp.hireDate) return null;
+    const hire = new Date(emp.hireDate + 'T00:00:00');
+    const now = new Date();
+    let annivStart = new Date(hire); annivStart.setFullYear(now.getFullYear());
+    if (annivStart > now) annivStart.setFullYear(now.getFullYear() - 1);
+    annivStart.setFullYear(annivStart.getFullYear() + annivOffset);
+    const annivEnd = new Date(annivStart); annivEnd.setFullYear(annivStart.getFullYear() + 1);
+    return { start: annivStart, end: annivEnd };
+  })();
+  const isPartTime = emp.empType === 'parttime';
+  const usedStart = isPartTime ? new Date(year, 0, 1) : _annivRange?.start;
+  const usedEnd   = isPartTime ? new Date(year + 1, 0, 1) : _annivRange?.end;
+  const used = getTimeOffUsed(emp.id, year, usedStart, usedEnd);
+  const vacAccrued = getQuarterlyAccrual(emp.hireDate, _annivRange?.start, emp);
+  const vacOpeningBalance = emp.vacBank || 0;
+
+  let sickAllotment = 0;
+  const sickOpeningBalance = emp.sickBank || 0;
+  if (isPartTime) {
+    sickAllotment = sickOpeningBalance + getPartTimeSickAccrued(emp.id, new Date().getFullYear());
+  } else if (emp.hireDate && _annivRange) {
+    sickAllotment = _sickAllotmentAsOf(today, sickOpeningBalance, _annivRange, emp);
+  } else {
+    if (today >= new Date(year, 0, 1)) sickAllotment += 24;
+    if (today >= new Date(year, 4, 1)) sickAllotment += 24;
+  }
+
+  const _isFirstYearFT = isInFirstYear(emp.hireDate) && !isPartTime;
+  let _rawSickOverage, _bankUsedTotal;
+  if (!isPartTime && emp.hireDate && _annivRange && !_isFirstYearFT) {
+    const _sickEntries = _collectSickEntriesInRange(emp.id, _annivRange);
+    let _bankUsedRunning = 0, _overageRunning = 0;
+    _sickEntries.forEach(e => {
+      const entryDate = new Date(e.date + 'T00:00:00');
+      const allotAsOf = _sickAllotmentAsOf(entryDate, sickOpeningBalance, _annivRange, emp);
+      const cap = Math.max(0, allotAsOf - _bankUsedRunning);
+      const bankHrs = Math.min(e.hrs, cap);
+      _bankUsedRunning += bankHrs;
+      _overageRunning  += (e.hrs - bankHrs);
+    });
+    _rawSickOverage = _overageRunning;
+    _bankUsedTotal  = _bankUsedRunning;
+  } else {
+    _rawSickOverage = Math.max(0, used.sick - sickAllotment);
+    _bankUsedTotal  = Math.max(0, used.sick - _rawSickOverage);
+  }
+
+  const sickBankBalance = (() => {
+    if (isPartTime) return Math.max(0, sickAllotment - _bankUsedTotal);
+    if (!emp.hireDate || !_annivRange) return sickOpeningBalance - _bankUsedTotal;
+    let running = sickOpeningBalance;
+    const annivStart = _annivRange.start, annivEnd = _annivRange.end;
+    for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
+      for (const mo of [0, 4]) {
+        const drop = new Date(y, mo, 1);
+        if (drop > annivStart && drop <= annivEnd && drop <= today && _dropIsCreditable(emp, drop)) running += 24;
+      }
+    }
+    return Math.max(0, running - _bankUsedTotal);
+  })();
+
+  let sickOverage;
+  if (_isFirstYearFT) {
+    let futureSickCapacity = 0;
+    if (_annivRange) {
+      const annivStart = _annivRange.start, annivEnd = _annivRange.end;
+      for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
+        for (const mo of [0, 4]) {
+          const drop = new Date(y, mo, 1);
+          if (drop > annivStart && drop <= annivEnd && drop > today && _dropIsCreditable(emp, drop)) futureSickCapacity += 24;
+        }
+      }
+    }
+    sickOverage = Math.max(0, _rawSickOverage - futureSickCapacity);
+  } else {
+    sickOverage = _rawSickOverage;
+  }
+  const vacBankBalance = vacOpeningBalance + vacAccrued - (used.vacation + sickOverage);
+
+  return {
+    vacBankBalance, sickBankBalance,
+    usedVacation: used.vacation || 0,
+    usedSick: used.sick || 0,
+    isPartTime,
+  };
+}
+
+// ============================================================================
+// Phase 4 — Disciplinary approval queue (Discipline tab in the Approvals panel)
+// ----------------------------------------------------------------------------
+// Mirror of the review approval flow: managers/HR approve a supervisor-submitted
+// disciplinary action (auto-posts to the employee) or return it with a note.
+// ============================================================================
+let _cachedPendingDisciplineCount = 0;
+
+async function _fetchPendingDisciplineCount() {
+  if (typeof isManager !== 'function' || !isManager()) return 0;
+  try {
+    const { count, error } = await sb.from('disciplinary_actions')
+      .select('id', { count: 'exact', head: true })
+      .not('submitted_for_approval_at', 'is', null)
+      .is('hr_approved_at', null);
+    if (error) { console.warn('[approvals] discipline count error:', error.message); return 0; }
+    _cachedPendingDisciplineCount = count || 0;
+    return _cachedPendingDisciplineCount;
+  } catch (e) { console.warn('[approvals] discipline count exception:', e); return 0; }
+}
+
+async function _renderApprovalsDisciplineTab() {
+  const content = document.getElementById('approvalsTabContent');
+  if (!content) return;
+  content.innerHTML = `<div style="font-size:13px;color:var(--muted)">Loading…</div>`;
+
+  let pending = [], approved = [];
+  try {
+    const [pRes, aRes] = await Promise.all([
+      sb.from('disciplinary_actions').select('*').not('submitted_for_approval_at', 'is', null).is('hr_approved_at', null).order('submitted_for_approval_at', { ascending: true }),
+      sb.from('disciplinary_actions').select('*').not('hr_approved_at', 'is', null).order('hr_approved_at', { ascending: false }).limit(10),
+    ]);
+    if (pRes.error) throw pRes.error;
+    pending  = pRes.data || [];
+    approved = aRes.data || [];
+  } catch (err) {
+    content.innerHTML = `<div style="padding:14px;color:var(--red);font-size:13px">Could not load disciplinary actions: ${(err.message || err)}</div>`;
+    return;
+  }
+  _cachedPendingDisciplineCount = pending.length;
+  window._apprDiscipline = [...pending, ...approved];
+
+  const empName = (id) => { const e = employees.find(x => x.id === id); return e ? e.name : 'Employee'; };
+  const fmt     = (d)  => (typeof _hrFmtDate === 'function') ? _hrFmtDate(d) : d;
+  const esc     = (s)  => String(s == null ? '' : s).replace(/</g, '&lt;');
+  const tierOf  = (k)  => (typeof _hrTier === 'function') ? (_hrTier(k).label || k) : k;
+  const catOf   = (k)  => (typeof _hrCategory === 'function') ? (_hrCategory(k).label || k) : k;
+
+  const pendingHtml = pending.length === 0
+    ? `<div style="font-size:13px;color:var(--muted);font-style:italic">Nothing waiting for approval.</div>`
+    : pending.map(d => `
+        <div style="border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:10px;background:var(--surface)">
+          <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <div style="flex:1;min-width:200px">
+              <div style="font-size:13.5px;font-weight:600;color:var(--text)">${esc(empName(d.employee_id))}</div>
+              <div style="font-size:11.5px;color:var(--muted);margin-top:2px">${esc(tierOf(d.tier))} · ${esc(catOf(d.category))} · ${fmt(d.incident_date)}</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
+            <button onclick="_apprOpenDiscipline('${d.employee_id}','${d.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:5px 12px;font-size:12px;color:var(--text);cursor:pointer">👁 Open</button>
+            <button onclick="approveDiscipline('${d.id}','${d.employee_id}')" style="background:rgba(76,175,125,0.15);border:1px solid #4caf7d;border-radius:6px;padding:5px 12px;font-size:12px;color:#4caf7d;cursor:pointer;font-weight:600">✓ Approve &amp; Post</button>
+            <button onclick="showDiscReturnInput('${d.id}')" style="background:transparent;border:1px solid rgba(224,92,92,0.4);border-radius:6px;padding:5px 12px;font-size:12px;color:#e05c5c;cursor:pointer">↩ Return</button>
+          </div>
+          <div id="discReturnWrap_${d.id}" style="display:none;margin-top:10px;gap:8px;align-items:center">
+            <input id="discReturnNote_${d.id}" placeholder="Reason for return (optional)…" style="flex:1;min-width:220px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 10px;font-size:12px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none" />
+            <button onclick="confirmReturnDiscipline('${d.id}','${d.employee_id}')" style="background:rgba(224,92,92,0.15);border:1px solid #e05c5c;border-radius:6px;padding:6px 12px;font-size:12px;color:#e05c5c;cursor:pointer;font-weight:600">Send back</button>
+            <button onclick="hideDiscReturnInput('${d.id}')" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:6px 12px;font-size:12px;color:var(--muted);cursor:pointer">Cancel</button>
+          </div>
+        </div>`).join('');
+
+  const approvedHtml = approved.length === 0
+    ? `<div style="font-size:13px;color:var(--muted);font-style:italic">No approved actions yet.</div>`
+    : approved.map(d => `
+        <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dotted var(--border)">
+          <div style="flex:1"><span style="font-size:12.5px;color:var(--text);font-weight:500">${esc(empName(d.employee_id))}</span> <span style="font-size:11.5px;color:var(--muted)">· ${esc(tierOf(d.tier))} · ${fmt(d.incident_date)}</span></div>
+          <span style="font-size:11px;color:#4caf7d">✓ ${fmt(d.hr_approved_at)}</span>
+        </div>`).join('');
+
+  content.innerHTML = `
+    <div style="font-size:14px;color:var(--muted);margin-bottom:14px">${pending.length} pending</div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">⏳ Pending Approval</div>
+      ${pendingHtml}
+    </div>
+    <div style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px">
+      <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:12px">📋 Recently Approved</div>
+      ${approvedHtml}
+    </div>`;
+}
+
+function _apprOpenDiscipline(empId, id) {
+  if (typeof hrRecordsCache !== 'undefined' && Array.isArray(window._apprDiscipline)) {
+    hrRecordsCache[empId] = hrRecordsCache[empId] || { reviews: [], discipline: [] };
+    hrRecordsCache[empId].discipline = window._apprDiscipline.filter(d => d.employee_id === empId);
+  }
+  if (typeof openDisciplineModal === 'function') openDisciplineModal(empId, id);
+}
+
+function showDiscReturnInput(id) { const w = document.getElementById('discReturnWrap_' + id); if (w) { w.style.display = 'flex'; document.getElementById('discReturnNote_' + id)?.focus(); } }
+function hideDiscReturnInput(id) { const w = document.getElementById('discReturnWrap_' + id); if (w) w.style.display = 'none'; }
+
+async function approveDiscipline(id, empId) {
+  const now = new Date().toISOString();
+  const me  = currentEmployee?.id || null;
+  const { error } = await sb.from('disciplinary_actions').update({
+    hr_approved_at: now, hr_approved_by: me,
+    released_to_employee_at: now, released_by: me,
+    hr_returned_at: null, hr_returned_by: null, hr_rejection_note: null,
+  }).eq('id', id);
+  if (error) { alert('Approve failed: ' + error.message); return; }
+  try {
+    const subj = employees.find(e => e.id === empId);
+    const rows = [{
+      employee_id: empId, proj_id: null, msg_id: null,
+      from_name: currentEmployee?.name || 'HR', from_initials: currentEmployee?.initials || 'HR', from_color: currentEmployee?.color || '#888',
+      preview: `⚠️ A disciplinary record has been posted to your file. Please review and acknowledge.||myinfo:hrrecords`,
+      is_read: false, created_at: now,
+    }];
+    if (subj && subj.approverId && subj.approverId !== me) {
+      rows.push({
+        employee_id: subj.approverId, proj_id: null, msg_id: null,
+        from_name: currentEmployee?.name || 'HR', from_initials: currentEmployee?.initials || 'HR', from_color: currentEmployee?.color || '#888',
+        preview: `✓ Disciplinary action for ${subj.name} approved and posted.||empHr:${empId}`,
+        is_read: false, created_at: now,
+      });
+    }
+    await sb.from('chatter_notifs').insert(rows);
+  } catch (e) { console.warn('discipline approve notif failed:', e); }
+  if (typeof hrRecordsCache !== 'undefined') delete hrRecordsCache[empId];
+  toast('✓ Disciplinary action approved and posted');
+  if (typeof renderApprovalsPanel === 'function') renderApprovalsPanel();
+  if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
+}
+
+async function confirmReturnDiscipline(id, empId) {
+  const note = (document.getElementById('discReturnNote_' + id)?.value || '').trim();
+  const now  = new Date().toISOString();
+  const { error } = await sb.from('disciplinary_actions').update({
+    hr_returned_at: now, hr_returned_by: currentEmployee?.id || null,
+    hr_rejection_note: note || null,
+    submitted_for_approval_at: null, submitted_by: null,
+  }).eq('id', id);
+  if (error) { alert('Return failed: ' + error.message); return; }
+  try {
+    const subj = employees.find(e => e.id === empId);
+    if (subj && subj.approverId && subj.approverId !== currentEmployee?.id) {
+      await sb.from('chatter_notifs').insert([{
+        employee_id: subj.approverId, proj_id: null, msg_id: null,
+        from_name: currentEmployee?.name || 'HR', from_initials: currentEmployee?.initials || 'HR', from_color: currentEmployee?.color || '#888',
+        preview: `↩ Disciplinary action for ${subj.name} was returned${note ? ': ' + note : ''}. Please revise and resubmit.||empHr:${empId}`,
+        is_read: false, created_at: now,
+      }]);
+    }
+  } catch (e) { console.warn('discipline return notif failed:', e); }
+  if (typeof hrRecordsCache !== 'undefined') delete hrRecordsCache[empId];
+  toast('↩ Disciplinary action returned to supervisor');
+  if (typeof renderApprovalsPanel === 'function') renderApprovalsPanel();
+  if (typeof updateApprovalsBadge === 'function') updateApprovalsBadge();
 }

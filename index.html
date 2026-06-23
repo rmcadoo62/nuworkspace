@@ -19,6 +19,7 @@
   <link rel="stylesheet" href="css/projects-table.css">
   <link rel="stylesheet" href="css/project-info.css">
   <link rel="stylesheet" href="css/employees.css">
+  <link rel="stylesheet" href="css/myteam.css">
   <link rel="stylesheet" href="css/timesheet.css">
   <link rel="stylesheet" href="css/dashboard.css">
   <link rel="stylesheet" href="css/clients.css">
@@ -144,6 +145,7 @@
   <div class="nav-section">
     <div class="nav-item active" id="navHome" onclick="openHomePanel(this)"><span class="icon">&#x1F3E1;</span> Home</div>
     <div class="nav-item" id="navMyTasks" style="display:none" onclick="openMyTasksPanel(this)"><span class="icon survey-count" id="myTasksBadge">0</span> My Tasks</div>
+    <div class="nav-item" id="navMyTeam" style="display:none" onclick="openMyTeamPanel(this)"><span class="icon">&#x1F465;</span> My Team</div>
     <div class="nav-item" id="navDashboard" onclick="openDashboardPanel(this)"><span class="icon">&#x1F4C8;</span> Dashboard</div>
     <div class="nav-item" id="navProjects" onclick="openProjectsTable(this)"><span class="icon">&#x1F4C1;</span> Projects</div>
     <div class="nav-item" onclick="openTimesheetPanel(this)"><span class="icon">&#x23F1;</span> Timesheet</div>
@@ -240,6 +242,13 @@
     <div class="view-panel" id="panel-home">
       <div style="flex:1;overflow-y:auto;">
         <div id="homeWrap"></div>
+      </div>
+    </div>
+
+    <!-- MY TEAM PANEL -->
+    <div class="view-panel" id="panel-myteam" style="flex-direction:column;overflow:hidden;">
+      <div style="flex:1;overflow-y:auto;padding:0;">
+        <div id="myTeamWrap"></div>
       </div>
     </div>
 
@@ -1098,10 +1107,11 @@
       </div>
       <div class="field-row" style="align-items:center;gap:16px;margin-top:4px">
         <div class="field" style="flex:1">
-          <label class="field-label">Timesheet Approver</label>
+          <label class="field-label">Supervisor / Approver</label>
           <select class="f-input" id="empApprover" style="cursor:pointer">
             <option value="">— None —</option>
           </select>
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">Approves this person's timesheets, time off, and performance reviews.</div>
         </div>
         <div class="field" style="flex:0;white-space:nowrap;padding-top:18px;display:flex;flex-direction:column;gap:10px">
           <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:var(--text)">
@@ -1237,6 +1247,7 @@
   <script src="js/clients.js"></script>
   <script src="js/reports.js"></script>
   <script src="js/mytasks.js"></script>
+  <script src="js/myteam.js"></script>
   <script src="js/search.js"></script>
   <script src="js/chatter.js"></script>
   <script src="js/dm.js"></script>

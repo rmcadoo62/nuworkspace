@@ -1,0 +1,289 @@
+/* ============================================================
+   My Team — supervisor surface
+   ============================================================ */
+
+.mt-header {
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.mt-header-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 20px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.mt-header-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.mt-layout {
+  display: flex;
+  align-items: stretch;
+  min-height: 420px;
+}
+
+/* ---- Reports list (left) ---- */
+.mt-list {
+  width: 230px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding: 10px 8px;
+  overflow-y: auto;
+}
+.mt-report {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+  transition: background var(--transition, .15s);
+}
+.mt-report:hover { background: var(--surface2); }
+.mt-report.active { background: var(--amber-glow, rgba(232,162,52,0.12)); }
+.mt-report.active .mt-report-name { color: var(--text); }
+
+.mt-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0e0e0f;
+}
+.mt-avatar-lg { width: 42px; height: 42px; font-size: 15px; }
+
+.mt-report-meta { min-width: 0; }
+.mt-report-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mt-report-role {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Detail (right) ---- */
+.mt-detail {
+  flex: 1;
+  min-width: 0;
+  padding: 18px 22px;
+  overflow-y: auto;
+}
+.mt-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.mt-detail-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+}
+.mt-detail-role {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.mt-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.mt-section-title {
+  font-family: 'DM Serif Display', serif;
+  font-size: 17px;
+  color: var(--text);
+}
+
+/* ---- New Review picker ---- */
+.mt-picker-wrap { position: relative; }
+.mt-new-btn {
+  background: var(--amber);
+  color: #0e0e0f;
+  border: none;
+  border-radius: 7px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.mt-picker {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+  z-index: 250;
+  min-width: 210px;
+  overflow: hidden;
+}
+
+/* ---- Review cards ---- */
+.mt-rev-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  margin-bottom: 10px;
+}
+.mt-rev-main { flex: 1; min-width: 0; }
+.mt-rev-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.mt-rev-pills {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.mt-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 600;
+}
+.mt-pill-score  { background: rgba(91,156,246,0.12); color: #5b9cf6; }
+.mt-pill-rating { background: rgba(232,162,52,0.15); color: var(--amber); font-weight: 700; }
+.mt-pill-muted  { font-size: 11px; color: var(--muted); font-style: italic; }
+
+.mt-rev-note {
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: #e05c5c;
+  white-space: pre-wrap;
+}
+
+.mt-rev-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.mt-act {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: 'DM Sans', sans-serif;
+  white-space: nowrap;
+}
+.mt-act:hover { border-color: var(--amber-dim, rgba(232,162,52,0.4)); }
+
+/* ---- States ---- */
+.mt-empty, .mt-empty-sm, .mt-error, .mt-loading {
+  color: var(--muted);
+  font-size: 13px;
+}
+.mt-empty {
+  margin: 28px 24px;
+  padding: 22px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+.mt-empty-sm {
+  padding: 26px;
+  text-align: center;
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}
+.mt-loading { padding: 20px; }
+.mt-error {
+  padding: 14px;
+  color: var(--red, #e05c5c);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+@media (max-width: 720px) {
+  .mt-layout { flex-direction: column; }
+  .mt-list {
+    width: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+  }
+  .mt-report { flex-shrink: 0; }
+}
+
+/* ---- Disciplinary category pill ---- */
+.mt-pill-cat { background: rgba(232,162,52,0.12); color: var(--amber); }
+
+/* ---- Time-off panel (read-only) ---- */
+.mt-to-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.mt-to-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.mt-to-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.mt-to-val {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin-top: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+.mt-to-note {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+@media (max-width: 720px) {
+  .mt-to-grid { grid-template-columns: 1fr; }
+}
