@@ -1034,6 +1034,11 @@ let assessmentDomainCollapsed = {}; // keyed by domain abbrev
 let assessmentSearchVal = '';
 let assessmentStatusFilter = 'all'; // all | MET | PARTIAL | NOT MET | unscored
 
+// ===== STATE additions for Evidence Artifacts (cmmc_evidence) =====
+let evidenceRecords  = {};   // keyed by practice_id: [ {id, practice_id, title, ...} ]
+let evidenceExpanded = {};   // keyed by practice_id: bool (inline panel open)
+let evidenceEditing  = null; // evidence row id currently being edited (one at a time)
+
 function _renderComingSoonTab(tab) {
   const labels = {
     incidents:     '🚨 Incident Records',
@@ -1294,6 +1299,21 @@ async function _renderAssessmentTab() {
   assessmentRecords = {};
   (data || []).forEach(r => { assessmentRecords[r.practice_id] = r; });
 
+  // Load evidence artifacts for the year (one batched query, grouped in JS).
+  // .order() is required so rows render in a stable, newest-first sequence.
+  const { data: evData, error: evErr } = await sb
+    .from('cmmc_evidence')
+    .select('*')
+    .eq('assessment_year', assessmentYear)
+    .order('captured_at', { ascending: false });
+
+  if (evErr) console.error('Evidence load error:', evErr);
+
+  evidenceRecords = {};
+  (evData || []).forEach(r => {
+    (evidenceRecords[r.practice_id] = evidenceRecords[r.practice_id] || []).push(r);
+  });
+
   _renderAssessmentPage();
 }
 
@@ -1308,6 +1328,22 @@ function _renderAssessmentPage() {
   const notMetCount  = Object.values(assessmentRecords).filter(r => r.status === 'NOT MET').length;
   const scoredCount  = metCount + partialCount + notMetCount;
   const unscoredCount = 110 - scoredCount;
+
+  // Evidence-artifact summary (drives the "Evidence" + "Due for refresh" pills)
+  const _today = new Date().toISOString().split('T')[0];
+  let evTotal = 0, evOverdue = 0, evSoon = 0;
+  Object.values(evidenceRecords).forEach(arr => arr.forEach(ev => {
+    evTotal++;
+    if (ev.next_due) {
+      if (ev.next_due <= _today) evOverdue++;
+      else {
+        const days = Math.round((new Date(ev.next_due + 'T00:00:00') - new Date(_today + 'T00:00:00')) / 86400000);
+        if (days <= 30) evSoon++;
+      }
+    }
+  }));
+  const evDue = evOverdue + evSoon;
+  const evDueCls = evOverdue > 0 ? 'comp-stat-red' : evSoon > 0 ? 'comp-stat-amber' : '';
 
   const sprsColor = sprs >= 90 ? 'var(--green)' : sprs >= 70 ? 'var(--amber)' : 'var(--red)';
 
@@ -1352,6 +1388,14 @@ function _renderAssessmentPage() {
             <div class="comp-stat-pill comp-stat-blue">
               <div class="comp-stat-num">${scoredCount} / 110</div>
               <div class="comp-stat-lbl">Scored</div>
+            </div>
+            <div class="comp-stat-pill">
+              <div class="comp-stat-num">${evTotal}</div>
+              <div class="comp-stat-lbl">Artifacts</div>
+            </div>
+            <div class="comp-stat-pill ${evDueCls}">
+              <div class="comp-stat-num">${evDue}</div>
+              <div class="comp-stat-lbl">Due for Refresh</div>
             </div>
           </div>
           <div class="comp-policy-banner" style="margin-bottom:0">
@@ -1485,6 +1529,25 @@ function _renderAssessmentDomains() {
       const rowBg = status === 'NOT MET' ? 'background:rgba(208,64,64,0.04)' :
                     status === 'PARTIAL'  ? 'background:rgba(192,122,26,0.04)' : '';
 
+      // Evidence-artifact toggle state for this practice
+      const evList  = evidenceRecords[p.id] || [];
+      const evCount = evList.length;
+      const evOpen  = !!evidenceExpanded[p.id];
+      const evFlag  = (status === 'MET' && evCount === 0); // MET with no proof = assessor red flag
+      const artifactsCell = `
+        <td style="width:120px;text-align:center">
+          <button onclick="toggleEvidence('${p.id}')"
+            class="assess-artifacts-toggle"
+            title="${evFlag ? 'Marked MET with no artifacts — assessor red flag' : 'View / add evidence artifacts'}"
+            style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid ${evFlag ? 'var(--red)' : 'var(--border)'};border-radius:6px;background:${evOpen ? 'var(--surface3)' : 'transparent'};cursor:pointer;font-size:11px;color:${evFlag ? 'var(--red)' : 'var(--text)'};font-family:'DM Sans',sans-serif;white-space:nowrap">
+            📎 ${evCount}${evFlag ? ' ⚠' : ''} <span style="opacity:.55">${evOpen ? '▾' : '▸'}</span>
+          </button>
+        </td>`;
+      const detailRow = evOpen ? `
+        <tr class="assess-evidence-detail">
+          <td colspan="7" style="padding:0;background:var(--surface)">${_renderEvidencePanel(p.id)}</td>
+        </tr>` : '';
+
       return `
         <tr class="assess-practice-row" style="${rowBg}">
           <td style="width:130px">
@@ -1517,8 +1580,10 @@ function _renderAssessmentDomains() {
                 onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">💡</button>` : ''}
             </div>
           </td>
+          ${artifactsCell}
           <td style="width:90px;text-align:right">${poamBtn}</td>
         </tr>
+        ${detailRow}
       `;
     }).join('');
 
@@ -1551,6 +1616,7 @@ function _renderAssessmentDomains() {
                   <th>Pts</th>
                   <th>Status</th>
                   <th>Evidence / Implementation Note</th>
+                  <th>Artifacts</th>
                   <th></th>
                 </tr>
               </thead>
@@ -1561,6 +1627,220 @@ function _renderAssessmentDomains() {
       </div>
     `;
   }).join('');
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  EVIDENCE ARTIFACTS — inline capture surface (cmmc_evidence)
+// ════════════════════════════════════════════════════════════════════
+// Each practice can have multiple dated, cadenced "proof" artifacts (links).
+// This complements the narrative "Evidence / Implementation Note" (the claim)
+// with the artifacts an assessor actually examines (the proof).
+
+const EV_TYPES    = ['examine','interview','test'];
+const EV_CADENCES = ['once','weekly','monthly','quarterly','annual'];
+const _EV_INP = "background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:5px 8px;font-size:11.5px;color:var(--text);font-family:inherit;outline:none";
+
+function _evKey(s)  { return String(s).replace(/[^A-Za-z0-9]/g, '_'); }
+
+function _evFmtDate(ymd) {
+  if (!ymd) return '—';
+  const d = new Date(ymd + 'T12:00:00');
+  if (isNaN(d)) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// Compute next due date (YYYY-MM-DD) from a captured date + cadence. null for one-time.
+function _evNextDue(capturedYmd, cadence) {
+  if (!cadence || cadence === 'once') return null;
+  const d = new Date(capturedYmd + 'T12:00:00');
+  if (isNaN(d)) return null;
+  if      (cadence === 'weekly')    d.setDate(d.getDate() + 7);
+  else if (cadence === 'monthly')   d.setMonth(d.getMonth() + 1);
+  else if (cadence === 'quarterly') d.setMonth(d.getMonth() + 3);
+  else if (cadence === 'annual')    d.setFullYear(d.getFullYear() + 1);
+  // Format back to YYYY-MM-DD in local terms (noon anchor avoids tz day-flip)
+  const yy = d.getFullYear(), mm = String(d.getMonth() + 1).padStart(2, '0'), dd = String(d.getDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+function _evDueMeta(ev) {
+  if (!ev.next_due) return { txt: 'One-time', color: 'var(--muted)' };
+  const today = new Date().toISOString().split('T')[0];
+  if (ev.next_due <= today) return { txt: 'Overdue · ' + _evFmtDate(ev.next_due), color: 'var(--red)' };
+  const days = Math.round((new Date(ev.next_due + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000);
+  if (days <= 30) return { txt: 'Due ' + _evFmtDate(ev.next_due), color: 'var(--amber)' };
+  return { txt: 'Next ' + _evFmtDate(ev.next_due), color: 'var(--muted)' };
+}
+
+function _evTypeOpts(sel)    { return EV_TYPES.map(t => `<option value="${t}"${t === sel ? ' selected' : ''}>${t}</option>`).join(''); }
+function _evCadenceOpts(sel) { return EV_CADENCES.map(c => `<option value="${c}"${c === sel ? ' selected' : ''}>${c}</option>`).join(''); }
+
+function toggleEvidence(pid) {
+  evidenceExpanded[pid] = !evidenceExpanded[pid];
+  if (!evidenceExpanded[pid] && evidenceEditing) evidenceEditing = null;
+  _renderAssessmentDomains();
+}
+
+function _renderEvidencePanel(pid) {
+  const list = evidenceRecords[pid] || [];
+  const rowsHtml = list.length
+    ? list.map(ev => _renderEvidenceItem(pid, ev)).join('')
+    : `<div style="padding:8px 12px;font-size:12px;color:var(--muted);font-style:italic">No artifacts attached yet — add a link to a Blumira report, Duo log, config screenshot, signed policy, etc.</div>`;
+  return `
+    <div style="padding:12px 16px 16px 16px;border-top:2px solid var(--amber-dim)">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">📎 Evidence Artifacts — ${pid}</div>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${rowsHtml}</div>
+      ${_renderEvidenceAddForm(pid)}
+    </div>`;
+}
+
+function _renderEvidenceItem(pid, ev) {
+  if (evidenceEditing === ev.id) return _renderEvidenceEditForm(pid, ev);
+  const typeColors = { examine: 'var(--blue)', interview: 'var(--amber)', test: 'var(--green)' };
+  const tc = typeColors[ev.evidence_type] || 'var(--muted)';
+  const due = _evDueMeta(ev);
+  const ref = ev.artifact_ref
+    ? `<a href="${_esc(ev.artifact_ref)}" target="_blank" rel="noopener" style="color:var(--blue);font-size:11.5px;text-decoration:none;word-break:break-all">${_esc(ev.artifact_ref)}</a>`
+    : `<span style="font-size:11.5px;color:var(--muted);font-style:italic">no link</span>`;
+  return `
+    <div style="display:flex;gap:10px;align-items:flex-start;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 10px">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px">
+          <span style="font-size:12.5px;font-weight:600;color:var(--text)">${_esc(ev.title)}</span>
+          <span style="font-size:9.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:${tc};border:1px solid ${tc};border-radius:4px;padding:1px 5px">${_esc(ev.evidence_type || '')}</span>
+          ${ev.source_system ? `<span style="font-size:10.5px;color:var(--muted)">${_esc(ev.source_system)}</span>` : ''}
+          ${ev.is_cui ? `<span style="font-size:9.5px;font-weight:700;color:var(--red);border:1px solid var(--red);border-radius:4px;padding:1px 5px">CUI</span>` : ''}
+        </div>
+        <div style="margin-bottom:3px">${ref}</div>
+        <div style="display:flex;gap:12px;align-items:center;font-size:10.5px;color:var(--muted);flex-wrap:wrap">
+          <span>Captured ${_evFmtDate((ev.captured_at || '').split('T')[0])}</span>
+          <span style="color:${due.color};font-weight:600">${due.txt}${ev.cadence && ev.cadence !== 'once' ? ' · ' + ev.cadence : ''}</span>
+        </div>
+        ${ev.notes ? `<div style="font-size:11px;color:var(--text);margin-top:4px;opacity:.85">${_esc(ev.notes)}</div>` : ''}
+      </div>
+      <div style="display:flex;gap:4px;flex-shrink:0">
+        <button onclick="startEditEvidence('${ev.id}')" title="Edit" style="padding:3px 7px;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;font-size:11px;color:var(--muted)">✎</button>
+        <button onclick="deleteEvidence('${pid}','${ev.id}')" title="Delete" style="padding:3px 7px;border:1px solid var(--border);border-radius:5px;background:transparent;cursor:pointer;font-size:11px;color:var(--red)">🗑</button>
+      </div>
+    </div>`;
+}
+
+function _renderEvidenceAddForm(pid) {
+  const k = _evKey(pid);
+  const today = new Date().toISOString().split('T')[0];
+  return `
+    <div style="border:1px dashed var(--border);border-radius:7px;padding:10px;background:var(--surface2)">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <input id="ev-title-${k}" type="text" placeholder="Artifact title (e.g. Q2 Blumira AU report)" style="${_EV_INP};flex:1;min-width:200px">
+        <select id="ev-type-${k}" title="Evidence method (examine / interview / test)" style="${_EV_INP}">${_evTypeOpts('examine')}</select>
+        <input id="ev-source-${k}" type="text" placeholder="Source (Blumira, Duo…)" style="${_EV_INP};width:150px">
+        <select id="ev-cadence-${k}" title="Refresh cadence" style="${_EV_INP}">${_evCadenceOpts('once')}</select>
+        <input id="ev-date-${k}" type="date" value="${today}" title="Date captured" style="${_EV_INP}">
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">
+        <input id="ev-ref-${k}" type="text" placeholder="Link (Blumira report URL, NAS path, Drive link…)" style="${_EV_INP};flex:1;min-width:240px">
+        <input id="ev-notes-${k}" type="text" placeholder="Notes (optional)" style="${_EV_INP};flex:1;min-width:160px">
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+          <input id="ev-cui-${k}" type="checkbox"> Contains CUI
+        </label>
+        <button onclick="addEvidence('${pid}')" class="comp-btn-ghost" style="font-size:12px;font-weight:600">+ Add Artifact</button>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:5px">CUI artifacts must be link-only into the NUEncrypted enclave — never upload CUI to the cloud.</div>
+    </div>`;
+}
+
+function _renderEvidenceEditForm(pid, ev) {
+  const id = ev.id;
+  const cap = (ev.captured_at || '').split('T')[0] || new Date().toISOString().split('T')[0];
+  return `
+    <div style="border:1px solid var(--amber-dim);border-radius:7px;padding:10px;background:var(--surface2)">
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+        <input id="eved-title-${id}" type="text" value="${_esc(ev.title)}" style="${_EV_INP};flex:1;min-width:200px">
+        <select id="eved-type-${id}" style="${_EV_INP}">${_evTypeOpts(ev.evidence_type)}</select>
+        <input id="eved-source-${id}" type="text" value="${_esc(ev.source_system || '')}" placeholder="Source" style="${_EV_INP};width:150px">
+        <select id="eved-cadence-${id}" style="${_EV_INP}">${_evCadenceOpts(ev.cadence || 'once')}</select>
+        <input id="eved-date-${id}" type="date" value="${cap}" style="${_EV_INP}">
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">
+        <input id="eved-ref-${id}" type="text" value="${_esc(ev.artifact_ref || '')}" placeholder="Link" style="${_EV_INP};flex:1;min-width:240px">
+        <input id="eved-notes-${id}" type="text" value="${_esc(ev.notes || '')}" placeholder="Notes" style="${_EV_INP};flex:1;min-width:160px">
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+          <input id="eved-cui-${id}" type="checkbox"${ev.is_cui ? ' checked' : ''}> Contains CUI
+        </label>
+        <button onclick="saveEditEvidence('${pid}','${id}')" class="comp-btn-ghost" style="font-size:12px;font-weight:600;border-color:var(--green);color:var(--green)">✓ Save</button>
+        <button onclick="cancelEditEvidence()" class="comp-btn-ghost" style="font-size:12px">Cancel</button>
+      </div>
+    </div>`;
+}
+
+async function addEvidence(pid) {
+  const k = _evKey(pid);
+  const g = id => document.getElementById(id);
+  const title = (g('ev-title-' + k)?.value || '').trim();
+  if (!title) { toast('⚠ Artifact title is required'); return; }
+  const capturedDate = g('ev-date-' + k)?.value || new Date().toISOString().split('T')[0];
+  const cadence = g('ev-cadence-' + k)?.value || 'once';
+  const payload = {
+    practice_id:     pid,
+    assessment_year: assessmentYear,
+    title,
+    evidence_type:   g('ev-type-' + k)?.value || 'examine',
+    source_system:   (g('ev-source-' + k)?.value || '').trim() || null,
+    artifact_ref:    (g('ev-ref-' + k)?.value || '').trim() || null,
+    is_cui:          !!g('ev-cui-' + k)?.checked,
+    cadence,
+    captured_at:     new Date(capturedDate + 'T12:00:00').toISOString(),
+    next_due:        _evNextDue(capturedDate, cadence),
+    notes:           (g('ev-notes-' + k)?.value || '').trim() || '',
+    created_at:      new Date().toISOString(),
+    updated_at:      new Date().toISOString(),
+  };
+  const { data: row, error } = await sb.from('cmmc_evidence').insert(payload).select().single();
+  if (error) { console.error('Evidence add error:', error); toast('⚠ Save failed: ' + error.message); return; }
+  (evidenceRecords[pid] = evidenceRecords[pid] || []).unshift(row);
+  evidenceExpanded[pid] = true;
+  toast('✓ Artifact added');
+  _renderAssessmentPage();
+}
+
+function startEditEvidence(id)  { evidenceEditing = id; _renderAssessmentDomains(); }
+function cancelEditEvidence()   { evidenceEditing = null; _renderAssessmentDomains(); }
+
+async function saveEditEvidence(pid, id) {
+  const g = elId => document.getElementById(elId);
+  const title = (g('eved-title-' + id)?.value || '').trim();
+  if (!title) { toast('⚠ Artifact title is required'); return; }
+  const capturedDate = g('eved-date-' + id)?.value || new Date().toISOString().split('T')[0];
+  const cadence = g('eved-cadence-' + id)?.value || 'once';
+  const payload = {
+    title,
+    evidence_type: g('eved-type-' + id)?.value || 'examine',
+    source_system: (g('eved-source-' + id)?.value || '').trim() || null,
+    artifact_ref:  (g('eved-ref-' + id)?.value || '').trim() || null,
+    is_cui:        !!g('eved-cui-' + id)?.checked,
+    cadence,
+    captured_at:   new Date(capturedDate + 'T12:00:00').toISOString(),
+    next_due:      _evNextDue(capturedDate, cadence),
+    notes:         (g('eved-notes-' + id)?.value || '').trim() || '',
+    updated_at:    new Date().toISOString(),
+  };
+  const { error } = await sb.from('cmmc_evidence').update(payload).eq('id', id);
+  if (error) { console.error('Evidence update error:', error); toast('⚠ Save failed: ' + error.message); return; }
+  const arr = evidenceRecords[pid] || [];
+  const idx = arr.findIndex(r => r.id === id);
+  if (idx !== -1) arr[idx] = { ...arr[idx], ...payload };
+  evidenceEditing = null;
+  toast('✓ Artifact updated');
+  _renderAssessmentPage();
+}
+
+async function deleteEvidence(pid, id) {
+  if (!confirm('Delete this evidence artifact? This cannot be undone.')) return;
+  const { error } = await sb.from('cmmc_evidence').delete().eq('id', id);
+  if (error) { console.error('Evidence delete error:', error); toast('⚠ Delete failed: ' + error.message); return; }
+  evidenceRecords[pid] = (evidenceRecords[pid] || []).filter(r => r.id !== id);
+  toast('✓ Artifact deleted');
+  _renderAssessmentPage();
 }
 
 async function setAssessmentStatus(practiceId, status) {
