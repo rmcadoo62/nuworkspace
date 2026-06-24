@@ -1038,6 +1038,7 @@ let assessmentStatusFilter = 'all'; // all | MET | PARTIAL | NOT MET | unscored
 let evidenceRecords  = {};   // keyed by practice_id: [ {id, practice_id, title, ...} ]
 let evidenceExpanded = {};   // keyed by practice_id: bool (inline panel open)
 let evidenceEditing  = null; // evidence row id currently being edited (one at a time)
+let evidenceAdding   = {};   // keyed by practice_id: bool (add-artifact form open)
 
 function _renderComingSoonTab(tab) {
   const labels = {
@@ -1732,11 +1733,14 @@ function _renderEvidencePanel(pid) {
   const rowsHtml = list.length
     ? list.map(ev => _renderEvidenceItem(pid, ev)).join('')
     : `<div style="padding:8px 12px;font-size:12px;color:var(--muted);font-style:italic">No artifacts attached yet — add a link to a Blumira report, Duo log, config screenshot, signed policy, etc.</div>`;
+  const adder = evidenceAdding[pid]
+    ? _renderEvidenceAddForm(pid)
+    : `<button onclick="showAddEvidence('${pid}')" class="comp-btn-ghost" style="font-size:12px;font-weight:600">+ Add Artifact</button>`;
   return `
     <div style="padding:12px 16px 16px 16px;border-top:2px solid var(--amber-dim)">
       <div style="font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">📎 Evidence Artifacts — ${pid}</div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">${rowsHtml}</div>
-      ${_renderEvidenceAddForm(pid)}
+      ${adder}
     </div>`;
 }
 
@@ -1798,6 +1802,7 @@ function _renderEvidenceAddForm(pid) {
           <input id="ev-cui-${k}" type="checkbox" onchange="_evToggleCui('${k}')"> Contains CUI
         </label>
         <button onclick="addEvidence('${pid}')" class="comp-btn-ghost" style="font-size:12px;font-weight:600">+ Add Artifact</button>
+        <button onclick="cancelAddEvidence('${pid}')" class="comp-btn-ghost" style="font-size:12px">Cancel</button>
       </div>
       <div id="ev-cuihint-${k}" style="font-size:10px;color:var(--muted);margin-top:5px">Drop a file to upload it. If it contains CUI, check the box — upload disables and you must link to the NUEncrypted enclave instead (CUI never goes to the cloud).</div>
     </div>`;
@@ -1885,12 +1890,15 @@ async function addEvidence(pid) {
   }
   (evidenceRecords[pid] = evidenceRecords[pid] || []).unshift(row);
   evidenceExpanded[pid] = true;
+  evidenceAdding[pid] = false; // collapse the form back to the + Add Artifact button
   toast('✓ Artifact added');
   _renderAssessmentPage();
 }
 
 function startEditEvidence(id)  { evidenceEditing = id; _renderAssessmentDomains(); }
 function cancelEditEvidence()   { evidenceEditing = null; _renderAssessmentDomains(); }
+function showAddEvidence(pid)   { evidenceAdding[pid] = true;  evidenceExpanded[pid] = true; _renderAssessmentDomains(); }
+function cancelAddEvidence(pid) { evidenceAdding[pid] = false; _renderAssessmentDomains(); }
 
 async function saveEditEvidence(pid, id) {
   const g = elId => document.getElementById(elId);
