@@ -232,7 +232,7 @@ async function loadAllData() {
 
     // Tasks
     taskStore = taskRows.map(r => ({
-      _id: r.id, taskNum: r.task_num||0, name: r.name, assign: r.assignee||'', assignId: r.assignee_id||'',
+      _id: r.id, taskNum: r.task_num||0, name: r.name, desc: r.description||'', assign: r.assignee||'', assignId: r.assignee_id||'',
       due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
       due_raw: r.due_date||'',
       overdue: r.due_date ? new Date(r.due_date+'T00:00:00') < new Date() && !r.done : false,
@@ -475,7 +475,7 @@ async function loadClosedProject(projId) {
     taskRows.forEach(r => {
       if (existingIds.has(r.id)) return;
       taskStore.push({
-        _id: r.id, taskNum: r.task_num||0, name: r.name, assign: r.assignee||'', assignId: r.assignee_id||'',
+        _id: r.id, taskNum: r.task_num||0, name: r.name, desc: r.description||'', assign: r.assignee||'', assignId: r.assignee_id||'',
         due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
         due_raw: r.due_date||'', overdue: false, done: r.done||false,
         proj: r.project_id||'', status: r.status||'new', priority: r.priority||'medium',
@@ -667,7 +667,7 @@ function setupRealtime() {
       if (taskStore.find(t => t._id === r.id)) return;
       if (window._localInsertIds?.has(r.id)) return; // skip locally inserted tasks
       taskStore.unshift({
-        _id: r.id, taskNum: r.task_num||0, name: r.name, assign: r.assignee||'', assignId: r.assignee_id||'',
+        _id: r.id, taskNum: r.task_num||0, name: r.name, desc: r.description||'', assign: r.assignee||'', assignId: r.assignee_id||'',
         due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
         due_raw: r.due_date||'', overdue: false, done: r.done||false,
         proj: r.project_id||'', status: r.status||'new', priority: r.priority||'medium',
@@ -689,7 +689,7 @@ function setupRealtime() {
       const t = taskStore.find(x => x._id === r.id);
       const wasDone = t ? t.done : false;
       if (t) {
-        t.name = r.name; t.assign = r.assignee||''; t.assignId = r.assignee_id||''; t.done = r.done||false;
+        t.name = r.name; t.desc = r.description||''; t.assign = r.assignee||''; t.assignId = r.assignee_id||''; t.done = r.done||false;
         t.status = r.status||t.status; t.priority = r.priority||t.priority;
         t.due_raw = r.due_date||'';
         t.due = r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
