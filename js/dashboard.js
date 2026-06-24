@@ -108,7 +108,7 @@ function renderDashboard() {
   const totalBilled  = chartData[chartData.length - 1] || 0; // current month from chart
   // Note: totalBilledAllProjects is the accurate all-time total across all projects
   // Sum ALL billed tasks directly — not just those with a date
-  const _openProjIds = new Set(projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').map(p => p.id));
+  const _openProjIds = new Set(projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed' && !p.is_internal).map(p => p.id));
   const readyToBill  = taskStore.filter(t => t.status === 'complete' && _openProjIds.has(t.proj)).reduce((s,t) => s + (t.fixedPrice||0), 0);
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
 
@@ -159,7 +159,8 @@ function renderDashboard() {
   // Booking data spans open projects (live taskStore) + a current-year snapshot of
   // closed-project tasks (window._bookingClosedTasks). Without the latter, closing a
   // job mid-year silently erases its bookings AND its cancellation reversals here.
-  const _bkTasks = taskStore.concat(window._bookingClosedTasks || []);
+  const _internalProjIds = new Set(projects.filter(p => p.is_internal).map(p => p.id));
+  const _bkTasks = taskStore.concat(window._bookingClosedTasks || []).filter(t => !_internalProjIds.has(t.proj));
 
   _bkTasks.forEach(t => {
     const cat = t.salesCat || 'Uncategorized';
