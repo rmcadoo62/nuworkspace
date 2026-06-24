@@ -1639,6 +1639,7 @@ function _renderAssessmentDomains() {
 const EV_TYPES    = ['examine','interview','test'];
 const EV_CADENCES = ['once','weekly','monthly','quarterly','annual'];
 const _EV_INP = "background:var(--surface);border:1px solid var(--border);border-radius:5px;padding:5px 8px;font-size:11.5px;color:var(--text);font-family:inherit;outline:none";
+const EV_BUCKET = 'cmmc-evidence'; // private Supabase Storage bucket for non-CUI artifacts
 
 function _evKey(s)  { return String(s).replace(/[^A-Za-z0-9]/g, '_'); }
 
@@ -1681,6 +1682,51 @@ function toggleEvidence(pid) {
   _renderAssessmentDomains();
 }
 
+// Upload a non-CUI file to the private bucket. Returns { path } or null on failure.
+async function _evUpload(pid, file) {
+  if (file.size > 25 * 1024 * 1024) { toast('⚠ File is larger than 25 MB — link to it instead'); return null; }
+  const safe = (file.name || 'file').replace(/[^A-Za-z0-9._-]/g, '_');
+  const uid = (window.crypto && crypto.randomUUID) ? crypto.randomUUID()
+            : (Date.now() + '_' + Math.random().toString(36).slice(2));
+  const path = `${pid}/${uid}_${safe}`;
+  const { error } = await sb.storage.from(EV_BUCKET).upload(path, file, {
+    upsert: false,
+    contentType: file.type || undefined,
+  });
+  if (error) { console.error('Upload error:', error); toast('⚠ Upload failed: ' + error.message); return null; }
+  return { path };
+}
+
+// Open an uploaded artifact via a short-lived signed URL (private bucket).
+async function _evDownload(filePath) {
+  const { data, error } = await sb.storage.from(EV_BUCKET).createSignedUrl(filePath, 3600);
+  if (error || !data?.signedUrl) { console.error('Signed URL error:', error); toast('⚠ Could not open file'); return; }
+  window.open(data.signedUrl, '_blank', 'noopener');
+}
+
+// Add-form: checking CUI disables upload (CUI must stay off the cloud).
+function _evToggleCui(k) {
+  const cui  = document.getElementById('ev-cui-' + k)?.checked;
+  const file = document.getElementById('ev-file-' + k);
+  const ref  = document.getElementById('ev-ref-' + k);
+  const hint = document.getElementById('ev-cuihint-' + k);
+  if (file) { file.disabled = !!cui; file.style.opacity = cui ? '0.4' : '1'; if (cui) file.value = ''; }
+  if (ref)  { ref.placeholder = cui ? 'NAS link to NUEncrypted enclave (required)' : '…or paste a link (optional)'; }
+  if (hint) { hint.style.color = cui ? 'var(--red)' : 'var(--muted)';
+              hint.textContent = cui
+                ? 'CUI artifact — upload is disabled. Link to the file on the NUEncrypted enclave; CUI never goes to the cloud.'
+                : 'Drop a file to upload it. If it contains CUI, check the box — upload disables and you must link to the NUEncrypted enclave instead (CUI never goes to the cloud).'; }
+}
+
+// Edit-form variant of the CUI guard.
+function _evToggleCuiEdit(id) {
+  const cui  = document.getElementById('eved-cui-' + id)?.checked;
+  const file = document.getElementById('eved-file-' + id);
+  const ref  = document.getElementById('eved-ref-' + id);
+  if (file) { file.disabled = !!cui; file.style.opacity = cui ? '0.4' : '1'; if (cui) file.value = ''; }
+  if (ref)  { ref.placeholder = cui ? 'NAS link to NUEncrypted enclave (required)' : '…or link'; }
+}
+
 function _renderEvidencePanel(pid) {
   const list = evidenceRecords[pid] || [];
   const rowsHtml = list.length
@@ -1699,9 +1745,14 @@ function _renderEvidenceItem(pid, ev) {
   const typeColors = { examine: 'var(--blue)', interview: 'var(--amber)', test: 'var(--green)' };
   const tc = typeColors[ev.evidence_type] || 'var(--muted)';
   const due = _evDueMeta(ev);
-  const ref = ev.artifact_ref
-    ? `<a href="${_esc(ev.artifact_ref)}" target="_blank" rel="noopener" style="color:var(--blue);font-size:11.5px;text-decoration:none;word-break:break-all">${_esc(ev.artifact_ref)}</a>`
-    : `<span style="font-size:11.5px;color:var(--muted);font-style:italic">no link</span>`;
+  let ref;
+  if (ev.file_path) {
+    ref = `<button onclick="_evDownload('${ev.file_path}')" style="display:inline-flex;align-items:center;gap:5px;background:transparent;border:none;padding:0;cursor:pointer;color:var(--blue);font-size:11.5px;font-family:inherit;word-break:break-all">📄 ${_esc(ev.file_name || 'Download file')}</button>`;
+  } else if (ev.artifact_ref) {
+    ref = `<a href="${_esc(ev.artifact_ref)}" target="_blank" rel="noopener" style="color:var(--blue);font-size:11.5px;text-decoration:none;word-break:break-all">🔗 ${_esc(ev.artifact_ref)}</a>`;
+  } else {
+    ref = `<span style="font-size:11.5px;color:var(--muted);font-style:italic">no file or link</span>`;
+  }
   return `
     <div style="display:flex;gap:10px;align-items:flex-start;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:8px 10px">
       <div style="flex:1;min-width:0">
@@ -1738,14 +1789,17 @@ function _renderEvidenceAddForm(pid) {
         <input id="ev-date-${k}" type="date" value="${today}" title="Date captured" style="${_EV_INP}">
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">
-        <input id="ev-ref-${k}" type="text" placeholder="Link (Blumira report URL, NAS path, Drive link…)" style="${_EV_INP};flex:1;min-width:240px">
+        <input id="ev-file-${k}" type="file" title="Drop or choose a file" style="${_EV_INP};flex:1;min-width:240px;padding:4px 6px">
+        <input id="ev-ref-${k}" type="text" placeholder="…or paste a link (optional)" style="${_EV_INP};flex:1;min-width:200px">
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">
         <input id="ev-notes-${k}" type="text" placeholder="Notes (optional)" style="${_EV_INP};flex:1;min-width:160px">
         <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
-          <input id="ev-cui-${k}" type="checkbox"> Contains CUI
+          <input id="ev-cui-${k}" type="checkbox" onchange="_evToggleCui('${k}')"> Contains CUI
         </label>
         <button onclick="addEvidence('${pid}')" class="comp-btn-ghost" style="font-size:12px;font-weight:600">+ Add Artifact</button>
       </div>
-      <div style="font-size:10px;color:var(--muted);margin-top:5px">CUI artifacts must be link-only into the NUEncrypted enclave — never upload CUI to the cloud.</div>
+      <div id="ev-cuihint-${k}" style="font-size:10px;color:var(--muted);margin-top:5px">Drop a file to upload it. If it contains CUI, check the box — upload disables and you must link to the NUEncrypted enclave instead (CUI never goes to the cloud).</div>
     </div>`;
 }
 
@@ -1762,10 +1816,14 @@ function _renderEvidenceEditForm(pid, ev) {
         <input id="eved-date-${id}" type="date" value="${cap}" style="${_EV_INP}">
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">
-        <input id="eved-ref-${id}" type="text" value="${_esc(ev.artifact_ref || '')}" placeholder="Link" style="${_EV_INP};flex:1;min-width:240px">
+        <input id="eved-file-${id}" type="file" title="Replace file (leave empty to keep current)" style="${_EV_INP};flex:1;min-width:200px;padding:4px 6px">
+        <input id="eved-ref-${id}" type="text" value="${_esc(ev.artifact_ref || '')}" placeholder="…or link" style="${_EV_INP};flex:1;min-width:180px">
+      </div>
+      ${ev.file_path ? `<div style="font-size:10.5px;color:var(--muted);margin-top:4px">Current file: 📄 ${_esc(ev.file_name || ev.file_path)} — choosing a new file replaces it.</div>` : ''}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px">
         <input id="eved-notes-${id}" type="text" value="${_esc(ev.notes || '')}" placeholder="Notes" style="${_EV_INP};flex:1;min-width:160px">
         <label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
-          <input id="eved-cui-${id}" type="checkbox"${ev.is_cui ? ' checked' : ''}> Contains CUI
+          <input id="eved-cui-${id}" type="checkbox"${ev.is_cui ? ' checked' : ''} onchange="_evToggleCuiEdit('${id}')"> Contains CUI
         </label>
         <button onclick="saveEditEvidence('${pid}','${id}')" class="comp-btn-ghost" style="font-size:12px;font-weight:600;border-color:var(--green);color:var(--green)">✓ Save</button>
         <button onclick="cancelEditEvidence()" class="comp-btn-ghost" style="font-size:12px">Cancel</button>
@@ -1778,16 +1836,38 @@ async function addEvidence(pid) {
   const g = id => document.getElementById(id);
   const title = (g('ev-title-' + k)?.value || '').trim();
   if (!title) { toast('⚠ Artifact title is required'); return; }
+  const isCui        = !!g('ev-cui-' + k)?.checked;
   const capturedDate = g('ev-date-' + k)?.value || new Date().toISOString().split('T')[0];
-  const cadence = g('ev-cadence-' + k)?.value || 'once';
+  const cadence      = g('ev-cadence-' + k)?.value || 'once';
+  const linkVal      = (g('ev-ref-' + k)?.value || '').trim();
+  const file         = g('ev-file-' + k)?.files?.[0];
+
+  let file_path = null, file_name = null, artifact_ref = null;
+  if (isCui) {
+    // CUI: never upload to cloud — require a NAS/enclave link.
+    if (!linkVal) { toast('⚠ CUI artifacts must be a link to the NUEncrypted enclave — no cloud upload'); return; }
+    artifact_ref = linkVal;
+  } else if (file) {
+    const up = await _evUpload(pid, file);
+    if (!up) return; // _evUpload already surfaced the error
+    file_path = up.path; file_name = file.name;
+    if (linkVal) artifact_ref = linkVal; // optional companion link
+  } else if (linkVal) {
+    artifact_ref = linkVal;
+  } else {
+    toast('⚠ Drop a file or paste a link'); return;
+  }
+
   const payload = {
     practice_id:     pid,
     assessment_year: assessmentYear,
     title,
     evidence_type:   g('ev-type-' + k)?.value || 'examine',
     source_system:   (g('ev-source-' + k)?.value || '').trim() || null,
-    artifact_ref:    (g('ev-ref-' + k)?.value || '').trim() || null,
-    is_cui:          !!g('ev-cui-' + k)?.checked,
+    artifact_ref,
+    file_path,
+    file_name,
+    is_cui:          isCui,
     cadence,
     captured_at:     new Date(capturedDate + 'T12:00:00').toISOString(),
     next_due:        _evNextDue(capturedDate, cadence),
@@ -1796,7 +1876,13 @@ async function addEvidence(pid) {
     updated_at:      new Date().toISOString(),
   };
   const { data: row, error } = await sb.from('cmmc_evidence').insert(payload).select().single();
-  if (error) { console.error('Evidence add error:', error); toast('⚠ Save failed: ' + error.message); return; }
+  if (error) {
+    console.error('Evidence add error:', error);
+    // If the DB insert fails after a successful upload, clean up the orphaned object.
+    if (file_path) { try { await sb.storage.from(EV_BUCKET).remove([file_path]); } catch (e) {} }
+    toast('⚠ Save failed: ' + error.message);
+    return;
+  }
   (evidenceRecords[pid] = evidenceRecords[pid] || []).unshift(row);
   evidenceExpanded[pid] = true;
   toast('✓ Artifact added');
@@ -1810,14 +1896,42 @@ async function saveEditEvidence(pid, id) {
   const g = elId => document.getElementById(elId);
   const title = (g('eved-title-' + id)?.value || '').trim();
   if (!title) { toast('⚠ Artifact title is required'); return; }
+  const arr = evidenceRecords[pid] || [];
+  const old = arr.find(r => r.id === id) || {};
   const capturedDate = g('eved-date-' + id)?.value || new Date().toISOString().split('T')[0];
   const cadence = g('eved-cadence-' + id)?.value || 'once';
+  const isCui   = !!g('eved-cui-' + id)?.checked;
+  const linkVal = (g('eved-ref-' + id)?.value || '').trim();
+  const newFile = g('eved-file-' + id)?.files?.[0];
+
+  let file_path = old.file_path || null, file_name = old.file_name || null, artifact_ref = null;
+  let removeOld = null, uploadedNew = null;
+
+  if (isCui) {
+    if (!linkVal) { toast('⚠ CUI artifacts must be a link to the NUEncrypted enclave — no cloud upload'); return; }
+    artifact_ref = linkVal;
+    if (old.file_path) removeOld = old.file_path; // pull the cloud copy now that it's CUI/link
+    file_path = null; file_name = null;
+  } else if (newFile) {
+    const up = await _evUpload(pid, newFile);
+    if (!up) return;
+    uploadedNew = up.path;
+    if (old.file_path && old.file_path !== up.path) removeOld = old.file_path;
+    file_path = up.path; file_name = newFile.name;
+    artifact_ref = linkVal || null;
+  } else {
+    // keep existing file (if any); allow editing/adding a link
+    artifact_ref = linkVal || null;
+  }
+
   const payload = {
     title,
     evidence_type: g('eved-type-' + id)?.value || 'examine',
     source_system: (g('eved-source-' + id)?.value || '').trim() || null,
-    artifact_ref:  (g('eved-ref-' + id)?.value || '').trim() || null,
-    is_cui:        !!g('eved-cui-' + id)?.checked,
+    artifact_ref,
+    file_path,
+    file_name,
+    is_cui:        isCui,
     cadence,
     captured_at:   new Date(capturedDate + 'T12:00:00').toISOString(),
     next_due:      _evNextDue(capturedDate, cadence),
@@ -1825,8 +1939,13 @@ async function saveEditEvidence(pid, id) {
     updated_at:    new Date().toISOString(),
   };
   const { error } = await sb.from('cmmc_evidence').update(payload).eq('id', id);
-  if (error) { console.error('Evidence update error:', error); toast('⚠ Save failed: ' + error.message); return; }
-  const arr = evidenceRecords[pid] || [];
+  if (error) {
+    console.error('Evidence update error:', error);
+    if (uploadedNew) { try { await sb.storage.from(EV_BUCKET).remove([uploadedNew]); } catch (e) {} }
+    toast('⚠ Save failed: ' + error.message);
+    return;
+  }
+  if (removeOld) { try { await sb.storage.from(EV_BUCKET).remove([removeOld]); } catch (e) { console.warn('Old file cleanup failed', e); } }
   const idx = arr.findIndex(r => r.id === id);
   if (idx !== -1) arr[idx] = { ...arr[idx], ...payload };
   evidenceEditing = null;
@@ -1836,8 +1955,10 @@ async function saveEditEvidence(pid, id) {
 
 async function deleteEvidence(pid, id) {
   if (!confirm('Delete this evidence artifact? This cannot be undone.')) return;
+  const rec = (evidenceRecords[pid] || []).find(r => r.id === id);
   const { error } = await sb.from('cmmc_evidence').delete().eq('id', id);
   if (error) { console.error('Evidence delete error:', error); toast('⚠ Delete failed: ' + error.message); return; }
+  if (rec?.file_path) { try { await sb.storage.from(EV_BUCKET).remove([rec.file_path]); } catch (e) { console.warn('Storage cleanup failed', e); } }
   evidenceRecords[pid] = (evidenceRecords[pid] || []).filter(r => r.id !== id);
   toast('✓ Artifact deleted');
   _renderAssessmentPage();
