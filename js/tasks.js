@@ -1681,7 +1681,7 @@ window.saveTask = async function(another=false) {
   const row = {
     name: title,
     description: document.getElementById('taskDesc').value.trim(),
-    project_id: projId, assignee: assign,
+    project_id: projId, assignee: assign, assignee_id: assignEmp ? assignEmp.id : null,
     completed_date: (status === 'complete' || status === 'done' || status === 'billed') ? (due||null) : null,
     due_date: null, status, priority: tPri,
     section: 'sprint', done: status==='done',
