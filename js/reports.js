@@ -702,7 +702,7 @@ function renderInProgressReport() {
 
   // Open (non-closed) projects only
   const openProjIds = new Set(
-    projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').map(p => p.id)
+    projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed' && !p.is_internal).map(p => p.id)
   );
 
   // All in-progress tasks across open projects, decorated with project/client info
@@ -1302,6 +1302,7 @@ async function renderStaleProjects() {
   const openProjects = projects.filter(p => {
     const st = (projectInfo[p.id] || {}).status;
     if (st === 'closed') return false;
+    if (p.is_internal) return false;
     if (hideNJobs && /^N\d/i.test(p.name)) return false;
     return true;
   });
@@ -1540,7 +1541,7 @@ function clearAiHistory() {
 
 function buildAiContext() {
   const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-  const openProjects = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed');
+  const openProjects = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed' && !p.is_internal);
   const openProjIds  = new Set(openProjects.map(p => p.id));
 
   // ----- Project summary (open projects) -----
