@@ -189,7 +189,8 @@ async function loadAllData() {
     projects = projRows.map(r => ({
       id: r.id, name: r.name, color: r.color, emoji: r.emoji, desc: r.description || '', description: r.description || '',
       createdAt: r.created_at ? r.created_at.split('T')[0] : '',
-      skip_survey: r.skip_survey === true   // Carry through so the Customer Surveys eligibility filter works after a full reload
+      skip_survey: r.skip_survey === true,   // Carry through so the Customer Surveys eligibility filter works after a full reload
+      is_internal: r.is_internal === true   // Carry through so report/dashboard internal-project exclusions survive a full reload
     }));
 
     // Project info
@@ -608,7 +609,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'projects' }, payload => {
       const r = payload.new;
       if (!projects.find(p => p.id === r.id)) {
-        projects.push({ id: r.id, name: r.name, color: r.color, emoji: r.emoji||'📁', desc: r.description||'', skip_survey: r.skip_survey === true });
+        projects.push({ id: r.id, name: r.name, color: r.color, emoji: r.emoji||'📁', desc: r.description||'', skip_survey: r.skip_survey === true, is_internal: r.is_internal === true });
         toast('📁 New project: ' + r.name);
         refreshCurrentView();
       }
@@ -616,7 +617,7 @@ function setupRealtime() {
     .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'projects' }, payload => {
       const r = payload.new;
       const p = projects.find(x => x.id === r.id);
-      if (p) { p.name = r.name; p.color = r.color; p.emoji = r.emoji||p.emoji; p.desc = r.description||''; p.skip_survey = r.skip_survey === true; }
+      if (p) { p.name = r.name; p.color = r.color; p.emoji = r.emoji||p.emoji; p.desc = r.description||''; p.skip_survey = r.skip_survey === true; p.is_internal = r.is_internal === true; }
       refreshCurrentView();
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'projects' }, payload => {
