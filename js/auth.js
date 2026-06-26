@@ -1096,6 +1096,10 @@ function applyPermissions() {
   // to call unconditionally.
   if (typeof refreshSurveysBadge === 'function') refreshSurveysBadge();
 
+  // EMI Quote WU open-count badge (drafts awaiting work). Safe to call
+  // unconditionally; crr.js no-ops if Supabase isn't ready yet.
+  if (typeof refreshCrrBadge === 'function') refreshCrrBadge();
+
   // After every individual nav-item has had its visibility set, collapse
   // any sections (and the Vibrato brand) whose contents are entirely hidden.
   _autoCollapseNavSections();

@@ -2585,7 +2585,7 @@ const CAPABILITY_DEFS = [
   { key: 'edit_schedule',      label: 'Edit Scheduler',        group: 'Scheduler' },
   { key: 'view_cmmc',          label: 'View CMMC Compliance',  group: 'Compliance' },
   { key: 'access_nuforce',     label: 'Access NUForce',        group: 'Apps' },
-  { key: 'access_crr',         label: 'Quote Workup (CRR)',    group: 'Apps' },
+  { key: 'access_crr',         label: 'EMI Quote WU',          group: 'Apps' },
   { key: 'nuforce_approve_quotes', label: 'Approve Quotes (NUForce)', group: 'Apps' },
   { key: 'nuforce_send_quotes',    label: 'Send Approved Quotes (NUForce)', group: 'Apps' },
 ];

@@ -161,7 +161,7 @@
   </div>
   <div class="nav-section">
     <div class="nav-item" id="navQuotes" onclick="openQuotesPanel(this)"><span class="icon">&#x1F4CB;</span> Quotes</div>
-    <div class="nav-item" id="navCrr" onclick="openCrrPanel(this)" style="display:none"><span class="icon">&#x1F4DD;</span> Quote Workup</div>
+    <div class="nav-item" id="navCrr" onclick="openCrrPanel(this)" style="display:none"><span class="icon survey-count" id="crrBadge">0</span> EMI Quote WU</div>
     <div class="nav-item" id="navNuforce" onclick="openNuforce()" style="display:none"><span class="icon">&#x1F680;</span> Open NUForce <span style="font-size:11px;opacity:.55;margin-left:1px">&#x2197;</span></div>
   </div>
   <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
@@ -232,10 +232,23 @@
       </div>
     </div>
 
-    <!-- QUOTE WORKUP (CRR) PANEL -->
+    <!-- EMI QUOTE WORKUP (CRR) PANEL -->
     <div class="view-panel" id="panel-crr" style="flex-direction:column;overflow:hidden">
-      <div class="crr-scroll" style="flex:1;overflow-y:auto">
-        <div id="crrRoot" class="crr-root">
+      <!-- LIST VIEW -->
+      <div id="crrListView" class="crr-root" style="flex:1;overflow-y:auto">
+        <div class="crr-list-container" id="crrListBody"></div>
+      </div>
+      <!-- FORM VIEW -->
+      <div id="crrFormView" class="crr-root" style="display:none;flex-direction:column;overflow:hidden;flex:1">
+        <div class="crr-formbar">
+          <button type="button" class="crr-btn" id="crrBackBtn">&#8592; Back</button>
+          <span class="crr-formquote" id="crrFormQuote"></span>
+          <span class="status" id="status">Ready.</span>
+          <button type="button" class="crr-btn" id="crrSaveDraftBtn">Save Draft</button>
+          <button type="button" class="crr-btn primary" id="crrFinishBtn">Finished</button>
+        </div>
+        <div class="crr-form-scroll">
+          <div id="crrRoot">
           <header>
             <div class="brand">
               <img class="logo" id="logoImg" alt="NU Laboratories"/>
@@ -378,16 +391,7 @@
             </div>
 
           </main>
-
-          <div class="actionbar">
-            <span class="status" id="status">Ready.</span>
-            <button id="resetBtn" class="danger" title="Clear all fields and unselect specs">Reset</button>
-            <button id="loadJson" title="Load a previously saved .json file">Load data</button>
-            <button id="saveJson" title="Save current data to a .json file">Save data</button>
-            <button id="exportWord" class="primary" title="Export filled form to Word .docx">Export to Word</button>
           </div>
-
-          <input type="file" id="fileInput" accept="application/json,.json" style="display:none"/>
         </div>
       </div>
     </div>
