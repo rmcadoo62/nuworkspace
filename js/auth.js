@@ -1085,6 +1085,10 @@ function applyPermissions() {
   const navNuforce = document.getElementById('navNuforce');
   if (navNuforce) navNuforce.style.display = can('access_nuforce') ? 'flex' : 'none';
 
+  // Quote Workup (Customer Request Review) — gated by the access_crr capability
+  const navCrr = document.getElementById('navCrr');
+  if (navCrr) navCrr.style.display = can('access_crr') ? 'flex' : 'none';
+
   applySchedAccessToNav();
 
   // Initialize the Customer Surveys eligible-count badge. Function in
@@ -1191,15 +1195,17 @@ function _applyIdentityNav() {
 // of applyPermissions() and _applyIdentityNav() so it sees the final state
 // of every nav-item's display. Idempotent — safe to call multiple times.
 function _autoCollapseNavSections() {
-  // 1) NUForce brand header — show if EITHER Quotes or the NUForce launcher
-  //    is visible (a user may have access_nuforce without view_quotes).
+  // 1) NUForce brand header — show if Quotes, the NUForce launcher, OR the
+  //    Quote Workup tool is visible (a user may have one without the others).
   const navQuotes     = document.getElementById('navQuotes');
   const navNuforce    = document.getElementById('navNuforce');
+  const navCrr        = document.getElementById('navCrr');
   const vibratoBrand  = document.getElementById('vibratoBrand');
   if (vibratoBrand) {
     const quotesVisible  = navQuotes  && navQuotes.style.display  !== 'none';
     const nuforceVisible = navNuforce && navNuforce.style.display !== 'none';
-    vibratoBrand.style.display = (quotesVisible || nuforceVisible) ? '' : 'none';
+    const crrVisible     = navCrr     && navCrr.style.display     !== 'none';
+    vibratoBrand.style.display = (quotesVisible || nuforceVisible || crrVisible) ? '' : 'none';
   }
 
   // 2) Each sidebar .nav-section — hide the whole section AND its preceding

@@ -1,0 +1,77 @@
+/* ============================================================
+   crr.css — Customer Request Review (Quote Workup) panel
+   Ported from CRRv4.html. All rules scoped under .crr-root so
+   the form's generic selectors (.card, .field, header, main,
+   :root vars) cannot collide with the workspace's own styles.
+   ============================================================ */
+
+.crr-root{--ink:#1a2332; --muted:#6b7a8d; --line:#e0e4ea; --line-strong:#c8d0db;
+    --bg:#f7f8fa; --card:#fff; --accent:#1F6F6B; --red:#c0392b;
+    --radius:8px; --shadow:0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+    --sans:'-apple-system',BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    --mono:'SF Mono',Consolas,Monaco,monospace;}
+.crr-root *{box-sizing:border-box}
+.crr-root{margin:0;padding:0}
+.crr-root{font-family:var(--sans);font-size:13.5px;line-height:1.45;color:var(--ink);background:var(--bg);padding-bottom:80px}
+.crr-root header{background:#fff;border-bottom:1px solid var(--line);padding:14px 24px;display:flex;align-items:center;gap:18px}
+.crr-root header .brand{display:flex;align-items:center;gap:12px}
+.crr-root header .logo{width:120px;height:auto;display:block}
+.crr-root header .title{font-size:18px;font-weight:700;letter-spacing:.2px}
+.crr-root header .subtitle{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.1em;margin-top:2px}
+.crr-root header .spacer{flex:1}
+.crr-root main{max-width:1200px;margin:0 auto;padding:18px 24px}
+.crr-root .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px 22px;margin-bottom:16px}
+.crr-root .card h2{font-size:13px;color:var(--accent);text-transform:uppercase;letter-spacing:.12em;margin:0 0 14px;font-weight:700;padding-bottom:8px;border-bottom:1px solid var(--line)}
+.crr-root .card h3{font-size:12px;color:var(--ink);font-weight:600;margin:14px 0 8px}
+.crr-root .grid{display:grid;gap:10px 14px}
+.crr-root .grid.cols-2{grid-template-columns:1fr 1fr}
+.crr-root .grid.cols-3{grid-template-columns:1fr 1fr 1fr}
+.crr-root .grid.cols-4{grid-template-columns:1fr 1fr 1fr 1fr}
+.crr-root .field{display:flex;flex-direction:column;gap:3px}
+.crr-root .field label{font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.04em}
+.crr-root .field input[type=text], .crr-root .field input[type=email], .crr-root .field input[type=tel], .crr-root .field input[type=date], .crr-root .field textarea, .crr-root .field select{border:1px solid var(--line-strong);border-radius:5px;padding:7px 9px;font-family:var(--sans);font-size:13px;color:var(--ink);background:#fff;}
+.crr-root .field textarea{resize:vertical;min-height:54px}
+.crr-root .field input:focus, .crr-root .field textarea:focus, .crr-root .field select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px rgba(31,111,107,0.12)}
+.crr-root .checkrow{display:flex;flex-wrap:wrap;gap:14px;margin:6px 0}
+.crr-root .checkrow label{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;cursor:pointer;color:var(--ink);font-weight:500}
+.crr-root .checkrow input[type=checkbox]{accent-color:var(--accent);width:14px;height:14px;cursor:pointer}
+.crr-root .spec-selector{background:#f0f4f7;border:1px solid var(--line);border-radius:var(--radius);padding:14px 18px;margin-bottom:16px}
+.crr-root .spec-selector .hdr{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--accent);font-weight:700;margin-bottom:8px}
+.crr-root .spec-selector .opts{display:flex;flex-wrap:wrap;gap:12px 22px}
+.crr-root .spec-selector label{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;font-weight:600;padding:6px 12px;background:#fff;border:1px solid var(--line-strong);border-radius:18px;transition:all .15s}
+.crr-root .spec-selector label:hover{border-color:var(--accent)}
+.crr-root .spec-selector label.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.crr-root .spec-selector label.on input{accent-color:#fff}
+.crr-root .spec-selector input[type=checkbox]{width:14px;height:14px;cursor:pointer}
+.crr-root .testtable-wrap{margin-top:10px;overflow-x:auto}
+.crr-root table.testtable{width:100%;border-collapse:collapse;font-size:12.5px}
+.crr-root table.testtable th, .crr-root table.testtable td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+.crr-root table.testtable th{background:#f0f4f7;color:var(--ink);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.05em}
+.crr-root table.testtable td textarea{width:100%;border:0;outline:0;resize:none;font-family:var(--sans);font-size:12.5px;color:var(--ink);padding:2px 4px;background:transparent;line-height:1.4;display:block;min-height:24px;overflow:hidden}
+.crr-root table.testtable td input{width:100%;border:0;outline:0;font-family:var(--sans);font-size:12.5px;color:var(--ink);padding:2px 4px;background:transparent}
+.crr-root table.testtable .gut{width:36px;background:#fafbfc;text-align:center;color:var(--muted);font-size:11px;font-family:var(--mono)}
+.crr-root table.testtable .gut button{background:none;border:0;color:var(--muted);font-size:14px;cursor:pointer;padding:2px;line-height:1}
+.crr-root table.testtable .gut button:hover{color:var(--red)}
+.crr-root table.testtable .col-key{width:90px}
+.crr-root table.testtable .col-time{width:110px}
+.crr-root .table-actions{margin-top:6px;display:flex;gap:6px}
+.crr-root .table-actions button{background:#fff;border:1px solid var(--line-strong);border-radius:5px;padding:5px 11px;font-size:11.5px;cursor:pointer;color:var(--ink);font-weight:500}
+.crr-root .table-actions button:hover{border-color:var(--accent);color:var(--accent)}
+.crr-root .actionbar{position:fixed;bottom:0;left:0;right:0;background:#fff;border-top:1px solid var(--line);padding:10px 24px;display:flex;align-items:center;gap:10px;z-index:50;box-shadow:0 -2px 8px rgba(0,0,0,0.03)}
+.crr-root .actionbar .status{font-size:12px;color:var(--muted);margin-right:auto}
+.crr-root .actionbar .status.ok{color:#22825b}
+.crr-root .actionbar .status.warn{color:#b06b00}
+.crr-root .actionbar button{border:1px solid var(--line-strong);background:#fff;border-radius:6px;padding:8px 14px;font-size:13px;cursor:pointer;color:var(--ink);font-weight:500}
+.crr-root .actionbar button:hover{border-color:var(--accent);color:var(--accent)}
+.crr-root .actionbar button.primary{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.crr-root .actionbar button.primary:hover{background:#185855;border-color:#185855;color:#fff}
+.crr-root .actionbar button.danger{color:var(--red)}
+.crr-root .actionbar button.danger:hover{border-color:var(--red)}
+@media (max-width: 760px){.crr-root .grid.cols-2, .crr-root .grid.cols-3, .crr-root .grid.cols-4{grid-template-columns:1fr}
+.crr-root header{padding:10px 14px}
+.crr-root main{padding:12px 14px}}
+
+/* --- panel glue: pin the action bar to the bottom of the panel
+   scroll area instead of the viewport (original was position:fixed) --- */
+.crr-root{min-height:100%}
+.crr-root .actionbar{position:sticky;left:auto;right:auto}
