@@ -903,10 +903,12 @@ async function crrOpenWorkup(quoteNo) {
   const finBtn  = document.getElementById('crrFinishBtn');
   const saveBtn = document.getElementById('crrSaveDraftBtn');
   const loadWordBtn = document.getElementById('loadWord');
+  const reopenBtn = document.getElementById('crrReopenBtn');
   const isFinished = data.status === 'finished';
   if (finBtn)  finBtn.style.display  = isFinished ? 'none' : '';
   if (saveBtn) saveBtn.style.display = isFinished ? 'none' : '';
   if (loadWordBtn) loadWordBtn.style.display = isFinished ? 'none' : '';
+  if (reopenBtn) reopenBtn.style.display = isFinished ? '' : 'none';
 
   crrShowForm();
   setStatus(isFinished ? 'Finished workup (view only).' : 'Draft loaded.', 'ok');
@@ -950,6 +952,19 @@ async function crrSave(finish) {
   }
 }
 
+// Reopen a finished workup as a draft (update-only so the data blob is untouched).
+async function crrReopen() {
+  if (typeof sb === 'undefined' || !sb || !crrCurrentQuote) return;
+  if (!window.confirm('Reopen this finished workup as a draft? It moves back to Open Workups and becomes editable.')) return;
+  const { error } = await sb.from('crr_workups')
+    .update({ status: 'draft', closed_at: null, closed_by: null, updated_by: crrEmpId(), updated_at: new Date().toISOString() })
+    .eq('quote_number', crrCurrentQuote);
+  if (error) { console.error('crr reopen:', error); setStatus('Reopen failed: ' + (error.message || error), 'warn'); return; }
+  setStatus('Workup reopened as draft.', 'ok');
+  refreshCrrBadge();
+  await crrOpenWorkup(crrCurrentQuote); // re-render in editable draft mode
+}
+
 async function crrBackToList(skipDirtyCheck) {
   if (!skipDirtyCheck && crrDirty) {
     if (!window.confirm('You have unsaved changes. Leave without saving?')) return;
@@ -987,6 +1002,7 @@ window.refreshCrrBadge = refreshCrrBadge;
   const save = document.getElementById('crrSaveDraftBtn'); if (save) save.addEventListener('click', () => crrSave(false));
   const fin  = document.getElementById('crrFinishBtn');    if (fin)  fin.addEventListener('click',  () => crrSave(true));
   const back = document.getElementById('crrBackBtn');      if (back) back.addEventListener('click', () => crrBackToList(false));
+  const reopen = document.getElementById('crrReopenBtn');  if (reopen) reopen.addEventListener('click', crrReopen);
 })();
 
 // Keep the badge live without needing to open the panel (like Surveys/Tasks).
