@@ -3087,7 +3087,18 @@ async function approveVacationRequest(reqId, empId) {
     if (updErr) { toast('⚠ Error approving request: ' + updErr.message); console.error('vacation approve update error:', updErr); return; }
   } catch(e) { toast('⚠ Error approving request'); console.error('vacation approve exception:', e); return; }
 
-  const req = (vacationRequestCache[empId] || []).find(r => r.id === reqId);
+  // Resolve the request row. Prefer the in-memory cache, but fall back to a
+  // direct DB fetch when it's empty — the Approvals panel
+  // (_renderApprovalsVacationTab) never seeds vacationRequestCache, so an
+  // approval from that surface used to leave req undefined, which silently
+  // skipped Step 2 (calendar block) and Step 3 (employee notification) below.
+  let req = (vacationRequestCache[empId] || []).find(r => r.id === reqId);
+  if (!req) {
+    try {
+      const { data } = await sb.from('vacation_requests').select('*').eq('id', reqId).single();
+      if (data) req = data;
+    } catch(e) { console.error('vacation approve req fetch:', e); }
+  }
   if (req) req.status = 'approved';
 
   // Step 2 — create the calendar (schedule_blocks) entry. Do the upsert
