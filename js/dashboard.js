@@ -1700,16 +1700,25 @@ function _drawBookingChart() {
 
 
 // ── Dashboard manual refresh ───────────────────────────────────────────────
-// Re-pulls every startup table from Supabase and re-renders. This is the same
-// data reload a hard browser refresh performs — the fix for billed-revenue (and
-// any other store) drifting from the DB when changes happen out-of-band. Called
-// from the Refresh button in the dashboard top-right corner.
+// Targeted re-pull of ONLY the stores the dashboard reads, then re-render. This
+// is the fix for billed-revenue (and bookings/backlog) drifting from the DB when
+// changes happen out-of-band. It deliberately skips the heavy startup pulls the
+// dashboard does not use (timesheets back to 2023, employees, clients, contacts,
+// expenses, sections, roles, articles) — that is what makes it a few seconds
+// instead of the full ~15s reload.
 //
-// loadAllData() ends by calling bootApp(), which re-navigates to the active
-// project or Home, so after it resolves we send the user back to the dashboard
-// and re-highlight the Dashboard nav item. renderDashboard() (via
-// openDashboardPanel) rebuilds the button in its default state, so the spinner /
-// disabled state clears itself with no manual reset.
+// Stores rebuilt (query shapes mirror loadAllData in supabase-client.js):
+//   projects                    ← projects
+//   projectInfo                 ← project_info      (billedRevenue + status)
+//   window.billedMonthlyData    ← billed_revenue_monthly       (Billed Revenue chart)
+//   window.billedCatData        ← billed_revenue_by_category    (Sales by Category chart)
+//   taskStore                   ← tasks for open projects       (bookings/backlog/due/overdue)
+//   window._bookingClosedTasks  ← current-year tasks, closed projects (booking grid)
+//
+// Note: taskStore is rebuilt to open-projects-only, exactly as loadAllData does.
+// If a closed project happens to be open elsewhere its tasks would need re-loading,
+// but nothing on the dashboard depends on that (closed-project money comes from the
+// billed summary tables and the booking supplement above).
 async function refreshDashboard(btn) {
   // Ensure the spin keyframes exist (injected once — dashboard.css is untouched).
   if (!document.getElementById('rk-refresh-style')) {
@@ -1732,16 +1741,143 @@ async function refreshDashboard(btn) {
   }
 
   try {
-    await loadAllData();
+    if (!sb) throw new Error('Supabase client not ready');
+
+    // Local paginator — mirrors loadAllData's fetchAllPages (which is not in scope here).
+    const fetchPages = async (table, sel, orderCol, filterFn) => {
+      let rows = [], page = 0;
+      while (true) {
+        let q = sb.from(table).select(sel).range(page * 1000, page * 1000 + 999);
+        q = q.order(orderCol || 'id', { ascending: true });
+        if (filterFn) q = filterFn(q);
+        const { data, error } = await q;
+        if (error) throw new Error('Refresh failed for ' + table + ': ' + (error.message || 'unknown'));
+        if (!data || data.length === 0) break;
+        rows = rows.concat(data);
+        if (data.length < 1000) break;
+        page++;
+      }
+      return rows;
+    };
+
+    // Phase 1 — projects + project_info (needed to compute open-project IDs).
+    const [projRows, infoRows] = await Promise.all([
+      fetchPages('projects',     '*', 'created_at'),
+      fetchPages('project_info', '*', 'id'),
+    ]);
+    const openProjInfoMap = {};
+    infoRows.forEach(r => { openProjInfoMap[r.project_id] = r.status || 'active'; });
+    const openProjIds = projRows
+      .filter(p => (openProjInfoMap[p.id] || 'active') !== 'closed')
+      .map(p => p.id);
+    const _ys = new Date().getFullYear() + '-01-01';
+
+    // Phase 2 — the dashboard data pulls, in parallel.
+    const [taskRows, billedMonthlyRows, billedCatRows, bookingTaskRows] = await Promise.all([
+      fetchPages('tasks', '*', 'id', q => q.in('project_id', openProjIds)),
+      fetchPages('billed_revenue_monthly',     '*', 'year_month'),
+      fetchPages('billed_revenue_by_category', '*', 'year_month'),
+      fetchPages('tasks',
+        'id,project_id,status,sales_category,fixed_price,cancelled_date,created_at,name',
+        'id', q => q.or(`created_at.gte.${_ys},cancelled_date.gte.${_ys}`)),
+    ]);
+
+    // Rebuild stores — mapping identical to loadAllData.
+    projects = projRows.map(r => ({
+      id: r.id, name: r.name, color: r.color, emoji: r.emoji, desc: r.description || '', description: r.description || '',
+      createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+      skip_survey: r.skip_survey === true,
+      is_internal: r.is_internal === true
+    }));
+
+    infoRows.forEach(r => {
+      projectInfo[r.project_id] = {
+        pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
+        phase: r.phase||'Waiting on TP Approval', status: r.status||'active',
+        startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
+        client: r.client||'', clientContact: r.client_contact||'',
+        clientEmail: r.client_email||'', clientPhone: r.client_phone||'',
+        clientId: r.client_id||null, contactId: r.contact_id||null,
+        billingType: r.billing_type||'Fixed Fee', invoiced: r.invoiced||'',
+        remaining: r.remaining||'', notes: r.notes||'', desc: r.description||'',
+        dcas: r.dcas||'', customerWitness: r.customer_witness||'', tpApproval: r.tp_approval||'', dpas: r.dpas||'', cui: r.cui||'',
+        testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'', quoteNumber: r.quote_number||'',
+        creditHold: r.credit_hold||false,
+        needUpdatedPo: r.need_updated_po||false,
+        testcompleteDate: r.testcomplete_date||'',
+        billedRevenue: r.billed_revenue ? parseFloat(r.billed_revenue) : 0,
+        expectedRevenue: r.expected_revenue ? parseFloat(r.expected_revenue) : 0,
+        actualHours: r.actual_hours ? parseFloat(r.actual_hours) : 0,
+      };
+    });
+
+    window.billedMonthlyData = {};
+    billedMonthlyRows.forEach(r => {
+      if (!window.billedMonthlyData[r.year_month]) window.billedMonthlyData[r.year_month] = 0;
+      window.billedMonthlyData[r.year_month] += parseFloat(r.amount) || 0;
+    });
+
+    window.billedCatData = {};
+    billedCatRows.forEach(r => {
+      if (!window.billedCatData[r.year_month]) window.billedCatData[r.year_month] = {};
+      window.billedCatData[r.year_month][r.sales_category || 'Uncategorized'] =
+        (window.billedCatData[r.year_month][r.sales_category || 'Uncategorized'] || 0) + (parseFloat(r.amount) || 0);
+    });
+
+    taskStore = taskRows.map(r => ({
+      _id: r.id, taskNum: r.task_num||0, name: r.name, desc: r.description||'', assign: r.assignee||'', assignId: r.assignee_id||'',
+      due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
+      due_raw: r.due_date||'',
+      overdue: r.due_date ? new Date(r.due_date+'T00:00:00') < new Date() && !r.done : false,
+      done: r.done||false, proj: r.project_id||'',
+      status: r.status||'new', priority: r.priority||'medium',
+      section: r.section||'sprint',
+      sectionId: r.section_id||null,
+      salesCat: r.sales_category||'',
+      fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
+      budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
+      taskStartDate: r.task_start_date||'',
+      completedDate: r.completed_date||'',
+      billedDate: r.billed_date||'',
+      cancelledDate: r.cancelled_date||'',
+      quoteNum: r.quote_number||'',
+      poNumber: r.po_number||'',
+      peachtreeInv: r.peachtree_inv||'',
+      createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+      revenueType: r.revenue_type||'fixed',
+    }));
+
+    {
+      const _openSet = new Set(openProjIds);
+      window._bookingClosedTasks = (bookingTaskRows || [])
+        .filter(r => !_openSet.has(r.project_id))
+        .map(r => ({
+          _id: r.id, proj: r.project_id||'', status: r.status||'new',
+          salesCat: r.sales_category||'', name: r.name||'',
+          fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
+          cancelledDate: r.cancelled_date||'',
+          createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+        }));
+    }
+
+    // Re-assign per-project task numbers, matching loadAllData.
+    const projTaskNums = {};
+    taskStore.forEach(t => {
+      if (!projTaskNums[t.proj]) projTaskNums[t.proj] = 0;
+      if (!t.taskNum) {
+        projTaskNums[t.proj]++;
+        t.taskNum = projTaskNums[t.proj];
+      } else {
+        projTaskNums[t.proj] = Math.max(projTaskNums[t.proj], t.taskNum);
+      }
+    });
+    window._projTaskNums = projTaskNums;
+
   } catch (e) {
     console.error('refreshDashboard', e);
   } finally {
-    // Return to the dashboard (bootApp may have navigated away) and restore the
-    // nav highlight. This also re-renders the dashboard with the fresh data.
-    if (typeof openDashboardPanel === 'function') {
-      openDashboardPanel(document.getElementById('navDashboard'));
-    } else {
-      renderDashboard();
-    }
+    // Stay on the dashboard — no navigation happened, so just re-render.
+    // renderDashboard() rebuilds the button fresh, clearing the spinner/disabled state.
+    renderDashboard();
   }
 }
