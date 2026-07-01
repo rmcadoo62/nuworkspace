@@ -517,6 +517,14 @@ function renderDashboard() {
   });
 
   wrap.innerHTML = `
+    <div class="dash-topbar" style="display:flex;align-items:center;margin-bottom:14px">
+      <button id="dashRefreshBtn" onclick="refreshDashboard(this)" title="Reload all dashboard data from the server"
+        style="margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:5px 12px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">
+        <span class="rk-icon" style="display:inline-block;font-size:14px;line-height:1">&#x21BB;</span>
+        <span class="rk-label">Refresh</span>
+      </button>
+    </div>
+
     <div class="dash-charts-row">
       <div class="dash-chart-card">
         <div class="dash-chart-title"><span>💰</span> Billed Revenue
@@ -1690,3 +1698,50 @@ function _drawBookingChart() {
   });
 }
 
+
+// ── Dashboard manual refresh ───────────────────────────────────────────────
+// Re-pulls every startup table from Supabase and re-renders. This is the same
+// data reload a hard browser refresh performs — the fix for billed-revenue (and
+// any other store) drifting from the DB when changes happen out-of-band. Called
+// from the Refresh button in the dashboard top-right corner.
+//
+// loadAllData() ends by calling bootApp(), which re-navigates to the active
+// project or Home, so after it resolves we send the user back to the dashboard
+// and re-highlight the Dashboard nav item. renderDashboard() (via
+// openDashboardPanel) rebuilds the button in its default state, so the spinner /
+// disabled state clears itself with no manual reset.
+async function refreshDashboard(btn) {
+  // Ensure the spin keyframes exist (injected once — dashboard.css is untouched).
+  if (!document.getElementById('rk-refresh-style')) {
+    const st = document.createElement('style');
+    st.id = 'rk-refresh-style';
+    st.textContent =
+      '@keyframes rkspin{to{transform:rotate(360deg)}}' +
+      '#dashRefreshBtn.refreshing{opacity:.7;cursor:default}' +
+      '#dashRefreshBtn.refreshing .rk-icon{animation:rkspin .7s linear infinite}';
+    document.head.appendChild(st);
+  }
+
+  if (btn && btn.dataset.busy === '1') return; // guard against double-clicks
+  if (btn) {
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    btn.classList.add('refreshing');
+    const lbl = btn.querySelector('.rk-label');
+    if (lbl) lbl.textContent = 'Refreshing…';
+  }
+
+  try {
+    await loadAllData();
+  } catch (e) {
+    console.error('refreshDashboard', e);
+  } finally {
+    // Return to the dashboard (bootApp may have navigated away) and restore the
+    // nav highlight. This also re-renders the dashboard with the fresh data.
+    if (typeof openDashboardPanel === 'function') {
+      openDashboardPanel(document.getElementById('navDashboard'));
+    } else {
+      renderDashboard();
+    }
+  }
+}
