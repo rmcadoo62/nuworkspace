@@ -34,6 +34,7 @@ function can(capability) {
   const fallbacks = {
     add_projects: mgr, delete_projects: false, add_tasks: true, edit_tasks: true,
     delete_tasks: mgr, mark_complete: mgr, mark_closing: mgr, mark_closed: false,
+    unlock_billed: false,
     view_dashboard: true, view_reports: mgr, view_audit_log: mgr, view_setup: mgr,
     manage_employees: mgr, manage_permissions: false, view_billing: mgr,
     edit_project_info: mgr, view_chatter: true, post_chatter: true,

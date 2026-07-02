@@ -2735,10 +2735,13 @@ function renderInfoTasks(projId, filter) {
       const pLabel = {urgent:'Urgent', high:'High', medium:'Medium', low:'Low'};
       const pri = t.priority || 'medium';
       const empM = employees.find(e => e.initials === t.assign) || {color:'#555'};
-      const statusOpts = ['new','inprogress','prohold','accthold','complete','cancelled','billed'].map(s => {
+      const statusOpts = ['new','inprogress','prohold','accthold','complete','cancelled']
+        .concat(t.status === 'billed' ? ['billed'] : [])
+        .map(s => {
         const labels = {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed'};
         return `<option value="${s}" ${t.status===s?'selected':''}>${labels[s]}</option>`;
       }).join('');
+      const billedLock = (t.status === 'billed') && !((typeof can === 'function') && can('unlock_billed'));
       const priOpts = ['urgent','high','medium','low'].map(p =>
         `<option value="${p}" ${(t.priority||'medium')===p?'selected':''}>${{urgent:'Urgent',high:'High',medium:'Medium',low:'Low'}[p]}</option>`).join('');
       const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
@@ -2754,7 +2757,7 @@ function renderInfoTasks(projId, filter) {
           <div class="itt-name ${t.done?'done':''} itt-cell-edit" onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()" title="Click to edit">${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;letter-spacing:0.6px;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red);vertical-align:middle;flex-shrink:0">NC</span>':''}</div>
           <div onclick="event.stopPropagation()">
             <select class="status-pill-select" style="color:${statusColor(t.status||'new')};background:${statusColor(t.status||'new')}18;border-color:${statusColor(t.status||'new')}55"
-              onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color=statusColor(this.value);this.style.background=statusColor(this.value)+'18';this.style.borderColor=statusColor(this.value)+'55'">
+              onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color=statusColor(this.value);this.style.background=statusColor(this.value)+'18';this.style.borderColor=statusColor(this.value)+'55'"${billedLock ? ' disabled title="Billed — locked. Unlock from the Billing Queue."' : ''}>
               ${statusOpts}
             </select>
           </div>
@@ -2763,7 +2766,7 @@ function renderInfoTasks(projId, filter) {
               ${salesOpts}
             </select>
           </div>
-          <div class="itt-cell-edit" onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()" title="Click to edit price" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);cursor:text">
+          <div class="${billedLock?'':'itt-cell-edit'}" ${billedLock?'':`onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()"`} title="${billedLock?'Billed — locked. Unlock from the Billing Queue.':'Click to edit price'}" style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);${billedLock?'':'cursor:text'}">
             ${t.fixedPrice ? '$' + t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}) : '—'}
           </div>
           <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${getHoursForTask(t.name,t.proj,t._id) > 0 ? 'var(--blue)' : 'var(--muted)'}">
@@ -2862,6 +2865,8 @@ function ptblInitResizers() {
 window.toggleInfoTask = async function toggleInfoTask(idx, projId) {
   if (idx < 0 || idx >= taskStore.length) return;
   const t = taskStore[idx];
+  const targetStatus = t.done ? 'inprogress' : 'complete';
+  if (!guardStatusChange(t, targetStatus)) { renderInfoTasks(projId, currentTaskFilter); return; }
   const today = new Date().toISOString().split('T')[0];
   t.done = !t.done;
   t.status = t.done ? 'complete' : 'inprogress';

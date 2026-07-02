@@ -546,10 +546,16 @@ function renderTasksPanel(projId) {
 
     const canEditTask = typeof can === 'function' ? can('edit_tasks') : true;
     const empM = (t.assignId && employees.find(e => e.id === t.assignId)) || employees.find(e => e.initials === t.assign) || {color:'#555'};
-    const statusOpts = ['new','inprogress','prohold','accthold','complete','cancelled','billed'].map(s => {
+    const statusOpts = ['new','inprogress','prohold','accthold','complete','cancelled']
+      .concat(t.status === 'billed' ? ['billed'] : [])
+      .map(s => {
         const labels = {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed'};
         return `<option value="${s}" ${t.status===s?'selected':''}>${labels[s]}</option>`;
       }).join('');
+    // Billed tasks freeze status, price, and billed date. Only unlock_billed
+    // may edit them; every other field stays gated on edit_tasks as before.
+    const billedLock = (t.status === 'billed') && !((typeof can === 'function') && can('unlock_billed'));
+    const canEditBilled = canEditTask && !billedLock;
     const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
       `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
     const loggedH = getHoursForTask(t.name, t.proj, t._id);
@@ -574,11 +580,11 @@ function renderTasksPanel(projId) {
         <div class="${canEditTask ? 'itt-name '+( t.done?'done':'')+' itt-cell-edit' : 'itt-name '+(t.done?'done':'')}" ${canEditTask ? `onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()"` : ''}>${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red)">NC</span>':''}</div>
         <div onclick="event.stopPropagation()">
           <select class="status-pill-select" style="color:#000;background:${(t.status||'new')==='new'?'#fff':statusColor(t.status||'new')+('80')};border-color:${(t.status||'new')==='new'?'#bbb':statusColor(t.status||'new')+('99')}"
-            onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'" ${canEditTask ? '' : 'disabled'}>${statusOpts}</select>
+            onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'" ${canEditBilled ? '' : 'disabled'}${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${statusOpts}</select>
         </div>
         <div class="itt-quote ${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#000;${canEditTask?'cursor:text':''}">${t.quoteNum||'—'}</div>
         <div class="itt-po ${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);${canEditTask?'cursor:text':''}"> ${t.poNumber||'—'}</div>
-        <div class="itt-price ${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled' ? 'var(--red)' : 'var(--green)'};font-weight:700;${canEditTask?'cursor:text':''}">
+        <div class="itt-price ${canEditBilled?'itt-cell-edit':''}" ${canEditBilled?`onclick="inlineEditPrice('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:${t.status==='cancelled' ? 'var(--red)' : 'var(--green)'};font-weight:700;${canEditBilled?'cursor:text':''}"${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>
           ${t.fixedPrice ? (t.status==='cancelled' ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})) : '—'}
         </div>
         <div style="font-size:12px;color:#000">${fmtShortDate(t.createdAt)}</div>
@@ -596,7 +602,7 @@ function renderTasksPanel(projId) {
           </select>
         </div>
         <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()"`:''}  style="font-size:12px;color:var(--muted);font-weight:700;${canEditTask?'cursor:text':''}">${fmtShortDate(t.taskStartDate)}</div>
-        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()"`:''}  style="font-size:12px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};font-weight:700;${canEditTask?'cursor:text':''}">${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
+        <div class="${canEditBilled?'itt-cell-edit':''}" ${canEditBilled?`onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()"`:''}  style="font-size:12px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};font-weight:700;${canEditBilled?'cursor:text':''}"${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
         <div class="itt-row-actions">
           ${can('edit_tasks') ? '<button class="itt-row-action-btn" onclick="openEditTaskModal(\''+t._id+'\');event.stopPropagation()">&#x270E;</button>' : ''}
           <button class="itt-row-action-btn tlog-log-btn${(typeof taskLogHas==='function' && taskLogHas(t._id)) ? ' has-log' : ''}" onclick="openTaskLogPanel('${t._id}');event.stopPropagation()" title="Test log">&#x1F4CB;</button>
@@ -858,6 +864,8 @@ function setTasksPanelFilter(filter, projId) {
 function tpToggleDone(taskId, projId) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
+  const targetStatus = t.done ? 'inprogress' : 'complete';
+  if (!guardStatusChange(t, targetStatus)) { renderTasksPanel(projId); return; }
   t.done = !t.done;
   t.status = t.done ? 'complete' : 'inprogress';
   if (sb) dbUpdate('tasks', taskId, { done: t.done, status: t.status });
@@ -872,16 +880,63 @@ function tpToggleDone(taskId, projId) {
 
 // ===== INLINE TASK EDITING =====
 // ===== INLINE TASK EDITING =====
+
+// ── Billed-lock + complete-confirm guard ──────────────────────────────────
+// Central rule for EVERY status-change path (inline status dropdowns and done
+// checkboxes, in both the Tasks tab and the Info tab). Returns true if the
+// change may proceed, false if it should be blocked/cancelled.
+//   • Billed tasks are frozen. Only the `unlock_billed` capability may change
+//     them, and even then a confirm fires. (Billed is set solely from the
+//     Reports → Billing Queue, which captures the PeachTree invoice #.)
+//   • A completed (non-billed) task prompts a confirm before its status
+//     changes, to catch accidental un-completes.
+function guardStatusChange(t, newStatus) {
+  if (!t) return true;
+  const cur = t.status;
+  if (cur === newStatus) return true;
+  if (cur === 'billed') {
+    const privileged = (typeof can === 'function') && can('unlock_billed');
+    if (!privileged) {
+      if (typeof toast === 'function') toast('🔒 Billed task is locked. Ask Linda to unlock.', 'error');
+      return false;
+    }
+    return confirm('This task is billed (invoice on file). Change its status anyway?');
+  }
+  if (cur === 'complete' || cur === 'done') {
+    return confirm('This task is marked complete. Change its status?');
+  }
+  return true;
+}
+
 async function inlineSave(taskId, projId, field, value) {
   if (typeof can === 'function' && !can('edit_tasks')) return;
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
+
+  // Billed tasks freeze price and billed date too (status is handled by
+  // guardStatusChange below). Only unlock_billed may edit them.
+  if (t.status === 'billed' && (field === 'fixedPrice' || field === 'billedDate')) {
+    const privileged = (typeof can === 'function') && can('unlock_billed');
+    if (!privileged) {
+      if (typeof toast === 'function') toast('🔒 Billed task is locked. Ask Linda to unlock.', 'error');
+      renderInfoTasks(projId, currentTaskFilter);
+      renderTasksPanel(projId);
+      return;
+    }
+  }
 
   let _assignNotifyAfterSave = null;
   const today = new Date().toISOString().split('T')[0];
 
   // Update local store first
   if (field === 'status') {
+    // Billed-lock / complete-confirm gate. On block, snap the on-screen
+    // select back to the stored value and bail.
+    if (!guardStatusChange(t, value)) {
+      renderInfoTasks(projId, currentTaskFilter);
+      renderTasksPanel(projId);
+      return;
+    }
     t.status = value;
     t.done = (value === 'complete' || value === 'done' || value === 'billed');
 

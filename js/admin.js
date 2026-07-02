@@ -2557,6 +2557,7 @@ const CAPABILITY_DEFS = [
   { key: 'add_tasks',          label: 'Add Tasks',             group: 'Tasks' },
   { key: 'edit_tasks',         label: 'Edit Tasks',            group: 'Tasks' },
   { key: 'delete_tasks',       label: 'Delete Tasks',          group: 'Tasks' },
+  { key: 'unlock_billed',      label: 'Unlock Billed Tasks',   group: 'Tasks' },
   { key: 'view_hours',         label: 'View Hours Tab',        group: 'Projects' },
   { key: 'view_expenses',      label: 'View Expenses Tab',     group: 'Projects' },
   { key: 'view_invoicing',     label: 'View Invoicing Tab',    group: 'Projects' },
