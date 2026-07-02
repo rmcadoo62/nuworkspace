@@ -65,6 +65,8 @@ async function renderHomePage() {
         ${renderHolidaysCard(holidays)}
       </div>
 
+      ${renderCuiHintCard()}
+
       ${renderChatterCard(chatter)}
 
       ${renderMySubmissionsCard(mySubmissions)}
@@ -425,6 +427,227 @@ function _homeEsc(s) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// ---- CUI Hint of the Day ----
+// Flat bank of awareness one-liners, grouped by CMMC / NIST 800-171 domain.
+// One is shown per calendar day, picked deterministically so everyone sees the
+// same hint on the same day; it advances by one each day and wraps around.
+// ~172 hints => ~6 months before any repeat. Edit freely: add/remove lines,
+// the rotation adjusts automatically. Groupings are only for your convenience.
+const CUI_HINTS = [
+  // --- PE  Physical Protection ---
+  "End of day: is your CUI locked in a drawer, or still sitting out on your desk?",
+  "The RDM Office PIN is yours. Don't share it, don't prop the door, don't let anyone tailgate in behind you.",
+  "Stepping away? Win+L. A locked screen can't be read over your shoulder.",
+  "Clean desk = compliant desk. Papers away, drawers locked, screen locked.",
+  "Visitors get escorted \u2014 even if you're \u201cjust grabbing coffee.\u201d",
+  "Last one out of the RDM Office? Make sure the door actually latched behind you.",
+  "That locking desk drawer isn't decoration. If CUI paperwork lives at your desk, it lives locked.",
+  "Don't prop the server room door \u201cjust for a minute.\u201d A minute is all it takes.",
+  "Someone you don't recognize wandering the tech floor? Ask who they're here to see.",
+  "Printouts with CUI don't stay on your desk unattended. Lock them up or take them with you.",
+  "The cameras aren't there to watch you \u2014 they're there so we know who was where if it ever matters.",
+  "Going to lunch? Lock your screen and clear any CUI off your desk first.",
+  "A propped-open door is an open invitation. If you see one, close it.",
+  "Your PIN is like your toothbrush \u2014 personal, and you don't lend it out.",
+  "Working late alone? Same rules. Lock up CUI before you head out \u2014 no exceptions for the night shift.",
+  "If a delivery driver needs in, meet them at the door \u2014 don't wave a stranger through to the floor.",
+  "Badges and keys stay with their owner. Don't hand them off so someone can skip signing in.",
+
+  // --- AC  Access Control ---
+  "Your login is yours. Never work under someone else's account \u2014 or hand yours to anyone.",
+  "Stepping away, even for two minutes? Win+L.",
+  "You get access to what your job needs. Can't open something? That's by design, not a glitch.",
+  "Never leave a workstation logged in and walk away \u2014 that's your name on whatever happens next.",
+  "\u201cCan you just log in for me real quick?\u201d No. Everyone uses their own access.",
+  "Remote in from home with the same care as at your desk \u2014 lock it when you step away.",
+  "Shared passwords aren't convenient, they're a liability. One person, one login.",
+  "If you can suddenly see files you couldn't before, that's worth a heads-up to Russ, not a shrug.",
+  "Don't save the CUI NAS password in a browser on a shared machine.",
+  "Changing roles or leaving? Your access changes too \u2014 that's expected, nothing personal.",
+  "A coworker asking to \u201cborrow\u201d your login has a problem you shouldn't solve that way.",
+  "Auto-lock is your backup, not your plan. Lock it yourself when you get up.",
+  "The fewer people who can reach CUI, the safer it is. That's why access is by name, not by default.",
+  "Logged into the CUI NAS on someone else's desktop? Log out before you walk away.",
+  "Kiosk or shared terminal? Log out completely \u2014 don't just close the window.",
+  "Access requests go through Russ, not through borrowing a coworker's session.",
+
+  // --- IA  Identification & Authentication ---
+  "Where does your Windows password live? Not on a sticky note, not under the keyboard \u2014 in an approved manager or in your head.",
+  "Got a Duo push you didn't request? Deny it and tell Russ. Someone's trying to log in as you.",
+  "Your password is yours alone. Real IT will never ask you for it.",
+  "A password taped to your monitor is a password anyone who walks by already knows.",
+  "Don't reuse your work password anywhere else. If another site leaks, your login shouldn't be part of the fallout.",
+  "Approving a Duo prompt without reading it defeats the point. Know what you're approving.",
+  "\u201cWhat's your password?\u201d is never a normal question \u2014 including from someone claiming to be IT.",
+  "A longer passphrase beats a clever short one. Length wins.",
+  "Unexpected MFA prompt in the middle of the night? Deny it, then tell Russ.",
+  "Don't let the browser remember your password on a machine other people use.",
+  "Writing it down \u201cjust until I memorize it\u201d? That note is a risk the whole time it exists.",
+  "Your Duo device is a key. Lost phone = tell Russ so we can cut off the old one.",
+  "If a login screen looks even slightly off, stop and check the address before you type anything.",
+  "One account, one human. Never log in as someone else \u201cto save time.\u201d",
+  "Let the password manager do the remembering so you never have to write it down.",
+  "Treat your MFA prompt like a signature \u2014 you're vouching that it's really you.",
+
+  // --- MP  Media Protection ---
+  "Found a USB stick? Don't plug it in \u2014 anywhere. Hand it to Russ.",
+  "CUI printouts get shredded, not recycled. Paper is media too.",
+  "CUI lives on the CUI NAS \u2014 not a personal USB drive, your phone, or a home laptop.",
+  "Don't snap a phone photo of a CUI drawing \u201cjust to reference later.\u201d",
+  "That \u201cfree\u201d USB stick from a trade show is exactly how malware walks in the front door.",
+  "Old drive headed for the trash? It gets wiped first. Ask Russ \u2014 don't just toss it.",
+  "Copying something to a thumb drive for a customer? Stop and ask how it should go out.",
+  "If it has CUI on it, it doesn't ride home in your bag.",
+  "Know what's CUI before you decide how to handle or ship it. Labels matter.",
+  "Shred bin, not recycle bin. When in doubt, shred it.",
+  "Don't email CUI to your personal address to \u201cwork on it at home.\u201d",
+  "A misplaced USB drive is a reportable event, not a \u201chope I find it later.\u201d",
+  "Printing CUI? Grab it off the printer immediately \u2014 don't leave it sitting in the tray.",
+  "Sanitize before you surplus. No device leaves with data still on it.",
+  "Draft printouts with CUI count too \u2014 into the shred bin, not the trash.",
+  "Moving CUI between machines? It goes over the approved path, not on a thumb drive.",
+
+  // --- SI  System & Information Integrity ---
+  "That security warning on your screen isn't \u201cjust noise.\u201d Read it; if you're unsure, ask Russ.",
+  "Phishing is the #1 way in. Slow down on emails that push you to click, log in, or act now.",
+  "Don't turn off antivirus or dismiss updates because they're inconvenient.",
+  "Unexpected attachment, even from a name you know? Verify before you open it.",
+  "\u201cYour account will be closed in 24 hours!\u201d is pressure \u2014 and pressure is the tell.",
+  "Hover before you click. The link text and the real address aren't always the same.",
+  "A pop-up saying your PC is infected and to \u201ccall this number\u201d is the scam \u2014 close it, don't call.",
+  "Forward suspicious emails to Russ rather than testing the link yourself.",
+  "Updates ship for a reason \u2014 usually a hole someone's already trying to use. Let them run.",
+  "Machine suddenly slow, popping ads, or acting weird? Say something.",
+  "Don't install browser extensions on a work machine without asking.",
+  "A login page reached from an email link deserves a second look before you type.",
+  "Bad grammar and a strange sender address are gifts \u2014 they're telling you it's fake.",
+  "When an email asks you to break normal procedure \u201curgently,\u201d that's the moment to slow down.",
+  "QR codes in emails can be phishing too \u2014 don't scan first and think later.",
+  "If IT didn't announce it, an \u201cupdate now\u201d pop-up from a website isn't your update. Ignore it.",
+
+  // --- IR  Incident Response ---
+  "Think you clicked something bad? Tell Russ immediately. Fast beats perfect.",
+  "You won't be in trouble for reporting. Hiding it is the only real mistake.",
+  "Lost a laptop, phone, or badge? Report it the same day, not next week.",
+  "\u201cIt's probably nothing\u201d is exactly the thing to report. Let us decide.",
+  "Not sure if it's an incident? Report it anyway \u2014 that's what reporting is for.",
+  "Spot CUI somewhere it shouldn't be? Flag it. Don't just move it and forget it.",
+  "If a coworker's account is doing strange things, say something \u2014 it might not be them.",
+  "The faster we know, the smaller the cleanup. Speed is the whole game in incident response.",
+  "Know who to tell before you need to: for anything security, that's Russ.",
+  "Got tricked by a phishing email? It happens \u2014 report it and we sort it out. No shame, just speed.",
+  "A missing device isn't just lost property; it's a security report.",
+  "After-hours incident? Report it as soon as you can \u2014 don't wait for it to become someone else's find.",
+
+  // --- SC  System & Communications Protection ---
+  "Sending CUI out? Through Virtru. Every time. No \u201cjust this once\u201d plain email.",
+  "Don't plug personal devices \u2014 phones, drives, chargers with data \u2014 into work machines.",
+  "CUI stays on our systems. Not personal cloud, not personal email, not \u201cjust to finish at home.\u201d",
+  "Plain email is a postcard. CUI goes in the Virtru envelope.",
+  "Public wifi and CUI don't mix. If you're out, you're not working on CUI.",
+  "Zipping a file isn't encrypting it. Use Virtru for the real thing.",
+  "Don't forward a CUI thread to an outside address without stopping to think how it's protected.",
+  "Your work phone isn't a CUI storage locker. Keep the data where it belongs.",
+  "A customer asking you to \u201cjust email it unencrypted\u201d is asking you to break the rule. Virtru it.",
+  "Personal USB chargers can carry more than power. Use approved gear on work machines.",
+  "Don't set up your own file-sharing link for work files. Ask how it should go out.",
+  "Remote work runs through the approved path. No shortcuts around the VPN.",
+  "Texting a customer a CUI detail is still sending CUI the wrong way. Keep it in Virtru.",
+
+  // --- AT  Awareness & Training ---
+  "These hints are the training. Read them, act on them \u2014 that's the point.",
+  "Security isn't just Russ's job. Everyone who touches CUI keeps it safe.",
+  "See something off? Say something. You don't need to be sure to speak up.",
+  "A minute reading this is a minute well spent \u2014 awareness is the cheapest defense we have.",
+  "The habits are simple: lock it, shred it, verify it, report it. Repeat daily.",
+  "You're not expected to be an expert \u2014 just alert. Notice things and speak up.",
+  "Every one of us is either a way in or a way blocked. Be the block.",
+  "Good security is mostly good habits done every day, not heroics once a year.",
+  "If a hint here changes one thing you do, it did its job.",
+  "The goal isn't fear, it's habit. Small, steady, everyday.",
+
+  // --- CM  Configuration Management ---
+  "Don't install software yourself. Need a program? Ask \u2014 free downloads are how bad things get in.",
+  "Don't plug in new hardware without asking \u2014 that mystery gadget from home included.",
+  "Your machine is set up a certain way for a reason. If something changed on its own, report it.",
+  "\u201cIt's just a little free tool\u201d is how big problems start. Ask first.",
+  "New device that needs to touch the network? Run it by Russ before you connect it.",
+  "Don't change system settings to force something to work \u2014 flag it instead.",
+  "Approved software only. If it's not on the machine already, ask before adding it.",
+  "That browser toolbar you don't remember installing? Tell Russ.",
+  "Consistency is security. The standard setup is standard on purpose.",
+  "If a program wants to install \u201chelpers\u201d or \u201cextras,\u201d that's your cue to pause and ask.",
+
+  // --- MA  Maintenance ---
+  "A repair tech on site gets escorted, same as any visitor. Don't leave them alone with our gear.",
+  "Equipment leaving for repair or disposal gets wiped first. Flag it to Russ \u2014 don't just hand it off.",
+  "Maintenance on CUI systems is scheduled and tracked. An unannounced \u201cIT guy\u201d isn't.",
+  "Don't let a stranger with a toolbox start working on a machine without checking they're expected.",
+  "Vendor needs access to fix something? Someone stays with them the whole time.",
+  "Before a device goes out the door for service, its data comes off first.",
+  "\u201cI'm here to service the server\u201d isn't a badge. Verify, then escort.",
+  "Scheduled maintenance is fine. Surprise maintenance is a question mark \u2014 ask.",
+
+  // --- AU  Audit & Accountability ---
+  "Everything on our systems is logged \u2014 that protects you too. If it wasn't you, the log shows it.",
+  "Never share a login. Shared accounts make logs useless and put your name on someone else's actions.",
+  "The clocks are synced on purpose. Don't change your machine's date and time.",
+  "Logs aren't Big Brother \u2014 they're the receipt that proves what you did and didn't do.",
+  "One account per person keeps the record honest. Keep yours yours.",
+  "Notice odd activity under your account? Tell Russ \u2014 the log will back you up.",
+  "Accurate logs depend on accurate identities. That's the whole reason we don't share logins.",
+  "The system remembers so nobody has to argue about it later. Keep your account clean and it works for you.",
+
+  // --- PS  Personnel Security ---
+  "When someone leaves, their access leaves too. Former employee still has a key or login? Tell Russ.",
+  "Returning a badge, key, or laptop on your last day is part of protecting CUI, not just paperwork.",
+  "Access follows the role. Change jobs here and your access changes \u2014 nothing personal.",
+  "Notice a departed coworker's account still active? Flag it.",
+  "Keys and badges are accountable items. If yours goes missing, report it.",
+  "The day someone leaves is the day their access should end \u2014 help us make that true.",
+  "Don't pass your badge to someone who forgot theirs. Everyone uses their own.",
+  "Offboarding is a security step. Return what you were issued.",
+
+  // --- RA  Risk Assessment ---
+  "Spot a new risk \u2014 a propped door, an unlocked cabinet, a weird email trend? Report it.",
+  "Don't work around a security control because it's inconvenient. Tell us it's slowing you down; we'll fix it safely.",
+  "Every shortcut around security is a risk someone has to own. Flag the friction instead.",
+  "You see things Russ can't. If something feels risky, that instinct is worth a message.",
+  "A workaround that \u201cjust works\u201d often works for attackers too. Ask for a safe fix.",
+  "Small risks noticed early beat big problems found late. Speak up.",
+  "If a process forces you to do something insecure to get your job done, that's a bug \u2014 report it.",
+  "Security friction is feedback. Tell us where it hurts and we'll smooth it the right way.",
+
+  // --- CA  Security Assessment ---
+  "Assessors sometimes ask staff questions. \u201cI lock my screen and shred CUI\u201d is a great answer.",
+  "The locked doors, the shredding, these hints \u2014 it all adds up to what an assessor checks. You're the evidence.",
+  "Ask how we keep CUI safe? The true answer is simple: we all follow the same habits every day.",
+  "An honest \u201chere's what I actually do\u201d beats a polished script every time.",
+  "You don't need to memorize the framework \u2014 just be able to describe your own good habits.",
+  "When the assessment comes, the best prep is the habits you already keep every day.",
+  "\u201cThat's not my department\u201d is the wrong answer. Protecting CUI is everyone's department.",
+  "The cleanest evidence is a team that all does the small things right, consistently.",
+];
+
+// Deterministic daily pick: same hint for everyone on a given local calendar
+// day, advancing by one each day and wrapping. Local midnight keeps it stable
+// through the day and avoids a jump at the year boundary.
+function renderCuiHintCard() {
+  if (!CUI_HINTS.length) return '';
+  const now = new Date();
+  const localMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dayIndex = Math.floor(localMidnight.getTime() / 86400000);
+  const hint = CUI_HINTS[((dayIndex % CUI_HINTS.length) + CUI_HINTS.length) % CUI_HINTS.length];
+
+  return `<div class="home-cui-hint">
+    <div class="home-cui-hint-head">
+      <span class="home-cui-hint-icon">&#x1F6E1;&#xFE0F;</span>
+      <span class="home-cui-hint-label">CUI Hint of the Day</span>
+    </div>
+    <div class="home-cui-hint-text">${_homeEsc(hint)}</div>
+  </div>`;
 }
 
 // ---- Weather ----
