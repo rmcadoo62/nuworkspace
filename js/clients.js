@@ -22,6 +22,8 @@ function mapArticle(r) {
     desc: r.description||'',
     receivedDate: r.received_date||'',
     receivedBy: r.received_by||'',
+    receivedCarrier: r.received_carrier||'',
+    receivedNotes: r.received_notes||'',
     shippedDate: r.shipped_date||'',
     carrier: r.carrier||'',
     notes: r.notes||'',
@@ -179,7 +181,8 @@ function renderShippingProjTab(projId) {
           <div style="flex:1;min-width:0">
             <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px">${a.desc}</div>
             <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:11px;color:var(--muted)">
-              <span>📥 Received ${fmt(a.receivedDate)}${a.receivedBy ? ' by '+a.receivedBy : ''}</span>
+              <span>📥 Received ${fmt(a.receivedDate)}${a.receivedBy ? ' by '+a.receivedBy : ''}${a.receivedCarrier ? ' via '+a.receivedCarrier : ''}</span>
+              ${a.receivedNotes ? `<span>📝 ${a.receivedNotes}</span>` : ''}
               ${a.shippedDate ? `<span>📤 Shipped ${fmt(a.shippedDate)}${a.carrier ? ' via '+a.carrier : ''}</span>` : ''}
               ${a.notes ? `<span>📝 ${a.notes}</span>` : ''}
             </div>
@@ -214,11 +217,27 @@ function openArticleModal(articleId, projId) {
   const a = articleId ? articleStore.find(x => x._id === articleId) : null;
   document.getElementById('articleModalTitle').textContent = a ? 'Edit Test Article' : 'Receive Test Article';
   document.getElementById('articleDeleteBtn').style.display = a ? 'inline-flex' : 'none';
+  const today = new Date().toISOString().split('T')[0];
   document.getElementById('articleDesc').value = a ? a.desc : '';
-  document.getElementById('articleReceivedDate').value = a ? a.receivedDate : new Date().toISOString().split('T')[0];
-  document.getElementById('articleShippedDate').value = a ? a.shippedDate : '';
+  document.getElementById('articleReceivedDate').value = a ? a.receivedDate : today;
+  const rcEl = document.getElementById('articleReceivedCarrier');
+  if (rcEl) rcEl.value = a ? (a.receivedCarrier || '') : '';
+  const rnEl = document.getElementById('articleReceivedNotes');
+  if (rnEl) rnEl.value = a ? (a.receivedNotes || '') : '';
+  // Date Shipped prefills with today (per Scott) so shipping an item costs zero
+  // keystrokes. saveArticle() discards the date if no carrier is selected, so a
+  // plain receive entry never gets a false ship date. Existing records keep
+  // their saved date; already-shipped legacy rows are never touched.
+  document.getElementById('articleShippedDate').value = a ? (a.shippedDate || today) : today;
   document.getElementById('articleCarrier').value = a ? a.carrier : '';
   document.getElementById('articleNotes').value = a ? a.notes : '';
+  // Received By is auto-stamped: original receiver on existing records, the
+  // logged-in user on new ones. Shown read-only in the Inbound header.
+  const rbNote = document.getElementById('articleReceivedByNote');
+  if (rbNote) {
+    const rbName = a ? (a.receivedBy || '') : ((typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.name) || '');
+    rbNote.textContent = rbName ? '· received by ' + rbName : '';
+  }
   // Status dropdown — defaults to 'in_house' for new records.
   const statusEl = document.getElementById('articleStatus');
   if (statusEl) statusEl.value = a ? (a.status || 'in_house') : 'in_house';
@@ -247,13 +266,6 @@ function openArticleModal(articleId, projId) {
     }).join('');
   // Hide picker only when opening from within a project tab (projId locked)
   projField.style.display = projId && !articleId ? 'none' : '';
-
-  // Populate received-by dropdown
-  const sel = document.getElementById('articleReceivedBy');
-  sel.innerHTML = '<option value="">— Select —</option>' +
-    employees.filter(e => e.isActive !== false).map(e =>
-      `<option value="${e.name}" ${a && a.receivedBy===e.name ? 'selected' : ''}>${e.name}</option>`
-    ).join('');
 
   // Populate client picker
   const clientSearch = document.getElementById('articleClientSearch');
@@ -285,19 +297,21 @@ function closeArticleModal() {
   _editingArticleId = null;
 }
 
-// Auto-link shipped date → status.
-// Filling in a shipped date flips status to 'shipped' (no need to also
-// change the dropdown); clearing the date reverts status to 'in_house'.
-// If the user explicitly set 'in_storage', we still flip to 'shipped' when
-// a date is entered — a shipped date is a strong enough signal that the
-// item has actually left the building.
-function articleShippedDateChanged() {
-  const dateEl   = document.getElementById('articleShippedDate');
-  const statusEl = document.getElementById('articleStatus');
-  if (!dateEl || !statusEl) return;
-  if (dateEl.value) {
+// Auto-link outbound fields → status.
+// The shipped date now prefills with today, so the date alone is no longer a
+// "this shipped" signal — the CARRIER is. Date + carrier both present flips
+// status to 'shipped' (even from an explicit 'in_storage' — a carrier is a
+// strong enough signal the item actually left the building). Clearing the
+// date reverts a 'shipped' status to 'in_house'. A date with no carrier
+// leaves status alone; saveArticle() discards that date on save.
+function articleOutboundChanged() {
+  const dateEl    = document.getElementById('articleShippedDate');
+  const carrierEl = document.getElementById('articleCarrier');
+  const statusEl  = document.getElementById('articleStatus');
+  if (!dateEl || !carrierEl || !statusEl) return;
+  if (dateEl.value && carrierEl.value) {
     if (statusEl.value !== 'shipped') statusEl.value = 'shipped';
-  } else {
+  } else if (!dateEl.value) {
     if (statusEl.value === 'shipped') statusEl.value = 'in_house';
   }
 }
@@ -324,21 +338,44 @@ async function saveArticle() {
   const clientName = document.getElementById('articleClientSearch')?.value.trim() || '';
   const resolvedClient = clientStore.find(c => c.id === clientId);
 
+  const oldArticle = _editingArticleId ? articleStore.find(a => a._id === _editingArticleId) : null;
+
+  // Scott's rule: the shipped date prefills with today, so it only "counts"
+  // when a carrier is selected. No carrier → discard the date. Exception:
+  // records that were ALREADY shipped keep their date regardless, so opening
+  // a legacy shipped record (which may have no carrier) for an unrelated edit
+  // can never wipe its ship date.
+  let shippedDate = document.getElementById('articleShippedDate').value || null;
+  const outCarrier = document.getElementById('articleCarrier').value || null;
+  const wasShipped = !!(oldArticle && oldArticle.shippedDate);
+  let status = document.getElementById('articleStatus')?.value || 'in_house';
+  if (shippedDate && !outCarrier && !wasShipped) {
+    shippedDate = null;
+    if (status === 'shipped') status = 'in_house'; // keep record consistent with the discarded date
+  }
+
+  // Received By is auto-stamped: logged-in user on create, original receiver
+  // preserved on edit (the editor's name never overwrites the receiver's).
+  const receivedBy = oldArticle
+    ? (oldArticle.receivedBy || null)
+    : ((typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.name) || null);
+
   const payload = {
-    project_id:    resolvedProjId || null,
-    client_id:     clientId || null,
-    client_name:   resolvedClient ? resolvedClient.name : clientName || null,
-    description:   desc,
-    received_date: document.getElementById('articleReceivedDate').value || null,
-    received_by:   document.getElementById('articleReceivedBy').value || null,
-    shipped_date:  document.getElementById('articleShippedDate').value || null,
-    carrier:       document.getElementById('articleCarrier').value || null,
-    notes:         document.getElementById('articleNotes').value.trim() || null,
-    status:        document.getElementById('articleStatus')?.value || 'in_house',
+    project_id:       resolvedProjId || null,
+    client_id:        clientId || null,
+    client_name:      resolvedClient ? resolvedClient.name : clientName || null,
+    description:      desc,
+    received_date:    document.getElementById('articleReceivedDate').value || null,
+    received_by:      receivedBy,
+    received_carrier: document.getElementById('articleReceivedCarrier')?.value || null,
+    received_notes:   document.getElementById('articleReceivedNotes')?.value.trim() || null,
+    shipped_date:     shippedDate,
+    carrier:          outCarrier,
+    notes:            document.getElementById('articleNotes').value.trim() || null,
+    status:           status,
   };
 
   if (_editingArticleId) {
-    const oldArticle = articleStore.find(a => a._id === _editingArticleId);
     if (sb) {
       const { error } = await sb.from('test_articles').update(payload).eq('id', _editingArticleId);
       if (error) { toast('⚠ Save error: ' + error.message); return; }
@@ -367,7 +404,7 @@ async function saveArticle() {
         logActivity('shipping', data.id, projLabel, `📥 Received: ${desc}${payload.received_by ? ' — received by ' + payload.received_by : ''}`);
       }
     } else {
-      articleStore.push({ _id: 'local-'+Date.now(), projId: resolvedProjId, desc, receivedDate: payload.received_date||'', receivedBy: payload.received_by||'', shippedDate: payload.shipped_date||'', carrier: payload.carrier||'', notes: payload.notes||'', status: payload.status, createdAt: new Date().toISOString().split('T')[0] });
+      articleStore.push({ _id: 'local-'+Date.now(), projId: resolvedProjId, desc, receivedDate: payload.received_date||'', receivedBy: payload.received_by||'', receivedCarrier: payload.received_carrier||'', receivedNotes: payload.received_notes||'', shippedDate: payload.shipped_date||'', carrier: payload.carrier||'', notes: payload.notes||'', status: payload.status, createdAt: new Date().toISOString().split('T')[0] });
     }
     toast('📦 Article logged');
   }

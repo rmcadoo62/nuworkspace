@@ -1752,28 +1752,40 @@
             <div id="articleClientDrop" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface2);border:1.5px solid var(--border);border-radius:8px;z-index:100;max-height:180px;overflow-y:auto;margin-top:2px;box-shadow:0 4px 16px rgba(0,0,0,0.3)"></div>
           </div>
         </div>
+        <div class="modal-div" style="margin:16px 0"></div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Inbound <span id="articleReceivedByNote" style="font-weight:400;letter-spacing:0;text-transform:none;color:var(--muted)"></span></div>
         <div class="field-row">
           <div class="field">
             <label class="field-label">Date Received</label>
             <input class="f-input" id="articleReceivedDate" type="date" style="color-scheme:dark" />
           </div>
           <div class="field">
-            <label class="field-label">Received By</label>
-            <select class="f-input" id="articleReceivedBy" style="cursor:pointer">
+            <label class="field-label">Carrier</label>
+            <select class="f-input" id="articleReceivedCarrier" style="cursor:pointer">
               <option value="">— Select —</option>
+              <option value="UPS">UPS</option>
+              <option value="FedEx">FedEx</option>
+              <option value="USPS">USPS</option>
+              <option value="Customer Delivered">Customer Delivered</option>
+              <option value="Hand Delivered">Hand Delivered</option>
+              <option value="Other">Other</option>
             </select>
           </div>
         </div>
+        <div class="field">
+          <label class="field-label">Notes</label>
+          <input class="f-input" id="articleReceivedNotes" type="text" placeholder="Optional inbound notes…" autocomplete="off" />
+        </div>
         <div class="modal-div" style="margin:16px 0"></div>
-        <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Outbound (leave blank if still in house)</div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Outbound (date saves only when a carrier is selected)</div>
         <div class="field-row">
           <div class="field">
             <label class="field-label">Date Shipped</label>
-            <input class="f-input" id="articleShippedDate" type="date" style="color-scheme:dark" onchange="articleShippedDateChanged()" />
+            <input class="f-input" id="articleShippedDate" type="date" style="color-scheme:dark" onchange="articleOutboundChanged()" />
           </div>
           <div class="field">
             <label class="field-label">Carrier</label>
-            <select class="f-input" id="articleCarrier" style="cursor:pointer">
+            <select class="f-input" id="articleCarrier" style="cursor:pointer" onchange="articleOutboundChanged()">
               <option value="">— Select —</option>
               <option value="UPS">UPS</option>
               <option value="FedEx">FedEx</option>
@@ -1786,7 +1798,7 @@
         </div>
         <div class="field">
           <label class="field-label">Notes</label>
-          <input class="f-input" id="articleNotes" type="text" placeholder="Optional notes…" autocomplete="off" />
+          <input class="f-input" id="articleNotes" type="text" placeholder="Optional outbound notes…" autocomplete="off" />
         </div>
       </div>
       <div class="modal-footer">
