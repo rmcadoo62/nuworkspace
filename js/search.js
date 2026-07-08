@@ -65,6 +65,15 @@ function _renderRecentsHtml(recents) {
   return html;
 }
 
+// If the query hit a PO or quote number (rather than the name), return a
+// short prefix like "PO 4500123" / "Quote Q-2261" so the result row shows
+// why it matched. Returns '' when the match was on the name.
+function _gsNumberHit(q, po, quoteNum) {
+  if (po && String(po).toLowerCase().includes(q)) return 'PO ' + po;
+  if (quoteNum && String(quoteNum).toLowerCase().includes(q)) return 'Quote ' + quoteNum;
+  return '';
+}
+
 function runGlobalSearch(q) {
   const res = document.getElementById('globalSearchResults');
   if (!res) return;
@@ -106,31 +115,44 @@ function runGlobalSearch(q) {
     html += '</div>';
   }
 
-  // Projects
-  const projMatches = projects.filter(p => p.name.toLowerCase().includes(q)).slice(0, 5);
+  // Projects — match on name, PO number, or quote number (PO/quote live on
+  // projectInfo, loaded alongside projects)
+  const projMatches = projects.filter(p => {
+    if (p.name.toLowerCase().includes(q)) return true;
+    const info = projectInfo[p.id] || {};
+    return !!_gsNumberHit(q, info.po, info.quoteNumber);
+  }).slice(0, 5);
   if (projMatches.length) {
     html += '<div class="gs-section"><div class="gs-section-label">Projects</div>';
     projMatches.forEach(p => {
       const info = projectInfo[p.id] || {};
+      const hit = _gsNumberHit(q, info.po, info.quoteNumber);
+      const sub = hit ? hit + (info.status ? ' · ' + info.status : '') : (info.status||'');
       html += '<div class="gs-item" data-action="project" data-id="' + p.id + '">' +
         '<span class="gs-item-icon">' + (p.emoji||'📁') + '</span>' +
         '<div><div class="gs-item-main">' + p.name + '</div>' +
-        '<div class="gs-item-sub">' + (info.status||'') + '</div></div></div>';
+        '<div class="gs-item-sub">' + sub + '</div></div></div>';
     });
     html += '</div>';
   }
 
   // Tasks (capped at 3 — task names are repetitive and tend to flood the
   // panel; keeping them shorter pushes them to a tertiary signal)
-  const taskMatches = taskStore.filter(t => t.name.toLowerCase().includes(q)).slice(0, 3);
+  // Match on name, PO number, or quote number (task-level fields)
+  const taskMatches = taskStore.filter(t =>
+    t.name.toLowerCase().includes(q) || !!_gsNumberHit(q, t.poNumber, t.quoteNum)
+  ).slice(0, 3);
   if (taskMatches.length) {
     html += '<div class="gs-section"><div class="gs-section-label">Tasks</div>';
     taskMatches.forEach(t => {
       const proj = projects.find(p => p.id === t.proj);
+      const hit = _gsNumberHit(q, t.poNumber, t.quoteNum);
+      const projName = proj ? proj.name : '';
+      const sub = hit ? hit + (projName ? ' · ' + projName : '') : projName;
       html += '<div class="gs-item" data-action="task" data-proj="' + t.proj + '" data-id="' + t._id + '">' +
         '<span class="gs-item-icon">✓</span>' +
         '<div><div class="gs-item-main">' + t.name + '</div>' +
-        '<div class="gs-item-sub">' + (proj ? proj.name : '') + '</div></div></div>';
+        '<div class="gs-item-sub">' + sub + '</div></div></div>';
     });
     html += '</div>';
   }
@@ -201,6 +223,3 @@ function gsOpenClients() {
 document.addEventListener('click', e => {
   if (!e.target.closest('.global-search-wrap')) gsCloseSearch();
 });
-
-
-
