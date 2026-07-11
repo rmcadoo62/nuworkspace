@@ -637,6 +637,7 @@ const CUI_HINTS = [
 function renderCuiHintCard() {
   if (!CUI_HINTS.length) return '';
   const now = new Date();
+  if (now.getDay() === 0 || now.getDay() === 6) return ''; // closed Sat/Sun
   const localMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const dayIndex = Math.floor(localMidnight.getTime() / 86400000);
   const hint = CUI_HINTS[((dayIndex % CUI_HINTS.length) + CUI_HINTS.length) % CUI_HINTS.length];
