@@ -172,7 +172,7 @@ async function loadAllData() {
         let rows = [], page = 0;
         while (true) {
           const { data } = await sb.from('tasks')
-            .select('id,project_id,status,sales_category,fixed_price,cancelled_date,created_at,name')
+            .select('id,project_id,status,sales_category,fixed_price,cancelled_date,created_at,name,is_legacy_import')
             .or(`created_at.gte.${ys},cancelled_date.gte.${ys}`)
             .order('id', { ascending: true })
             .range(page * 1000, page * 1000 + 999);
@@ -253,6 +253,7 @@ async function loadAllData() {
       peachtreeInv: r.peachtree_inv||'',
       createdAt: r.created_at ? r.created_at.split('T')[0] : '',
       revenueType: r.revenue_type||'fixed',
+      isLegacyImport: r.is_legacy_import === true,
     }));
 
     // Booking report supplement — current-year tasks from CLOSED projects only.
@@ -270,6 +271,7 @@ async function loadAllData() {
           fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
           cancelledDate: r.cancelled_date||'',
           createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+          isLegacyImport: r.is_legacy_import === true,
         }));
     }
 
@@ -489,6 +491,7 @@ async function loadClosedProject(projId) {
         poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
         createdAt: r.created_at ? r.created_at.split('T')[0] : '',
         revenueType: r.revenue_type||'fixed',
+        isLegacyImport: r.is_legacy_import === true,
       });
     });
 

@@ -160,7 +160,12 @@ function renderDashboard() {
   // closed-project tasks (window._bookingClosedTasks). Without the latter, closing a
   // job mid-year silently erases its bookings AND its cancellation reversals here.
   const _internalProjIds = new Set(projects.filter(p => p.is_internal).map(p => p.id));
-  const _bkTasks = taskStore.concat(window._bookingClosedTasks || []).filter(t => !_internalProjIds.has(t.proj));
+  // Legacy-import tasks (is_legacy_import flag) carry a placeholder created_at with no
+  // real booking date, so any cancellation on them would show as a reversal with no
+  // corresponding booking anywhere in the report. Excluded entirely, both sides.
+  const _bkTasks = taskStore.concat(window._bookingClosedTasks || [])
+    .filter(t => !_internalProjIds.has(t.proj))
+    .filter(t => !t.isLegacyImport);
 
   _bkTasks.forEach(t => {
     const cat = t.salesCat || 'Uncategorized';
@@ -1778,7 +1783,7 @@ async function refreshDashboard(btn) {
       fetchPages('billed_revenue_monthly',     '*', 'year_month'),
       fetchPages('billed_revenue_by_category', '*', 'year_month'),
       fetchPages('tasks',
-        'id,project_id,status,sales_category,fixed_price,cancelled_date,created_at,name',
+        'id,project_id,status,sales_category,fixed_price,cancelled_date,created_at,name,is_legacy_import',
         'id', q => q.or(`created_at.gte.${_ys},cancelled_date.gte.${_ys}`)),
     ]);
 
@@ -1845,6 +1850,7 @@ async function refreshDashboard(btn) {
       peachtreeInv: r.peachtree_inv||'',
       createdAt: r.created_at ? r.created_at.split('T')[0] : '',
       revenueType: r.revenue_type||'fixed',
+      isLegacyImport: r.is_legacy_import === true,
     }));
 
     {
@@ -1857,6 +1863,7 @@ async function refreshDashboard(btn) {
           fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
           cancelledDate: r.cancelled_date||'',
           createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+          isLegacyImport: r.is_legacy_import === true,
         }));
     }
 
