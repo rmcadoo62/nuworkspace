@@ -541,7 +541,7 @@ function renderEmployeesPanel(search) {
             placeholder="Search…" value="${q}" oninput="renderEmployeesPanel(this.value)" id="empSearch" />
           <button onclick="openEmployeeModal(null)" style="background:var(--amber);border:none;border-radius:8px;padding:6px 10px;font-size:11px;font-weight:600;color:#000;cursor:pointer;white-space:nowrap">+ Add</button>
         </div>
-        ${isManager() ? `<div style="padding:6px 14px;border-bottom:1px solid var(--border)">
+        ${can('manage_employees') ? `<div style="padding:6px 14px;border-bottom:1px solid var(--border)">
           <button onclick="openBulkLifecycleModal()" style="width:100%;background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:10px;color:var(--muted);cursor:pointer;text-align:left">
             📋 Bulk lifecycle update
           </button>
@@ -1587,7 +1587,7 @@ async function _loadLifecycleTab(empId, emp) {
   const onboardingComplete = applicableItems.filter(key => lifecycleData[key]?.onboarding_date).length;
   const offboardingComplete = applicableItems.filter(key => lifecycleData[key]?.offboarding_date).length;
   
-  const canEdit = isManager() && !_myInfoReadOnly;
+  const canEdit = can('manage_employees') && !_myInfoReadOnly;
   const isInactive = emp.isActive === false || !!emp.terminationDate;
 
   inner.innerHTML = `
@@ -1784,7 +1784,7 @@ let _bulkAllLifecycle = {};   // employee_id -> { template_key -> record }
 let _bulkLastUpdCount = 0;
 
 async function openBulkLifecycleModal() {
-  if (!isManager()) return;
+  if (!can('manage_employees')) return;
   await _ensureTemplatesLoaded();
   if (!templates || !templates.length) {
     toast('⚠ No lifecycle templates found');
@@ -2263,7 +2263,7 @@ async function _loadOnboardingTab(empId, emp, tabType) {
     : await _buildOffboardingItems(track);
 
   const prefix = tabType === 'onboarding' ? 'ob_' : 'off_';
-  const canEdit = isManager();
+  const canEdit = can('manage_employees');
   const isInactive = emp.isActive === false || !!emp.terminationDate;
 
   // Progress
