@@ -821,6 +821,22 @@ function _renderApprovalsTimesheetTab() {
   content.innerHTML = '<div style="font-size:14px;color:var(--muted);margin-bottom:14px">'+pending.length+' pending</div>' + cards;
 }
 
+// Toggle handler for the vacation-history "Show all / Show less" button.
+// Reads the pre-built short/full HTML that _renderApprovalsVacationTab()
+// stashed on window — see the comment there for why this replaced the old
+// inline-onclick-with-JSON.stringify approach.
+function _toggleVacHistoryApprovals() {
+  const list = document.getElementById('vacHistoryListApprovals');
+  const btn  = document.getElementById('vacHistoryToggleApprovals');
+  if (!list || !btn) return;
+  const showing = list.dataset.expanded === '1';
+  list.innerHTML = showing ? window._vacHistoryApprovalsShort : window._vacHistoryApprovalsFull;
+  list.dataset.expanded = showing ? '0' : '1';
+  btn.textContent = showing
+    ? 'Show all ' + window._vacHistoryApprovalsCount + ' requests ▼'
+    : 'Show less ▲';
+}
+
 // ── Vacation Requests tab — pending + history with approve/reject/delete ──
 async function _renderApprovalsVacationTab() {
   const content = document.getElementById('approvalsTabContent');
@@ -907,19 +923,23 @@ async function _renderApprovalsVacationTab() {
         ${historyRows.slice(0, 5).map(r => buildRow(r, false)).join('')}
       </div>
       ${historyRows.length > 5 ? `
-        <button id="vacHistoryToggleApprovals" onclick="
-          const list=document.getElementById('vacHistoryListApprovals');
-          const btn=document.getElementById('vacHistoryToggleApprovals');
-          const showing=list.dataset.expanded==='1';
-          list.innerHTML=showing
-            ? ${JSON.stringify(historyRows.slice(0,5).map(r=>buildRow(r,false)).join(''))}
-            : ${JSON.stringify(historyRows.map(r=>buildRow(r,false)).join(''))};
-          list.dataset.expanded=showing?'0':'1';
-          btn.textContent=showing?'Show all ${historyRows.length} requests ▼':'Show less ▲';"
+        <button id="vacHistoryToggleApprovals" onclick="_toggleVacHistoryApprovals()"
           style="background:none;border:none;color:var(--amber);font-size:12px;cursor:pointer;padding:4px 0;margin-top:4px">
           Show all ${historyRows.length} requests ▼
         </button>` : ''}`
     : '<div style="color:var(--muted);font-size:12px;padding:4px 0">No history yet.</div>';
+
+  // Stash both variants for the toggle button to swap between. Previously
+  // these were JSON.stringify'd and inlined directly into the button's
+  // onclick="..." attribute — but JSON.stringify wraps strings in double
+  // quotes, which collided with the attribute's own double-quote delimiter
+  // and broke out of it early, dumping raw HTML/escaped-\n text onto the
+  // page (only visible once historyRows.length > 5, since that's the only
+  // time this button rendered at all). Storing on window + calling a real
+  // function sidesteps the quoting problem entirely.
+  window._vacHistoryApprovalsShort = historyRows.slice(0, 5).map(r => buildRow(r, false)).join('');
+  window._vacHistoryApprovalsFull  = historyRows.map(r => buildRow(r, false)).join('');
+  window._vacHistoryApprovalsCount = historyRows.length;
 
   content.innerHTML = `
     <div style="font-size:14px;color:var(--muted);margin-bottom:14px">${pendingRows.length} pending</div>
