@@ -603,6 +603,41 @@ async function updateApprovalsBadge() {
   }
 }
 
+// Repaints the sidebar Approvals badge and the Vacation Requests tab-strip
+// badge directly from whatever's currently cached — no DB roundtrip, no
+// full panel re-render. Needed because renderApprovalsPanel() draws the
+// tab bar synchronously from the *old* cached vacation count, then kicks
+// off _renderApprovalsVacationTab()'s async fetch in the background. When
+// that fetch corrects _cachedPendingVacationCount to the true value, nothing
+// was repainting the already-drawn badges — so a resolved/stale request
+// could show "1" on the sidebar and tab strip indefinitely, even though the
+// tab body correctly said "no pending requests." This closes that gap.
+function _repaintApprovalsBadges() {
+  const tsPending = _pendingTimesheetCountForApprover();
+  const vacCount  = _cachedPendingVacationCount || 0;
+  const revCount  = (typeof _cachedPendingReviewCount !== 'undefined') ? (_cachedPendingReviewCount || 0) : 0;
+  const discCount = (typeof _cachedPendingDisciplineCount !== 'undefined') ? (_cachedPendingDisciplineCount || 0) : 0;
+  const total = tsPending + vacCount + revCount + discCount;
+
+  const sidebarBadge = document.getElementById('approvalsBadge');
+  if (sidebarBadge) {
+    sidebarBadge.textContent = total;
+    sidebarBadge.style.display = total > 0 ? 'inline-flex' : 'none';
+    if (total > 0) sidebarBadge.style.background = 'rgba(91,156,246,.2)';
+  }
+
+  const vacTabBtn = document.getElementById('approvalsTab-vacation');
+  if (vacTabBtn) {
+    const existing = vacTabBtn.querySelector('.approvals-tab-badge');
+    if (vacCount > 0) {
+      if (existing) existing.textContent = vacCount;
+      else vacTabBtn.insertAdjacentHTML('beforeend', `<span class="approvals-tab-badge">${vacCount}</span>`);
+    } else if (existing) {
+      existing.remove();
+    }
+  }
+}
+
 
 // ===== APPROVAL QUEUE =====
 // ===== APPROVAL QUEUE =====
@@ -874,6 +909,7 @@ async function _renderApprovalsVacationTab() {
   // Keep the cached count in sync with what we just loaded — protects against
   // drift between the tab badge and the body when this tab is opened directly.
   _cachedPendingVacationCount = pendingRows.length;
+  _repaintApprovalsBadges();
 
   const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   const statusColor = { pending: '#e8a234', approved: '#4caf7d', rejected: '#d04040' };
