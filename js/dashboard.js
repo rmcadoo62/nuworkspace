@@ -231,7 +231,11 @@ function renderDashboard() {
   const fmtStatNeg = v => '($' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) + ')';
 
   // Cell display helpers
-  const fmtBook    = v => v > 0 ? '<span style="color:var(--green);font-family:monospace">$'+v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+'</span>' : '<span style="color:var(--border)">—</span>';
+  const fmtBook    = v => {
+    if (v > 0) return '<span style="color:var(--green);font-family:monospace">$'+v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+'</span>';
+    if (v < 0) return '<span style="color:var(--red);font-family:monospace">($'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+')</span> <span style="color:var(--red);font-size:9px;font-weight:700;letter-spacing:.3px">CR</span>';
+    return '<span style="color:var(--border)">—</span>';
+  };
   const fmtRev     = v => v > 0 ? '<span style="color:var(--red);font-family:monospace">($'+v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+')</span>' : '<span style="color:var(--border)">—</span>';
   const fmtNetCell = v => {
     if (v === 0) return '<span style="color:var(--border)">—</span>';
