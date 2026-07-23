@@ -662,7 +662,7 @@ document.querySelectorAll('#specOpts input[type=checkbox]').forEach(cb => {
 function collectFormData() {
   // Simple text/email/tel/date/textarea fields, gathered by id
   const ids = ['quoteNo','quoteDate','custCompany','custAddress','custName','custTitle',
-               'custEmail','custPhone','custFax','eqCables','eqModes','eqReaction',
+               'custEmail','custPhone','custFax','eqUnitName','eqCables','eqModes','eqReaction',
                'eqSizeL','eqSizeW','eqSizeH','eqWeight','eqCurrent','eqVoltage',
                'specOtherText','specialReq','quoteReq'];
   const fields = {};
