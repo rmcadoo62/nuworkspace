@@ -602,7 +602,8 @@ function renderTasksPanel(projId) {
           </select>
         </div>
         <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()"`:''}  style="font-size:12px;color:var(--muted);font-weight:700;${canEditTask?'cursor:text':''}">${fmtShortDate(t.taskStartDate)}</div>
-        <div class="${canEditBilled?'itt-cell-edit':''}" ${canEditBilled?`onclick="inlineEditTaskDate('${t._id}','${projId}','${t.status==='billed'?'billedDate':'completedDate'}');event.stopPropagation()"`:''}  style="font-size:12px;color:${(t.completedDate||t.billedDate)?'var(--green)':'var(--muted)'};font-weight:700;${canEditBilled?'cursor:text':''}"${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${t.status==='billed'?fmtShortDate(t.billedDate):fmtShortDate(t.completedDate)}</div>
+        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','completedDate');event.stopPropagation()"`:''}  style="font-size:12px;color:${t.completedDate?'var(--green)':'var(--muted)'};font-weight:700;${canEditTask?'cursor:text':''}">${fmtShortDate(t.completedDate)}</div>
+        <div class="${canEditBilled?'itt-cell-edit':''}" ${canEditBilled?`onclick="inlineEditTaskDate('${t._id}','${projId}','billedDate');event.stopPropagation()"`:''}  style="font-size:12px;color:${t.billedDate?'var(--green)':'var(--muted)'};font-weight:700;${canEditBilled?'cursor:text':''}"${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${fmtShortDate(t.billedDate)}</div>
         <div class="itt-row-actions">
           ${can('edit_tasks') ? '<button class="itt-row-action-btn" onclick="openEditTaskModal(\''+t._id+'\');event.stopPropagation()">&#x270E;</button>' : ''}
           <button class="itt-row-action-btn tlog-log-btn${(typeof taskLogHas==='function' && taskLogHas(t._id)) ? ' has-log' : ''}" onclick="openTaskLogPanel('${t._id}');event.stopPropagation()" title="Test log">&#x1F4CB;</button>
@@ -642,7 +643,8 @@ function renderTasksPanel(projId) {
       <div class="itt-head-cell">Budget Hrs<span class="itt-resizer" data-col="hrs"></span></div>
       <div class="itt-head-cell">Assignee<span class="itt-resizer" data-col="bhrs"></span></div>
       <div class="itt-head-cell">Start Date<span class="itt-resizer" data-col="assign"></span></div>
-      <div class="itt-head-cell">Done/Billed<span class="itt-resizer" data-col="start"></span></div>
+      <div class="itt-head-cell">Completed<span class="itt-resizer" data-col="start"></span></div>
+      <div class="itt-head-cell">Billed<span class="itt-resizer" data-col="billed"></span></div>
       <div class="itt-head-cell"><span class="itt-resizer" data-col="comp"></span></div>
       <div class="itt-head-cell"></div>
     </div>
@@ -803,7 +805,7 @@ function inlineEditTaskDate(taskId, projId, field) {
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
-  const fieldIdx = { taskStartDate: 13, completedDate: 14, billedDate: 14 };
+  const fieldIdx = { taskStartDate: 12, completedDate: 13, billedDate: 14 };
   const cell = [...row.children][fieldIdx[field]];
   if (!cell) return;
   const orig = t[field] || '';
