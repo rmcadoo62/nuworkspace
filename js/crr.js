@@ -891,9 +891,10 @@ async function crrOpenWorkup(quoteNo) {
 
   if (data.data) { applyFormData(data.data); } else { crrClearForm(); }
 
-  // Quote # is owned by whoever created the line — lock it.
+  // Quote # can be edited while the workup is a draft (e.g. consolidating
+  // two workups on the same unit onto one quote #). Locked once finished.
   const qn = document.getElementById('quoteNo');
-  if (qn) { qn.value = data.quote_number; qn.readOnly = true; }
+  if (qn) { qn.value = data.quote_number; qn.readOnly = (data.status === 'finished'); }
 
   crrCurrentQuote = data.quote_number;
   crrDirty = false;
@@ -928,6 +929,26 @@ function crrClearForm() {
 
 async function crrSave(finish) {
   if (typeof sb === 'undefined' || !sb || !crrCurrentQuote) return;
+
+  // Quote # is the primary key on crr_workups, so if it was edited we have
+  // to rename the existing row (not just resave under the old number).
+  const qn = document.getElementById('quoteNo');
+  const newQ = qn ? qn.value.trim() : crrCurrentQuote;
+  if (!newQ) { setStatus('Quote # is required.', 'warn'); return; }
+  if (newQ !== crrCurrentQuote) {
+    const { data: dupe, error: dupeErr } = await sb.from('crr_workups')
+      .select('quote_number').eq('quote_number', newQ).maybeSingle();
+    if (dupeErr) { console.error('crr rename check:', dupeErr); setStatus('Rename check failed: ' + (dupeErr.message || dupeErr), 'warn'); return; }
+    if (dupe) { setStatus('Quote # ' + newQ + ' already exists — pick a different number.', 'warn'); return; }
+    const { error: renameErr } = await sb.from('crr_workups')
+      .update({ quote_number: newQ, updated_by: crrEmpId(), updated_at: new Date().toISOString() })
+      .eq('quote_number', crrCurrentQuote);
+    if (renameErr) { console.error('crr rename:', renameErr); setStatus('Rename failed: ' + (renameErr.message || renameErr), 'warn'); return; }
+    crrCurrentQuote = newQ;
+    const lbl = document.getElementById('crrFormQuote');
+    if (lbl) lbl.textContent = 'Quote #' + newQ;
+  }
+
   const cc = document.getElementById('custCompany');
   const payload = {
     quote_number: crrCurrentQuote,
