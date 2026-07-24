@@ -415,13 +415,16 @@ function renderDashboard() {
             catTasks.map(t => {
               const p = projects.find(x=>x.id===t.proj);
               const isRev = cancelledMo.has(t._id);
-              const pColor = isRev ? 'var(--red)' : 'var(--green)';
+              const isCredit = !isRev && t.fixedPrice < 0;
+              const pColor = (isRev || isCredit) ? 'var(--red)' : 'var(--green)';
               const pDisplay = t.fixedPrice > 0
                 ? (isRev ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))
+                : isCredit ? '($'+Math.abs(t.fixedPrice).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')<span style="font-size:9px;font-weight:700;margin-left:3px">CR</span>'
                 : '—';
               return '<tr style="border-bottom:0.5px solid var(--border)">'+
                 '<td style="padding:5px 10px 5px 22px;color:'+(isRev?'var(--muted)':'var(--text)')+';font-size:11px">'+
-                  (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+t.name+
+                  (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+
+                  (isCredit?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">CR CREDIT</span>':'')+t.name+
                 '</td>'+
                 '<td style="padding:5px 10px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
                 '<td style="padding:5px 10px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
@@ -460,13 +463,16 @@ function renderDashboard() {
           '<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+projColor+'">'+projDisplay+'</td></tr>'+
           ptasks.map(t => {
             const isRev = cancelledMo.has(t._id);
-            const pColor = isRev ? 'var(--red)' : 'var(--green)';
+            const isCredit = !isRev && t.fixedPrice < 0;
+            const pColor = (isRev || isCredit) ? 'var(--red)' : 'var(--green)';
             const pDisplay = t.fixedPrice > 0
               ? (isRev ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))
+              : isCredit ? '($'+Math.abs(t.fixedPrice).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')<span style="font-size:9px;font-weight:700;margin-left:3px">CR</span>'
               : '—';
             return '<tr style="border-bottom:0.5px solid var(--border)">'+
               '<td style="padding:5px 10px 5px 22px;color:'+(isRev?'var(--muted)':'var(--text)')+';font-size:11px">'+
-                (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+t.name+
+                (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+
+                (isCredit?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">CR CREDIT</span>':'')+t.name+
               '</td>'+
               '<td style="padding:5px 10px;color:var(--amber);font-weight:600;font-size:11px">'+(t.salesCat||'—')+'</td>'+
               '<td style="padding:5px 10px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
