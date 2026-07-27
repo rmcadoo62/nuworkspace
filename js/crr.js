@@ -917,6 +917,16 @@ async function crrOpenWorkup(quoteNo) {
 
 // Clear every form field/checkbox/spec back to empty (was the old Reset).
 function crrClearForm() {
+  // Clear by the same fixed id list collectFormData()/applyFormData() use,
+  // so a missing/odd `type` attribute on any field can't leave stale data
+  // in the DOM to get picked up by the next workup's save.
+  const ids = ['quoteNo','quoteDate','custCompany','custAddress','custName','custTitle',
+               'custEmail','custPhone','custFax','eqUnitName','eqCables','eqModes','eqReaction',
+               'eqSizeL','eqSizeW','eqSizeH','eqWeight','eqCurrent','eqVoltage',
+               'specOtherText','specialReq','quoteReq'];
+  ids.forEach(id => { const el = $(id); if (el) el.value = ''; });
+  // Belt-and-suspenders: also sweep by type selector for any other text-like
+  // fields not in the fixed id list above.
   document.querySelectorAll('#crrRoot input[type=text],#crrRoot input[type=email],#crrRoot input[type=tel],#crrRoot input[type=date],#crrRoot input[type=number],#crrRoot textarea').forEach(el => { el.value = ''; });
   document.querySelectorAll('#crrRoot input[type=checkbox]').forEach(cb => { cb.checked = false; });
   state.enabledSpecs = {};
