@@ -786,9 +786,13 @@ async function crrLoadList() {
 }
 
 function crrRowHtml(r) {
+  const isFin = r.status === 'finished';
+  const pillHtml = '<span class="crr-status-pill ' + (isFin ? 'finished' : 'draft') + '">'
+      + (isFin ? '\u2713 Ready to Quote' : 'Draft') + '</span>';
   return '<tr class="crr-li" data-q="' + crrEscHtml(r.quote_number) + '">'
        + '<td class="crr-q">' + crrEscHtml(r.quote_number) + '</td>'
        + '<td>' + crrEscHtml(r.customer_company) + '</td>'
+       + '<td>' + pillHtml + '</td>'
        + '<td>' + crrEscHtml(crrEmpName(r.updated_by)) + '</td>'
        + '<td>' + crrEscHtml(crrFmtDate(r.updated_at)) + '</td>'
        + '</tr>';
@@ -799,7 +803,7 @@ function crrRenderList() {
   if (!wrap) return;
   const open   = crrList.filter(r => r.status !== 'finished');
   const closed = crrList.filter(r => r.status === 'finished');
-  const head = '<thead><tr><th>Quote #</th><th>Company</th><th>Last edited by</th><th>Updated</th></tr></thead>';
+  const head = '<thead><tr><th>Quote #</th><th>Company</th><th>Status</th><th>Last edited by</th><th>Updated</th></tr></thead>';
 
   let html = '';
   html += '<div class="crr-list-head"><h2>Open Workups <span class="crr-count">' + open.length + '</span></h2>'
@@ -901,6 +905,12 @@ async function crrOpenWorkup(quoteNo) {
 
   const lbl = document.getElementById('crrFormQuote');
   if (lbl) lbl.textContent = 'Quote #' + data.quote_number;
+  const pill = document.getElementById('crrStatusPill');
+  if (pill) {
+    const isFin = data.status === 'finished';
+    pill.textContent = isFin ? '\u2713 Ready to Quote' : 'Draft';
+    pill.className = 'crr-status-pill ' + (isFin ? 'finished' : 'draft');
+  }
   const finBtn  = document.getElementById('crrFinishBtn');
   const saveBtn = document.getElementById('crrSaveDraftBtn');
   const loadWordBtn = document.getElementById('loadWord');

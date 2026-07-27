@@ -243,6 +243,7 @@
         <div class="crr-formbar">
           <button type="button" class="crr-btn" id="crrBackBtn">&#8592; Back</button>
           <span class="crr-formquote" id="crrFormQuote"></span>
+          <span class="crr-status-pill" id="crrStatusPill"></span>
           <button type="button" class="crr-btn" id="loadWord" title="Import field values from an existing Word .docx/.docm CRR file (best-effort)">Load from Word</button>
           <button type="button" class="crr-btn primary" id="crrReopenBtn" style="display:none" title="Reopen this finished workup as an editable draft">Reopen</button>
           <span class="status" id="status">Ready.</span>
@@ -1159,7 +1160,7 @@
         </div>
         <div class="field">
           <label class="field-label">Completed Date</label>
-          <input class="f-input" id="taskDue" type="date" style="color-scheme:dark" />
+          <input class="f-input" id="taskDue" type="date" style="color-scheme:dark" onchange="handleTaskDueChange()" />
         </div>
       </div>
       <div class="field-row">
@@ -1347,7 +1348,7 @@
         </div>
         <div class="field">
           <label class="field-label">Completed Date</label>
-          <input class="f-input" id="etDue" type="date" style="color-scheme:dark" onchange="updateCompletedDateFromStatus()" />
+          <input class="f-input" id="etDue" type="date" style="color-scheme:dark" onchange="handleEtDueChange()" />
         </div>
       </div>
       <div class="field-row">
