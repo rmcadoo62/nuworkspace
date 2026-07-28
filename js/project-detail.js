@@ -682,6 +682,11 @@ async function changeProjectStatus(projId, selectEl) {
     info.endDate = today;
     dbStatusPayload.end_date = today;
   }
+  // Clear Closed Date when reopened from closed
+  if (currentStatus === 'closed' && newStatus !== 'closed') {
+    info.endDate = null;
+    dbStatusPayload.end_date = null;
+  }
   if (sb) dbUpdate('project_info', projId, dbStatusPayload);
 
   const s = SM[newStatus] || SM.active;
