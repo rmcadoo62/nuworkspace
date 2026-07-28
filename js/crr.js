@@ -777,7 +777,7 @@ function crrShowList() {
 async function crrLoadList() {
   if (typeof sb === 'undefined' || !sb) return;
   const { data, error } = await sb.from('crr_workups')
-    .select('quote_number,customer_company,status,updated_at,updated_by')
+    .select('quote_number,customer_company,status,ready_to_quote,updated_at,updated_by')
     .order('updated_at', { ascending: false });
   if (error) { console.error('crr list:', error); setStatus('Could not load workups', 'warn'); return; }
   crrList = data || [];
@@ -786,9 +786,9 @@ async function crrLoadList() {
 }
 
 function crrRowHtml(r) {
-  const isFin = r.status === 'finished';
-  const pillHtml = '<span class="crr-status-pill ' + (isFin ? 'finished' : 'draft') + '">'
-      + (isFin ? '\u2713 Ready to Quote' : 'Draft') + '</span>';
+  const isReady = !!r.ready_to_quote;
+  const pillHtml = '<span class="crr-status-pill ' + (isReady ? 'finished' : 'draft') + '">'
+      + (isReady ? '\u2713 Ready to Quote' : 'Draft') + '</span>';
   return '<tr class="crr-li" data-q="' + crrEscHtml(r.quote_number) + '">'
        + '<td class="crr-q">' + crrEscHtml(r.quote_number) + '</td>'
        + '<td>' + crrEscHtml(r.customer_company) + '</td>'
@@ -888,6 +888,26 @@ async function crrCreateWorkup() {
   crrOpenWorkup(q);
 }
 
+function crrRenderPill(pill, isReady) {
+  pill.textContent = isReady ? '\u2713 Ready to Quote' : 'Draft';
+  pill.className = 'crr-status-pill ' + (isReady ? 'finished' : 'draft');
+}
+
+async function crrToggleReadyToQuote(pill, quoteNo) {
+  if (typeof sb === 'undefined' || !sb) return;
+  const wasReady = pill.classList.contains('finished');
+  const nextReady = !wasReady;
+  crrRenderPill(pill, nextReady); // optimistic UI
+  const { error } = await sb.from('crr_workups')
+    .update({ ready_to_quote: nextReady })
+    .eq('quote_number', quoteNo);
+  if (error) {
+    console.error('crr ready_to_quote toggle:', error);
+    crrRenderPill(pill, wasReady); // revert on failure
+    setStatus('Could not update Ready to Quote', 'warn');
+  }
+}
+
 async function crrOpenWorkup(quoteNo) {
   if (typeof sb === 'undefined' || !sb) return;
   const { data, error } = await sb.from('crr_workups').select('*').eq('quote_number', quoteNo).single();
@@ -905,17 +925,23 @@ async function crrOpenWorkup(quoteNo) {
 
   const lbl = document.getElementById('crrFormQuote');
   if (lbl) lbl.textContent = 'Quote #' + data.quote_number;
-  const pill = document.getElementById('crrStatusPill');
-  if (pill) {
-    const isFin = data.status === 'finished';
-    pill.textContent = isFin ? '\u2713 Ready to Quote' : 'Draft';
-    pill.className = 'crr-status-pill ' + (isFin ? 'finished' : 'draft');
-  }
   const finBtn  = document.getElementById('crrFinishBtn');
   const saveBtn = document.getElementById('crrSaveDraftBtn');
   const loadWordBtn = document.getElementById('loadWord');
   const reopenBtn = document.getElementById('crrReopenBtn');
   const isFinished = data.status === 'finished';
+
+  // Ready-to-Quote pill: a local signal from EMI to Sales that the workup
+  // itself is done, fully independent of Finished/status. Instant-write,
+  // clickable unless the workup is already finished (then it's just a
+  // read-only marker, like the rest of the locked form).
+  const pill = document.getElementById('crrStatusPill');
+  if (pill) {
+    crrRenderPill(pill, !!data.ready_to_quote);
+    pill.onclick = isFinished ? null : () => crrToggleReadyToQuote(pill, data.quote_number);
+    pill.style.cursor = isFinished ? 'default' : 'pointer';
+  }
+
   if (finBtn)  finBtn.style.display  = isFinished ? 'none' : '';
   if (saveBtn) saveBtn.style.display = isFinished ? 'none' : '';
   if (loadWordBtn) loadWordBtn.style.display = isFinished ? 'none' : '';

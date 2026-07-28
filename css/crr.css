@@ -104,7 +104,8 @@
 .crr-root .crr-formbar .status.warn{color:#b06b00}
 
 /* status pill — form header + list rows */
-.crr-root .crr-status-pill{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:3px 10px;border-radius:12px;white-space:nowrap}
+.crr-root .crr-status-pill{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:3px 10px;border-radius:12px;white-space:nowrap;transition:filter .1s}
+.crr-root .crr-formbar .crr-status-pill:hover{filter:brightness(0.94)}
 .crr-root .crr-status-pill.draft{background:#f0f4f7;color:var(--muted);border:1px solid var(--line-strong)}
 .crr-root .crr-status-pill.finished{background:rgba(34,130,91,0.12);color:#22825b;border:1px solid rgba(34,130,91,0.35)}
 .crr-root table.crr-list .crr-status-pill{padding:2px 8px;font-size:10px}
