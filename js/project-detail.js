@@ -39,14 +39,23 @@ function fmtSchedPillDate(start, end) {
   return fmt(start) + ' \u2192 ' + fmt(end);
 }
 
-function computeScheduleStatusFromBlocks(blocks) {
+const SCHED_DONE_STATUSES = ['complete','testcomplete','closed','cancelled'];
+
+function computeScheduleStatusFromBlocks(blocks, projStatus) {
   const today = (typeof todayStr === 'function') ? todayStr() : new Date().toISOString().slice(0,10);
+  const projDone = SCHED_DONE_STATUSES.includes(projStatus);
   const active = blocks.filter(b => {
     if (b.taskId) {
       const t = (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === b.taskId);
-      if (t && ['complete','billed','cancelled'].includes(t.status)) return false;
-      return true;
+      if (t) return !['complete','billed','cancelled'].includes(t.status);
+      // Linked task not found (deleted/stale reference) — fall back to the
+      // block's own end date rather than assuming it's still active.
+      return !b.end || b.end >= today;
     }
+    // Project-only block (no task attached) — nothing to check against
+    // except its own dates and the project's own status. If the project
+    // itself is done, a leftover/open-ended block shouldn't count as active.
+    if (projDone) return false;
     return !b.end || b.end >= today;
   });
   if (!active.length) return { state: 'not_scheduled' };
@@ -65,7 +74,7 @@ async function loadScheduleStatus(projId) {
     const blocks = (data || []).map(r => (typeof schedRowToBlock === 'function' ? schedRowToBlock(r) : {
       start: r.start_date, end: r.end_date, taskId: r.task_id || null, flag: r.flag || null,
     }));
-    scheduleStatusCache[projId] = computeScheduleStatusFromBlocks(blocks);
+    scheduleStatusCache[projId] = computeScheduleStatusFromBlocks(blocks, (projectInfo[projId]||{}).status);
   } catch(e) {
     console.error('loadScheduleStatus:', e);
     scheduleStatusCache[projId] = { state: 'not_scheduled' };

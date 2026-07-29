@@ -117,7 +117,7 @@ async function loadBulkScheduleStatus() {
       byProj[r.proj_id].push({ start: r.start_date, end: r.end_date, taskId: r.task_id || null, flag: r.flag || null });
     });
     const result = {};
-    Object.keys(byProj).forEach(projId => { result[projId] = computeScheduleStatusFromBlocks(byProj[projId]); });
+    Object.keys(byProj).forEach(projId => { result[projId] = computeScheduleStatusFromBlocks(byProj[projId], (projectInfo[projId]||{}).status); });
     bulkScheduleStatus = result;
   } catch(e) {
     console.error('loadBulkScheduleStatus:', e);
