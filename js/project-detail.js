@@ -16,9 +16,85 @@ function defaultInfo(proj) {
   };
 }
 
+// ===== LIVE SCHEDULE STATUS (replaces old manual "Condition"/phase pill) =====
+// ===== LIVE SCHEDULE STATUS =====
+// Pulled from schedule_blocks, scoped to this project — NOT the scheduler's
+// global schedBlocks array, since that's only populated once someone opens
+// the Scheduler panel. Cached per project for the session; refetched each
+// time the project is (re)selected.
+const scheduleStatusCache = {}; // projId -> {state,start,end} | {state:'loading'}
 
-// ===== RENDER INFO SHEET =====
-// ===== RENDER INFO SHEET =====
+const SCHED_STATE_STYLE = {
+  scheduled:     { label: 'Scheduled',     color: '#4caf7d' },
+  tentative:     { label: 'Tentative',     color: '#a0a0a0' },
+  rescheduled:   { label: 'Rescheduled',   color: '#c9a800' },
+  not_scheduled: { label: 'Not Scheduled', color: '#7a7a85' },
+  loading:       { label: '\u2026',        color: '#7a7a85' },
+};
+
+function fmtSchedPillDate(start, end) {
+  const fmt = d => { try { return new Date(d + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric', year:'numeric'}); } catch(e) { return ''; } };
+  if (!start) return '';
+  if (!end || end === start) return fmt(start);
+  return fmt(start) + ' \u2192 ' + fmt(end);
+}
+
+function computeScheduleStatusFromBlocks(blocks) {
+  const today = (typeof todayStr === 'function') ? todayStr() : new Date().toISOString().slice(0,10);
+  const active = blocks.filter(b => {
+    if (b.taskId) {
+      const t = (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === b.taskId);
+      if (t && ['complete','billed','cancelled'].includes(t.status)) return false;
+      return true;
+    }
+    return !b.end || b.end >= today;
+  });
+  if (!active.length) return { state: 'not_scheduled' };
+  active.sort((a, b) => (a.start||'').localeCompare(b.start||''));
+  const block = active[0];
+  const state = block.flag === 'reschedule' ? 'rescheduled' : block.flag === 'tentative' ? 'tentative' : 'scheduled';
+  return { state, start: block.start, end: block.end };
+}
+
+async function loadScheduleStatus(projId) {
+  scheduleStatusCache[projId] = { state: 'loading' };
+  if (!sb) { scheduleStatusCache[projId] = { state: 'not_scheduled' }; return; }
+  try {
+    const { data, error } = await sb.from('schedule_blocks').select('*').eq('proj_id', projId);
+    if (error) throw error;
+    const blocks = (data || []).map(r => (typeof schedRowToBlock === 'function' ? schedRowToBlock(r) : {
+      start: r.start_date, end: r.end_date, taskId: r.task_id || null, flag: r.flag || null,
+    }));
+    scheduleStatusCache[projId] = computeScheduleStatusFromBlocks(blocks);
+  } catch(e) {
+    console.error('loadScheduleStatus:', e);
+    scheduleStatusCache[projId] = { state: 'not_scheduled' };
+  }
+  if (activeProjectId === projId) {
+    renderProjStickyHeader(projId);
+    if (document.getElementById('infoWrap') && document.getElementById('infoWrap').innerHTML.trim()) renderInfoSheet(projId);
+  }
+}
+
+// Call this after anything that could change a project's schedule status
+// while it's on screen (e.g. task marked complete) to force a refresh.
+function refreshScheduleStatus(projId) {
+  delete scheduleStatusCache[projId];
+}
+
+function renderSchedulePill(projId) {
+  let entry = scheduleStatusCache[projId];
+  if (entry === undefined) {
+    loadScheduleStatus(projId); // fire-and-forget; sets cache to 'loading' synchronously
+    entry = { state: 'loading' };
+  }
+  const style = SCHED_STATE_STYLE[entry.state] || SCHED_STATE_STYLE.not_scheduled;
+  const dateText = (entry.state !== 'not_scheduled' && entry.state !== 'loading') ? fmtSchedPillDate(entry.start, entry.end) : '';
+  return '<div class="phase-pill" style="background:'+style.color+'22;color:'+style.color+';flex-shrink:0" title="Live status from the Scheduler">'+
+    style.label + (dateText ? ' \u2014 ' + dateText : '') + '</div>';
+}
+
+
 // Shared gate for all Project Info edits. The render layer hides edit
 // affordances for users without edit_project_info; this is the belt-and-
 // suspenders guard so a stale-DOM or console-triggered handler still refuses.
@@ -52,14 +128,7 @@ function renderInfoSheet(projId) {
     'closing':{label:'Closing (Pending)',bg:'rgba(232,162,52,0.15)',color:'#e8a234',dot:'#e8a234'},
     'closed':{label:'Closed',bg:'rgba(85,85,102,0.15)',color:'#555566',dot:'#555566'},
   };
-  const phaseColors = {
-    'Waiting on TP Approval': '#e05c5c',
-    'Within 3 Months':        '#e8a234',
-    '3 to 6 Months':          '#5b9cf6',
-    'No Time Frame':          '#7a7a85',
-  };
   const st = statusMap[info.status] || statusMap.active;
-  const phColor = phaseColors[info.phase] || '#7a7a85';
 
   // Calc progress from tasks — count billed/complete/done; exclude cancelled from denominator
   const projTasks = taskStore.filter(t => t.proj === projId);
@@ -124,9 +193,7 @@ function renderInfoSheet(projId) {
               📦 ${inHouse.length} In House
             </div>`;
           })()}
-          <div class="phase-pill" style="background:${phColor}22;color:${phColor};flex-shrink:0;position:relative" onclick="openConditionDropdown('${projId}',this)" title="Click to change condition">
-            ${info.phase||'Waiting on TP Approval'}
-          </div>
+          ${renderSchedulePill(projId)}
           <div style="font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;margin-left:4px">${fmtDate(info.startDate)}${info.startDate||info.endDate?' &rarr; ':''} ${fmtDate(info.endDate)}</div>
         </div>
         <div class="desc-cards">
@@ -306,7 +373,6 @@ function renderInfoSheet(projId) {
           </div>
           ${dateField('Test Complete Date', fmtDate(info.testcompleteDate), 'testcompleteDate')}
           ${dateField('Closed Date', fmtDate(info.endDate), 'endDate')}
-          ${dateField('Tentative Test Date', fmtDate(info.tentativeTestDate), 'tentativeTestDate')}
         </div>
       </div>
     </div>
@@ -3010,8 +3076,6 @@ function renderProjStickyHeader(projId) {
     closed:{label:'Closed',bg:'rgba(50,50,60,0.15)',color:'#555566'},
   };
   const st = statusMap[info.status] || statusMap.active;
-  const phaseColors = {'Waiting on TP Approval':'#e05c5c','Within 3 Months':'#e8a234','3 to 6 Months':'#5b9cf6','No Time Frame':'#7a7a85'};
-  const phColor = phaseColors[info.phase] || '#7a7a85';
 
   hdr.style.display = '';
   bar.innerHTML =
@@ -3023,7 +3087,7 @@ function renderProjStickyHeader(projId) {
        ['testcomplete','Testing Complete'],['closing','Closing (Pending)'],['closed','Closed']]
       .map(([k,l]) => '<option value="'+k+'" '+(info.status===k?'selected':'')+'>'+l+'</option>').join('')+
     '</select>'+
-    '<div class="phase-pill" style="background:'+phColor+'22;color:'+phColor+';cursor:pointer;flex-shrink:0;position:relative" onclick="openConditionDropdown(\x27'+projId+'\x27,this)" title="Click to change condition">'+( info.phase||'Waiting on TP Approval')+'</div>'+
+    renderSchedulePill(projId)+
     (info.startDate||info.endDate ? '<span style="font-size:11px;color:var(--muted);font-family:\"JetBrains Mono\",monospace">'+fmtDate(info.startDate)+(info.startDate&&info.endDate?' → ':'')+fmtDate(info.endDate)+'</span>' : '')+
     (info.creditHold ? '<div class="credit-hold-checkbox-wrap active" onclick="toggleCreditHold(\''+projId+'\')"><span>⚠ CREDIT HOLD</span></div>' :
       '<div class="credit-hold-checkbox-wrap" onclick="toggleCreditHold(\''+projId+'\')"><span>Credit Hold</span></div>')+

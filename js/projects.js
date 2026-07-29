@@ -17,6 +17,9 @@ function openProjectsTable(el) {
   if (panel) { panel.style.flexDirection = 'column'; panel.style.overflow = 'hidden'; }
   renderSavedFiltersBar();
   renderProjectsTable();
+  loadBulkScheduleStatus().then(() => {
+    if (document.getElementById('panel-projects')?.classList.contains('active')) renderProjectsTable();
+  });
 }
 
 async function openDashboardPanel(el) {
@@ -92,6 +95,56 @@ async function openDashboardPanel(el) {
 //   default   — whether visible by default for users who have never toggled
 //   width     — initial column width (before resizing)
 //   colorRule — optional fn(value, info) => {bg, color} | null — applied to cell when visible
+// ===== BULK SCHEDULE STATUS (Projects table) =====
+// ===== BULK SCHEDULE STATUS =====
+// Same Scheduled/Tentative/Rescheduled/Not Scheduled logic as the project
+// detail pill (computeScheduleStatusFromBlocks, in project-detail.js), but
+// fetched in one bulk query for every project instead of one at a time —
+// the table can show 100+ rows at once.
+let bulkScheduleStatus = {}; // projId -> {state,start,end}
+let bulkScheduleLoading = false;
+
+async function loadBulkScheduleStatus() {
+  if (!sb || bulkScheduleLoading) return;
+  if (typeof computeScheduleStatusFromBlocks !== 'function') return; // project-detail.js not loaded yet
+  bulkScheduleLoading = true;
+  try {
+    const { data, error } = await sb.from('schedule_blocks').select('proj_id,task_id,start_date,end_date,flag').not('proj_id', 'is', null);
+    if (error) throw error;
+    const byProj = {};
+    (data || []).forEach(r => {
+      if (!byProj[r.proj_id]) byProj[r.proj_id] = [];
+      byProj[r.proj_id].push({ start: r.start_date, end: r.end_date, taskId: r.task_id || null, flag: r.flag || null });
+    });
+    const result = {};
+    Object.keys(byProj).forEach(projId => { result[projId] = computeScheduleStatusFromBlocks(byProj[projId]); });
+    bulkScheduleStatus = result;
+  } catch(e) {
+    console.error('loadBulkScheduleStatus:', e);
+  } finally {
+    bulkScheduleLoading = false;
+  }
+}
+
+function getBulkScheduleEntry(projId) {
+  return bulkScheduleStatus[projId] || { state: 'not_scheduled' };
+}
+
+// Sort key: dated states first (soonest date first), Not Scheduled last
+function scheduleSortKey(projId) {
+  const e = getBulkScheduleEntry(projId);
+  if (e.state === 'not_scheduled' || !e.start) return '1_';
+  return '0_' + e.start;
+}
+
+function fmtScheduleCell(projId) {
+  const e = getBulkScheduleEntry(projId);
+  const style = (typeof SCHED_STATE_STYLE !== 'undefined' && SCHED_STATE_STYLE[e.state]) || { label: 'Not Scheduled', color: '#7a7a85' };
+  const dateText = (e.state !== 'not_scheduled' && typeof fmtSchedPillDate === 'function') ? fmtSchedPillDate(e.start, e.end) : '';
+  return { label: style.label, color: style.color, dateText, text: style.label + (dateText ? ' \u2014 ' + dateText : '') };
+}
+
+
 const PROJ_COL_DEFS = [
   // Previously "core" columns — now optional, default ON (existing users see no change)
   { key: 'po',            label: 'PO',                   ptc: 'po',       default: true,  width: '90px'  },
@@ -104,7 +157,7 @@ const PROJ_COL_DEFS = [
   { key: 'remaining',     label: 'Remaining Rev.',       ptc: 'remain',   default: true,  width: '110px' },
   // Previously optional columns — unchanged defaults
   { key: 'pm',            label: 'PM',                   ptc: 'pm',       default: false, width: '110px' },
-  { key: 'tentativeTest', label: 'Tent. Test Date',      ptc: 'tenttest', default: false, width: '120px' },
+  { key: 'tentativeTest', label: 'Schedule',            ptc: 'tenttest', default: false, width: '150px' },
   { key: 'testcomplete',  label: 'Test Comp. Date',      ptc: 'testcomp', default: false, width: '120px' },
   { key: 'dcas',          label: 'DCAS',                 ptc: 'dcas',     default: true,  width: '80px',
     colorRule: dcasColor },
@@ -164,9 +217,9 @@ function inHouseColor(v) {
 // gated by the same capability the detail Info sheet uses: edit_project_info.
 
 // col key (PROJ_COL_DEFS) -> editor type
-const PROJ_INLINE_TYPE   = { dcas:'enum', witness:'enum', tpApproval:'enum', cui:'enum', tentativeTest:'date' };
+const PROJ_INLINE_TYPE   = { dcas:'enum', witness:'enum', tpApproval:'enum', cui:'enum' };
 // col key -> projectInfo field name
-const PROJ_INLINE_FIELD  = { dcas:'dcas', witness:'customerWitness', tpApproval:'tpApproval', cui:'cui', tentativeTest:'tentativeTestDate' };
+const PROJ_INLINE_FIELD  = { dcas:'dcas', witness:'customerWitness', tpApproval:'tpApproval', cui:'cui' };
 // projectInfo field name -> project_info DB column
 const PROJ_INLINE_COLMAP = { dcas:'dcas', customerWitness:'customer_witness', tpApproval:'tp_approval', cui:'cui', tentativeTestDate:'tentative_test_date' };
 // enum option sets — mirror the detail Info sheet (pickField) exactly: same values, same colors
@@ -389,7 +442,7 @@ function renderProjectsTable() {
     else if (projSortCol === 'dcas')     { va = ia.dcas||''; vb = ib.dcas||''; }
     else if (projSortCol === 'po')       { va = ia.po||''; vb = ib.po||''; }
     else if (projSortCol === 'pm')            { va = ia.pm||''; vb = ib.pm||''; }
-    else if (projSortCol === 'tentativeTest') { va = ia.tentativeTestDate||''; vb = ib.tentativeTestDate||''; }
+    else if (projSortCol === 'tentativeTest') { va = scheduleSortKey(a.id); vb = scheduleSortKey(b.id); }
     else if (projSortCol === 'testcomplete')  { va = ia.testcompleteDate||''; vb = ib.testcompleteDate||''; }
     else if (projSortCol === 'witness')       { va = ia.customerWitness||''; vb = ib.customerWitness||''; }
     else if (projSortCol === 'tpApproval')    { va = ia.tpApproval||''; vb = ib.tpApproval||''; }
@@ -462,7 +515,7 @@ function renderProjectsTable() {
         else if (field === 'desc')    cell = (p.desc||info.desc||'').toLowerCase();
         else if (field === 'article') cell = (info.testArticleDesc||'').toLowerCase();
         else if (field === 'pm')      cell = (info.pm||'').toLowerCase();
-        else if (field === 'tentativeTest') cell = (info.tentativeTestDate||'').toLowerCase();
+        else if (field === 'tentativeTest') cell = fmtScheduleCell(p.id).text.toLowerCase();
         else if (field === 'testcomplete')  cell = (info.testcompleteDate||'').toLowerCase();
         else if (field === 'witness')       cell = (info.customerWitness||'').toLowerCase();
         else if (field === 'contact')       cell = (info.clientContact||'').toLowerCase();
@@ -556,7 +609,9 @@ function renderProjectsTable() {
       val = info.pm || '—';
       rawValue = info.pm;
     } else if (c.key === 'tentativeTest') {
-      val = `<span style="font-size:11px;font-family:'JetBrains Mono',monospace">${fmtDate(info.tentativeTestDate)}</span>`;
+      const sc = fmtScheduleCell(p.id);
+      val = `<span style="font-size:11px;font-weight:600;color:${sc.color}">${sc.text}</span>`;
+      rawValue = sc.text;
     } else if (c.key === 'testcomplete') {
       val = `<span style="font-size:11px;font-family:'JetBrains Mono',monospace">${fmtDate(info.testcompleteDate)}</span>`;
     } else if (c.key === 'dcas') {
@@ -806,7 +861,7 @@ function _applyProjColFiltersToDOM() {
       else if (field === 'desc')    cell = ((p?.desc||'')||(info.desc||'')).toLowerCase();
       else if (field === 'article') cell = (info.testArticleDesc||'').toLowerCase();
       else if (field === 'pm')      cell = (info.pm||'').toLowerCase();
-      else if (field === 'tentativeTest') cell = (info.tentativeTestDate||'').toLowerCase();
+      else if (field === 'tentativeTest') cell = fmtScheduleCell(projId).text.toLowerCase();
       else if (field === 'testcomplete')  cell = (info.testcompleteDate||'').toLowerCase();
       else if (field === 'witness')       cell = (info.customerWitness||'').toLowerCase();
       else if (field === 'contact')       cell = (info.clientContact||'').toLowerCase();
