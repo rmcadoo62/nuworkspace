@@ -45,6 +45,7 @@ body{
 .card-row{display:flex;justify-content:space-between;align-items:flex-end;}
 .card-col .k{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px;}
 .card-col .v{font-family:'JetBrains Mono',monospace;font-weight:500;font-size:24px;color:var(--text);}
+.card-col .q{font-size:11px;color:var(--muted);margin-top:2px;}
 .card-col.ytd .v{font-size:15px;color:var(--muted);}
 .card-col.ytd{text-align:right;}
 .chart-box{height:160px;margin-top:14px;display:none;}
@@ -135,43 +136,71 @@ async function fetchAll(table, columns, filters){
   return rows;
 }
 
-// ---- BOOKINGS: replica of dashboard.js's Booking Report ----
+// ---- BOOKINGS: replica of dashboard.js's Booking Report, plus job counts ----
 // Both bookings and reversals only ever look at CURRENT-YEAR activity, so a
 // single query for tasks with created_at or cancelled_date in this year
 // covers every task that matters here — open project or closed, no need to
 // separately fetch full multi-year history for open projects. From that pool,
 // exclude tasks on internal projects (e.g. Ballantine) and legacy-import tasks.
+// Each month's entry also tracks which distinct JOBS (projects) contributed:
+// "new" jobs (their very first-ever task was created this month) vs "change"
+// jobs (the job already existed before this month, this is more work added
+// to it). Origin dates are computed from ALL tasks ever, unfiltered, so a
+// legacy-imported or since-closed job isn't mistaken for brand-new.
 async function computeBookingsByMonth(){
-  const [internalProjIds, yearTasks] = await Promise.all([
+  const [internalProjIds, yearTasks, allProjectTasks] = await Promise.all([
     fetchAll('projects', 'id', q => q.eq('is_internal', true)).then(rows => new Set(rows.map(r => r.id))),
     fetchAll('tasks', 'fixed_price,created_at,cancelled_date,status,project_id,is_legacy_import',
-      q => q.or(`created_at.gte.${yearStart},cancelled_date.gte.${yearStart}`))
+      q => q.or(`created_at.gte.${yearStart},cancelled_date.gte.${yearStart}`)),
+    fetchAll('tasks', 'project_id,created_at')
   ]);
+
+  const originByProject = {};
+  allProjectTasks.forEach(t => {
+    if (!t.project_id || !t.created_at) return;
+    if (!originByProject[t.project_id] || t.created_at < originByProject[t.project_id]) {
+      originByProject[t.project_id] = t.created_at;
+    }
+  });
 
   const filtered = yearTasks.filter(t => !t.is_legacy_import && !internalProjIds.has(t.project_id));
 
   const byMonth = {};
   const yearPrefix = yearStart.slice(0,7);
+  const get = k => byMonth[k] || (byMonth[k] = { amount: 0, newJobs: new Set(), changeJobs: new Set() });
+
   filtered.forEach(t => {
     if (t.status !== 'cancelled') {
       const k = (t.created_at||'').slice(0,7);
-      if (k >= yearPrefix) byMonth[k] = (byMonth[k]||0) + (parseFloat(t.fixed_price)||0);
+      if (k >= yearPrefix) {
+        const entry = get(k);
+        entry.amount += (parseFloat(t.fixed_price)||0);
+        if (t.project_id) {
+          const originMonth = (originByProject[t.project_id]||'').slice(0,7);
+          if (originMonth === k) entry.newJobs.add(t.project_id);
+          else entry.changeJobs.add(t.project_id);
+        }
+      }
     }
     const ck = (t.cancelled_date||'').slice(0,7);
-    if (ck && ck >= yearPrefix) byMonth[ck] = (byMonth[ck]||0) - (parseFloat(t.fixed_price)||0);
+    if (ck && ck >= yearPrefix) {
+      get(ck).amount -= (parseFloat(t.fixed_price)||0);
+    }
   });
 
   return byMonth;
 }
 
-// ---- SALES: billed revenue by billed_date month ----
+// ---- SALES: billed revenue by billed_date month, plus distinct jobs billed ----
 async function computeSalesByMonth(){
-  const rows = await fetchAll('tasks', 'fixed_price,billed_date', q => q.eq('status','billed').gte('billed_date', yearStart));
+  const rows = await fetchAll('tasks', 'fixed_price,billed_date,project_id', q => q.eq('status','billed').gte('billed_date', yearStart));
   const byMonth = {};
   rows.forEach(r => {
     const k = (r.billed_date||'').slice(0,7);
     if (!k) return;
-    byMonth[k] = (byMonth[k]||0) + (parseFloat(r.fixed_price)||0);
+    const entry = byMonth[k] || (byMonth[k] = { amount: 0, jobs: new Set() });
+    entry.amount += (parseFloat(r.fixed_price)||0);
+    if (r.project_id) entry.jobs.add(r.project_id);
   });
   return byMonth;
 }
@@ -225,19 +254,49 @@ function last12Keys(){
   return keys;
 }
 
+function amt(entry){ return typeof entry === 'number' ? entry : (entry ? entry.amount : 0); }
+
 function ytdSum(byMonth){
   let sum = 0;
   for (let m = 0; m <= curMonthIdx; m++) {
     const k = monthKey(new Date(curYear, m, 1));
-    sum += byMonth[k] || 0;
+    sum += amt(byMonth[k]);
   }
   return sum;
 }
 
+function pluralJobs(n){ return n + (n === 1 ? ' job' : ' jobs'); }
+
+function salesQty(byMonth){
+  const monthEntry = byMonth[monthKey(now)];
+  const monthCount = monthEntry ? monthEntry.jobs.size : 0;
+  const ytdSet = new Set();
+  for (let m = 0; m <= curMonthIdx; m++) {
+    const e = byMonth[monthKey(new Date(curYear, m, 1))];
+    if (e) e.jobs.forEach(id => ytdSet.add(id));
+  }
+  return { month: pluralJobs(monthCount), ytd: pluralJobs(ytdSet.size) };
+}
+
+function bookingsQty(byMonth){
+  const monthEntry = byMonth[monthKey(now)];
+  const monthNew = monthEntry ? monthEntry.newJobs.size : 0;
+  const monthChange = monthEntry ? monthEntry.changeJobs.size : 0;
+  const ytdNewSet = new Set(), ytdChangeSet = new Set();
+  for (let m = 0; m <= curMonthIdx; m++) {
+    const e = byMonth[monthKey(new Date(curYear, m, 1))];
+    if (e) { e.newJobs.forEach(id => ytdNewSet.add(id)); e.changeJobs.forEach(id => ytdChangeSet.add(id)); }
+  }
+  return {
+    month: monthNew + ' new \u00b7 ' + monthChange + ' changed',
+    ytd: ytdNewSet.size + ' new \u00b7 ' + ytdChangeSet.size + ' changed'
+  };
+}
+
 const METRICS = [
-  { key:'quotes',   label:'Quotes',   icon:'&#128196;', fn: computeQuotesByMonth },
-  { key:'bookings', label:'Bookings', icon:'&#128188;', fn: computeBookingsByMonth },
-  { key:'sales',    label:'Sales',    icon:'&#128176;', fn: computeSalesByMonth },
+  { key:'quotes',   label:'Quotes',   icon:'&#128196;', fn: computeQuotesByMonth, qty: null },
+  { key:'bookings', label:'Bookings', icon:'&#128188;', fn: computeBookingsByMonth, qty: bookingsQty },
+  { key:'sales',    label:'Sales',    icon:'&#128176;', fn: computeSalesByMonth, qty: salesQty },
 ];
 
 async function loadAllMetrics(){
@@ -250,9 +309,10 @@ async function loadAllMetrics(){
     METRICS.forEach((m, i) => {
       const byMonth = results[i];
       const thisMonthKey = monthKey(now);
-      const thisMonth = byMonth[thisMonthKey] || 0;
+      const thisMonth = amt(byMonth[thisMonthKey]);
       const ytd = ytdSum(byMonth);
-      cardsEl.appendChild(buildCard(m, thisMonth, ytd, byMonth));
+      const qty = m.qty ? m.qty(byMonth) : null;
+      cardsEl.appendChild(buildCard(m, thisMonth, ytd, byMonth, qty));
     });
     document.getElementById('updatedAt').textContent = 'Updated ' + now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   } catch (e) {
@@ -261,14 +321,16 @@ async function loadAllMetrics(){
   }
 }
 
-function buildCard(metric, thisMonth, ytd, byMonth){
+function buildCard(metric, thisMonth, ytd, byMonth, qty){
   const card = document.createElement('div');
   card.className = 'card';
   card.innerHTML =
     '<div class="card-label">' + metric.icon + ' ' + metric.label + '</div>' +
     '<div class="card-row">' +
-      '<div class="card-col"><div class="k">This month</div><div class="v">' + fmt$(thisMonth) + '</div></div>' +
-      '<div class="card-col ytd"><div class="k">Year to date</div><div class="v">' + fmt$(ytd) + '</div></div>' +
+      '<div class="card-col"><div class="k">This month</div><div class="v">' + fmt$(thisMonth) + '</div>' +
+        (qty ? '<div class="q">' + qty.month + '</div>' : '') + '</div>' +
+      '<div class="card-col ytd"><div class="k">Year to date</div><div class="v">' + fmt$(ytd) + '</div>' +
+        (qty ? '<div class="q">' + qty.ytd + '</div>' : '') + '</div>' +
     '</div>' +
     '<div class="chart-box" id="chart-' + metric.key + '"><canvas id="canvas-' + metric.key + '"></canvas></div>';
   card.addEventListener('click', () => toggleChart(metric.key, byMonth));
@@ -284,14 +346,31 @@ function toggleChart(key, byMonth){
   if (charts[key]) { charts[key].destroy(); }
   const keys = last12Keys();
   const labels = keys.map(k => MONTH_NAMES[parseInt(k.slice(5,7),10)-1]);
-  const data = keys.map(k => Math.round(byMonth[k] || 0));
+  const data = keys.map(k => Math.round(amt(byMonth[k])));
 
+  // 3-month trailing moving average. First two points have no prior data
+  // within this 12-month window, so they're left as gaps rather than a
+  // misleadingly short average.
+  const movingAvg = data.map((_, i) => i < 2 ? null : Math.round((data[i] + data[i-1] + data[i-2]) / 3));
+
+  // Chart.js draws datasets lowest-order-first (i.e. lowest order ends up at
+  // the back), so lines need a HIGHER order than the bars to render on top.
   const datasets = [{
     label: 'Actual',
     data,
     backgroundColor: '#c07a1a',
     borderRadius: 3,
-    order: 2
+    order: 1
+  }, {
+    type: 'line',
+    label: '3-mo avg',
+    data: movingAvg,
+    borderColor: '#3b6fa0',
+    borderWidth: 2,
+    pointRadius: 0,
+    fill: false,
+    spanGaps: false,
+    order: 3
   }];
 
   const TARGET = 165000;
@@ -305,7 +384,7 @@ function toggleChart(key, byMonth){
       borderDash: [6,4],
       pointRadius: 0,
       fill: false,
-      order: 1
+      order: 2
     });
   }
 
