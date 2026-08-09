@@ -1526,6 +1526,13 @@
           <input class="sched-f-input" id="schedEndTime" type="time" />
         </div>
       </div>
+      <div id="schedEmpTimeQuickFill" style="display:none;margin-top:-6px;margin-bottom:10px;">
+        <div class="sched-dur-chips">
+          <div class="sched-dur-chip" onclick="schedFillAmPm('am')">AM (8:00–12:00)</div>
+          <div class="sched-dur-chip" onclick="schedFillAmPm('pm')">PM (12:00–5:00)</div>
+          <div class="sched-dur-chip" onclick="schedFillAmPm('clear')">Full day</div>
+        </div>
+      </div>
       <div id="schedDurationPreview" style="font-size:12px;color:var(--muted);font-family:'JetBrains Mono',monospace;min-height:18px;"></div>
       <div class="sched-flag-section">
         <div class="sched-field-label" style="margin-bottom:6px">Color Status</div>

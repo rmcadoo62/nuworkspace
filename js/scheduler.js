@@ -2394,15 +2394,28 @@ window.schedBlockTypeChanged = function() {
     hide(document.getElementById('schedProjPreview'));
     show(document.getElementById('schedEmpSection'));
     show(document.getElementById('schedEmpTypeField'));
+    show(document.getElementById('schedEmpTimeQuickFill'));
     if (flagSection) hide(flagSection);
   } else {
     show(document.getElementById('schedRoomSection'));
     show(document.getElementById('schedProjWrap'));
     hide(document.getElementById('schedEmpSection'));
     hide(document.getElementById('schedEmpTypeField'));
+    hide(document.getElementById('schedEmpTimeQuickFill'));
     if (flagSection) show(flagSection);
     // taskSection and projPreview shown only when a project is selected
   }
+};
+
+// Quick-fill Start/End Time for the common employee partial-day cases.
+// 'am' = 8:00–12:00, 'pm' = 12:00–17:00, 'clear' = full day (no times).
+window.schedFillAmPm = function(period) {
+  const startEl = document.getElementById('schedStartTime');
+  const endEl   = document.getElementById('schedEndTime');
+  if (!startEl || !endEl) return;
+  if (period === 'am')      { startEl.value = '08:00'; endEl.value = '12:00'; }
+  else if (period === 'pm') { startEl.value = '12:00'; endEl.value = '17:00'; }
+  else                       { startEl.value = '';      endEl.value = '';      }
 };
 
 window.schedEmpPickerChanged = function() {

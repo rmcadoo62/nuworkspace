@@ -786,7 +786,7 @@ async function getWhosOut() {
   if (!sb) return [];
   try {
     const { data } = await sb.from('schedule_blocks')
-      .select('emp_id, emp_event_type, start_date, end_date')
+      .select('emp_id, emp_event_type, start_date, end_date, start_time, end_time')
       .not('emp_id', 'is', null)
       .in('emp_event_type', ['vacation', 'sick', 'ooo', 'work'])
       .lte('start_date', today)
@@ -796,8 +796,31 @@ async function getWhosOut() {
       empEventType: r.emp_event_type,
       start:        r.start_date,
       end:          r.end_date,
+      startTime:    r.start_time,
+      endTime:      r.end_time,
     }));
   } catch(e) { console.error('getWhosOut:', e); return []; }
+}
+
+// Format "HH:MM" (24h) → "H:MM AM/PM". Returns '' for falsy input.
+function formatHomeOutTime(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const h12 = ((h + 11) % 12) + 1;
+  return `${h12}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+// Build a "— from X" / "— until X" / "— X–Y" suffix from partial-day times.
+// Treats 08:00/17:00 (standard workday bounds) as "not partial" so a block
+// with no meaningful time restriction still reads as a plain all-day label.
+function homeOutTimeSuffix(startTime, endTime) {
+  const hasStart = !!startTime && startTime !== '08:00';
+  const hasEnd   = !!endTime   && endTime   !== '17:00';
+  if (!hasStart && !hasEnd) return '';
+  if (hasStart && hasEnd)   return ` — ${formatHomeOutTime(startTime)}–${formatHomeOutTime(endTime)}`;
+  if (hasStart)             return ` — from ${formatHomeOutTime(startTime)}`;
+  return ` — until ${formatHomeOutTime(endTime)}`;
 }
 
 function renderWhosOutCard(blocks) {
@@ -812,10 +835,11 @@ function renderWhosOutCard(blocks) {
                 : b.empEventType === 'ooo'      ? '🚪 Out of Office'
                 : b.empEventType === 'work'     ? '💻 Working - off site'
                 : '';
+    const suffix = homeOutTimeSuffix(b.startTime, b.endTime);
     return `<div class="home-out-row">
       <div class="home-out-av" style="background:${color}">${initials}</div>
       <div class="home-out-name">${name}</div>
-      <div class="home-out-type">${label}</div>
+      <div class="home-out-type">${label}${suffix}</div>
     </div>`;
   }).join('');
 
