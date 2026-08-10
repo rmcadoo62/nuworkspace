@@ -312,6 +312,7 @@ async function loadAllData() {
       empType: r.employment_type||'fulltime',
       sickBank: parseFloat(r.sick_bank)||0,
       vacBank: parseFloat(r.vac_bank)||0,
+      lastAccrualDate: r.last_accrual_date||null,
       isOwner: !!r.is_owner,
       isActive: r.is_active !== false,
       terminationDate: r.termination_date||'',

@@ -625,15 +625,25 @@ function showEmpProfile(empId, annivOffset) {
     const annivEnd = new Date(annivStart); annivEnd.setFullYear(annivStart.getFullYear() + 1);
     return { start: annivStart, end: annivEnd };
   })();
+  // ---- Pre-settled window handling ----
+  // If last_accrual_date is set in the future, an admin or the accrual-rollover
+  // automation has already manually closed out this employee's current window
+  // -- vacBank/sickBank already reflect everything through that date. Re-walking
+  // historical drops/usage between the true anniversary start and today would
+  // double-count them. This only affects the math below; the true _annivRange
+  // is kept as-is for header labels and the historical drill-down lists further
+  // down. Once last_accrual_date passes, this stops applying automatically.
+  const _preSettled = !!(emp.lastAccrualDate && new Date(emp.lastAccrualDate + 'T00:00:00') > new Date());
+  const _effectiveAnnivRange = (_preSettled && _annivRange) ? { start: new Date(), end: _annivRange.end } : _annivRange;
   // Part-time: sick tracking uses calendar year; full-time uses anniversary year
   const isPartTime = emp.empType === 'parttime';
-  const usedStart = isPartTime ? new Date(year, 0, 1) : _annivRange?.start;
-  const usedEnd   = isPartTime ? new Date(year + 1, 0, 1) : _annivRange?.end;
+  const usedStart = isPartTime ? new Date(year, 0, 1) : _effectiveAnnivRange?.start;
+  const usedEnd   = isPartTime ? new Date(year + 1, 0, 1) : _effectiveAnnivRange?.end;
   const used = getTimeOffUsed(empId, year, usedStart, usedEnd);
   // For holiday display, always use calendar year so Jan holidays aren't missed for mid-year hire dates
   const usedHolidays = getTimeOffUsed(empId, year, null, null);
   const vacAllotment = getVacationAllotment(emp.hireDate);
-  const vacAccrued = getQuarterlyAccrual(emp.hireDate, _annivRange?.start, emp);
+  const vacAccrued = _preSettled ? 0 : getQuarterlyAccrual(emp.hireDate, _annivRange?.start, emp);
   const vacOpeningBalance = emp.vacBank || 0;
   const today = new Date();
 
@@ -648,8 +658,8 @@ function showEmpProfile(empId, annivOffset) {
   if (isPartTime) {
     const ptAccrued = getPartTimeSickAccrued(empId, new Date().getFullYear());
     sickAllotment = sickOpeningBalance + ptAccrued;
-  } else if (emp.hireDate && _annivRange) {
-    sickAllotment = _sickAllotmentAsOf(today, sickOpeningBalance, _annivRange, emp);
+  } else if (emp.hireDate && _effectiveAnnivRange) {
+    sickAllotment = _sickAllotmentAsOf(today, sickOpeningBalance, _effectiveAnnivRange, emp);
   } else {
     if (today >= new Date(year, 0, 1)) sickAllotment += 24;
     if (today >= new Date(year, 4, 1)) sickAllotment += 24;
@@ -671,12 +681,12 @@ function showEmpProfile(empId, annivOffset) {
   let _rawSickOverage;
   let _bankUsedTotal;
   let _chronoTaggedEntries = null;
-  if (!isPartTime && emp.hireDate && _annivRange && !_isFirstYearFT) {
-    const _sickEntries = _collectSickEntriesInRange(empId, _annivRange);
+  if (!isPartTime && emp.hireDate && _effectiveAnnivRange && !_isFirstYearFT) {
+    const _sickEntries = _collectSickEntriesInRange(empId, _effectiveAnnivRange);
     let _bankUsedRunning = 0;
     _chronoTaggedEntries = _sickEntries.map(e => {
       const entryDate = new Date(e.date + 'T00:00:00');
-      const allotAsOf = _sickAllotmentAsOf(entryDate, sickOpeningBalance, _annivRange, emp);
+      const allotAsOf = _sickAllotmentAsOf(entryDate, sickOpeningBalance, _effectiveAnnivRange, emp);
       const cap = Math.max(0, allotAsOf - _bankUsedRunning);
       const bankHrs = Math.min(e.hrs, cap);
       const overageHrs = e.hrs - bankHrs;
@@ -695,10 +705,10 @@ function showEmpProfile(empId, annivOffset) {
   // to vacation never touched the sick bank and must not be deducted from it.
   const sickBankBalance = (() => {
     if (isPartTime) return Math.max(0, sickAllotment - _bankUsedTotal);
-    if (!emp.hireDate || !_annivRange) return sickOpeningBalance - _bankUsedTotal;
+    if (!emp.hireDate || !_effectiveAnnivRange) return sickOpeningBalance - _bankUsedTotal;
     let running = sickOpeningBalance;
-    const annivStart = _annivRange.start;
-    const annivEnd   = _annivRange.end;
+    const annivStart = _effectiveAnnivRange.start;
+    const annivEnd   = _effectiveAnnivRange.end;
     for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
       for (const mo of [0, 4]) {
         const drop = new Date(y, mo, 1);
@@ -5112,19 +5122,23 @@ function _computeTimeOffSummary(emp, annivOffset) {
     const annivEnd = new Date(annivStart); annivEnd.setFullYear(annivStart.getFullYear() + 1);
     return { start: annivStart, end: annivEnd };
   })();
+  // Pre-settled window handling -- see matching comment in the employee-card
+  // renderer above. Mirrors that logic so My Team shows the same numbers.
+  const _preSettled = !!(emp.lastAccrualDate && new Date(emp.lastAccrualDate + 'T00:00:00') > new Date());
+  const _effectiveAnnivRange = (_preSettled && _annivRange) ? { start: new Date(), end: _annivRange.end } : _annivRange;
   const isPartTime = emp.empType === 'parttime';
-  const usedStart = isPartTime ? new Date(year, 0, 1) : _annivRange?.start;
-  const usedEnd   = isPartTime ? new Date(year + 1, 0, 1) : _annivRange?.end;
+  const usedStart = isPartTime ? new Date(year, 0, 1) : _effectiveAnnivRange?.start;
+  const usedEnd   = isPartTime ? new Date(year + 1, 0, 1) : _effectiveAnnivRange?.end;
   const used = getTimeOffUsed(emp.id, year, usedStart, usedEnd);
-  const vacAccrued = getQuarterlyAccrual(emp.hireDate, _annivRange?.start, emp);
+  const vacAccrued = _preSettled ? 0 : getQuarterlyAccrual(emp.hireDate, _annivRange?.start, emp);
   const vacOpeningBalance = emp.vacBank || 0;
 
   let sickAllotment = 0;
   const sickOpeningBalance = emp.sickBank || 0;
   if (isPartTime) {
     sickAllotment = sickOpeningBalance + getPartTimeSickAccrued(emp.id, new Date().getFullYear());
-  } else if (emp.hireDate && _annivRange) {
-    sickAllotment = _sickAllotmentAsOf(today, sickOpeningBalance, _annivRange, emp);
+  } else if (emp.hireDate && _effectiveAnnivRange) {
+    sickAllotment = _sickAllotmentAsOf(today, sickOpeningBalance, _effectiveAnnivRange, emp);
   } else {
     if (today >= new Date(year, 0, 1)) sickAllotment += 24;
     if (today >= new Date(year, 4, 1)) sickAllotment += 24;
@@ -5132,12 +5146,12 @@ function _computeTimeOffSummary(emp, annivOffset) {
 
   const _isFirstYearFT = isInFirstYear(emp.hireDate) && !isPartTime;
   let _rawSickOverage, _bankUsedTotal;
-  if (!isPartTime && emp.hireDate && _annivRange && !_isFirstYearFT) {
-    const _sickEntries = _collectSickEntriesInRange(emp.id, _annivRange);
+  if (!isPartTime && emp.hireDate && _effectiveAnnivRange && !_isFirstYearFT) {
+    const _sickEntries = _collectSickEntriesInRange(emp.id, _effectiveAnnivRange);
     let _bankUsedRunning = 0, _overageRunning = 0;
     _sickEntries.forEach(e => {
       const entryDate = new Date(e.date + 'T00:00:00');
-      const allotAsOf = _sickAllotmentAsOf(entryDate, sickOpeningBalance, _annivRange, emp);
+      const allotAsOf = _sickAllotmentAsOf(entryDate, sickOpeningBalance, _effectiveAnnivRange, emp);
       const cap = Math.max(0, allotAsOf - _bankUsedRunning);
       const bankHrs = Math.min(e.hrs, cap);
       _bankUsedRunning += bankHrs;
@@ -5152,9 +5166,9 @@ function _computeTimeOffSummary(emp, annivOffset) {
 
   const sickBankBalance = (() => {
     if (isPartTime) return Math.max(0, sickAllotment - _bankUsedTotal);
-    if (!emp.hireDate || !_annivRange) return sickOpeningBalance - _bankUsedTotal;
+    if (!emp.hireDate || !_effectiveAnnivRange) return sickOpeningBalance - _bankUsedTotal;
     let running = sickOpeningBalance;
-    const annivStart = _annivRange.start, annivEnd = _annivRange.end;
+    const annivStart = _effectiveAnnivRange.start, annivEnd = _effectiveAnnivRange.end;
     for (let y = annivStart.getFullYear(); y <= annivEnd.getFullYear(); y++) {
       for (const mo of [0, 4]) {
         const drop = new Date(y, mo, 1);
