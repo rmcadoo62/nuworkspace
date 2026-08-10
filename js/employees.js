@@ -32,7 +32,13 @@ function _sickAllotmentAsOf(asOfDate, opening, annivRange, emp) {
       const drop = new Date(y, mo, 1);
       if (drop > annivRange.start && drop <= annivRange.end &&
           drop <= asOfDate && _dropIsCreditable(emp, drop)) {
-        running = Math.min(48, running + 24);
+        // Only cap NEW growth from this drop -- never reduce a balance already
+        // above 48h. (Math.min(48, running+24) used to do exactly that: any
+        // running value over 48 got forced back down to 48 the instant a new
+        // drop landed, silently erasing legitimately banked hours for anyone
+        // long-tenured. This is mathematically identical to the old formula
+        // for running <= 48, and only changes behavior above that line.)
+        running += Math.max(0, Math.min(24, 48 - running));
       }
     }
   }
@@ -1336,7 +1342,8 @@ function showEmpProfile(empId, annivOffset) {
                 const next = futureDrops[0];
                 // Projected bank after drop = current bank + drop amount (capped at 48 by policy,
                 // but actual cap logic runs in getTimeOffUsed so keep this display simple).
-                const projectedBank = Math.min(48, Math.max(0, sickBankBalance) + next.amt);
+                const _curBank = Math.max(0, sickBankBalance);
+                const projectedBank = _curBank + Math.max(0, Math.min(next.amt, 48 - _curBank));
                 return '<div style="margin-top:2px;font-size:10px;color:var(--muted);font-style:italic">Next drop ' + next.label + ' (+' + next.amt + 'h) → sick bank will be ' + projectedBank.toFixed(1) + 'h</div>';
               })()}`;
           })()}
