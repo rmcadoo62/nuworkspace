@@ -1630,6 +1630,7 @@ function attachBarDrag(bar, block, rows, range, dayW, rowTops, rowHeights) {
       if (drag) {
         if (drag.hasMoved) {
           schedSaveBlock(block).then(() => renderSched());
+          if (block.projId && typeof refreshScheduleStatus === 'function') refreshScheduleStatus(block.projId);
         } else {
           if (!schedReadOnly) openSchedModal(block.id);
         }
@@ -2183,6 +2184,7 @@ function _doSaveSchedBlock() {
   if (!s || !e || e < s) { alert('Please set valid start and end dates.'); return; }
   const lbl = (document.getElementById('schedLabel').value || '').trim();
   const editId = document.getElementById('schedEditId').value;
+  const _prevProjId = editId ? ((schedBlocks.find(b => b.id === editId) || {}).projId || null) : null;
   if (editId) {
     const idx = schedBlocks.findIndex(b => b.id === editId);
     if (idx >= 0) {
@@ -2223,6 +2225,15 @@ function _doSaveSchedBlock() {
     ? schedBlocks.find(b => b.id === editId)
     : schedBlocks[schedBlocks.length - 1];
   if (_savedBlock) schedSaveBlock(_savedBlock);
+  // The project header's "Scheduled/Not Scheduled" pill caches its status
+  // per project (project-detail.js). Invalidate it here for both the
+  // block's project and, if it changed, its previous project — otherwise
+  // an already-loaded project page keeps showing the stale pill.
+  if (typeof refreshScheduleStatus === 'function') {
+    const _newProjId = _savedBlock ? (_savedBlock.projId || null) : null;
+    if (_newProjId) refreshScheduleStatus(_newProjId);
+    if (_prevProjId && _prevProjId !== _newProjId) refreshScheduleStatus(_prevProjId);
+  }
   closeSchedModal();
   if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
 }
@@ -2231,8 +2242,11 @@ window.saveSchedBlock   = _doSaveSchedBlock;
 
 window.deleteSchedBlock = function() {
   const editId = document.getElementById('schedEditId').value;
+  const _delBlock = schedBlocks.find(b => b.id === editId);
+  const _delProjId = _delBlock ? (_delBlock.projId || null) : null;
   schedBlocks = schedBlocks.filter(b => b.id !== editId);
   schedDeleteFromDB(editId);
+  if (_delProjId && typeof refreshScheduleStatus === 'function') refreshScheduleStatus(_delProjId);
   closeSchedModal();
   if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
 };
