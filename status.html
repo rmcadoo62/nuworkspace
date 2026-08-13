@@ -18,6 +18,7 @@
   --border:#dcdce0;--text:#1a1a2e;--muted:#6b6b78;
   --amber:#c07a1a;--amber-dim:#9a6214;--amber-glow:rgba(192,122,26,0.10);
   --green:#2e9e62;--green-glow:rgba(46,158,98,0.10);
+  --purple:#c084fc;
   --red:#d04040;--radius:10px;
 }
 *{box-sizing:border-box;}
@@ -46,6 +47,7 @@ body{
 .card-col .k{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px;}
 .card-col .v{font-family:'JetBrains Mono',monospace;font-weight:500;font-size:24px;color:var(--text);}
 .card-col .q{font-size:11px;color:var(--muted);margin-top:2px;}
+.card-col .ready{font-size:11px;color:var(--purple);font-weight:600;margin-top:3px;}
 .card-col.ytd .v{font-size:15px;color:var(--muted);}
 .card-col.ytd{text-align:right;}
 .chart-box{height:160px;margin-top:14px;display:none;}
@@ -293,8 +295,21 @@ function bookingsQty(byMonth){
   };
 }
 
+// ---- READY TO BILL: complete work not yet invoiced, matches Workspace's dashboard exactly ----
+async function computeReadyToBill(){
+  const [internalProjIds, openProjectIds, tasks] = await Promise.all([
+    fetchAll('projects', 'id', q => q.eq('is_internal', true)).then(rows => new Set(rows.map(r => r.id))),
+    fetchAll('project_info', 'project_id,status').then(rows =>
+      new Set(rows.filter(r => (r.status||'active') !== 'closed').map(r => r.project_id))
+    ),
+    fetchAll('tasks', 'fixed_price,project_id,status', q => q.eq('status','complete'))
+  ]);
+  return tasks
+    .filter(t => openProjectIds.has(t.project_id) && !internalProjIds.has(t.project_id))
+    .reduce((sum,t) => sum + (parseFloat(t.fixed_price)||0), 0);
+}
+
 const METRICS = [
-  { key:'quotes',   label:'Quotes',   icon:'&#128196;', fn: computeQuotesByMonth, qty: null },
   { key:'bookings', label:'Bookings', icon:'&#128188;', fn: computeBookingsByMonth, qty: bookingsQty },
   { key:'sales',    label:'Sales',    icon:'&#128176;', fn: computeSalesByMonth, qty: salesQty },
 ];
@@ -304,7 +319,10 @@ async function loadAllMetrics(){
   const cardsEl = document.getElementById('cards');
   cardsEl.innerHTML = '<div class="loading">Loading…</div>';
   try {
-    const results = await Promise.all(METRICS.map(m => m.fn()));
+    const [results, readyToBill] = await Promise.all([
+      Promise.all(METRICS.map(m => m.fn())),
+      computeReadyToBill()
+    ]);
     cardsEl.innerHTML = '';
     METRICS.forEach((m, i) => {
       const byMonth = results[i];
@@ -312,7 +330,7 @@ async function loadAllMetrics(){
       const thisMonth = amt(byMonth[thisMonthKey]);
       const ytd = ytdSum(byMonth);
       const qty = m.qty ? m.qty(byMonth) : null;
-      cardsEl.appendChild(buildCard(m, thisMonth, ytd, byMonth, qty));
+      cardsEl.appendChild(buildCard(m, thisMonth, ytd, byMonth, qty, m.key === 'sales' ? readyToBill : null));
     });
     document.getElementById('updatedAt').textContent = 'Updated ' + now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   } catch (e) {
@@ -321,14 +339,15 @@ async function loadAllMetrics(){
   }
 }
 
-function buildCard(metric, thisMonth, ytd, byMonth, qty){
+function buildCard(metric, thisMonth, ytd, byMonth, qty, readyToBill){
   const card = document.createElement('div');
   card.className = 'card';
   card.innerHTML =
     '<div class="card-label">' + metric.icon + ' ' + metric.label + '</div>' +
     '<div class="card-row">' +
       '<div class="card-col"><div class="k">This month</div><div class="v">' + fmt$(thisMonth) + '</div>' +
-        (qty ? '<div class="q">' + qty.month + '</div>' : '') + '</div>' +
+        (qty ? '<div class="q">' + qty.month + '</div>' : '') +
+        (readyToBill != null ? '<div class="ready">' + fmt$(readyToBill) + ' ready to bill</div>' : '') + '</div>' +
       '<div class="card-col ytd"><div class="k">Year to date</div><div class="v">' + fmt$(ytd) + '</div>' +
         (qty ? '<div class="q">' + qty.ytd + '</div>' : '') + '</div>' +
     '</div>' +
