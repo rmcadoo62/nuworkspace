@@ -1224,6 +1224,28 @@ function renderSchedStats() {
     return 'var(--muted)';
   }
 
+  const fmt$ = n => '$' + Math.round(n||0).toLocaleString('en-US');
+
+  // "Not yet scheduled" $ — open, non-report-cat (41-44) tasks in new/inprogress
+  // status that have no linked schedule_blocks row at all. This deliberately
+  // stays OUTSIDE the week/month bubbles above: those are capacity-window
+  // figures, this is a standing total, and some real work (e.g. teardown/ship,
+  // cat 96) never gets an equipment block in the first place — without this
+  // line that value would just be invisible everywhere in the scheduler.
+  const REPORT_CATS_UTIL = new Set(['41','42','43','44']);
+  const openProjIdsUtil = new Set(
+    (typeof projects !== 'undefined' ? projects : [])
+      .filter(p => ((typeof projectInfo !== 'undefined' ? projectInfo[p.id] : null) || {}).status !== 'closed')
+      .map(p => p.id)
+  );
+  const scheduledTaskIds = new Set(schedBlocks.filter(b => b.taskId).map(b => b.taskId));
+  const unscheduledValue = (typeof taskStore !== 'undefined' ? taskStore : [])
+    .filter(t => (t.status === 'new' || t.status === 'inprogress'))
+    .filter(t => openProjIdsUtil.has(t.proj))
+    .filter(t => !REPORT_CATS_UTIL.has((t.salesCat || '').toString().trim()))
+    .filter(t => !scheduledTaskIds.has(t._id))
+    .reduce((s, t) => s + (t.fixedPrice || 0), 0);
+
   function bubble(label, booked, avail, pct) {
     const clr  = pctColor(pct);
     const fill = Math.min(pct, 100);
@@ -1243,7 +1265,11 @@ function renderSchedStats() {
   el.innerHTML =
     bubble('This Week',  weekBooked,      weekAvail,      weekPct) +
     bubble(monthName,    monthBooked,     monthAvail,     monthPct) +
-    bubble(nextMonthName, nextMonthBooked, nextMonthAvail, nextMonthPct);
+    bubble(nextMonthName, nextMonthBooked, nextMonthAvail, nextMonthPct) +
+    `<div style="flex:1 0 100%;display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin-top:4px;border-top:1px solid var(--border);font-size:12.5px;color:var(--muted)">
+      <span>Not yet scheduled (in-progress &amp; new tasks, no lab block)</span>
+      <span style="font-weight:600;color:var(--text)">${fmt$(unscheduledValue)}</span>
+    </div>`;
 }
 
 // ---- Helper: resolve a canvas Y coordinate to a row index, honoring variable row heights ----

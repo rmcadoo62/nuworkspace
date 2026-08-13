@@ -292,6 +292,7 @@ function switchReportsTab(el) {
   if (el.dataset.tab === 'tab-employees') renderReportsEmployees();
   if (el.dataset.tab === 'tab-stale') renderStaleProjects();
   if (el.dataset.tab === 'tab-closedjobs') renderClosedJobsReport();
+  if (el.dataset.tab === 'tab-revenue') renderRevenueProjectionReport();
 }
 
 async function renderTimesheetsReport(filterDept, filterStatus) {
@@ -1066,6 +1067,174 @@ function renderInProgressReport() {
           ${renderGroupedTable(_procRows, rpFilter === 'active' ? 'No active procedures — some may be on hold (switch Show to All).' : 'No procedures owed or in progress.', { showStatus: true, sortByAge: rpSort === 'age' })}
         </div>
       </div>
+    </div>
+  `;
+}
+
+// ---- Revenue Projection (Scheduled by month + Not Yet Scheduled) ----
+// Uses the task-level schedule (schedule_blocks.task_id) to answer "when
+// does this task's revenue land." A task's projected month = the earliest
+// schedule_blocks.start_date linked to it. Tasks with no linked block at
+// all (e.g. cat 96 teardown/ship, which structurally never gets a lab-room
+// or equipment block) fall into "Not Yet Scheduled" rather than being
+// silently dropped.
+async function renderRevenueProjectionReport() {
+  const el = document.getElementById('tab-revenue');
+  if (!el) return;
+  el.innerHTML = `<div style="padding:40px;text-align:center;color:var(--muted)">Loading…</div>`;
+
+  const fmt$ = n => '$' + Math.round(n||0).toLocaleString('en-US');
+  const REPORT_CATS = new Set(['41','42','43','44']);
+
+  const openProjIds = new Set(
+    projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed').map(p => p.id)
+  );
+
+  const openTasks = taskStore.filter(t =>
+    (t.status === 'new' || t.status === 'inprogress') &&
+    openProjIds.has(t.proj) &&
+    !REPORT_CATS.has((t.salesCat||'').toString().trim())
+  );
+
+  // Pull every schedule block linked to a task (task_id not null). Grabbing
+  // all of them (rather than an IN() on task ids) avoids a huge query string
+  // and this table isn't large enough for it to matter.
+  let blockRows = [];
+  if (sb) {
+    const { data, error } = await sb.from('schedule_blocks')
+      .select('task_id, start_date')
+      .not('task_id', 'is', null);
+    if (error) console.error('renderRevenueProjectionReport:', error);
+    blockRows = data || [];
+  }
+
+  // Earliest start_date per task_id
+  const earliestByTask = {};
+  blockRows.forEach(r => {
+    if (!r.task_id || !r.start_date) return;
+    if (!earliestByTask[r.task_id] || r.start_date < earliestByTask[r.task_id]) {
+      earliestByTask[r.task_id] = r.start_date;
+    }
+  });
+
+  const decorated = openTasks.map(t => {
+    const proj = projects.find(p => p.id === t.proj) || {};
+    const info = projectInfo[t.proj] || {};
+    const sched = earliestByTask[t._id] || null;
+    return {
+      ...t,
+      projName: proj.name || '—',
+      pm: info.pm || '',
+      scheduledDate: sched,
+      scheduledMonth: sched ? sched.slice(0,7) : null, // YYYY-MM
+    };
+  });
+
+  const scheduled   = decorated.filter(t => t.scheduledMonth);
+  const unscheduled = decorated.filter(t => !t.scheduledMonth);
+
+  const scheduledValue   = scheduled.reduce((s,t) => s + (t.fixedPrice||0), 0);
+  const unscheduledValue = unscheduled.reduce((s,t) => s + (t.fixedPrice||0), 0);
+  const totalValue       = scheduledValue + unscheduledValue;
+
+  // Group scheduled tasks by month, chronological
+  const byMonth = {};
+  scheduled.forEach(t => {
+    if (!byMonth[t.scheduledMonth]) byMonth[t.scheduledMonth] = [];
+    byMonth[t.scheduledMonth].push(t);
+  });
+  const months = Object.keys(byMonth).sort();
+
+  const monthLabel = ym => {
+    const [y,m] = ym.split('-').map(Number);
+    return new Date(y, m-1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+  };
+
+  const taskRow = t => `
+    <tr>
+      <td style="padding:8px 14px;font-size:12.5px;color:var(--text)">
+        <span style="color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px">${t.projName}</span>
+        ${t.pm ? `<span style="color:var(--muted);font-size:11px"> · ${t.pm}</span>` : ''}
+        <div>${t.name||''}</div>
+      </td>
+      <td style="padding:8px 14px;font-size:12px;color:var(--muted);text-align:right">${t.salesCat||'—'}</td>
+      <td style="padding:8px 14px;font-size:12px;color:var(--muted);text-align:right">${t.scheduledDate||'—'}</td>
+      <td style="text-align:right;padding:8px 14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);font-weight:600">${fmt$(t.fixedPrice)}</td>
+    </tr>`;
+
+  const tableHead = `
+    <thead>
+      <tr>
+        <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Task / Project</th>
+        <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>
+        <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Scheduled</th>
+        <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>
+      </tr>
+    </thead>`;
+
+  const monthSections = months.map(ym => {
+    const list = byMonth[ym];
+    const val = list.reduce((s,t) => s + (t.fixedPrice||0), 0);
+    return `
+      <div style="margin-bottom:24px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+          <div style="font-family:'DM Serif Display',serif;font-size:15px;color:var(--text)">${monthLabel(ym)}</div>
+          <div style="font-size:12.5px;color:var(--muted)">${list.length} task${list.length!==1?'s':''} · <span style="color:var(--green);font-weight:600">${fmt$(val)}</span></div>
+        </div>
+        <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse">
+            ${tableHead}
+            <tbody>${list.map(taskRow).join('')}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }).join('') || `<div style="padding:24px;text-align:center;color:var(--muted);font-size:13px">No scheduled tasks with projected revenue.</div>`;
+
+  const unscheduledSection = `
+    <div style="margin-top:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <div style="font-family:'DM Serif Display',serif;font-size:15px;color:var(--text)">Not Yet Scheduled</div>
+        <div style="font-size:12.5px;color:var(--muted)">${unscheduled.length} task${unscheduled.length!==1?'s':''} · <span style="color:var(--amber);font-weight:600">${fmt$(unscheduledValue)}</span></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--muted);margin-bottom:10px;font-style:italic">In-progress or new tasks with no linked schedule block yet — includes work that never gets a lab/room block (e.g. teardown &amp; ship), so this total won't reach zero even when scheduling is fully caught up.</div>
+      <div style="background:var(--surface2);border:1px solid var(--border);border-radius:10px;overflow:hidden">
+        <table style="width:100%;border-collapse:collapse">
+          ${tableHead}
+          <tbody>${unscheduled.length ? unscheduled.map(taskRow).join('') : `<tr><td colspan="4" style="padding:20px;text-align:center;color:var(--muted);font-size:12.5px">Everything's scheduled.</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+
+  el.innerHTML = `
+    <div style="max-width:1180px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">
+        <div>
+          <div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--text)">📈 Revenue Projection</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Open-project task value, grouped by scheduled month</div>
+        </div>
+        <button class="btn btn-ghost" style="font-size:12px" onclick="renderRevenueProjectionReport()">↻ Refresh</button>
+      </div>
+
+      <div class="report-stat-grid">
+        <div class="report-stat">
+          <div class="report-stat-label">Scheduled</div>
+          <div class="report-stat-val" style="color:var(--green);font-size:18px">${fmt$(scheduledValue)}</div>
+        </div>
+        <div class="report-stat">
+          <div class="report-stat-label">Not Yet Scheduled</div>
+          <div class="report-stat-val" style="color:var(--amber);font-size:18px">${fmt$(unscheduledValue)}</div>
+        </div>
+        <div class="report-stat">
+          <div class="report-stat-label">Total Open Value</div>
+          <div class="report-stat-val" style="color:var(--blue);font-size:18px">${fmt$(totalValue)}</div>
+        </div>
+      </div>
+
+      <div style="margin-top:8px">
+        ${monthSections}
+      </div>
+
+      ${unscheduledSection}
     </div>
   `;
 }
