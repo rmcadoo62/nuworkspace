@@ -310,6 +310,7 @@ async function computeReadyToBill(){
 }
 
 const METRICS = [
+  { key:'quotes',   label:'Quotes',   icon:'&#128196;', fn: computeQuotesByMonth, qty: null },
   { key:'bookings', label:'Bookings', icon:'&#128188;', fn: computeBookingsByMonth, qty: bookingsQty },
   { key:'sales',    label:'Sales',    icon:'&#128176;', fn: computeSalesByMonth, qty: salesQty },
 ];
