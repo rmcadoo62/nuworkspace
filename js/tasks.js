@@ -174,6 +174,7 @@ function openTaskModal(){
   document.getElementById('taskDesc').value='';
   document.getElementById('taskStatus').value='new';
   document.getElementById('taskDue').value='';
+  document.getElementById('taskDue').max = new Date().toISOString().slice(0,10);
   document.getElementById('taskSalesCat').value='';
   document.getElementById('taskFixedPrice').value='';
   if (document.getElementById('taskRevenueType')) { document.getElementById('taskRevenueType').value='fixed'; toggleTaskFixedPriceField('fixed'); }
@@ -187,6 +188,28 @@ function openTaskModal(){
 }
 
 function closeTaskModal(){document.getElementById('taskModal').classList.remove('open');}
+
+// ── Completion Date → Status (New Task modal) ─────────────────────────────
+// Mirrors the inline-table rule (see inlineSave): entering a current/past
+// date while New/In Progress auto-completes the task; clearing it reverts to
+// New (no Start Date field exists in this modal). Every other status is
+// untouched — per Scott, those must be changed via the Status dropdown.
+function handleTaskDueChange() {
+  const dueFld = document.getElementById('taskDue');
+  const statusFld = document.getElementById('taskStatus');
+  if (!dueFld || !statusFld) return;
+  const todayStr = new Date().toISOString().slice(0,10);
+  if (dueFld.value && dueFld.value > todayStr) {
+    if (typeof toast === 'function') toast('⚠ Completion date cannot be in the future.', 'error');
+    dueFld.value = '';
+    return;
+  }
+  if (dueFld.value && (statusFld.value === 'new' || statusFld.value === 'inprogress')) {
+    statusFld.value = 'complete';
+  } else if (!dueFld.value && statusFld.value === 'complete') {
+    statusFld.value = 'new';
+  }
+}
 
 function buildTaskChips(){
   const grid = document.getElementById('taskChipGrid');
@@ -552,8 +575,9 @@ function renderTasksPanel(projId) {
         const labels = {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed'};
         return `<option value="${s}" ${t.status===s?'selected':''}>${labels[s]}</option>`;
       }).join('');
-    // Billed tasks freeze status, price, and billed date. Only unlock_billed
-    // may edit them; every other field stays gated on edit_tasks as before.
+    // Billed tasks freeze status, price, billed date, AND completed date.
+    // Only unlock_billed may edit them; every other field stays gated on
+    // edit_tasks as before.
     const billedLock = (t.status === 'billed') && !((typeof can === 'function') && can('unlock_billed'));
     const canEditBilled = canEditTask && !billedLock;
     const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
@@ -602,7 +626,7 @@ function renderTasksPanel(projId) {
           </select>
         </div>
         <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','taskStartDate');event.stopPropagation()"`:''}  style="font-size:12px;color:var(--muted);font-weight:700;${canEditTask?'cursor:text':''}">${fmtShortDate(t.taskStartDate)}</div>
-        <div class="${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditTaskDate('${t._id}','${projId}','completedDate');event.stopPropagation()"`:''}  style="font-size:12px;color:${t.completedDate?'var(--green)':'var(--muted)'};font-weight:700;${canEditTask?'cursor:text':''}">${fmtShortDate(t.completedDate)}</div>
+        <div class="${canEditBilled?'itt-cell-edit':''}" ${canEditBilled?`onclick="inlineEditTaskDate('${t._id}','${projId}','completedDate');event.stopPropagation()"`:''}  style="font-size:12px;color:${t.completedDate?'var(--green)':'var(--muted)'};font-weight:700;${canEditBilled?'cursor:text':''}"${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${fmtShortDate(t.completedDate)}</div>
         <div class="${canEditBilled?'itt-cell-edit':''}" ${canEditBilled?`onclick="inlineEditTaskDate('${t._id}','${projId}','billedDate');event.stopPropagation()"`:''}  style="font-size:12px;color:${t.billedDate?'var(--green)':'var(--muted)'};font-weight:700;${canEditBilled?'cursor:text':''}"${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${fmtShortDate(t.billedDate)}</div>
         <div class="itt-row-actions">
           ${can('edit_tasks') ? '<button class="itt-row-action-btn" onclick="openEditTaskModal(\''+t._id+'\');event.stopPropagation()">&#x270E;</button>' : ''}
@@ -832,6 +856,7 @@ function inlineEditTaskDate(taskId, projId, field) {
   const inp = document.createElement('input');
   inp.type = 'date';
   inp.value = orig;
+  if (field === 'completedDate') inp.max = new Date().toISOString().slice(0,10);
   inp.style.cssText = 'color-scheme:dark;font-family:"DM Sans",sans-serif;font-size:13px;border:none;background:transparent;color:var(--text);outline:none;width:140px;';
   wrap.appendChild(inp);
   document.body.appendChild(wrap);
@@ -915,9 +940,9 @@ async function inlineSave(taskId, projId, field, value) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
 
-  // Billed tasks freeze price and billed date too (status is handled by
-  // guardStatusChange below). Only unlock_billed may edit them.
-  if (t.status === 'billed' && (field === 'fixedPrice' || field === 'billedDate')) {
+  // Billed tasks freeze price, billed date, and completed date too (status
+  // is handled by guardStatusChange below). Only unlock_billed may edit them.
+  if (t.status === 'billed' && (field === 'fixedPrice' || field === 'billedDate' || field === 'completedDate')) {
     const privileged = (typeof can === 'function') && can('unlock_billed');
     if (!privileged) {
       if (typeof toast === 'function') toast('🔒 Billed task is locked. Ask Linda to unlock.', 'error');
@@ -1013,7 +1038,45 @@ async function inlineSave(taskId, projId, field, value) {
   }
   else if (field === 'budgetHours')   { t.budgetHours = parseFloat(value)||0; }
   else if (field === 'taskStartDate') { t.taskStartDate = value; }
-  else if (field === 'completedDate') { t.completedDate = value; }
+  else if (field === 'completedDate') {
+    // ── Completion-date-driven status (per Scott, mirrors Workfront) ──────
+    // Only the New/In-Progress <-> Complete transition is automated. Every
+    // other status (Production Hold, Accounting Hold, Cancelled, Billed) is
+    // untouched by date edits — those require changing the status dropdown
+    // itself first, which carries its own access requirements.
+    const todayStr = new Date().toISOString().slice(0,10);
+
+    // Reject future dates outright — completion can't be scheduled ahead.
+    if (value && value > todayStr) {
+      if (typeof toast === 'function') toast('⚠ Completion date cannot be in the future.', 'error');
+      renderInfoTasks(projId, currentTaskFilter);
+      renderTasksPanel(projId);
+      return;
+    }
+
+    // Clearing the date on a Complete task reverts status. Hand off to the
+    // status branch above so it goes through guardStatusChange — same
+    // billed-lock and "are you sure" confirm a manual status change gets —
+    // which also clears completed_date itself as part of that transition.
+    if (!value && t.status === 'complete') {
+      const targetStatus = t.taskStartDate ? 'inprogress' : 'new';
+      return inlineSave(taskId, projId, 'status', targetStatus);
+    }
+
+    t.completedDate = value;
+
+    // Entering a date while New/In Progress auto-completes the task.
+    if (value && (t.status === 'new' || t.status === 'inprogress')) {
+      // Persist the exact chosen date first — the recursive status call only
+      // fills completed_date with "today" when it's empty, and would
+      // otherwise clobber a user-chosen past date with today's date.
+      if (sb) {
+        const { error } = await sb.from('tasks').update({ completed_date: value }).eq('id', taskId);
+        if (error) console.error('inline save completedDate', error);
+      }
+      return inlineSave(taskId, projId, 'status', 'complete');
+    }
+  }
   else if (field === 'billedDate')    { t.billedDate = value; }
   else if (field === 'quoteNum')      { t.quoteNum = value; }
   else if (field === 'poNumber')      { t.poNumber = value; }
@@ -1239,6 +1302,7 @@ async function openEditTaskModal(taskId) {
   document.getElementById('etDesc').value = t.desc || '';
   document.getElementById('etStatus').value = t.status || 'inprogress';
   document.getElementById('etDue').value = t.completedDate || t.due_raw || '';
+  document.getElementById('etDue').max = new Date().toISOString().slice(0,10);
   document.getElementById('etSalesCat').value = t.salesCat || '';
   document.getElementById('etFixedPrice').value = t.fixedPrice || '';
   if (document.getElementById('etRevenueType')) {
@@ -1332,6 +1396,30 @@ async function updateCompletedDateFromStatus() {
   const dueFld = document.getElementById('etDue');
   if ((status === 'complete' || status === 'billed') && !dueFld.value) {
     dueFld.value = new Date().toISOString().slice(0,10);
+  }
+}
+
+// ── Completion Date → Status (Edit Task modal) ────────────────────────────
+// Reverse direction of updateCompletedDateFromStatus above. Same rule as the
+// inline table: entering a date while New/In Progress auto-completes;
+// clearing it while Complete reverts — to In Progress if the task already
+// has a Start Date on record, else New. (This modal has no Start Date field
+// of its own, so the check reads the stored task record.)
+function handleEtDueChange() {
+  const dueFld = document.getElementById('etDue');
+  const statusFld = document.getElementById('etStatus');
+  if (!dueFld || !statusFld) return;
+  const todayStr = new Date().toISOString().slice(0,10);
+  if (dueFld.value && dueFld.value > todayStr) {
+    if (typeof toast === 'function') toast('⚠ Completion date cannot be in the future.', 'error');
+    dueFld.value = '';
+    return;
+  }
+  if (dueFld.value && (statusFld.value === 'new' || statusFld.value === 'inprogress')) {
+    statusFld.value = 'complete';
+  } else if (!dueFld.value && statusFld.value === 'complete') {
+    const t = taskStore.find(x => x._id === editingTaskId);
+    statusFld.value = (t && t.taskStartDate) ? 'inprogress' : 'new';
   }
 }
 
