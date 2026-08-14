@@ -14,7 +14,7 @@
 const CASH_FLOW_TABLE = 'cash_flow_entries';
 const CASH_FLOW_CAP   = 'view_cash_flow';
 
-let cashFlowEntries      = []; // [{id, entryDate, bankBalance, deposits, billPayments, arOutstanding, salesInvoiced, notes, createdBy}]
+let cashFlowEntries      = []; // [{id, entryDate, bankBalance, schwabBalance, deposits, billPayments, arOutstanding, salesInvoiced, notes, createdBy}]
 let cashFlowLoaded       = false;
 let cashFlowLoading      = false;
 let _cfEditingEntryId    = null; // id of entry currently open in the modal, or null for "new"
@@ -43,6 +43,7 @@ async function loadCashFlowEntries(force) {
       id:            r.id,
       entryDate:     r.entry_date,
       bankBalance:   r.bank_balance   != null ? parseFloat(r.bank_balance)   : null,
+      schwabBalance: r.schwab_balance != null ? parseFloat(r.schwab_balance) : null,
       deposits:      r.deposits       != null ? parseFloat(r.deposits)      : 0,
       billPayments:  r.bill_payments  != null ? parseFloat(r.bill_payments) : 0,
       arOutstanding: r.ar_outstanding != null ? parseFloat(r.ar_outstanding): null,
@@ -62,6 +63,7 @@ async function upsertCashFlowEntry(entry) {
   const row = {
     entry_date:      entry.entryDate,
     bank_balance:    entry.bankBalance,
+    schwab_balance:  entry.schwabBalance,
     deposits:        entry.deposits || 0,
     bill_payments:   entry.billPayments || 0,
     ar_outstanding:  entry.arOutstanding,
@@ -92,6 +94,45 @@ function _cfSorted() {
 function cfLatestEntry() {
   const sorted = _cfSorted();
   return sorted.length ? sorted[sorted.length - 1] : null;
+}
+
+// ── Charles Schwab carry-forward ──────────────────────────────────────────
+// The Schwab money market account is separate from the NUI Cash TD Bank
+// checking account and doesn't get a fresh reading every day — Russ pulls
+// it "when he gets the number," sometimes weeks apart. So schwabBalance is
+// null on most days, meaning "no new reading," not "$0." This carries the
+// most recently known value forward so the combined total below doesn't
+// wrongly drop every time a day passes without a fresh Schwab number.
+// Returns a same-length array aligned to sortedEntries.
+function _cfCarriedSchwab(sortedEntries) {
+  let lastKnown = null;
+  return sortedEntries.map(e => {
+    if (e.schwabBalance != null) lastKnown = e.schwabBalance;
+    return lastKnown;
+  });
+}
+
+// "Bank Balance" everywhere in the UI means the combined NULabs total — TD
+// Bank + Schwab (carried forward) — since that's the number Russ actually
+// tracks day to day. Before any Schwab reading has ever been entered, the
+// carried value is null and this just falls back to TD alone.
+function _cfTotalBalance(entry, carriedSchwab) {
+  if (entry.bankBalance == null && carriedSchwab == null) return null;
+  return (entry.bankBalance || 0) + (carriedSchwab || 0);
+}
+
+// Sorted entries with Schwab carried forward and the combined total attached
+// (as `carriedSchwab` / `totalBalance`), computed once over the FULL history
+// so a chart zoomed to "1M" still carries forward a Schwab reading from
+// outside that window instead of wrongly showing it as missing. Use this
+// (not _cfSorted()) anywhere the UI needs the combined balance.
+function _cfSortedWithTotal() {
+  const sorted = _cfSorted();
+  const carried = _cfCarriedSchwab(sorted);
+  return sorted.map((e, i) => Object.assign({}, e, {
+    carriedSchwab: carried[i],
+    totalBalance: _cfTotalBalance(e, carried[i]),
+  }));
 }
 
 function cfNetFlow(entry) {
@@ -220,11 +261,12 @@ function renderCashFlowPanel() {
   const wrap = document.getElementById('cashFlowWrap');
   if (!wrap) return;
 
-  const latest   = cfLatestEntry();
+  const sorted = _cfSortedWithTotal();
+  const latest = sorted.length ? sorted[sorted.length - 1] : null;
   const fmt$     = n => n == null ? '—' : '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   const fmtDays  = n => n == null ? '—' : n.toFixed(1) + ' days';
 
-  const bankBalance   = latest ? latest.bankBalance : null;
+  const bankBalance   = latest ? latest.totalBalance : null;
   const netToday       = latest ? cfNetFlow(latest) : null;
   const netTrailing7   = cashFlowEntries.length ? cfTrailing7NetFlow() : null;
   const arOutstanding  = latest ? latest.arOutstanding : null;
@@ -233,7 +275,6 @@ function renderCashFlowPanel() {
   const netTodayColor  = netToday   == null ? 'var(--muted)' : netToday   >= 0 ? 'var(--green)' : 'var(--red)';
   const net7Color      = netTrailing7 == null ? 'var(--muted)' : netTrailing7 >= 0 ? 'var(--green)' : 'var(--red)';
 
-  const sorted = _cfSorted();
   const recent = sorted.slice(-30).reverse(); // most recent first
 
   wrap.innerHTML = `
@@ -248,6 +289,7 @@ function renderCashFlowPanel() {
         <div class="cf-kpi-label">Bank Balance</div>
         <div class="cf-kpi-value">${fmt$(bankBalance)}</div>
         <div class="cf-kpi-sub">${latest ? 'as of ' + _cfFmtDate(latest.entryDate) : 'No entries yet'}</div>
+        <div class="cf-kpi-sub">TD ${fmt$(latest ? latest.bankBalance : null)} + Schwab ${fmt$(latest ? latest.carriedSchwab : null)}</div>
       </div>
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">Net Cash Flow — Today</div>
@@ -304,7 +346,7 @@ function renderCashFlowPanel() {
         <table class="cf-table">
           <thead>
             <tr>
-              <th>Date</th><th>Bank Balance</th><th>Deposits</th><th>Bill Payments</th>
+              <th>Date</th><th>TD Bank</th><th>Schwab</th><th>Total Bank Balance</th><th>Deposits</th><th>Bill Payments</th>
               <th>Net</th><th>AR Outstanding</th><th></th>
             </tr>
           </thead>
@@ -314,6 +356,8 @@ function renderCashFlowPanel() {
               return `<tr>
                 <td>${_cfFmtDate(e.entryDate)}</td>
                 <td>${fmt$(e.bankBalance)}</td>
+                <td title="${e.schwabBalance != null ? 'Entered this day' : 'Carried forward — no new reading this day'}">${e.schwabBalance != null ? fmt$(e.schwabBalance) : (e.carriedSchwab != null ? fmt$(e.carriedSchwab) + ' *' : '—')}</td>
+                <td>${fmt$(e.totalBalance)}</td>
                 <td>${fmt$(e.deposits)}</td>
                 <td>${fmt$(e.billPayments)}</td>
                 <td style="color:${net >= 0 ? 'var(--green)' : 'var(--red)'}">${(net >= 0 ? '+' : '') + fmt$(net)}</td>
@@ -323,7 +367,8 @@ function renderCashFlowPanel() {
             }).join('')}
           </tbody>
         </table>
-      </div>`}
+      </div>
+      <div class="cf-modal-note" style="margin-top:10px">* Schwab reading carried forward from the last day it was entered — Russ only updates it when he pulls a new balance, not daily.</div>`}
     </div>
   `;
 
@@ -354,7 +399,7 @@ function setCfChartRange(range) {
   document.querySelectorAll('.cf-range-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.range === range);
   });
-  _cfDrawCharts(_cfFilterByRange(_cfSorted(), range));
+  _cfDrawCharts(_cfFilterByRange(_cfSortedWithTotal(), range));
 }
 
 function _cfFmtDate(iso) {
@@ -371,7 +416,8 @@ function _cfDrawCharts(sorted) {
   if (bankCanv) {
     const existing = Chart.getChart(bankCanv);
     if (existing) existing.destroy();
-    const bankData = sorted.map(e => e.bankBalance);
+    // Combined TD Bank + Schwab (carried forward) — see _cfSortedWithTotal().
+    const bankData = sorted.map(e => e.totalBalance);
     // Trailing 7-entry moving average — same "last 7 entries" convention as
     // the Net Cash Flow — Trailing 7 KPI card, so it reads consistently
     // whether entries are the old weekly backfill or daily going forward.
@@ -514,12 +560,12 @@ function _cfEnsureModal() {
           </div>
           <div class="field-row" style="display:flex;gap:12px;margin-bottom:14px">
             <div class="field" style="flex:1">
-              <label class="field-label">Bank Balance</label>
+              <label class="field-label">TD Bank Balance</label>
               <input class="f-input" id="cfEntryBankBalance" type="number" step="0.01" placeholder="0.00" />
             </div>
             <div class="field" style="flex:1">
-              <label class="field-label">AR Outstanding</label>
-              <input class="f-input" id="cfEntryAr" type="number" step="0.01" placeholder="0.00" />
+              <label class="field-label">Charles Schwab Balance</label>
+              <input class="f-input" id="cfEntrySchwab" type="number" step="0.01" placeholder="Leave blank if unchanged" />
             </div>
           </div>
           <div class="field-row" style="display:flex;gap:12px;margin-bottom:14px">
@@ -532,11 +578,15 @@ function _cfEnsureModal() {
               <input class="f-input" id="cfEntryBillPayments" type="number" step="0.01" placeholder="0.00" />
             </div>
           </div>
+          <div class="field" style="margin-bottom:14px">
+            <label class="field-label">AR Outstanding</label>
+            <input class="f-input" id="cfEntryAr" type="number" step="0.01" placeholder="0.00" />
+          </div>
           <div class="field">
             <label class="field-label">Notes</label>
             <input class="f-input" id="cfEntryNotes" type="text" placeholder="Optional notes…" autocomplete="off" />
           </div>
-          <div class="cf-modal-note">DSO is calculated automatically from Workspace's billed revenue — no need to enter sales here.</div>
+          <div class="cf-modal-note">DSO is calculated automatically from Workspace's billed revenue — no need to enter sales here. Schwab only needs a new number on the days it actually changes — leave it blank and the last known balance carries forward automatically.</div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" id="cfEntryDeleteBtn" onclick="deleteCashFlowEntryFromModal()" style="margin-right:auto;display:none;color:var(--red)">&#x1F5D1; Delete</button>
@@ -560,6 +610,7 @@ function openCashFlowEntryModal(entryId) {
   document.getElementById('cfEntryModalTitle').textContent = entry ? 'Edit Cash Flow Entry' : 'New Cash Flow Entry';
   dateInput.value = entry ? entry.entryDate : new Date().toISOString().slice(0, 10);
   document.getElementById('cfEntryBankBalance').value   = entry && entry.bankBalance   != null ? entry.bankBalance   : '';
+  document.getElementById('cfEntrySchwab').value          = entry && entry.schwabBalance != null ? entry.schwabBalance : '';
   document.getElementById('cfEntryAr').value             = entry && entry.arOutstanding != null ? entry.arOutstanding : '';
   document.getElementById('cfEntryDeposits').value       = entry ? entry.deposits      : '';
   document.getElementById('cfEntryBillPayments').value   = entry ? entry.billPayments  : '';
@@ -597,9 +648,21 @@ async function saveCashFlowEntryFromModal() {
     return v === '' ? null : parseFloat(v);
   };
 
+  // Schwab: blank means "no new reading" for a brand-new day (carried
+  // forward at display time). But if we're editing a day that already had a
+  // Schwab reading saved and the field is cleared, that's ambiguous — most
+  // likely the user just didn't touch it (the placeholder says "leave blank
+  // if unchanged"), so preserve the existing value rather than silently
+  // deleting a real reading. To actually blank out a previously-entered
+  // Schwab reading, delete the whole entry and re-add it.
+  const existingEntry = _cfEditingEntryId ? cashFlowEntries.find(e => e.id === _cfEditingEntryId) : null;
+  const schwabInput = num('cfEntrySchwab');
+  const schwabBalance = schwabInput != null ? schwabInput : (existingEntry ? existingEntry.schwabBalance : null);
+
   const entry = {
     entryDate,
     bankBalance:   num('cfEntryBankBalance'),
+    schwabBalance, // null = "no new reading" — carried forward, not treated as $0
     deposits:      num('cfEntryDeposits') || 0,
     billPayments:  num('cfEntryBillPayments') || 0,
     arOutstanding: num('cfEntryAr'),
