@@ -335,21 +335,46 @@ function _cfDrawCharts(sorted) {
   if (bankCanv) {
     const existing = Chart.getChart(bankCanv);
     if (existing) existing.destroy();
+    const bankData = sorted.map(e => e.bankBalance);
+    // Trailing 7-entry moving average — same "last 7 entries" convention as
+    // the Net Cash Flow — Trailing 7 KPI card, so it reads consistently
+    // whether entries are the old weekly backfill or daily going forward.
+    // Skips null balances rather than treating them as $0.
+    const bankMovingAvg = bankData.map((_, i) => {
+      const start = Math.max(0, i - 6);
+      const slice = bankData.slice(start, i + 1).filter(v => v != null);
+      if (!slice.length) return null;
+      return slice.reduce((s, v) => s + v, 0) / slice.length;
+    });
     new Chart(bankCanv, {
       type: 'line',
       data: {
         labels,
-        datasets: [{
-          label: 'Bank Balance',
-          data: sorted.map(e => e.bankBalance),
-          borderColor: '#5b9cf6',
-          backgroundColor: 'rgba(91,156,246,0.15)',
-          borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25,
-        }],
+        datasets: [
+          {
+            label: 'Bank Balance',
+            data: bankData,
+            borderColor: '#5b9cf6',
+            backgroundColor: 'rgba(91,156,246,0.15)',
+            borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, order: 1,
+          },
+          {
+            label: 'Trailing 7-Entry Avg',
+            data: bankMovingAvg,
+            borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)',
+            borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4,
+            fill: false, tension: 0.3, spanGaps: true, order: 0,
+          },
+        ],
       },
       options: {
         responsive: true,
-        plugins: { legend: { display: false } },
+        plugins: {
+          legend: {
+            display: true, position: 'top', align: 'end',
+            labels: { color: '#9a9aaa', font: { size: 10 }, boxWidth: 12, boxHeight: 8, padding: 8 },
+          },
+        },
         scales: {
           x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { display: false } },
           y: { ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$' + (v / 1000).toFixed(0) + 'k' : '$' + v }, grid: { color: 'rgba(255,255,255,0.05)' } },
