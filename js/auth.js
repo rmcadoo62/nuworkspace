@@ -44,6 +44,7 @@ function can(capability) {
     view_proj_shipping: true, view_clients: mgr, view_quotes: mgr,
     view_surveys: mgr, view_closing_report: mgr,
     supervise_team: false,
+    view_cash_flow: false,
   };
   return !!(fallbacks[capability]);
 }

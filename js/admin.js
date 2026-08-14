@@ -2589,6 +2589,7 @@ const CAPABILITY_DEFS = [
   { key: 'access_crr',         label: 'EMI Quote WU',          group: 'Apps' },
   { key: 'nuforce_approve_quotes', label: 'Approve Quotes (NUForce)', group: 'Apps' },
   { key: 'nuforce_send_quotes',    label: 'Send Approved Quotes (NUForce)', group: 'Apps' },
+  { key: 'view_cash_flow',     label: 'View Cash Flow Tracker', group: 'Financials' },
 ];
 
 function openPermissionsPanel() {
