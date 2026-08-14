@@ -257,7 +257,7 @@ function renderCashFlowPanel() {
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">Net Cash Flow — Trailing 7</div>
         <div class="cf-kpi-value" style="color:${net7Color}">${netTrailing7 == null ? '—' : (netTrailing7 >= 0 ? '+' : '') + fmt$(netTrailing7)}</div>
-        <div class="cf-kpi-sub">Last ${Math.min(sorted.length, 7)} entries</div>
+        <div class="cf-kpi-sub">Last ${Math.min(sorted.length, 7)} ${Math.min(sorted.length, 7) === 1 ? 'entry' : 'entries'}</div>
       </div>
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">AR Outstanding</div>
