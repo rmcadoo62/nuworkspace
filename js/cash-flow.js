@@ -376,7 +376,7 @@ function _cfDrawCharts(sorted) {
           },
         },
         scales: {
-          x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { display: false } },
+          x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
           y: { ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$' + (v / 1000).toFixed(0) + 'k' : '$' + v }, grid: { color: 'rgba(255,255,255,0.05)' } },
         },
       },
@@ -410,7 +410,7 @@ function _cfDrawCharts(sorted) {
         responsive: true,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + (ctx.parsed.y >= 0 ? '+' : '') + '$' + ctx.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 0 }) } } },
         scales: {
-          x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { display: false } },
+          x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(255,255,255,0.05)' } },
           y: {
             beginAtZero: true, suggestedMin: -maxAbsNet, suggestedMax: maxAbsNet,
             ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => (v < 0 ? '(' : '') + '$' + Math.abs(v >= 1000 || v <= -1000 ? v / 1000 : v).toFixed(0) + (Math.abs(v) >= 1000 ? 'k' : '') + (v < 0 ? ')' : '') },
@@ -451,7 +451,7 @@ function _cfDrawCharts(sorted) {
         responsive: true,
         plugins: { legend: { display: true, position: 'top', align: 'end', labels: { color: '#9a9aaa', font: { size: 10 }, boxWidth: 10 } } },
         scales: {
-          x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 10 }, grid: { display: false } },
+          x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 10 }, grid: { color: 'rgba(255,255,255,0.05)' } },
           y:  { position: 'left',  ticks: { color: '#e8a234', font: { size: 10 }, callback: v => v >= 1000 ? '$' + (v / 1000).toFixed(0) + 'k' : '$' + v }, grid: { color: 'rgba(255,255,255,0.05)' } },
           y1: { position: 'right', ticks: { color: '#c084fc', font: { size: 10 }, callback: v => v + 'd' }, grid: { display: false } },
         },
