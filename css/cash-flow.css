@@ -126,6 +126,39 @@
   margin-top: 4px;
 }
 
+/* Chart time-range selector */
+.cf-range-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.cf-range-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.cf-range-btn {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.cf-range-btn:hover { color: var(--text); border-color: var(--muted); }
+.cf-range-btn.active {
+  border-color: var(--amber-dim, #c07a1a);
+  background: var(--amber-glow, rgba(232,162,52,0.12));
+  color: var(--amber, #e8a234);
+}
+
 /* Charts */
 .cf-charts-row {
   display: flex;

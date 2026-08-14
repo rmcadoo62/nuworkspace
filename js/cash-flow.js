@@ -271,6 +271,15 @@ function renderCashFlowPanel() {
       </div>
     </div>
 
+    <div class="cf-range-row">
+      <span class="cf-range-label">Chart range:</span>
+      ${['1m','3m','6m','1y','all'].map(r => {
+        const labels = {'1m':'1M','3m':'3M','6m':'6M','1y':'1Y','all':'All'};
+        const active = (window._cfChartRange || 'all') === r;
+        return `<button class="cf-range-btn${active ? ' active' : ''}" data-range="${r}" onclick="setCfChartRange('${r}')">${labels[r]}</button>`;
+      }).join('')}
+    </div>
+
     <div class="cf-charts-row">
       <div class="cf-chart-card">
         <div class="cf-chart-title">📈 Bank Balance</div>
@@ -318,7 +327,34 @@ function renderCashFlowPanel() {
     </div>
   `;
 
-  setTimeout(() => _cfDrawCharts(sorted), 60);
+  setTimeout(() => _cfDrawCharts(_cfFilterByRange(sorted, window._cfChartRange || 'all')), 60);
+}
+
+// ── Chart time-range filter ───────────────────────────────────────────────
+// Charts plot every entry with no cap by default, which is fine at a few
+// dozen points but turns into an unreadable smear after a year of daily
+// entries. This trims to a trailing window (relative to the most recent
+// entry, not today, so it still works mid-backfill) without touching the
+// KPI cards or the Recent Entries table — those stay based on the full
+// dataset regardless of chart zoom.
+function _cfFilterByRange(sortedEntries, range) {
+  if (range === 'all' || !sortedEntries.length) return sortedEntries;
+  const days = { '1m': 30, '3m': 90, '6m': 182, '1y': 365 }[range];
+  if (!days) return sortedEntries;
+  const latest = new Date(sortedEntries[sortedEntries.length - 1].entryDate + 'T00:00:00');
+  const cutoff = new Date(latest); cutoff.setDate(cutoff.getDate() - days);
+  return sortedEntries.filter(e => new Date(e.entryDate + 'T00:00:00') >= cutoff);
+}
+
+// Swaps the active range and redraws just the three charts — cheap enough
+// to skip a full renderCashFlowPanel() re-render, so KPI cards and the
+// entries table don't flicker when someone's just zooming the charts.
+function setCfChartRange(range) {
+  window._cfChartRange = range;
+  document.querySelectorAll('.cf-range-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.range === range);
+  });
+  _cfDrawCharts(_cfFilterByRange(_cfSorted(), range));
 }
 
 function _cfFmtDate(iso) {
