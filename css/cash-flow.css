@@ -159,6 +159,15 @@
   color: var(--amber, #e8a234);
 }
 
+/* Per-chart series selector (e.g. Bank Balance: TD Bank / Schwab / Both) —
+   reuses .cf-range-btn styling, just laid out inside a chart card instead of
+   the page-level chart-range row. */
+.cf-series-row {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
 /* Charts */
 .cf-charts-row {
   display: flex;

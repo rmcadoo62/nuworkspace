@@ -325,6 +325,13 @@ function renderCashFlowPanel() {
     <div class="cf-charts-row">
       <div class="cf-chart-card">
         <div class="cf-chart-title">📈 Bank Balance</div>
+        <div class="cf-series-row">
+          ${['td','schwab','both'].map(s => {
+            const labels = {'td':'TD Bank','schwab':'Schwab','both':'Both'};
+            const active = (window._cfBankSeries || 'both') === s;
+            return `<button class="cf-range-btn${active ? ' active' : ''}" data-series="${s}" onclick="setCfBankSeries('${s}')">${labels[s]}</button>`;
+          }).join('')}
+        </div>
         <canvas id="cfBankBalanceChart" height="110"></canvas>
       </div>
       <div class="cf-chart-card">
@@ -402,6 +409,18 @@ function setCfChartRange(range) {
   _cfDrawCharts(_cfFilterByRange(_cfSortedWithTotal(), range));
 }
 
+// Swaps which line the Bank Balance chart plots — TD Bank alone, Schwab
+// alone (carried forward), or the combined total (default — same number
+// shown on the KPI card). Only touches that one chart; the range selector
+// and the other two charts are untouched.
+function setCfBankSeries(series) {
+  window._cfBankSeries = series;
+  document.querySelectorAll('[data-series]').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.series === series);
+  });
+  _cfDrawCharts(_cfFilterByRange(_cfSortedWithTotal(), window._cfChartRange || 'all'));
+}
+
 function _cfFmtDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso + 'T00:00:00');
@@ -416,38 +435,49 @@ function _cfDrawCharts(sorted) {
   if (bankCanv) {
     const existing = Chart.getChart(bankCanv);
     if (existing) existing.destroy();
-    // Combined TD Bank + Schwab (carried forward) — see _cfSortedWithTotal().
-    const bankData = sorted.map(e => e.totalBalance);
+    // Which line(s) to plot — TD Bank alone, Schwab alone (carried forward),
+    // or the combined total (default — same number as the KPI card and the
+    // old pre-Schwab chart, so "Both" reproduces exactly what this chart
+    // already showed).
+    const bankSeries = window._cfBankSeries || 'both';
+    const cfMovingAvg = data => data.map((_, i) => {
+      const start = Math.max(0, i - 6);
+      const slice = data.slice(start, i + 1).filter(v => v != null);
+      if (!slice.length) return null;
+      return slice.reduce((s, v) => s + v, 0) / slice.length;
+    });
     // Trailing 7-entry moving average — same "last 7 entries" convention as
     // the Net Cash Flow — Trailing 7 KPI card, so it reads consistently
     // whether entries are the old weekly backfill or daily going forward.
     // Skips null balances rather than treating them as $0.
-    const bankMovingAvg = bankData.map((_, i) => {
-      const start = Math.max(0, i - 6);
-      const slice = bankData.slice(start, i + 1).filter(v => v != null);
-      if (!slice.length) return null;
-      return slice.reduce((s, v) => s + v, 0) / slice.length;
-    });
+    const bankDatasets = [];
+    if (bankSeries === 'both') {
+      const bankData = sorted.map(e => e.totalBalance);
+      bankDatasets.push(
+        { label: 'Bank Balance', data: bankData, borderColor: '#5b9cf6', backgroundColor: 'rgba(91,156,246,0.15)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, order: 1 },
+        { label: 'Trailing 7-Entry Avg', data: cfMovingAvg(bankData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
+      );
+    } else if (bankSeries === 'td') {
+      const tdData = sorted.map(e => e.bankBalance);
+      bankDatasets.push(
+        { label: 'TD Bank', data: tdData, borderColor: '#5b9cf6', backgroundColor: 'rgba(91,156,246,0.15)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, order: 1 },
+        { label: 'Trailing 7-Entry Avg', data: cfMovingAvg(tdData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
+      );
+    } else if (bankSeries === 'schwab') {
+      // Carried-forward value, not the raw per-entry reading — see
+      // _cfCarriedSchwab() — so the line stays flat between actual readings
+      // instead of dropping to $0/null on days Russ didn't pull a number.
+      const schwabData = sorted.map(e => e.carriedSchwab);
+      bankDatasets.push(
+        { label: 'Schwab', data: schwabData, borderColor: '#2fae8f', backgroundColor: 'rgba(47,174,143,0.15)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, spanGaps: true, order: 1 },
+        { label: 'Trailing 7-Entry Avg', data: cfMovingAvg(schwabData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
+      );
+    }
     new Chart(bankCanv, {
       type: 'line',
       data: {
         labels,
-        datasets: [
-          {
-            label: 'Bank Balance',
-            data: bankData,
-            borderColor: '#5b9cf6',
-            backgroundColor: 'rgba(91,156,246,0.15)',
-            borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, order: 1,
-          },
-          {
-            label: 'Trailing 7-Entry Avg',
-            data: bankMovingAvg,
-            borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)',
-            borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4,
-            fill: false, tension: 0.3, spanGaps: true, order: 0,
-          },
-        ],
+        datasets: bankDatasets,
       },
       options: {
         responsive: true,
