@@ -363,6 +363,12 @@ function _cfDrawCharts(sorted) {
     const existing = Chart.getChart(netCanv);
     if (existing) existing.destroy();
     const netData = sorted.map(e => cfNetFlow(e));
+    // Floor the axis range at $100 so a stretch of all-$0 entries (e.g. the
+    // backfilled historical weeks, which have no deposit/payment detail)
+    // doesn't leave Chart.js to invent a sub-$1 auto-scaled range — that
+    // produced fractional ticks that rounded to confusing repeated "$1"
+    // labels. Real daily entries with actual movement make this a non-issue.
+    const maxAbsNet = Math.max(100, ...netData.map(v => Math.abs(v || 0)));
     new Chart(netCanv, {
       type: 'bar',
       data: {
@@ -380,7 +386,11 @@ function _cfDrawCharts(sorted) {
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + (ctx.parsed.y >= 0 ? '+' : '') + '$' + ctx.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 0 }) } } },
         scales: {
           x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { display: false } },
-          y: { ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => (v < 0 ? '(' : '') + '$' + Math.abs(v >= 1000 || v <= -1000 ? v / 1000 : v).toFixed(0) + (Math.abs(v) >= 1000 ? 'k' : '') + (v < 0 ? ')' : '') }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: {
+            beginAtZero: true, suggestedMin: -maxAbsNet, suggestedMax: maxAbsNet,
+            ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => (v < 0 ? '(' : '') + '$' + Math.abs(v >= 1000 || v <= -1000 ? v / 1000 : v).toFixed(0) + (Math.abs(v) >= 1000 ? 'k' : '') + (v < 0 ? ')' : '') },
+            grid: { color: 'rgba(255,255,255,0.05)' },
+          },
         },
       },
     });
