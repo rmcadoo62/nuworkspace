@@ -42,6 +42,12 @@ body{
   padding:16px 18px;margin-bottom:12px;cursor:pointer;transition:border-color .15s;
 }
 .card:active{border-color:var(--amber-dim);}
+.mini-row{display:flex;gap:10px;margin-bottom:12px;}
+.mini-card{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;cursor:pointer;transition:border-color .15s;min-width:0;}
+.mini-card:active{border-color:var(--amber-dim);}
+.mini-card .card-label{font-size:11px;margin-bottom:6px;}
+.mini-card .v{font-family:'JetBrains Mono',monospace;font-weight:500;font-size:19px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mini-card .asof{font-size:10px;color:var(--muted);margin-top:2px;}
 .card-label{font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px;margin-bottom:10px;}
 .card-row{display:flex;justify-content:space-between;align-items:flex-end;}
 .card-col .k{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:2px;}
@@ -309,6 +315,36 @@ async function computeReadyToBill(){
     .reduce((sum,t) => sum + (parseFloat(t.fixed_price)||0), 0);
 }
 
+// ---- CASH FLOW: TD Bank balance + AR outstanding, from cash_flow_entries ----
+// Entries come in roughly weekly, not daily, and either field can be blank on
+// a given entry (no fresh reading that day) — carried forward for charting,
+// but "as of" always reflects the true date of the most recent real reading.
+async function computeCashFlowSeries(){
+  const rows = await fetchAll('cash_flow_entries', 'entry_date,bank_balance,ar_outstanding',
+    q => q.order('entry_date', { ascending: true }));
+
+  let lastBank = null, lastAR = null;
+  const series = rows.map(r => {
+    if (r.bank_balance != null) lastBank = parseFloat(r.bank_balance);
+    if (r.ar_outstanding != null) lastAR = parseFloat(r.ar_outstanding);
+    return { date: r.entry_date, bank: lastBank, ar: lastAR };
+  });
+
+  const latestBankRow = [...rows].reverse().find(r => r.bank_balance != null);
+  const latestARRow = [...rows].reverse().find(r => r.ar_outstanding != null);
+
+  return {
+    series,
+    bank: latestBankRow ? { value: parseFloat(latestBankRow.bank_balance), asOf: latestBankRow.entry_date } : null,
+    ar: latestARRow ? { value: parseFloat(latestARRow.ar_outstanding), asOf: latestARRow.entry_date } : null
+  };
+}
+
+function fmtShortDate(dateStr){
+  const [y,m,d] = dateStr.split('-').map(Number);
+  return MONTH_NAMES[m-1] + ' ' + d + ', ' + y;
+}
+
 const METRICS = [
   { key:'quotes',   label:'Quotes',   icon:'&#128196;', fn: computeQuotesByMonth, qty: null },
   { key:'bookings', label:'Bookings', icon:'&#128188;', fn: computeBookingsByMonth, qty: bookingsQty },
@@ -320,9 +356,10 @@ async function loadAllMetrics(){
   const cardsEl = document.getElementById('cards');
   cardsEl.innerHTML = '<div class="loading">Loading…</div>';
   try {
-    const [results, readyToBill] = await Promise.all([
+    const [results, readyToBill, cashFlow] = await Promise.all([
       Promise.all(METRICS.map(m => m.fn())),
-      computeReadyToBill()
+      computeReadyToBill(),
+      computeCashFlowSeries()
     ]);
     cardsEl.innerHTML = '';
     METRICS.forEach((m, i) => {
@@ -332,12 +369,85 @@ async function loadAllMetrics(){
       const ytd = ytdSum(byMonth);
       const qty = m.qty ? m.qty(byMonth) : null;
       cardsEl.appendChild(buildCard(m, thisMonth, ytd, byMonth, qty, m.key === 'sales' ? readyToBill : null));
+      if (m.key === 'sales') cardsEl.appendChild(buildCashFlowRow(cashFlow));
     });
     document.getElementById('updatedAt').textContent = 'Updated ' + now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'});
   } catch (e) {
     console.error(e);
     cardsEl.innerHTML = '<div class="loading">Failed to load: ' + (e.message||'unknown error') + '</div>';
   }
+}
+
+function buildCashFlowRow(cashFlow){
+  const wrap = document.createElement('div');
+
+  const row = document.createElement('div');
+  row.className = 'mini-row';
+  row.innerHTML =
+    '<div class="mini-card" id="mini-bank">' +
+      '<div class="card-label">&#127974; Bank Balance</div>' +
+      '<div class="v">' + (cashFlow.bank ? fmt$(cashFlow.bank.value) : '\u2014') + '</div>' +
+      '<div class="asof">' + (cashFlow.bank ? 'as of ' + fmtShortDate(cashFlow.bank.asOf) : 'no data') + '</div>' +
+    '</div>' +
+    '<div class="mini-card" id="mini-ar">' +
+      '<div class="card-label">&#128203; AR Outstanding</div>' +
+      '<div class="v">' + (cashFlow.ar ? fmt$(cashFlow.ar.value) : '\u2014') + '</div>' +
+      '<div class="asof">' + (cashFlow.ar ? 'as of ' + fmtShortDate(cashFlow.ar.asOf) : 'no data') + '</div>' +
+    '</div>';
+  wrap.appendChild(row);
+
+  const chartBox = document.createElement('div');
+  chartBox.className = 'chart-box';
+  chartBox.id = 'chart-cashflow';
+  chartBox.innerHTML = '<canvas id="canvas-cashflow"></canvas>';
+  wrap.appendChild(chartBox);
+
+  row.querySelector('#mini-bank').addEventListener('click', () => toggleCashChart('bank', cashFlow.series, 'Bank Balance', '#c07a1a'));
+  row.querySelector('#mini-ar').addEventListener('click', () => toggleCashChart('ar', cashFlow.series, 'AR Outstanding', '#3b6fa0'));
+
+  return wrap;
+}
+
+let cashChartOpenKey = null;
+function toggleCashChart(key, series, label, color){
+  const box = document.getElementById('chart-cashflow');
+  document.querySelectorAll('.chart-box.open').forEach(b => { if (b !== box) b.classList.remove('open'); });
+  if (cashChartOpenKey === key) {
+    box.classList.remove('open');
+    cashChartOpenKey = null;
+    return;
+  }
+  cashChartOpenKey = key;
+  box.classList.add('open');
+  if (charts.cashflow) charts.cashflow.destroy();
+
+  const oneYearAgo = new Date(now); oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  const recent = series.filter(p => new Date(p.date) >= oneYearAgo && p[key] != null);
+  const labels = recent.map(p => { const [,m,d] = p.date.split('-'); return MONTH_NAMES[parseInt(m,10)-1] + ' ' + parseInt(d,10); });
+  const data = recent.map(p => Math.round(p[key]));
+
+  const ctx = document.getElementById('canvas-cashflow').getContext('2d');
+  charts.cashflow = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [{
+      label,
+      data,
+      borderColor: color,
+      backgroundColor: color + '26',
+      borderWidth: 2,
+      pointRadius: 2,
+      fill: true,
+      tension: 0.25
+    }]},
+    options: {
+      responsive:true, maintainAspectRatio:false,
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label: c => label + ': ' + fmt$(c.parsed.y) } } },
+      scales:{
+        x:{ ticks:{ color:'#6b6b78', font:{size:9}, maxRotation:0, autoSkip:true, maxTicksLimit:6 }, grid:{ display:false } },
+        y:{ ticks:{ color:'#6b6b78', font:{size:10}, callback: v => (v>=1000?('$'+(v/1000)+'k'):('$'+v)) }, grid:{ color:'#e8e8ed' } }
+      }
+    }
+  });
 }
 
 function buildCard(metric, thisMonth, ytd, byMonth, qty, readyToBill){
