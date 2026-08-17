@@ -114,13 +114,33 @@ function _cfCarriedSchwab(sortedEntries) {
   });
 }
 
-// "Bank Balance" everywhere in the UI means the combined NULabs total — TD
-// Bank + Schwab (carried forward) — since that's the number Russ actually
-// tracks day to day. Before any Schwab reading has ever been entered, the
-// carried value is null and this just falls back to TD alone.
-function _cfTotalBalance(entry, carriedSchwab) {
-  if (entry.bankBalance == null && carriedSchwab == null) return null;
-  return (entry.bankBalance || 0) + (carriedSchwab || 0);
+// Generic "most recently known value, and the true date it was actually
+// entered" forward-fill. TD Bank Balance and AR Outstanding were originally
+// built to require a fresh number every day (so a blank meant "Linda
+// hasn't logged today yet") — but now that Schwab / Held for Owners can be
+// updated on their own without touching TD Bank or AR that same day, an
+// entry that ONLY updates one of those would otherwise leave TD Bank/AR
+// null for "today" and blank out the KPI cards entirely, even though we do
+// know a real recent figure. Carrying the last known reading forward (with
+// its true source date, so the UI can say "carried from <that day>"
+// instead of implying it's fresh) fixes that. The Recent Entries table
+// still shows the raw per-day value separately, so the audit trail of
+// "did Linda actually log a fresh number today" isn't lost.
+function _cfCarriedWithDate(sortedEntries, field) {
+  let lastKnown = null, lastKnownDate = null;
+  return sortedEntries.map(e => {
+    if (e[field] != null) { lastKnown = e[field]; lastKnownDate = e.entryDate; }
+    return { value: lastKnown, asOfDate: lastKnownDate };
+  });
+}
+
+// "Bank Balance" everywhere in the UI means TD Bank's most recently known
+// reading plus Schwab's most recently known reading (both carried forward)
+// — since that's the number Russ actually tracks day to day, not
+// whatever's literally sitting in the newest calendar row.
+function _cfTotalBalance(carriedBankBalance, carriedSchwab) {
+  if (carriedBankBalance == null && carriedSchwab == null) return null;
+  return (carriedBankBalance || 0) + (carriedSchwab || 0);
 }
 
 // ── Rental owner pass-through cash ──────────────────────────────────────
@@ -140,36 +160,41 @@ function _cfCarriedHeldForOwners(sortedEntries) {
   });
 }
 
-// What NULabs can actually spend: TD Bank ONLY, minus whatever is currently
-// held for rental owners. Schwab is deliberately excluded — it's a money
-// market fund, not checking-account cash, and would have to be sold to
-// become spendable, so it's not "available" in the sense this figure means.
-// Before Linda ever enters a held-for-owners figure, carriedHeld is null
-// and this just falls back to TD Bank alone (i.e. "nothing held yet").
-function _cfAvailableCash(bankBalance, carriedHeld) {
-  if (bankBalance == null) return null;
-  return bankBalance - (carriedHeld || 0);
+// What NULabs can actually spend: TD Bank's most recently known reading,
+// minus whatever is currently held for rental owners. Schwab is
+// deliberately excluded — it's a money market fund, not checking-account
+// cash, and would have to be sold to become spendable, so it's not
+// "available" in the sense this figure means.
+function _cfAvailableCash(carriedBankBalance, carriedHeld) {
+  if (carriedBankBalance == null) return null;
+  return carriedBankBalance - (carriedHeld || 0);
 }
 
-// Sorted entries with Schwab and Held-for-Owners carried forward, plus the
-// combined TD+Schwab total and the (TD-only) available-cash figure attached
-// (`carriedSchwab` / `totalBalance` / `carriedHeldForOwners` /
-// `availableCash`), computed once over the FULL history so a chart zoomed
-// to "1M" still carries forward a reading from outside that window instead
-// of wrongly showing it as missing. Use this (not _cfSorted()) anywhere the
-// UI needs these figures. Note: totalBalance (TD+Schwab) is kept around for
-// the Recent Entries table's informational "Total Bank Balance" column
-// only — it is NOT what "Bank Balance" or "Available Cash" show anymore.
+// Sorted entries with TD Bank, Schwab, Held-for-Owners, and AR Outstanding
+// all carried forward (each with its own true "as of" source date), plus
+// the combined total and available-cash figures attached, computed once
+// over the FULL history so a chart zoomed to "1M" still carries forward a
+// reading from outside that window instead of wrongly showing it as
+// missing. Use this (not _cfSorted()) anywhere the UI needs these figures.
 function _cfSortedWithTotal() {
   const sorted = _cfSorted();
   const carriedSchwab = _cfCarriedSchwab(sorted);
   const carriedHeld   = _cfCarriedHeldForOwners(sorted);
-  return sorted.map((e, i) => Object.assign({}, e, {
-    carriedSchwab: carriedSchwab[i],
-    totalBalance: _cfTotalBalance(e, carriedSchwab[i]),
-    carriedHeldForOwners: carriedHeld[i],
-    availableCash: _cfAvailableCash(e.bankBalance, carriedHeld[i]),
-  }));
+  const carriedBank   = _cfCarriedWithDate(sorted, 'bankBalance');
+  const carriedAr     = _cfCarriedWithDate(sorted, 'arOutstanding');
+  return sorted.map((e, i) => {
+    const bankKnown = carriedBank[i].value;
+    return Object.assign({}, e, {
+      carriedSchwab: carriedSchwab[i],
+      carriedBankBalance: bankKnown,
+      carriedBankAsOf: carriedBank[i].asOfDate,
+      carriedArOutstanding: carriedAr[i].value,
+      carriedArAsOf: carriedAr[i].asOfDate,
+      totalBalance: _cfTotalBalance(bankKnown, carriedSchwab[i]),
+      carriedHeldForOwners: carriedHeld[i],
+      availableCash: _cfAvailableCash(bankKnown, carriedHeld[i]),
+    });
+  });
 }
 
 function cfNetFlow(entry) {
@@ -234,12 +259,16 @@ function _cfTrailingSalesInvoiced(asOfDateStr) {
 }
 
 function cfDSO() {
-  const latest = cfLatestEntry();
-  if (!latest || !latest.arOutstanding) return null;
+  const sorted = _cfSortedWithTotal();
+  const latest = sorted.length ? sorted[sorted.length - 1] : null;
+  if (!latest || latest.carriedArOutstanding == null) return null;
+  // Trailing sales window is anchored to today's date (current pace),
+  // even though the AR figure itself may be carried forward from an
+  // earlier entry that's the most recent one we actually have.
   const salesSum = _cfTrailingSalesInvoiced(latest.entryDate);
   const avgDailySales = salesSum / 30;
   if (!avgDailySales) return null;
-  return latest.arOutstanding / avgDailySales;
+  return latest.carriedArOutstanding / avgDailySales;
 }
 
 // ── Dashboard button injection ────────────────────────────────────────────
@@ -320,15 +349,23 @@ function renderCashFlowPanel() {
   const fmt$     = n => n == null ? '—' : '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   const fmtDays  = n => n == null ? '—' : n.toFixed(1) + ' days';
 
-  const bankBalance   = latest ? latest.bankBalance : null; // TD Bank only — Schwab is shown separately, not blended in
+  const bankBalance   = latest ? latest.carriedBankBalance : null; // TD Bank's most recently known reading — Schwab shown separately, not blended in
   const availableCash  = latest ? latest.availableCash : null;
   const netToday       = latest ? cfNetFlow(latest) : null;
   const netTrailing7   = cashFlowEntries.length ? cfTrailing7NetFlow() : null;
-  const arOutstanding  = latest ? latest.arOutstanding : null;
+  const arOutstanding  = latest ? latest.carriedArOutstanding : null;
   const dso            = cfDSO();
 
   const netTodayColor  = netToday   == null ? 'var(--muted)' : netToday   >= 0 ? 'var(--green)' : 'var(--red)';
   const net7Color      = netTrailing7 == null ? 'var(--muted)' : netTrailing7 >= 0 ? 'var(--green)' : 'var(--red)';
+
+  // If the most recent reading for a figure isn't from today's row (e.g.
+  // today only updated Held for Owners), label it "carried from <date>"
+  // instead of implying it's a fresh number.
+  const bankAsOfLabel = !latest || !latest.carriedBankAsOf ? 'No entries yet'
+    : (latest.carriedBankAsOf === latest.entryDate ? 'as of ' + _cfFmtDate(latest.carriedBankAsOf) : 'carried from ' + _cfFmtDate(latest.carriedBankAsOf));
+  const arAsOfLabel = !latest || !latest.carriedArAsOf ? ''
+    : (latest.carriedArAsOf === latest.entryDate ? 'as of ' + _cfFmtDate(latest.carriedArAsOf) : 'carried from ' + _cfFmtDate(latest.carriedArAsOf));
 
   const recent = sorted.slice(-30).reverse(); // most recent first
 
@@ -343,7 +380,7 @@ function renderCashFlowPanel() {
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">Bank Balance</div>
         <div class="cf-kpi-value">${fmt$(bankBalance)}</div>
-        <div class="cf-kpi-sub">${latest ? 'as of ' + _cfFmtDate(latest.entryDate) : 'No entries yet'}</div>
+        <div class="cf-kpi-sub">${bankAsOfLabel}</div>
         <div class="cf-kpi-sub" style="color:var(--muted)">TD Bank only — Schwab: ${fmt$(latest ? latest.carriedSchwab : null)} (separate, not included)</div>
       </div>
       <div class="cf-kpi-card">
@@ -365,7 +402,7 @@ function renderCashFlowPanel() {
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">AR Outstanding</div>
         <div class="cf-kpi-value">${fmt$(arOutstanding)}</div>
-        <div class="cf-kpi-sub">${latest ? 'as of ' + _cfFmtDate(latest.entryDate) : ''}</div>
+        <div class="cf-kpi-sub">${arAsOfLabel}</div>
       </div>
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">DSO</div>
@@ -423,7 +460,7 @@ function renderCashFlowPanel() {
               const net = cfNetFlow(e);
               return `<tr>
                 <td>${_cfFmtDate(e.entryDate)}</td>
-                <td>${fmt$(e.bankBalance)}</td>
+                <td title="${e.bankBalance != null ? 'Entered this day' : 'Carried forward — no new reading this day'}">${e.bankBalance != null ? fmt$(e.bankBalance) : (e.carriedBankBalance != null ? fmt$(e.carriedBankBalance) + ' *' : '—')}</td>
                 <td title="${e.schwabBalance != null ? 'Entered this day' : 'Carried forward — no new reading this day'}">${e.schwabBalance != null ? fmt$(e.schwabBalance) : (e.carriedSchwab != null ? fmt$(e.carriedSchwab) + ' *' : '—')}</td>
                 <td>${fmt$(e.totalBalance)}</td>
                 <td title="${e.heldForOwners != null ? 'Entered this day' : 'Carried forward — no update this day'}">${e.heldForOwners != null ? fmt$(e.heldForOwners) : (e.carriedHeldForOwners != null ? fmt$(e.carriedHeldForOwners) + ' *' : '—')}</td>
@@ -431,14 +468,14 @@ function renderCashFlowPanel() {
                 <td>${fmt$(e.deposits)}</td>
                 <td>${fmt$(e.billPayments)}</td>
                 <td style="color:${net >= 0 ? 'var(--green)' : 'var(--red)'}">${(net >= 0 ? '+' : '') + fmt$(net)}</td>
-                <td>${fmt$(e.arOutstanding)}</td>
+                <td title="${e.arOutstanding != null ? 'Entered this day' : 'Carried forward — no new reading this day'}">${e.arOutstanding != null ? fmt$(e.arOutstanding) : (e.carriedArOutstanding != null ? fmt$(e.carriedArOutstanding) + ' *' : '—')}</td>
                 <td><button class="cf-row-edit-btn" onclick="openCashFlowEntryModal('${e.id}')">Edit</button></td>
               </tr>`;
             }).join('')}
           </tbody>
         </table>
       </div>
-      <div class="cf-modal-note" style="margin-top:10px">* Value carried forward from the last day it was entered (Schwab and Held for Owners are only updated when they actually change, not daily).</div>`}
+      <div class="cf-modal-note" style="margin-top:10px">* Value carried forward from the last day it was actually entered — that day's row didn't include a fresh reading.</div>`}
     </div>
   `;
 
@@ -515,9 +552,11 @@ function _cfDrawCharts(sorted) {
     // Skips null balances rather than treating them as $0.
     const bankDatasets = [];
     if (bankSeries === 'td') {
-      const tdData = sorted.map(e => e.bankBalance);
+      // Carried-forward value — a day that only updated Schwab or Held for
+      // Owners shouldn't drop TD Bank's line to null/zero on the chart.
+      const tdData = sorted.map(e => e.carriedBankBalance);
       bankDatasets.push(
-        { label: 'TD Bank', data: tdData, borderColor: '#5b9cf6', backgroundColor: 'rgba(91,156,246,0.15)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, order: 1 },
+        { label: 'TD Bank', data: tdData, borderColor: '#5b9cf6', backgroundColor: 'rgba(91,156,246,0.15)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, spanGaps: true, order: 1 },
         { label: 'Trailing 7-Entry Avg', data: cfMovingAvg(tdData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
       );
     } else if (bankSeries === 'schwab') {
@@ -596,10 +635,13 @@ function _cfDrawCharts(sorted) {
     if (existing) existing.destroy();
     // Compute a rolling DSO series so the trend line has more than one point.
     // Uses the same auto-pulled billed-revenue proration as cfDSO() above.
+    // Both AR and DSO use the carried-forward AR figure — a day that only
+    // updated Schwab or Held for Owners shouldn't make AR (and therefore
+    // DSO) look like it vanished.
     const dsoSeries = sorted.map(e => {
-      if (!e.arOutstanding) return null;
+      if (e.carriedArOutstanding == null) return null;
       const avgDaily = _cfTrailingSalesInvoiced(e.entryDate) / 30;
-      return avgDaily ? e.arOutstanding / avgDaily : null;
+      return avgDaily ? e.carriedArOutstanding / avgDaily : null;
     });
     new Chart(arCanv, {
       type: 'line',
@@ -607,7 +649,7 @@ function _cfDrawCharts(sorted) {
         labels,
         datasets: [
           {
-            label: 'AR Outstanding', yAxisID: 'y', data: sorted.map(e => e.arOutstanding),
+            label: 'AR Outstanding', yAxisID: 'y', data: sorted.map(e => e.carriedArOutstanding), spanGaps: true,
             borderColor: '#e8a234', backgroundColor: 'rgba(232,162,52,0.12)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25,
           },
           {
