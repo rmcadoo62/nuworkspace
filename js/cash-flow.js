@@ -562,6 +562,20 @@ function _cfDaysBetween(isoStart, isoEnd) {
   return Math.round((new Date(isoEnd + 'T00:00:00') - new Date(isoStart + 'T00:00:00')) / 86400000);
 }
 
+// Trailing 7-entry moving average — same "last 7 entries" convention as the
+// Net Cash Flow — Trailing 7 KPI card, so it reads consistently whether
+// entries are the old weekly backfill or daily going forward. Skips
+// null values rather than treating them as $0. Shared across every chart
+// that plots a trend line (Bank Balance, Schwab, and Daily Net Cash Flow).
+function _cfMovingAvg(data) {
+  return data.map((_, i) => {
+    const start = Math.max(0, i - 6);
+    const slice = data.slice(start, i + 1).filter(v => v != null);
+    if (!slice.length) return null;
+    return slice.reduce((s, v) => s + v, 0) / slice.length;
+  });
+}
+
 function _cfDrawCharts(sorted) {
   if (typeof Chart === 'undefined') return;
   const labels = sorted.map(e => _cfFmtDate(e.entryDate));
@@ -575,16 +589,6 @@ function _cfDrawCharts(sorted) {
     // accounts that are no longer transferred back and forth, so a summed
     // line doesn't represent anything real going forward.
     const bankSeries = window._cfBankSeries || 'td';
-    const cfMovingAvg = data => data.map((_, i) => {
-      const start = Math.max(0, i - 6);
-      const slice = data.slice(start, i + 1).filter(v => v != null);
-      if (!slice.length) return null;
-      return slice.reduce((s, v) => s + v, 0) / slice.length;
-    });
-    // Trailing 7-entry moving average — same "last 7 entries" convention as
-    // the Net Cash Flow — Trailing 7 KPI card, so it reads consistently
-    // whether entries are the old weekly backfill or daily going forward.
-    // Skips null balances rather than treating them as $0.
     const bankDatasets = [];
     if (bankSeries === 'td') {
       // Carried-forward value — a day that only updated Schwab or Held for
@@ -592,7 +596,7 @@ function _cfDrawCharts(sorted) {
       const tdData = sorted.map(e => e.carriedBankBalance);
       bankDatasets.push(
         { label: 'TD Bank', data: tdData, borderColor: '#5b9cf6', backgroundColor: 'rgba(91,156,246,0.15)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, spanGaps: true, order: 1 },
-        { label: 'Trailing 7-Entry Avg', data: cfMovingAvg(tdData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
+        { label: 'Trailing 7-Entry Avg', data: _cfMovingAvg(tdData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
       );
     } else if (bankSeries === 'schwab') {
       // Carried-forward value, not the raw per-entry reading — see
@@ -601,7 +605,7 @@ function _cfDrawCharts(sorted) {
       const schwabData = sorted.map(e => e.carriedSchwab);
       bankDatasets.push(
         { label: 'Schwab', data: schwabData, borderColor: '#2fae8f', backgroundColor: 'rgba(47,174,143,0.15)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, spanGaps: true, order: 1 },
-        { label: 'Trailing 7-Entry Avg', data: cfMovingAvg(schwabData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
+        { label: 'Trailing 7-Entry Avg', data: _cfMovingAvg(schwabData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
       );
     }
     new Chart(bankCanv, {
@@ -637,22 +641,44 @@ function _cfDrawCharts(sorted) {
     // auto-scaled range — that produced fractional ticks that rounded to
     // confusing repeated "$1" labels. Real daily entries with actual
     // movement make this a non-issue.
-    const maxAbsNet = Math.max(100, ...netData.map(v => Math.abs(v || 0)));
+    // Bar-to-bar noise is expected — a $28k deposit day next to a $10k draw
+    // day doesn't mean anything is wrong. The trailing 7-entry average
+    // (same convention as the Bank Balance chart) is the line to actually
+    // watch: trending up means cash is building faster than it's going out;
+    // trending down or hovering below $0 means the reverse, even while
+    // individual days bounce around it.
+    const netTrendData = _cfMovingAvg(netData);
+    const maxAbsNet = Math.max(100, ...netData.map(v => Math.abs(v || 0)), ...netTrendData.map(v => Math.abs(v || 0)));
     new Chart(netCanv, {
       type: 'bar',
       data: {
         labels,
-        datasets: [{
-          label: 'Net Cash Flow',
-          data: netData,
-          backgroundColor: netData.map(v => v == null ? 'rgba(150,150,150,0.25)' : v >= 0 ? 'rgba(76,175,125,0.7)' : 'rgba(224,92,92,0.7)'),
-          borderColor: netData.map(v => v == null ? 'rgba(150,150,150,0.5)' : v >= 0 ? '#4caf7d' : '#e05c5c'),
-          borderWidth: 1, borderRadius: 4,
-        }],
+        datasets: [
+          {
+            label: 'Net Cash Flow',
+            data: netData,
+            backgroundColor: netData.map(v => v == null ? 'rgba(150,150,150,0.25)' : v >= 0 ? 'rgba(76,175,125,0.7)' : 'rgba(224,92,92,0.7)'),
+            borderColor: netData.map(v => v == null ? 'rgba(150,150,150,0.5)' : v >= 0 ? '#4caf7d' : '#e05c5c'),
+            borderWidth: 1, borderRadius: 4, order: 1,
+          },
+          {
+            type: 'line',
+            label: 'Trailing 7-Entry Avg',
+            data: netTrendData,
+            borderColor: '#c07a1a', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4,
+            fill: false, tension: 0.3, spanGaps: true, order: 0,
+          },
+        ],
       },
       options: {
         responsive: true,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ctx.parsed.y == null ? ' No prior entry to compare' : ' ' + (ctx.parsed.y >= 0 ? '+' : '') + '$' + ctx.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 0 }) } } },
+        plugins: {
+          legend: {
+            display: true, position: 'top', align: 'end',
+            labels: { color: '#9a9aaa', font: { size: 10 }, boxWidth: 12, boxHeight: 8, padding: 8 },
+          },
+          tooltip: { callbacks: { label: ctx => ctx.parsed.y == null ? ' No prior entry to compare' : ' ' + ctx.dataset.label + ': ' + (ctx.parsed.y >= 0 ? '+' : '') + '$' + ctx.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 0 }) } },
+        },
         scales: {
           x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(0,0,0,0.08)' } },
           y: {
