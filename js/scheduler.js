@@ -302,6 +302,7 @@ let schedReadOnly  = false; // true if user has view_schedule but not edit_sched
 let schedSelectedCat    = null;
 let schedSelectedProjId = null;
 let schedSelectedTaskId = null;
+let schedSelectedSectionId = null;
 let schedFlag           = null;   // null | 'reschedule' | 'tentative'
 let schedShowRooms      = true;   // toggle rooms section
 let schedShowEmps       = true;   // toggle employees section
@@ -336,6 +337,7 @@ function schedRowToBlock(r) {
     label:        r.label           || '',
     projId:       r.proj_id         || null,
     taskId:       r.task_id         || null,
+    sectionId:    r.section_id      || null,
     empId:        r.emp_id          || null,
     empEventType: r.emp_event_type  || null,
     flag:         r.flag            || null,
@@ -353,6 +355,7 @@ function blockToRow(b) {
     label:          b.label         || null,
     proj_id:        b.projId        || null,
     task_id:        b.taskId        || null,
+    section_id:     b.sectionId     || null,
     emp_id:         b.empId         || null,
     emp_event_type: b.empEventType  || null,
     flag:           b.flag          || null,
@@ -593,6 +596,15 @@ window.openSchedulerPanel = async function(el) {
   schedReadOnly = (typeof window.schedCanEdit !== 'undefined') ? !window.schedCanEdit : false;
   await schedLoad();
   renderSched();
+};
+
+// Jump into the Scheduler from elsewhere in the app (e.g. the project header's
+// schedule-status pill) landing on a specific date. Opens the panel itself
+// (loading its data if not already loaded), then scrolls the Gantt view to
+// that date — never opens an edit modal, just lands on the page.
+window.schedGoToDateFromPill = async function(dateStr) {
+  await window.openSchedulerPanel(document.getElementById('navScheduler'));
+  if (typeof schedJumpToDate === 'function') schedJumpToDate(dateStr);
 };
 
 // ---- Render (Gantt) ----
@@ -1190,9 +1202,11 @@ function renderSchedStats() {
     return countWeekdays(s, e);
   }
 
-  // Equipment-only blocks (exclude employee rows)
+  // Equipment-only blocks (exclude employee rows). Reschedule-flagged blocks
+  // are excluded here too — that flag means "this fell through, needs a new
+  // one," so the room isn't really committed and shouldn't count as booked.
   const equipBlocks = schedBlocks.filter(b =>
-    !b.empId && !(b.rowId || '').startsWith('emp_')
+    !b.empId && !(b.rowId || '').startsWith('emp_') && b.flag !== 'reschedule'
   );
 
   // Next calendar month
@@ -1206,7 +1220,7 @@ function renderSchedStats() {
     nextMonthBooked += blockDaysInRange(b, nextMonthStart, nextMonthEnd);
   });
 
-  const TECHS          = 7;
+  const TECHS          = 6;
   const weekAvail      = TECHS * 5;
   const monthAvail     = TECHS * countWeekdays(monthStart,    monthEnd);
   const nextMonthAvail = TECHS * countWeekdays(nextMonthStart, nextMonthEnd);
@@ -1227,23 +1241,28 @@ function renderSchedStats() {
   const fmt$ = n => '$' + Math.round(n||0).toLocaleString('en-US');
 
   // "Not yet scheduled" $ — open, non-report-cat (41-44) tasks in new/inprogress
-  // status that have no linked schedule_blocks row at all. This deliberately
+  // status that have no linked schedule_blocks coverage at all. This deliberately
   // stays OUTSIDE the week/month bubbles above: those are capacity-window
   // figures, this is a standing total, and some real work (e.g. teardown/ship,
   // cat 96) never gets an equipment block in the first place — without this
   // line that value would just be invisible everywhere in the scheduler.
+  // Reschedule-flagged blocks never count as coverage — that flag means
+  // "needs a new one," so a task/section on one is still genuinely unscheduled.
   const REPORT_CATS_UTIL = new Set(['41','42','43','44']);
   const openProjIdsUtil = new Set(
     (typeof projects !== 'undefined' ? projects : [])
       .filter(p => ((typeof projectInfo !== 'undefined' ? projectInfo[p.id] : null) || {}).status !== 'closed')
       .map(p => p.id)
   );
-  const scheduledTaskIds = new Set(schedBlocks.filter(b => b.taskId).map(b => b.taskId));
+  const coveredBlocks = schedBlocks.filter(b => b.flag !== 'reschedule');
+  const scheduledTaskIds = new Set(coveredBlocks.filter(b => b.taskId).map(b => b.taskId));
+  const scheduledSectionIds = new Set(coveredBlocks.filter(b => b.sectionId).map(b => b.sectionId));
   const unscheduledValue = (typeof taskStore !== 'undefined' ? taskStore : [])
     .filter(t => (t.status === 'new' || t.status === 'inprogress'))
     .filter(t => openProjIdsUtil.has(t.proj))
     .filter(t => !REPORT_CATS_UTIL.has((t.salesCat || '').toString().trim()))
     .filter(t => !scheduledTaskIds.has(t._id))
+    .filter(t => !(t.sectionId && scheduledSectionIds.has(t.sectionId)))
     .reduce((s, t) => s + (t.fixedPrice || 0), 0);
 
   function bubble(label, booked, avail, pct) {
@@ -1888,11 +1907,16 @@ window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) 
   document.getElementById('schedProjPreview').style.display = 'none';
   document.getElementById('schedTaskSection').style.display = 'none';
   document.getElementById('schedTaskList').innerHTML = '';
+  const _mgmtLinkReset = document.getElementById('schedManageSectionsLink');
+  if (_mgmtLinkReset) _mgmtLinkReset.style.display = 'none';
+  const _dupWarnReset = document.getElementById('schedDupWarning');
+  if (_dupWarnReset) { _dupWarnReset.style.display = 'none'; _dupWarnReset.innerHTML = ''; }
+  schedPickerCollapsed = new Set();
   _schedProjDDOpen = false;
   schedSelectedTaskId = null;
+  schedSelectedSectionId = null;
   schedFlag = null;
   updateFlagUI();
-  // Populate employee picker
   const empPicker = document.getElementById('schedEmpPicker');
   if (empPicker) {
     empPicker.innerHTML = '<option value="">— select employee —</option>' +
@@ -1912,6 +1936,7 @@ window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) 
       document.getElementById('schedEndTime').value   = blk.endTime   || '';
       document.getElementById('schedLabel').value     = blk.label || '';
       schedSelectedTaskId = blk.taskId || null;
+      schedSelectedSectionId = blk.sectionId || null;
       schedFlag = blk.flag || null;
       updateFlagUI();
       // Restore type/employee
@@ -2036,6 +2061,7 @@ window.filterSchedProjDD = function(q) {
 window.selectSchedLinkedProj = function(projId) {
   schedSelectedProjId = projId;
   schedSelectedTaskId = null;  // reset task when project changes
+  schedSelectedSectionId = null;
   const pi = getProjInfo(projId);
   if (pi) document.getElementById('schedProjSearch').value = (pi.proj.emoji||'') + ' ' + pi.proj.name;
   const dd = document.getElementById('schedProjDD');
@@ -2052,10 +2078,15 @@ window.selectSchedLinkedProj = function(projId) {
 window.clearSchedLinkedProj = function() {
   schedSelectedProjId = null;
   schedSelectedTaskId = null;
+  schedSelectedSectionId = null;
   document.getElementById('schedProjSearch').value = '';
   document.getElementById('schedProjPreview').style.display = 'none';
   document.getElementById('schedTaskSection').style.display = 'none';
   document.getElementById('schedTaskList').innerHTML = '';
+  const _mgmtLinkClr = document.getElementById('schedManageSectionsLink');
+  if (_mgmtLinkClr) _mgmtLinkClr.style.display = 'none';
+  const _dupWarnClr = document.getElementById('schedDupWarning');
+  if (_dupWarnClr) { _dupWarnClr.style.display = 'none'; _dupWarnClr.innerHTML = ''; }
   const clrBtn = document.getElementById('schedProjClearBtn');
   if (clrBtn) clrBtn.style.display = 'none';
   document.getElementById('schedProjSearch').focus();
@@ -2085,6 +2116,27 @@ function updateSchedProjPreview(projId) {
   if (clrBtn)  clrBtn.style.display = '';
 }
 
+// One-time style injection for the sectioned task/section picker in the
+// Edit Schedule Block modal — mirrors the Tasks tab's section stripe/chevron
+// look (see tasks.js SECTION_PALETTE) so a section reads as the same kind of
+// grouping in both places.
+const schedSecPickerStyle = document.createElement('style');
+schedSecPickerStyle.textContent = `
+  .sched-sec-header{display:flex;align-items:center;gap:6px;padding:7px 10px;border-radius:6px;cursor:pointer;transition:background var(--transition);margin-top:4px;}
+  .sched-sec-header:hover{background:var(--surface3);}
+  .sched-sec-header.selected{background:var(--amber-glow);outline:1.5px solid var(--amber-dim);}
+  .sched-sec-chevron{font-size:10px;color:var(--muted);flex-shrink:0;width:12px;text-align:center;transition:transform .12s;cursor:pointer;}
+  .sched-sec-chevron.open{transform:rotate(90deg);}
+  .sched-sec-name{font-size:12.5px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .sched-sec-count{font-size:10.5px;color:var(--muted);flex-shrink:0;}
+  .sched-sec-tasks{padding-left:14px;}
+  .sched-sec-divider{padding:10px 12px 4px;font-size:9.5px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);}
+`;
+document.head.appendChild(schedSecPickerStyle);
+
+const SCHED_SECTION_PALETTE = ['#1D9E75', '#D4537E', '#534AB7', '#D85A30', '#378ADD'];
+let schedPickerCollapsed = new Set(); // sectionIds collapsed in the current modal session
+
 function renderSchedTaskList(projId) {
   const section  = document.getElementById('schedTaskSection');
   const listEl   = document.getElementById('schedTaskList');
@@ -2104,14 +2156,17 @@ function renderSchedTaskList(projId) {
       return true;
     });
 
+  const mgmtLink = document.getElementById('schedManageSectionsLink');
+  if (mgmtLink) mgmtLink.style.display = '';
+
   if (tasks.length === 0) {
     section.style.display = 'block';
     listEl.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--muted)">No active tasks for this project</div>';
     return;
   }
-
   section.style.display = 'block';
-  listEl.innerHTML = tasks.map(t => {
+
+  const taskRowHtml = t => {
     const sel    = t._id === schedSelectedTaskId;
     const stLbl  = STATUS_LABELS[t.status] || t.status || 'New';
     const stClr  = STATUS_COLORS[t.status] || '#888';
@@ -2128,15 +2183,113 @@ function renderSchedTaskList(projId) {
       </div>
       <div class="sched-proj-opt-check">&#x2713;</div>
     </div>`;
-  }).join('');
+  };
+
+  // Group by section, same strict-membership rule as the Tasks tab: a task
+  // only belongs under a section if sectionId points to a real section for
+  // this project; everything else falls into Unsectioned at the bottom.
+  const sections = (typeof sectionStore !== 'undefined' ? sectionStore : [])
+    .filter(s => s.projId === projId)
+    .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+
+  if (sections.length === 0) {
+    listEl.innerHTML = tasks.map(taskRowHtml).join('');
+    renderSchedDupWarning(projId);
+    return;
+  }
+
+  const secColor = {};
+  sections.forEach((s,i) => { secColor[s._id] = SCHED_SECTION_PALETTE[i % SCHED_SECTION_PALETTE.length]; });
+  const validSecIds = new Set(sections.map(s => s._id));
+  const bySec = new Map();
+  const unsectioned = [];
+  tasks.forEach(t => {
+    if (t.sectionId && validSecIds.has(t.sectionId)) {
+      if (!bySec.has(t.sectionId)) bySec.set(t.sectionId, []);
+      bySec.get(t.sectionId).push(t);
+    } else {
+      unsectioned.push(t);
+    }
+  });
+
+  let html = '';
+  sections.forEach(s => {
+    const members = bySec.get(s._id) || [];
+    if (!members.length) return; // no open tasks in this section — nothing to schedule
+    const sel = s._id === schedSelectedSectionId;
+    const collapsed = schedPickerCollapsed.has(s._id);
+    const stripe = secColor[s._id] || 'transparent';
+    html += `<div class="sched-sec-header${sel?' selected':''}" style="box-shadow: inset 3px 0 0 0 ${stripe};" onclick="selectSchedSection('${s._id}','${projId}')">
+      <span class="sched-sec-chevron${collapsed?'':' open'}" onclick="toggleSchedSecCollapse(event,'${s._id}','${projId}')">&#x25B6;</span>
+      <span class="sched-sec-name">${s.name}</span>
+      <span class="sched-sec-count">${members.length} task${members.length!==1?'s':''}</span>
+      <div class="sched-proj-opt-check" style="display:${sel?'block':'none'}">&#x2713;</div>
+    </div>`;
+    if (!collapsed) {
+      html += `<div class="sched-sec-tasks">${members.map(taskRowHtml).join('')}</div>`;
+    }
+  });
+  if (unsectioned.length) {
+    html += `<div class="sched-sec-divider">Unsectioned</div>`;
+    html += unsectioned.map(taskRowHtml).join('');
+  }
+  listEl.innerHTML = html;
+  renderSchedDupWarning(projId);
 }
+
+window.toggleSchedSecCollapse = function(ev, sectionId, projId) {
+  ev.stopPropagation();
+  if (schedPickerCollapsed.has(sectionId)) schedPickerCollapsed.delete(sectionId);
+  else schedPickerCollapsed.add(sectionId);
+  renderSchedTaskList(projId);
+};
 
 window.selectSchedTask = function(taskId) {
   schedSelectedTaskId = schedSelectedTaskId === taskId ? null : taskId; // toggle
+  schedSelectedSectionId = null; // task and section picks are mutually exclusive
   if (schedSelectedProjId) renderSchedTaskList(schedSelectedProjId);
 };
 
-// Project dropdown close handled via blur event
+window.selectSchedSection = function(sectionId, projId) {
+  schedSelectedSectionId = schedSelectedSectionId === sectionId ? null : sectionId; // toggle
+  schedSelectedTaskId = null; // task and section picks are mutually exclusive
+  renderSchedTaskList(projId);
+};
+
+window.schedGoManageSections = function() {
+  if (!schedSelectedProjId) return;
+  closeSchedModal();
+  if (typeof selectProject === 'function') {
+    selectProject(schedSelectedProjId, null);
+    setTimeout(() => { if (typeof switchProjTab === 'function') switchProjTab('sub-tasks'); }, 160);
+  }
+};
+
+// ---- Duplicate-coverage cross-check ----
+// A reschedule-flagged block never counts as "this task/section is already
+// covered" — that flag means the opposite (this occurrence fell through and
+// needs a new one), so a fresh block for the same task/section is expected,
+// not a duplicate. This only warns about a DIFFERENT, still-active block
+// already covering the same task or section elsewhere on the calendar.
+function renderSchedDupWarning(projId) {
+  const warnEl = document.getElementById('schedDupWarning');
+  if (!warnEl) return;
+  const editId = document.getElementById('schedEditId').value;
+  let dupe = null;
+  if (schedSelectedTaskId) {
+    dupe = schedBlocks.find(b => b.id !== editId && b.flag !== 'reschedule' && b.taskId === schedSelectedTaskId);
+  } else if (schedSelectedSectionId) {
+    dupe = schedBlocks.find(b => b.id !== editId && b.flag !== 'reschedule' && b.sectionId === schedSelectedSectionId);
+  }
+  if (!dupe) { warnEl.style.display = 'none'; warnEl.innerHTML = ''; return; }
+  const pi = getProjInfo(dupe.projId);
+  const projLabel = pi ? pi.proj.name : (dupe.projId || 'another project');
+  const dateLabel = dupe.end && dupe.end !== dupe.start ? `${dupe.start} \u2192 ${dupe.end}` : dupe.start;
+  warnEl.style.display = 'block';
+  warnEl.innerHTML = `&#x26A0; Already on the schedule for ${projLabel}, ${dateLabel}.
+    <span style="text-decoration:underline;cursor:pointer" onclick="openSchedModal('${dupe.id}')">Edit that block instead</span>`;
+}
+
 
 window.schedDcasOverrideChanged = function(val) {
   // Selecting a DCAS override clears Reschedule/Tentative
@@ -2229,6 +2382,7 @@ function _doSaveSchedBlock() {
       schedBlocks[idx].label     = lbl;
       schedBlocks[idx].projId    = schedSelectedProjId || null;
       schedBlocks[idx].taskId    = schedSelectedTaskId  || null;
+      schedBlocks[idx].sectionId = schedSelectedSectionId || null;
       schedBlocks[idx].flag      = _effectiveFlag        || null;
     }
   } else {
@@ -2243,6 +2397,7 @@ function _doSaveSchedBlock() {
       endTime:   document.getElementById('schedEndTime').value   || null,
       label: lbl, projId: schedSelectedProjId || null,
       taskId: schedSelectedTaskId || null,
+      sectionId: schedSelectedSectionId || null,
       flag:   _effectiveFlag      || null
     });
   }

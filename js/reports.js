@@ -1096,37 +1096,58 @@ async function renderRevenueProjectionReport() {
     !REPORT_CATS.has((t.salesCat||'').toString().trim())
   );
 
-  // Pull every schedule block linked to a task (task_id not null). Grabbing
-  // all of them (rather than an IN() on task ids) avoids a huge query string
-  // and this table isn't large enough for it to matter.
+  // Pull every schedule block linked to a task OR a section, plus its flag —
+  // reschedule-flagged blocks never count as real coverage (that flag means
+  // "this fell through, needs a new one"), so they're excluded from the
+  // earliest-date maps below and instead tracked separately to tag tasks
+  // that specifically need rescheduling, vs. plain never-scheduled.
   let blockRows = [];
   if (sb) {
     const { data, error } = await sb.from('schedule_blocks')
-      .select('task_id, start_date')
-      .not('task_id', 'is', null);
+      .select('task_id, section_id, start_date, flag')
+      .or('task_id.not.is.null,section_id.not.is.null');
     if (error) console.error('renderRevenueProjectionReport:', error);
     blockRows = data || [];
   }
 
-  // Earliest start_date per task_id
+  const coverageRows  = blockRows.filter(r => r.flag !== 'reschedule');
+  const rescheduleRows = blockRows.filter(r => r.flag === 'reschedule');
+
+  // Earliest start_date per task_id / section_id, from valid coverage only
   const earliestByTask = {};
-  blockRows.forEach(r => {
-    if (!r.task_id || !r.start_date) return;
-    if (!earliestByTask[r.task_id] || r.start_date < earliestByTask[r.task_id]) {
+  const earliestBySection = {};
+  coverageRows.forEach(r => {
+    if (!r.start_date) return;
+    if (r.task_id && (!earliestByTask[r.task_id] || r.start_date < earliestByTask[r.task_id])) {
       earliestByTask[r.task_id] = r.start_date;
     }
+    if (r.section_id && (!earliestBySection[r.section_id] || r.start_date < earliestBySection[r.section_id])) {
+      earliestBySection[r.section_id] = r.start_date;
+    }
   });
+
+  // Tasks/sections whose ONLY relevant block(s) are reschedule-flagged —
+  // used purely to tag the "Not Yet Scheduled" row, not to place a month.
+  const needsRescheduleTaskIds = new Set(rescheduleRows.filter(r => r.task_id).map(r => r.task_id));
+  const needsRescheduleSectionIds = new Set(rescheduleRows.filter(r => r.section_id).map(r => r.section_id));
 
   const decorated = openTasks.map(t => {
     const proj = projects.find(p => p.id === t.proj) || {};
     const info = projectInfo[t.proj] || {};
-    const sched = earliestByTask[t._id] || null;
+    const sched = earliestByTask[t._id]
+      || (t.sectionId ? earliestBySection[t.sectionId] : null)
+      || null;
+    const needsReschedule = !sched && (
+      needsRescheduleTaskIds.has(t._id) ||
+      (t.sectionId && needsRescheduleSectionIds.has(t.sectionId))
+    );
     return {
       ...t,
       projName: proj.name || '—',
       pm: info.pm || '',
       scheduledDate: sched,
       scheduledMonth: sched ? sched.slice(0,7) : null, // YYYY-MM
+      needsReschedule,
     };
   });
 
@@ -1155,7 +1176,7 @@ async function renderRevenueProjectionReport() {
       <td style="padding:8px 14px;font-size:12.5px;color:var(--text)">
         <span style="color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px">${t.projName}</span>
         ${t.pm ? `<span style="color:var(--muted);font-size:11px"> · ${t.pm}</span>` : ''}
-        <div>${t.name||''}</div>
+        <div>${t.name||''}${t.needsReschedule ? ' <span style="font-size:10.5px;font-weight:600;color:var(--amber);background:rgba(201,168,0,0.12);padding:1px 6px;border-radius:4px;margin-left:4px">&#x21BB; Needs rescheduled</span>' : ''}</div>
       </td>
       <td style="padding:8px 14px;font-size:12px;color:var(--muted);text-align:right">${t.salesCat||'—'}</td>
       <td style="padding:8px 14px;font-size:12px;color:var(--muted);text-align:right">${t.scheduledDate||'—'}</td>

@@ -27,7 +27,7 @@ const scheduleStatusCache = {}; // projId -> {state,start,end} | {state:'loading
 const SCHED_STATE_STYLE = {
   scheduled:     { label: 'Scheduled',     color: '#4caf7d' },
   tentative:     { label: 'Tentative',     color: '#a0a0a0' },
-  rescheduled:   { label: 'Rescheduled',   color: '#c9a800' },
+  rescheduled:   { label: 'Reschedule',    color: '#c9a800' },
   not_scheduled: { label: 'Not Scheduled', color: '#7a7a85' },
   loading:       { label: '\u2026',        color: '#7a7a85' },
 };
@@ -41,28 +41,70 @@ function fmtSchedPillDate(start, end) {
 
 const SCHED_DONE_STATUSES = ['complete','testcomplete','closed','cancelled'];
 
+// A task/section is still "open" (i.e. genuinely represents future/current
+// work) if it hasn't been completed/billed/cancelled. Used both to decide
+// whether a block still counts as active coverage, and — for reschedule-
+// flagged blocks — whether the flag is still relevant to surface at all.
+function _schedTaskOpen(taskId) {
+  const t = (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === taskId);
+  if (!t) return null; // stale/deleted reference — caller decides fallback
+  return !['complete','billed','cancelled'].includes(t.status);
+}
+function _schedSectionHasOpenTasks(sectionId) {
+  return (typeof taskStore !== 'undefined' ? taskStore : [])
+    .some(t => t.sectionId === sectionId && !['complete','billed','cancelled'].includes(t.status));
+}
+
 function computeScheduleStatusFromBlocks(blocks, projStatus) {
   const today = (typeof todayStr === 'function') ? todayStr() : new Date().toISOString().slice(0,10);
   const projDone = SCHED_DONE_STATUSES.includes(projStatus);
-  const active = blocks.filter(b => {
+
+  // Does this block currently represent real, uncompleted coverage?
+  // (Ignores the reschedule flag entirely — that's handled separately below.)
+  const hasOpenCoverage = b => {
     if (b.taskId) {
-      const t = (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === b.taskId);
-      if (t) return !['complete','billed','cancelled'].includes(t.status);
+      const open = _schedTaskOpen(b.taskId);
+      if (open !== null) return open;
       // Linked task not found (deleted/stale reference) — fall back to the
       // block's own end date rather than assuming it's still active.
       return !b.end || b.end >= today;
     }
-    // Project-only block (no task attached) — nothing to check against
-    // except its own dates and the project's own status. If the project
-    // itself is done, a leftover/open-ended block shouldn't count as active.
+    if (b.sectionId) {
+      return _schedSectionHasOpenTasks(b.sectionId);
+    }
+    // Project-only block (no task/section attached) — nothing to check
+    // against except its own dates and the project's own status. If the
+    // project itself is done, a leftover/open-ended block shouldn't count.
     if (projDone) return false;
     return !b.end || b.end >= today;
-  });
-  if (!active.length) return { state: 'not_scheduled' };
-  active.sort((a, b) => (a.start||'').localeCompare(b.start||''));
-  const block = active[0];
-  const state = block.flag === 'reschedule' ? 'rescheduled' : block.flag === 'tentative' ? 'tentative' : 'scheduled';
-  return { state, start: block.start, end: block.end };
+  };
+
+  // Reschedule-flagged blocks never count as valid coverage — that flag
+  // means "this occurrence fell through and needs a new one," not "this is
+  // scheduled." They're evaluated separately below, purely as an informational
+  // marker, only shown when there's no genuinely active coverage.
+  const coverageBlocks = blocks.filter(b => b.flag !== 'reschedule');
+  const active = coverageBlocks.filter(hasOpenCoverage);
+
+  if (active.length) {
+    active.sort((a, b) => (a.start||'').localeCompare(b.start||''));
+    const block = active[0];
+    const state = block.flag === 'tentative' ? 'tentative' : 'scheduled';
+    return { state, start: block.start, end: block.end };
+  }
+
+  // No active coverage — surface the most relevant reschedule-flagged block,
+  // if any, as an informational "needs rescheduled" marker. Its original
+  // dates are kept and shown as-is; they're a record of when it WAS booked,
+  // not a claim that it's currently scheduled.
+  const rescheduleBlocks = blocks.filter(b => b.flag === 'reschedule' && hasOpenCoverage(b));
+  if (rescheduleBlocks.length) {
+    rescheduleBlocks.sort((a, b) => (a.start||'').localeCompare(b.start||''));
+    const block = rescheduleBlocks[0];
+    return { state: 'rescheduled', start: block.start, end: block.end };
+  }
+
+  return { state: 'not_scheduled' };
 }
 
 async function loadScheduleStatus(projId) {
@@ -72,7 +114,7 @@ async function loadScheduleStatus(projId) {
     const { data, error } = await sb.from('schedule_blocks').select('*').eq('proj_id', projId);
     if (error) throw error;
     const blocks = (data || []).map(r => (typeof schedRowToBlock === 'function' ? schedRowToBlock(r) : {
-      start: r.start_date, end: r.end_date, taskId: r.task_id || null, flag: r.flag || null,
+      start: r.start_date, end: r.end_date, taskId: r.task_id || null, sectionId: r.section_id || null, flag: r.flag || null,
     }));
     scheduleStatusCache[projId] = computeScheduleStatusFromBlocks(blocks, (projectInfo[projId]||{}).status);
   } catch(e) {
@@ -99,7 +141,12 @@ function renderSchedulePill(projId) {
   }
   const style = SCHED_STATE_STYLE[entry.state] || SCHED_STATE_STYLE.not_scheduled;
   const dateText = (entry.state !== 'not_scheduled' && entry.state !== 'loading') ? fmtSchedPillDate(entry.start, entry.end) : '';
-  return '<div class="phase-pill" style="background:'+style.color+'22;color:'+style.color+';flex-shrink:0" title="Live status from the Scheduler">'+
+  // Clickable whenever there's an actual date to land on (scheduled/tentative/
+  // reschedule) — jumps straight to that date on the Scheduler page itself,
+  // not into an edit modal.
+  const clickable = !!entry.start && typeof window.schedGoToDateFromPill === 'function';
+  const clickAttr = clickable ? ` onclick="schedGoToDateFromPill('${entry.start}')"` : '';
+  return '<div class="phase-pill"'+clickAttr+' style="background:'+style.color+'22;color:'+style.color+';flex-shrink:0'+(clickable?';cursor:pointer':'')+'" title="'+(clickable?'Go to this on the Scheduler':'Live status from the Scheduler')+'">'+
     style.label + (dateText ? ' \u2014 ' + dateText : '') + '</div>';
 }
 

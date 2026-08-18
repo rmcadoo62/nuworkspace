@@ -1511,8 +1511,12 @@
         <div id="schedProjPreview" style="display:none;margin-top:8px;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;font-size:12px;line-height:1.6;"></div>
       </div>
       <div id="schedTaskSection" style="display:none">
-        <div class="sched-field-label">Task <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — excludes billed &amp; complete)</span></div>
-        <div class="sched-proj-list" id="schedTaskList" style="max-height:160px"></div>
+        <div class="sched-field-label" style="display:flex;align-items:baseline;justify-content:space-between">
+          <span>Task <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--muted)">(optional — excludes billed &amp; complete)</span></span>
+          <span id="schedManageSectionsLink" style="display:none;font-weight:400;text-transform:none;letter-spacing:0;cursor:pointer;color:var(--blue);font-size:11px" onclick="schedGoManageSections()">Manage sections &rarr;</span>
+        </div>
+        <div class="sched-proj-list" id="schedTaskList" style="max-height:220px"></div>
+        <div id="schedDupWarning" style="display:none;margin-top:6px;padding:8px 10px;background:rgba(232,162,52,0.12);border:1px solid var(--amber-dim);border-radius:7px;font-size:12px;line-height:1.5;color:var(--amber)"></div>
       </div>
       <div class="sched-date-row">
         <div class="sched-field">
