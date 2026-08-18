@@ -172,18 +172,20 @@ function _cfAvailableCash(carriedBankBalance, carriedHeld) {
 
 // Sorted entries with TD Bank, Schwab, Held-for-Owners, and AR Outstanding
 // all carried forward (each with its own true "as of" source date), plus
-// the combined total and available-cash figures attached, computed once
-// over the FULL history so a chart zoomed to "1M" still carries forward a
-// reading from outside that window instead of wrongly showing it as
-// missing. Use this (not _cfSorted()) anywhere the UI needs these figures.
+// the combined total, available-cash, and net-flow figures attached,
+// computed once over the FULL history so a chart zoomed to "1M" still
+// carries forward a reading from outside that window instead of wrongly
+// showing it as missing. Use this (not _cfSorted()) anywhere the UI needs
+// these figures.
 function _cfSortedWithTotal() {
   const sorted = _cfSorted();
   const carriedSchwab = _cfCarriedSchwab(sorted);
   const carriedHeld   = _cfCarriedHeldForOwners(sorted);
   const carriedBank   = _cfCarriedWithDate(sorted, 'bankBalance');
   const carriedAr     = _cfCarriedWithDate(sorted, 'arOutstanding');
-  return sorted.map((e, i) => {
+  const withTotals = sorted.map((e, i) => {
     const bankKnown = carriedBank[i].value;
+    const availableCash = _cfAvailableCash(bankKnown, carriedHeld[i]);
     return Object.assign({}, e, {
       carriedSchwab: carriedSchwab[i],
       carriedBankBalance: bankKnown,
@@ -192,20 +194,35 @@ function _cfSortedWithTotal() {
       carriedArAsOf: carriedAr[i].asOfDate,
       totalBalance: _cfTotalBalance(bankKnown, carriedSchwab[i]),
       carriedHeldForOwners: carriedHeld[i],
-      availableCash: _cfAvailableCash(bankKnown, carriedHeld[i]),
+      availableCash,
     });
+  });
+  // Net Cash Flow = day-over-day change in Available Cash, NOT hand-entered
+  // Deposits/Bill Payments. Those two fields sat at $0 for the entire life
+  // of this tracker because nobody actually logged them day to day — and
+  // Bill Payments in particular can't really be tracked that way: a bill
+  // paid by check or wire may not clear TD for days (sometimes weeks) after
+  // it's "paid," so a same-day entry would never match what the bank shows
+  // anyway. Deriving it from the real balance change means it's always
+  // populated and always reflects what actually happened, with no extra
+  // data entry — a rental deposit/distribution swing washes out on its own
+  // since it's already netted out of Available Cash on both sides.
+  let prevAvailable = null;
+  return withTotals.map(e => {
+    const netFlow = (prevAvailable != null && e.availableCash != null) ? (e.availableCash - prevAvailable) : null;
+    if (e.availableCash != null) prevAvailable = e.availableCash;
+    return Object.assign({}, e, { netFlow });
   });
 }
 
-function cfNetFlow(entry) {
-  if (!entry) return 0;
-  return (entry.deposits || 0) - (entry.billPayments || 0);
-}
-
+// Sum of the last 7 rows' day-over-day netFlow values — i.e. the total
+// change in Available Cash across however many calendar days those 7 rows
+// actually span (may be more than 7 calendar days if entries are sparse).
 function cfTrailing7NetFlow() {
-  const sorted = _cfSorted();
+  const sorted = _cfSortedWithTotal();
   const last7 = sorted.slice(-7);
-  return last7.reduce((s, e) => s + cfNetFlow(e), 0);
+  const flows = last7.map(e => e.netFlow).filter(v => v != null);
+  return flows.length ? flows.reduce((s, v) => s + v, 0) : null;
 }
 
 // Sales Invoiced (for DSO) is NOT hand-entered by Linda — Workspace already
@@ -351,7 +368,7 @@ function renderCashFlowPanel() {
 
   const bankBalance   = latest ? latest.carriedBankBalance : null; // TD Bank's most recently known reading — Schwab shown separately, not blended in
   const availableCash  = latest ? latest.availableCash : null;
-  const netToday       = latest ? cfNetFlow(latest) : null;
+  const netToday       = latest ? latest.netFlow : null;
   const netTrailing7   = cashFlowEntries.length ? cfTrailing7NetFlow() : null;
   const arOutstanding  = latest ? latest.carriedArOutstanding : null;
   const dso            = cfDSO();
@@ -366,6 +383,20 @@ function renderCashFlowPanel() {
     : (latest.carriedBankAsOf === latest.entryDate ? 'as of ' + _cfFmtDate(latest.carriedBankAsOf) : 'carried from ' + _cfFmtDate(latest.carriedBankAsOf));
   const arAsOfLabel = !latest || !latest.carriedArAsOf ? ''
     : (latest.carriedArAsOf === latest.entryDate ? 'as of ' + _cfFmtDate(latest.carriedArAsOf) : 'carried from ' + _cfFmtDate(latest.carriedArAsOf));
+
+  // Net Cash Flow — Today is really "change since the previous entry," which
+  // is only literally "today" if that previous entry was the prior calendar
+  // day. When entries are sparse (or someone skipped a few days), say so
+  // honestly rather than implying a same-day comparison.
+  const prevEntry = sorted.length > 1 ? sorted[sorted.length - 2] : null;
+  const netTodayLabel = !latest ? ''
+    : !prevEntry ? 'First entry — nothing to compare yet'
+    : (_cfDaysBetween(prevEntry.entryDate, latest.entryDate) <= 1
+        ? _cfFmtDate(latest.entryDate)
+        : 'since ' + _cfFmtDate(prevEntry.entryDate));
+  const last7 = sorted.slice(-7);
+  const net7RangeLabel = last7.length > 1 ? _cfFmtDate(last7[0].entryDate) + ' – ' + _cfFmtDate(last7[last7.length - 1].entryDate)
+    : (last7.length === 1 ? _cfFmtDate(last7[0].entryDate) : '');
 
   const recent = sorted.slice(-30).reverse(); // most recent first
 
@@ -392,12 +423,13 @@ function renderCashFlowPanel() {
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">Net Cash Flow — Today</div>
         <div class="cf-kpi-value" style="color:${netTodayColor}">${netToday == null ? '—' : (netToday >= 0 ? '+' : '') + fmt$(netToday)}</div>
-        <div class="cf-kpi-sub">${latest ? _cfFmtDate(latest.entryDate) : ''}</div>
+        <div class="cf-kpi-sub">${netTodayLabel}</div>
+        <div class="cf-kpi-sub" style="color:var(--muted)">Change in Available Cash</div>
       </div>
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">Net Cash Flow — Trailing 7</div>
         <div class="cf-kpi-value" style="color:${net7Color}">${netTrailing7 == null ? '—' : (netTrailing7 >= 0 ? '+' : '') + fmt$(netTrailing7)}</div>
-        <div class="cf-kpi-sub">Last ${Math.min(sorted.length, 7)} ${Math.min(sorted.length, 7) === 1 ? 'entry' : 'entries'}</div>
+        <div class="cf-kpi-sub">Last ${Math.min(sorted.length, 7)} ${Math.min(sorted.length, 7) === 1 ? 'entry' : 'entries'}${net7RangeLabel ? ' · ' + net7RangeLabel : ''}</div>
       </div>
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">AR Outstanding</div>
@@ -434,6 +466,7 @@ function renderCashFlowPanel() {
       </div>
       <div class="cf-chart-card">
         <div class="cf-chart-title">💧 Daily Net Cash Flow</div>
+        <div style="font-size:11px;color:var(--muted);margin:-6px 0 10px">Change in Available Cash, entry to entry</div>
         <canvas id="cfNetFlowChart" height="110"></canvas>
       </div>
     </div>
@@ -451,13 +484,13 @@ function renderCashFlowPanel() {
         <table class="cf-table">
           <thead>
             <tr>
-              <th>Date</th><th>TD Bank</th><th>Schwab</th><th>Total Bank Balance</th><th>Held for Owners</th><th>Available Cash</th><th>Deposits</th><th>Bill Payments</th>
+              <th>Date</th><th>TD Bank</th><th>Schwab</th><th>Total Bank Balance</th><th>Held for Owners</th><th>Available Cash</th>
               <th>Net</th><th>AR Outstanding</th><th></th>
             </tr>
           </thead>
           <tbody>
             ${recent.map(e => {
-              const net = cfNetFlow(e);
+              const net = e.netFlow;
               return `<tr>
                 <td>${_cfFmtDate(e.entryDate)}</td>
                 <td title="${e.bankBalance != null ? 'Entered this day' : 'Carried forward — no new reading this day'}">${e.bankBalance != null ? fmt$(e.bankBalance) : (e.carriedBankBalance != null ? fmt$(e.carriedBankBalance) + ' *' : '—')}</td>
@@ -465,9 +498,7 @@ function renderCashFlowPanel() {
                 <td>${fmt$(e.totalBalance)}</td>
                 <td title="${e.heldForOwners != null ? 'Entered this day' : 'Carried forward — no update this day'}">${e.heldForOwners != null ? fmt$(e.heldForOwners) : (e.carriedHeldForOwners != null ? fmt$(e.carriedHeldForOwners) + ' *' : '—')}</td>
                 <td>${fmt$(e.availableCash)}</td>
-                <td>${fmt$(e.deposits)}</td>
-                <td>${fmt$(e.billPayments)}</td>
-                <td style="color:${net >= 0 ? 'var(--green)' : 'var(--red)'}">${(net >= 0 ? '+' : '') + fmt$(net)}</td>
+                <td style="color:${net == null ? 'var(--muted)' : net >= 0 ? 'var(--green)' : 'var(--red)'}">${net == null ? '—' : (net >= 0 ? '+' : '') + fmt$(net)}</td>
                 <td title="${e.arOutstanding != null ? 'Entered this day' : 'Carried forward — no new reading this day'}">${e.arOutstanding != null ? fmt$(e.arOutstanding) : (e.carriedArOutstanding != null ? fmt$(e.carriedArOutstanding) + ' *' : '—')}</td>
                 <td><button class="cf-row-edit-btn" onclick="openCashFlowEntryModal('${e.id}')">Edit</button></td>
               </tr>`;
@@ -525,6 +556,10 @@ function _cfFmtDate(iso) {
   if (!iso) return '—';
   const d = new Date(iso + 'T00:00:00');
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function _cfDaysBetween(isoStart, isoEnd) {
+  return Math.round((new Date(isoEnd + 'T00:00:00') - new Date(isoStart + 'T00:00:00')) / 86400000);
 }
 
 function _cfDrawCharts(sorted) {
@@ -595,12 +630,13 @@ function _cfDrawCharts(sorted) {
   if (netCanv) {
     const existing = Chart.getChart(netCanv);
     if (existing) existing.destroy();
-    const netData = sorted.map(e => cfNetFlow(e));
-    // Floor the axis range at $100 so a stretch of all-$0 entries (e.g. the
-    // backfilled historical weeks, which have no deposit/payment detail)
-    // doesn't leave Chart.js to invent a sub-$1 auto-scaled range — that
-    // produced fractional ticks that rounded to confusing repeated "$1"
-    // labels. Real daily entries with actual movement make this a non-issue.
+    const netData = sorted.map(e => e.netFlow);
+    // Floor the axis range at $100 so a stretch of all-null/near-$0 entries
+    // (e.g. the backfilled historical weeks, which have no day-over-day
+    // comparison point) doesn't leave Chart.js to invent a sub-$1
+    // auto-scaled range — that produced fractional ticks that rounded to
+    // confusing repeated "$1" labels. Real daily entries with actual
+    // movement make this a non-issue.
     const maxAbsNet = Math.max(100, ...netData.map(v => Math.abs(v || 0)));
     new Chart(netCanv, {
       type: 'bar',
@@ -609,14 +645,14 @@ function _cfDrawCharts(sorted) {
         datasets: [{
           label: 'Net Cash Flow',
           data: netData,
-          backgroundColor: netData.map(v => v >= 0 ? 'rgba(76,175,125,0.7)' : 'rgba(224,92,92,0.7)'),
-          borderColor: netData.map(v => v >= 0 ? '#4caf7d' : '#e05c5c'),
+          backgroundColor: netData.map(v => v == null ? 'rgba(150,150,150,0.25)' : v >= 0 ? 'rgba(76,175,125,0.7)' : 'rgba(224,92,92,0.7)'),
+          borderColor: netData.map(v => v == null ? 'rgba(150,150,150,0.5)' : v >= 0 ? '#4caf7d' : '#e05c5c'),
           borderWidth: 1, borderRadius: 4,
         }],
       },
       options: {
         responsive: true,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ' ' + (ctx.parsed.y >= 0 ? '+' : '') + '$' + ctx.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 0 }) } } },
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => ctx.parsed.y == null ? ' No prior entry to compare' : ' ' + (ctx.parsed.y >= 0 ? '+' : '') + '$' + ctx.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 0 }) } } },
         scales: {
           x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(0,0,0,0.08)' } },
           y: {
@@ -699,16 +735,6 @@ function _cfEnsureModal() {
           </div>
           <div class="field-row" style="display:flex;gap:12px;margin-bottom:14px">
             <div class="field" style="flex:1">
-              <label class="field-label">Deposits</label>
-              <input class="f-input" id="cfEntryDeposits" type="number" step="0.01" placeholder="0.00" />
-            </div>
-            <div class="field" style="flex:1">
-              <label class="field-label">Bill Payments</label>
-              <input class="f-input" id="cfEntryBillPayments" type="number" step="0.01" placeholder="0.00" />
-            </div>
-          </div>
-          <div class="field-row" style="display:flex;gap:12px;margin-bottom:14px">
-            <div class="field" style="flex:1">
               <label class="field-label">Held for Rental Owners</label>
               <input class="f-input" id="cfEntryHeldForOwners" type="number" step="0.01" placeholder="Leave blank if unchanged" />
             </div>
@@ -721,7 +747,7 @@ function _cfEnsureModal() {
             <label class="field-label">Notes</label>
             <input class="f-input" id="cfEntryNotes" type="text" placeholder="Optional notes…" autocomplete="off" />
           </div>
-          <div class="cf-modal-note">DSO is calculated automatically from Workspace's billed revenue — no need to enter sales here. Schwab and Held for Rental Owners only need a new number on the days they actually change — leave them blank and the last known value carries forward automatically. Held for Rental Owners is a running total of rental cash sitting in the bank that's already earmarked for owner distributions — raise it when a rental deposit comes in, lower it when the distribution goes out.</div>
+          <div class="cf-modal-note">DSO is calculated automatically from Workspace's billed revenue, and Net Cash Flow is calculated automatically from the change in Available Cash — no need to enter sales, deposits, or bill payments here. Schwab and Held for Rental Owners only need a new number on the days they actually change — leave them blank and the last known value carries forward automatically. Held for Rental Owners is a running total of rental cash sitting in the bank that's already earmarked for owner distributions — raise it when a rental deposit comes in, lower it when the distribution goes out.</div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" id="cfEntryDeleteBtn" onclick="deleteCashFlowEntryFromModal()" style="margin-right:auto;display:none;color:var(--red)">&#x1F5D1; Delete</button>
@@ -748,8 +774,6 @@ function openCashFlowEntryModal(entryId) {
   document.getElementById('cfEntrySchwab').value          = entry && entry.schwabBalance != null ? entry.schwabBalance : '';
   document.getElementById('cfEntryHeldForOwners').value   = entry && entry.heldForOwners != null ? entry.heldForOwners : '';
   document.getElementById('cfEntryAr').value             = entry && entry.arOutstanding != null ? entry.arOutstanding : '';
-  document.getElementById('cfEntryDeposits').value       = entry ? entry.deposits      : '';
-  document.getElementById('cfEntryBillPayments').value   = entry ? entry.billPayments  : '';
   document.getElementById('cfEntryNotes').value           = entry ? entry.notes         : '';
   delBtn.style.display = entry ? '' : 'none';
 
@@ -804,8 +828,8 @@ async function saveCashFlowEntryFromModal() {
     bankBalance:   num('cfEntryBankBalance'),
     schwabBalance, // null = "no new reading" — carried forward, not treated as $0
     heldForOwners, // null = "no change" — carried forward, not treated as $0
-    deposits:      num('cfEntryDeposits') || 0,
-    billPayments:  num('cfEntryBillPayments') || 0,
+    deposits:      0, // no longer hand-entered — Net Cash Flow is derived from the change in Available Cash instead (see _cfSortedWithTotal)
+    billPayments:  0, // same — kept as 0 only because the DB column is NOT NULL; unused by any calculation now
     arOutstanding: num('cfEntryAr'),
     notes:         document.getElementById('cfEntryNotes').value.trim(),
   };
