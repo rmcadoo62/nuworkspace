@@ -449,6 +449,13 @@ function renderTasksPanel(projId) {
     billed:    {dot:'#c084fc', label:'Billed'},
   };
 
+  // Selection mode state (module-scoped, declared near the section-header code below).
+  // If a different project renders while select mode is on (project switch), drop
+  // any stale selection from the previous project rather than silently carrying it.
+  if (_taskSelectMode && _taskSelectProjId !== projId) { _selectedTaskIds.clear(); }
+  _taskSelectProjId = _taskSelectMode ? projId : _taskSelectProjId;
+  const selectMode = _taskSelectMode;
+
   // Build combined ordered list: sections + tasks interleaved by taskNum
   const sections = sectionStore
     .filter(s => s.projId === projId)
@@ -590,13 +597,19 @@ function renderTasksPanel(projId) {
     const _stripeColor = (t.sectionId && sectionColorMap[t.sectionId]) ? sectionColorMap[t.sectionId] : null;
     const _stripeCss   = _stripeColor ? `box-shadow:inset 3px 0 0 0 ${_stripeColor};` : '';
 
+    // ── Selection checkbox (replaces the drag handle while select mode is on) ──
+    const _isSelected = _selectedTaskIds.has(t._id);
+    const _dragOrCheckHtml = selectMode
+      ? `<div class="itt-select-cb-wrap" onclick="event.stopPropagation()"><input type="checkbox" class="itt-select-cb" ${_isSelected?'checked':''} onchange="toggleTaskRowSelect('${t._id}',this.checked,'${projId}')"></div>`
+      : `<div class="itt-drag-handle" onclick="event.stopPropagation()">⠿</div>`;
+
     return `
-      <div class="itt-row" data-task-id="${t._id}" draggable="true" style="${t.status==='billed'?'background:rgba(192,132,252,0.50);border-color:rgba(192,132,252,0.70);':t.status==='cancelled'?'background:rgba(232,162,52,0.50);border-color:rgba(232,162,52,0.70);border-left:3px solid #e8a234;':t.status==='complete'||t.done?'background:rgba(120,120,130,0.50);border-color:rgba(120,120,130,0.70);':t.status==='inprogress'?'background:rgba(46,158,98,0.50);border-color:rgba(46,158,98,0.70);':''}${_stripeCss}"
+      <div class="itt-row${_isSelected?' itt-row-selected':''}" data-task-id="${t._id}" draggable="${selectMode?'false':'true'}" style="${t.status==='billed'?'background:rgba(192,132,252,0.50);border-color:rgba(192,132,252,0.70);':t.status==='cancelled'?'background:rgba(232,162,52,0.50);border-color:rgba(232,162,52,0.70);border-left:3px solid #e8a234;':t.status==='complete'||t.done?'background:rgba(120,120,130,0.50);border-color:rgba(120,120,130,0.70);':t.status==='inprogress'?'background:rgba(46,158,98,0.50);border-color:rgba(46,158,98,0.70);':''}${_stripeCss}"
         ondragstart="taskDragStart(event,'${t._id}')"
         ondragover="taskDragOver(event)"
         ondragleave="taskDragLeave(event)"
         ondrop="taskDrop(event,'${projId}')">
-        <div class="itt-drag-handle" onclick="event.stopPropagation()">⠿</div>
+        ${_dragOrCheckHtml}
         <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);padding-left:2px">${t.taskNum||''}</div>
         <div onclick="event.stopPropagation()">
           <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%" ${canEditTask ? '' : 'disabled'}>${salesOpts}</select>
@@ -647,6 +660,7 @@ function renderTasksPanel(projId) {
         </div>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
+        ${isManager() ? `<button class="btn btn-ghost itt-select-toggle-btn ${selectMode?'active':''}" style="font-size:12.5px;border:1px solid var(--border)" onclick="toggleTaskSelectMode('${projId}')" title="Select multiple tasks to move into a section">${selectMode ? '✕ Cancel Select' : '☑ Select'}</button>` : ''}
         ${isManager() ? `<button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="openAllLogsPanel('${projId}')" title="View all test logs for this job (read-only)">📋 Show all Logs</button>` : ''}
         ${isManager() ? `<button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="addSectionHeader('${projId}')">+ Section</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="openBulkAddModal('${projId}',null)" title="Add multiple tasks at once">+ Bulk</button>` : ''}
       </div>
@@ -677,6 +691,15 @@ function renderTasksPanel(projId) {
       : taskRows}
     </div>
     </div>
+    ${selectMode ? `
+    <div class="itt-select-bar">
+      <span class="itt-select-count"><b>${_selectedTaskIds.size}</b> selected</span>
+      <div class="itt-select-actions">
+        <button class="btn btn-ghost" style="font-size:12px;border:1px solid var(--border)" onclick="clearTaskSelection('${projId}')" ${_selectedTaskIds.size===0?'disabled':''}>Clear</button>
+        <button class="btn btn-primary" style="font-size:12px" ${_selectedTaskIds.size===0?'disabled':''} onclick="openQuickSectionPicker('${projId}')">+ Add to Section</button>
+      </div>
+    </div>
+    ` : ''}
   `;
   setTimeout(ittInitResizers, 0);
 }
@@ -2706,5 +2729,371 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     const ov = document.getElementById('manageSecOverlay');
     if (ov && ov.classList.contains('open')) closeManageSectionModal();
+  }
+});
+
+
+// ===== MULTI-SELECT ROWS → ADD TO SECTION =====
+// ===== MULTI-SELECT ROWS → ADD TO SECTION =====
+// Lets the user toggle a checkbox mode directly on the main task table,
+// check off several tasks, then drop them into an existing section — or
+// a brand-new one typed on the spot — in a single action. This is the
+// fast path for what previously took: create section → open each task's
+// pencil icon → pick the section, one row at a time.
+
+let _taskSelectMode = false;
+let _selectedTaskIds = new Set();
+let _taskSelectProjId = null; // guards against stale selections surviving a project switch
+
+function toggleTaskSelectMode(projId) {
+  if (typeof can === 'function' && !can('edit_tasks')) { toast('Permission denied'); return; }
+  _taskSelectMode = !_taskSelectMode;
+  _selectedTaskIds.clear();
+  _taskSelectProjId = _taskSelectMode ? projId : null;
+  renderTasksPanel(projId);
+}
+
+function toggleTaskRowSelect(taskId, checked, projId) {
+  if (checked) _selectedTaskIds.add(taskId);
+  else _selectedTaskIds.delete(taskId);
+  renderTasksPanel(projId);
+}
+
+function clearTaskSelection(projId) {
+  _selectedTaskIds.clear();
+  renderTasksPanel(projId);
+}
+
+// ── Quick section picker: pick an existing section or type a new one ──────
+let _quickSecContext = { projId: null };
+
+function ensureQuickSectionModal() {
+  if (document.getElementById('quickSecOverlay')) return;
+
+  if (!document.getElementById('quickSecStyles')) {
+    const st = document.createElement('style');
+    st.id = 'quickSecStyles';
+    st.textContent = `
+      .qs-overlay{
+        position:fixed;inset:0;z-index:10100;
+        background:rgba(0,0,0,0.55);
+        display:flex;align-items:center;justify-content:center;
+        opacity:0;pointer-events:none;
+        transition:opacity 0.18s ease;
+      }
+      .qs-overlay.open{opacity:1;pointer-events:auto;}
+      .qs-modal{
+        width:420px;max-width:92vw;max-height:80vh;
+        background:var(--surface);
+        border:1.5px solid var(--border);border-radius:12px;
+        display:flex;flex-direction:column;
+        box-shadow:0 18px 56px rgba(0,0,0,0.45);
+        font-family:'DM Sans',sans-serif;
+      }
+      .qs-header{
+        display:flex;align-items:center;justify-content:space-between;
+        padding:14px 20px;border-bottom:1px solid var(--border);
+      }
+      .qs-title{font-size:15px;font-weight:700;color:var(--text);}
+      .qs-close{
+        background:none;border:none;color:var(--muted);
+        font-size:18px;cursor:pointer;padding:2px 8px;border-radius:4px;
+      }
+      .qs-close:hover{background:var(--surface2);color:var(--text);}
+      .qs-body{padding:14px 20px;flex:1;overflow-y:auto;}
+      .qs-option{
+        display:flex;align-items:center;gap:10px;
+        padding:9px 10px;border-radius:7px;
+        cursor:pointer;border:1px solid transparent;
+        margin-bottom:4px;
+      }
+      .qs-option:hover{background:var(--surface2);}
+      .qs-option.qs-checked{
+        background:rgba(192,122,26,0.10);
+        border-color:rgba(192,122,26,0.30);
+      }
+      .qs-option input[type="radio"]{
+        width:15px;height:15px;cursor:pointer;flex-shrink:0;
+        accent-color:var(--amber,#c07a1a);
+      }
+      .qs-option-name{font-size:13.5px;color:var(--text);flex:1;}
+      .qs-new-row{
+        display:flex;flex-direction:column;gap:8px;
+        padding:9px 10px;border-radius:7px;
+        border:1px dashed var(--border);
+        margin-top:6px;
+      }
+      .qs-new-row.qs-checked{border-color:rgba(192,122,26,0.45);background:rgba(192,122,26,0.06);}
+      .qs-new-toprow{display:flex;align-items:center;gap:10px;}
+      .qs-new-input{
+        width:100%;box-sizing:border-box;
+        padding:7px 10px;
+        font-size:13px;font-family:'DM Sans',sans-serif;
+        border:1.5px solid var(--border);border-radius:6px;
+        background:var(--bg);color:var(--text);outline:none;
+        display:none;
+      }
+      .qs-new-input.show{display:block;}
+      .qs-new-input:focus{border-color:var(--amber,#c07a1a);}
+      .qs-empty{padding:20px 10px;text-align:center;color:var(--muted);font-size:12.5px;}
+      .qs-footer{
+        display:flex;justify-content:flex-end;gap:10px;
+        padding:12px 20px;border-top:1px solid var(--border);
+      }
+    `;
+    document.head.appendChild(st);
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'quickSecOverlay';
+  overlay.className = 'qs-overlay';
+  overlay.innerHTML = `
+    <div class="qs-modal" onclick="event.stopPropagation()">
+      <div class="qs-header">
+        <div class="qs-title" id="quickSecTitle">Add to Section</div>
+        <button class="qs-close" onclick="closeQuickSectionPicker()">✕</button>
+      </div>
+      <div class="qs-body" id="quickSecBody"></div>
+      <div class="qs-footer">
+        <button class="btn btn-ghost" style="border:1px solid var(--border)" onclick="closeQuickSectionPicker()">Cancel</button>
+        <button class="btn btn-primary" id="quickSecApplyBtn" onclick="applyQuickSectionPick()">Add Tasks</button>
+      </div>
+    </div>
+  `;
+  overlay.addEventListener('click', e => { if (e.target === overlay) closeQuickSectionPicker(); });
+  document.body.appendChild(overlay);
+}
+
+function openQuickSectionPicker(projId) {
+  if (_selectedTaskIds.size === 0) { toast('Select at least one task first'); return; }
+  ensureQuickSectionModal();
+  _quickSecContext = { projId };
+
+  const sections = sectionStore.filter(s => s.projId === projId)
+    .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+
+  document.getElementById('quickSecTitle').textContent =
+    `Add ${_selectedTaskIds.size} Task${_selectedTaskIds.size!==1?'s':''} to Section`;
+
+  const existingHtml = sections.map((s,i) => `
+    <label class="qs-option" data-qs-row="${s._id}">
+      <input type="radio" name="qsSectionChoice" value="${s._id}" ${i===0?'checked':''} onchange="updateQuickSecSelection()">
+      <span class="qs-option-name">${s.name}</span>
+    </label>
+  `).join('');
+
+  const body = document.getElementById('quickSecBody');
+  body.innerHTML = `
+    ${sections.length === 0 ? `<div class="qs-empty">No sections yet on this project — create one below.</div>` : existingHtml}
+    <div class="qs-new-row" data-qs-row="__new__">
+      <label class="qs-new-toprow">
+        <input type="radio" name="qsSectionChoice" value="__new__" ${sections.length===0?'checked':''} onchange="updateQuickSecSelection()">
+        <span class="qs-option-name">+ New section</span>
+      </label>
+      <input type="text" id="qsNewSectionName" class="qs-new-input ${sections.length===0?'show':''}" placeholder="Section name" maxlength="80" onkeydown="if(event.key==='Enter'){event.preventDefault();applyQuickSectionPick();}">
+    </div>
+  `;
+
+  updateQuickSecSelection();
+  document.getElementById('quickSecOverlay').classList.add('open');
+  setTimeout(() => {
+    const checked = document.querySelector('input[name="qsSectionChoice"]:checked');
+    if (checked && checked.value === '__new__') document.getElementById('qsNewSectionName')?.focus();
+  }, 100);
+}
+
+function updateQuickSecSelection() {
+  const checked = document.querySelector('input[name="qsSectionChoice"]:checked');
+  document.querySelectorAll('.qs-option, .qs-new-row').forEach(row => row.classList.remove('qs-checked'));
+  if (checked) {
+    document.querySelector(`[data-qs-row="${checked.value}"]`)?.classList.add('qs-checked');
+  }
+  const newInput = document.getElementById('qsNewSectionName');
+  if (newInput) {
+    if (checked && checked.value === '__new__') {
+      newInput.classList.add('show');
+      newInput.focus();
+    } else {
+      newInput.classList.remove('show');
+    }
+  }
+}
+
+function closeQuickSectionPicker() {
+  document.getElementById('quickSecOverlay')?.classList.remove('open');
+}
+
+async function applyQuickSectionPick() {
+  const { projId } = _quickSecContext;
+  if (!projId) return;
+  if (_selectedTaskIds.size === 0) { toast('Select at least one task first'); return; }
+
+  const checked = document.querySelector('input[name="qsSectionChoice"]:checked');
+  if (!checked) { toast('Pick a section'); return; }
+
+  const btn = document.getElementById('quickSecApplyBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; btn.style.cursor = 'wait'; }
+
+  // Everything below is wrapped so the button can NEVER get stuck on
+  // "Adding…" — any thrown/rejected error (network hiccup, RLS denial,
+  // Supabase client throwing instead of returning {error}, etc.) is caught
+  // here and the button is always restored in `finally`.
+  try {
+    let sectionId = checked.value;
+
+    // Create a brand-new section on the fly if that's what was chosen
+    if (sectionId === '__new__') {
+      const name = (document.getElementById('qsNewSectionName')?.value || '').trim();
+      if (!name) {
+        toast('Enter a section name');
+        document.getElementById('qsNewSectionName')?.focus();
+        return;
+      }
+      const maxNum = Math.max(0,
+        ...taskStore.filter(t=>t.proj===projId).map(t=>t.taskNum||0),
+        ...sectionStore.filter(s=>s.projId===projId).map(s=>s.taskNum||0)
+      ) + 1;
+      let newId = 'local-' + Date.now();
+      if (sb) {
+        const { data, error } = await sb.from('task_sections')
+          .insert({ project_id: projId, name, task_num: maxNum, collapsed: false })
+          .select().single();
+        if (error) { console.error('Create section failed:', error); toast('⚠ Could not create section: ' + (error.message || 'unknown error')); return; }
+        if (data) newId = data.id;
+      }
+      sectionStore.push({ _id: newId, projId, name, taskNum: maxNum, collapsed: false });
+      sectionId = newId;
+    }
+
+    await assignSelectedTasksToSection(projId, sectionId);
+
+    closeQuickSectionPicker();
+    _taskSelectMode = false;
+    _selectedTaskIds.clear();
+
+    if (activeProjectId) {
+      renderTasksPanel(activeProjectId);
+      const subInfo = document.getElementById('sub-info');
+      if (subInfo && subInfo.classList.contains('active') && typeof renderInfoTasks === 'function') {
+        renderInfoTasks(activeProjectId, currentTaskFilter);
+      }
+      if (typeof renderProjSummary === 'function') renderProjSummary(activeProjectId);
+    }
+  } catch (e) {
+    console.error('Add to section failed:', e);
+    toast('⚠ Something went wrong adding tasks to the section — check the console and try again');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Add Tasks'; btn.style.cursor = 'pointer'; }
+  }
+}
+
+// Moves every currently-selected task into `sectionId`, reordering task_num so
+// they land at the end of that section's region. Mirrors saveManageSection's
+// reordering algorithm — kept as a separate function so the existing "Move In"
+// modal on each section header is untouched.
+async function assignSelectedTasksToSection(projId, sectionId) {
+  const selectedIds = [..._selectedTaskIds].filter(id => {
+    const t = taskStore.find(x => x._id === id);
+    return t && t.sectionId !== sectionId; // skip tasks already in the target section
+  });
+  if (selectedIds.length === 0) {
+    toast('Selected tasks are already in that section');
+    return;
+  }
+
+  const allItems = [
+    ...taskStore.filter(t => t.proj === projId).map(t => ({ type:'task',    id: t._id, obj: t, num: t.taskNum||0 })),
+    ...sectionStore.filter(s => s.projId === projId).map(s => ({ type:'section', id: s._id, obj: s, num: s.taskNum||0 })),
+  ].sort((a,b) => a.num - b.num);
+
+  const secIdx = allItems.findIndex(x => x.type === 'section' && x.id === sectionId);
+  if (secIdx < 0) { toast('Section not found'); return; }
+  const nextSecIdxOriginal = allItems.findIndex((x,i) => i > secIdx && x.type === 'section');
+  const nextSecId = nextSecIdxOriginal >= 0 ? allItems[nextSecIdxOriginal].id : null;
+
+  const selSet = new Set(selectedIds);
+  const movedItems = [];
+  const remaining = [];
+  allItems.forEach(x => {
+    if (x.type === 'task' && selSet.has(x.id)) movedItems.push(x);
+    else remaining.push(x);
+  });
+
+  let insertAt;
+  if (nextSecId) {
+    insertAt = remaining.findIndex(x => x.type === 'section' && x.id === nextSecId);
+    if (insertAt < 0) insertAt = remaining.length;
+  } else {
+    insertAt = remaining.length;
+  }
+
+  const newOrder = [
+    ...remaining.slice(0, insertAt),
+    ...movedItems,
+    ...remaining.slice(insertAt),
+  ];
+
+  const taskUpdates = [];
+  const sectionUpdates = [];
+  newOrder.forEach((x, i) => {
+    const newNum = i + 1;
+    const oldNum = x.obj.taskNum || 0;
+    if (x.type === 'task') {
+      const isMoved = selSet.has(x.id);
+      if (newNum !== oldNum || isMoved) {
+        x.obj.taskNum = newNum;
+        if (isMoved) x.obj.sectionId = sectionId;
+        const update = { id: x.id, task_num: newNum };
+        if (isMoved) update.section_id = sectionId;
+        taskUpdates.push(update);
+      }
+    } else {
+      if (newNum !== oldNum) {
+        x.obj.taskNum = newNum;
+        sectionUpdates.push({ id: x.id, task_num: newNum });
+      }
+    }
+  });
+
+  if (sb) {
+    try {
+      const updates = [
+        ...taskUpdates.map(u => {
+          const patch = { task_num: u.task_num };
+          if ('section_id' in u) patch.section_id = u.section_id;
+          return sb.from('tasks').update(patch).eq('id', u.id);
+        }),
+        ...sectionUpdates.map(u => sb.from('task_sections').update({ task_num: u.task_num }).eq('id', u.id)),
+      ];
+      const results = await Promise.all(updates);
+      const failed = results.filter(r => r && r.error);
+      if (failed.length > 0) {
+        console.error('Quick-add-to-section errors:', failed);
+        toast(`⚠ ${failed.length} update${failed.length!==1?'s':''} failed — refresh to verify`);
+      }
+    } catch (e) {
+      console.error('Quick-add-to-section failed:', e);
+      toast('⚠ Move failed — please refresh');
+      return;
+    }
+  }
+
+  const _proj = projects.find(p => p.id === projId);
+  const _sec  = sectionStore.find(s => s._id === sectionId);
+  if (typeof logActivity === 'function') {
+    logActivity('tasks', sectionId, _sec?.name || 'section',
+      `Added ${selectedIds.length} task${selectedIds.length!==1?'s':''} to "${_sec?.name||''}"` + (_proj ? ' on ' + _proj.name : ''));
+  }
+
+  if (window._projTaskNums) delete window._projTaskNums[projId];
+
+  toast(`✓ Added ${selectedIds.length} task${selectedIds.length!==1?'s':''} to ${_sec?.name||'section'}`);
+}
+
+// Esc-to-close handler for the quick section picker
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const ov = document.getElementById('quickSecOverlay');
+    if (ov && ov.classList.contains('open')) closeQuickSectionPicker();
   }
 });
