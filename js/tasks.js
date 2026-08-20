@@ -833,9 +833,14 @@ function inlineEditBudgetHours(taskId, projId) {
   if (!t) return;
   const row = document.querySelector(`.itt-row[data-task-id="${taskId}"]`);
   if (!row) return;
-  // Find the budget hours cell (7th child after check)
+  // Find the budget hours cell. Row children are: drag/check(0),num(1),
+  // salesCat(2),name(3),status(4),quote(5),po(6),price(7),created(8),
+  // loggedHrs(9),budgetHrs(10),assignee(11),start(12),completed(13),billed(14),actions(15).
+  // (Matches the fieldIdx map in inlineEditTaskDate below: start=12/completed=13/billed=14 —
+  // the old index-11 here was off by one because it double-counted the drag-handle and the
+  // select-checkbox as two separate leading cells when the row only ever renders one of them.)
   const cells = [...row.children];
-  const cell = cells[11]; // budget hours cell (index 11: drag,num,check,cat,name,status,quote,po,price,created,loggedHrs,budgetHrs)
+  const cell = cells[10]; // budget hours cell
   if (!cell) return;
   const orig = t.budgetHours || 0;
   cell.innerHTML = `<input class="inline-edit-input" type="text" inputmode="decimal" value="${orig||''}" placeholder="0" style="font-family:'JetBrains Mono',monospace;width:50px" />`;
