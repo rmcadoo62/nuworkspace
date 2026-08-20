@@ -730,22 +730,20 @@ function renderTimesheet() {
       ${fmtDay(d)}<span class="day-num">${d.getDate()}</span>
     </th>`).join('');
 
-  // Build proxy employee bar (for approvers + engineers entering on behalf)
-  // Approvers see their own paper-TS reports. Engineers see all paper-TS employees
-  // (Scott is the only one currently — he consults on Robert Hoff's timesheet before
-  // submission). Non-approvers who aren't engineers see nothing.
-  const _role = (currentEmployee?.role || '').toLowerCase();
-  const isEngineer = _role.includes('engineer');
-  const paperEmps = employees.filter(e => {
+  // Build proxy employee bar (for approvers entering paper timesheets on behalf
+  // of a direct report). Strictly scoped to the current user's own reports —
+  // no cross-department bypass. (This used to also grant a role-name-matched
+  // "engineer" bypass that showed every paper-TS employee company-wide,
+  // regardless of who their real approver was — that's how Ballantine's
+  // paper-TS staff, who report to Linda, ended up visible to Scott. Removed;
+  // see openMyTeamAuditModal() in timesheet.js for the read-only visibility
+  // approvers actually need into their own reports.)
+  const paperEmps = isApprover ? employees.filter(e => {
     if (!currentEmployee) return false;
     if (e.id === currentEmployee.id) return false;
-    const isPaper = e.isPaperTs === true || e.isPaperTs === 1 || e.is_paper_ts === true;
-    if (!isPaper) return false;
-    // Approver sees only their own reports; engineer sees all paper-TS employees.
-    if (isApprover && e.approverId === currentEmployee.id) return true;
-    if (isEngineer) return true;
-    return false;
-  });
+    if (e.approverId !== currentEmployee.id) return false;
+    return e.isPaperTs === true || e.isPaperTs === 1 || e.is_paper_ts === true;
+  }) : [];
   const showProxy = paperEmps.length > 0;
   const proxyBar = showProxy ?
     '<div class="ts-proxy-bar">'+
