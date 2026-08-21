@@ -303,6 +303,8 @@ let schedSelectedCat    = null;
 let schedSelectedProjId = null;
 let schedSelectedTaskId = null;
 let schedSelectedSectionId = null;
+let schedSelectedTaskIds = [];   // multi-select: hand-picked subset of tasks (e.g. Shock-only tasks within a bigger section)
+let schedMultiSelectMode = false;
 let schedFlag           = null;   // null | 'reschedule' | 'tentative'
 let schedShowRooms      = true;   // toggle rooms section
 let schedShowEmps       = true;   // toggle employees section
@@ -338,6 +340,7 @@ function schedRowToBlock(r) {
     projId:       r.proj_id         || null,
     taskId:       r.task_id         || null,
     sectionId:    r.section_id      || null,
+    taskIds:      r.task_ids        || null,
     empId:        r.emp_id          || null,
     empEventType: r.emp_event_type  || null,
     flag:         r.flag            || null,
@@ -356,6 +359,7 @@ function blockToRow(b) {
     proj_id:        b.projId        || null,
     task_id:        b.taskId        || null,
     section_id:     b.sectionId     || null,
+    task_ids:       (b.taskIds && b.taskIds.length) ? b.taskIds : null,
     emp_id:         b.empId         || null,
     emp_event_type: b.empEventType  || null,
     flag:           b.flag          || null,
@@ -1256,6 +1260,7 @@ function renderSchedStats() {
   );
   const coveredBlocks = schedBlocks.filter(b => b.flag !== 'reschedule');
   const scheduledTaskIds = new Set(coveredBlocks.filter(b => b.taskId).map(b => b.taskId));
+  coveredBlocks.filter(b => b.taskIds && b.taskIds.length).forEach(b => b.taskIds.forEach(tid => scheduledTaskIds.add(tid)));
   const scheduledSectionIds = new Set(coveredBlocks.filter(b => b.sectionId).map(b => b.sectionId));
   const unscheduledValue = (typeof taskStore !== 'undefined' ? taskStore : [])
     .filter(t => (t.status === 'new' || t.status === 'inprogress'))
@@ -1915,6 +1920,8 @@ window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) 
   _schedProjDDOpen = false;
   schedSelectedTaskId = null;
   schedSelectedSectionId = null;
+  schedSelectedTaskIds = [];
+  schedMultiSelectMode = false;
   schedFlag = null;
   updateFlagUI();
   const empPicker = document.getElementById('schedEmpPicker');
@@ -1937,6 +1944,8 @@ window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) 
       document.getElementById('schedLabel').value     = blk.label || '';
       schedSelectedTaskId = blk.taskId || null;
       schedSelectedSectionId = blk.sectionId || null;
+      schedSelectedTaskIds = (blk.taskIds && blk.taskIds.length) ? blk.taskIds.slice() : [];
+      schedMultiSelectMode = schedSelectedTaskIds.length > 0;
       schedFlag = blk.flag || null;
       updateFlagUI();
       // Restore type/employee
@@ -2062,6 +2071,8 @@ window.selectSchedLinkedProj = function(projId) {
   schedSelectedProjId = projId;
   schedSelectedTaskId = null;  // reset task when project changes
   schedSelectedSectionId = null;
+  schedSelectedTaskIds = [];
+  schedMultiSelectMode = false;
   const pi = getProjInfo(projId);
   if (pi) document.getElementById('schedProjSearch').value = (pi.proj.emoji||'') + ' ' + pi.proj.name;
   const dd = document.getElementById('schedProjDD');
@@ -2079,6 +2090,8 @@ window.clearSchedLinkedProj = function() {
   schedSelectedProjId = null;
   schedSelectedTaskId = null;
   schedSelectedSectionId = null;
+  schedSelectedTaskIds = [];
+  schedMultiSelectMode = false;
   document.getElementById('schedProjSearch').value = '';
   document.getElementById('schedProjPreview').style.display = 'none';
   document.getElementById('schedTaskSection').style.display = 'none';
@@ -2159,18 +2172,33 @@ function renderSchedTaskList(projId) {
   const mgmtLink = document.getElementById('schedManageSectionsLink');
   if (mgmtLink) mgmtLink.style.display = '';
 
+  // Multi-select toggle — lives at the top of the picker, right under the
+  // "Task" label. Off by default (today's single-task/section behavior,
+  // used by most jobs); on, task clicks become checkboxes that accumulate
+  // into schedSelectedTaskIds instead of picking one thing.
+  const multiToggleHtml = `<div style="display:flex;align-items:center;justify-content:flex-end;gap:6px;margin-bottom:6px;">
+    <span style="font-size:11px;color:var(--muted);cursor:pointer;user-select:none;" onclick="toggleSchedMultiSelect('${projId}')">
+      <span style="display:inline-block;width:28px;height:15px;border-radius:8px;background:${schedMultiSelectMode?'var(--amber)':'var(--border)'};position:relative;vertical-align:middle;margin-right:5px;transition:background .12s;">
+        <span style="display:block;width:11px;height:11px;border-radius:50%;background:#fff;position:absolute;top:2px;left:${schedMultiSelectMode?'15px':'2px'};transition:left .12s;"></span>
+      </span>Select multiple tasks
+    </span>
+  </div>`;
+
   if (tasks.length === 0) {
     section.style.display = 'block';
-    listEl.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--muted)">No active tasks for this project</div>';
+    listEl.innerHTML = multiToggleHtml + '<div style="padding:10px 12px;font-size:12px;color:var(--muted)">No active tasks for this project</div>';
     return;
   }
   section.style.display = 'block';
 
   const taskRowHtml = t => {
-    const sel    = t._id === schedSelectedTaskId;
+    const sel    = schedMultiSelectMode ? schedSelectedTaskIds.includes(t._id) : (t._id === schedSelectedTaskId);
     const stLbl  = STATUS_LABELS[t.status] || t.status || 'New';
     const stClr  = STATUS_COLORS[t.status] || '#888';
     const lineNo = t.taskNum ? `#${t.taskNum}` : '—';
+    const checkGlyph = schedMultiSelectMode
+      ? `<div class="sched-proj-opt-check" style="display:${sel?'block':'none'}">${sel?'&#x2611;':'&#x2610;'}</div>`
+      : `<div class="sched-proj-opt-check">&#x2713;</div>`;
     return `<div class="sched-proj-opt${sel?' selected':''}" onclick="selectSchedTask('${t._id}')">
       <div style="display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;">
         <div style="display:flex;align-items:center;gap:6px;">
@@ -2181,7 +2209,7 @@ function renderSchedTaskList(projId) {
           <span style="font-size:10px;font-weight:600;color:${stClr};background:${stClr}18;padding:1px 6px;border-radius:4px;">${stLbl}</span>
         </div>
       </div>
-      <div class="sched-proj-opt-check">&#x2713;</div>
+      ${checkGlyph}
     </div>`;
   };
 
@@ -2193,7 +2221,7 @@ function renderSchedTaskList(projId) {
     .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
 
   if (sections.length === 0) {
-    listEl.innerHTML = tasks.map(taskRowHtml).join('');
+    listEl.innerHTML = multiToggleHtml + tasks.slice().sort((a,b) => (a.taskNum||0) - (b.taskNum||0)).map(taskRowHtml).join('');
     renderSchedDupWarning(projId);
     return;
   }
@@ -2211,19 +2239,28 @@ function renderSchedTaskList(projId) {
       unsectioned.push(t);
     }
   });
+  // Match the Tasks tab's ordering — within each group, sort by task number.
+  // taskStore isn't guaranteed to come back in taskNum order, so without this
+  // a section's tasks render in whatever order they happened to load in.
+  bySec.forEach(arr => arr.sort((a,b) => (a.taskNum||0) - (b.taskNum||0)));
+  unsectioned.sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
 
-  let html = '';
+  let html = multiToggleHtml;
   sections.forEach(s => {
     const members = bySec.get(s._id) || [];
     if (!members.length) return; // no open tasks in this section — nothing to schedule
-    const sel = s._id === schedSelectedSectionId;
+    const sel = !schedMultiSelectMode && s._id === schedSelectedSectionId;
     const collapsed = schedPickerCollapsed.has(s._id);
     const stripe = secColor[s._id] || 'transparent';
-    html += `<div class="sched-sec-header${sel?' selected':''}" style="box-shadow: inset 3px 0 0 0 ${stripe};" onclick="selectSchedSection('${s._id}','${projId}')">
+    // In multi-select mode, a section header only collapses/expands — "pick
+    // the whole section in one click" doesn't apply once you're hand-picking
+    // individual tasks, so its click handler and checkmark are dropped.
+    const headerClick = schedMultiSelectMode ? '' : ` onclick="selectSchedSection('${s._id}','${projId}')"`;
+    html += `<div class="sched-sec-header${sel?' selected':''}" style="box-shadow: inset 3px 0 0 0 ${stripe};${schedMultiSelectMode?'cursor:default;':''}"${headerClick}>
       <span class="sched-sec-chevron${collapsed?'':' open'}" onclick="toggleSchedSecCollapse(event,'${s._id}','${projId}')">&#x25B6;</span>
       <span class="sched-sec-name">${s.name}</span>
       <span class="sched-sec-count">${members.length} task${members.length!==1?'s':''}</span>
-      <div class="sched-proj-opt-check" style="display:${sel?'block':'none'}">&#x2713;</div>
+      ${schedMultiSelectMode ? '' : `<div class="sched-proj-opt-check" style="display:${sel?'block':'none'}">&#x2713;</div>`}
     </div>`;
     if (!collapsed) {
       html += `<div class="sched-sec-tasks">${members.map(taskRowHtml).join('')}</div>`;
@@ -2237,6 +2274,24 @@ function renderSchedTaskList(projId) {
   renderSchedDupWarning(projId);
 }
 
+window.toggleSchedMultiSelect = function(projId) {
+  schedMultiSelectMode = !schedMultiSelectMode;
+  if (schedMultiSelectMode) {
+    // Entering multi mode: carry a single already-picked task over as the
+    // starting point of the set, rather than losing the selection.
+    schedSelectedTaskIds = schedSelectedTaskId ? [schedSelectedTaskId] : [];
+    schedSelectedTaskId = null;
+    schedSelectedSectionId = null;
+  } else {
+    // Leaving multi mode: collapse back to a single selection (the first
+    // pick) rather than silently discarding the rest — Scott can re-enter
+    // multi mode if he actually meant to keep several.
+    schedSelectedTaskId = schedSelectedTaskIds[0] || null;
+    schedSelectedTaskIds = [];
+  }
+  renderSchedTaskList(projId);
+};
+
 window.toggleSchedSecCollapse = function(ev, sectionId, projId) {
   ev.stopPropagation();
   if (schedPickerCollapsed.has(sectionId)) schedPickerCollapsed.delete(sectionId);
@@ -2245,8 +2300,14 @@ window.toggleSchedSecCollapse = function(ev, sectionId, projId) {
 };
 
 window.selectSchedTask = function(taskId) {
-  schedSelectedTaskId = schedSelectedTaskId === taskId ? null : taskId; // toggle
-  schedSelectedSectionId = null; // task and section picks are mutually exclusive
+  if (schedMultiSelectMode) {
+    const idx = schedSelectedTaskIds.indexOf(taskId);
+    if (idx >= 0) schedSelectedTaskIds.splice(idx, 1);
+    else schedSelectedTaskIds.push(taskId);
+  } else {
+    schedSelectedTaskId = schedSelectedTaskId === taskId ? null : taskId; // toggle
+    schedSelectedSectionId = null; // task and section picks are mutually exclusive
+  }
   if (schedSelectedProjId) renderSchedTaskList(schedSelectedProjId);
 };
 
@@ -2276,8 +2337,20 @@ function renderSchedDupWarning(projId) {
   if (!warnEl) return;
   const editId = document.getElementById('schedEditId').value;
   let dupe = null;
-  if (schedSelectedTaskId) {
-    dupe = schedBlocks.find(b => b.id !== editId && b.flag !== 'reschedule' && b.taskId === schedSelectedTaskId);
+  if (schedMultiSelectMode && schedSelectedTaskIds.length) {
+    dupe = schedBlocks.find(b =>
+      b.id !== editId && b.flag !== 'reschedule' && (
+        (b.taskId && schedSelectedTaskIds.includes(b.taskId)) ||
+        (b.taskIds && b.taskIds.some(tid => schedSelectedTaskIds.includes(tid)))
+      )
+    );
+  } else if (schedSelectedTaskId) {
+    dupe = schedBlocks.find(b =>
+      b.id !== editId && b.flag !== 'reschedule' && (
+        b.taskId === schedSelectedTaskId ||
+        (b.taskIds && b.taskIds.includes(schedSelectedTaskId))
+      )
+    );
   } else if (schedSelectedSectionId) {
     dupe = schedBlocks.find(b => b.id !== editId && b.flag !== 'reschedule' && b.sectionId === schedSelectedSectionId);
   }
@@ -2383,6 +2456,7 @@ function _doSaveSchedBlock() {
       schedBlocks[idx].projId    = schedSelectedProjId || null;
       schedBlocks[idx].taskId    = schedSelectedTaskId  || null;
       schedBlocks[idx].sectionId = schedSelectedSectionId || null;
+      schedBlocks[idx].taskIds   = schedSelectedTaskIds.length ? schedSelectedTaskIds.slice() : null;
       schedBlocks[idx].flag      = _effectiveFlag        || null;
     }
   } else {
@@ -2398,6 +2472,7 @@ function _doSaveSchedBlock() {
       label: lbl, projId: schedSelectedProjId || null,
       taskId: schedSelectedTaskId || null,
       sectionId: schedSelectedSectionId || null,
+      taskIds: schedSelectedTaskIds.length ? schedSelectedTaskIds.slice() : null,
       flag:   _effectiveFlag      || null
     });
   }

@@ -1104,8 +1104,8 @@ async function renderRevenueProjectionReport() {
   let blockRows = [];
   if (sb) {
     const { data, error } = await sb.from('schedule_blocks')
-      .select('task_id, section_id, start_date, flag')
-      .or('task_id.not.is.null,section_id.not.is.null');
+      .select('task_id, section_id, task_ids, start_date, flag')
+      .or('task_id.not.is.null,section_id.not.is.null,task_ids.not.is.null');
     if (error) console.error('renderRevenueProjectionReport:', error);
     blockRows = data || [];
   }
@@ -1113,7 +1113,9 @@ async function renderRevenueProjectionReport() {
   const coverageRows  = blockRows.filter(r => r.flag !== 'reschedule');
   const rescheduleRows = blockRows.filter(r => r.flag === 'reschedule');
 
-  // Earliest start_date per task_id / section_id, from valid coverage only
+  // Earliest start_date per task_id / section_id, from valid coverage only.
+  // A multi-task block (task_ids) contributes its date to every task in the
+  // array, same as a single task_id block contributes to just the one.
   const earliestByTask = {};
   const earliestBySection = {};
   coverageRows.forEach(r => {
@@ -1124,12 +1126,18 @@ async function renderRevenueProjectionReport() {
     if (r.section_id && (!earliestBySection[r.section_id] || r.start_date < earliestBySection[r.section_id])) {
       earliestBySection[r.section_id] = r.start_date;
     }
+    if (r.task_ids && r.task_ids.length) {
+      r.task_ids.forEach(tid => {
+        if (!earliestByTask[tid] || r.start_date < earliestByTask[tid]) earliestByTask[tid] = r.start_date;
+      });
+    }
   });
 
   // Tasks/sections whose ONLY relevant block(s) are reschedule-flagged —
   // used purely to tag the "Not Yet Scheduled" row, not to place a month.
   const needsRescheduleTaskIds = new Set(rescheduleRows.filter(r => r.task_id).map(r => r.task_id));
   const needsRescheduleSectionIds = new Set(rescheduleRows.filter(r => r.section_id).map(r => r.section_id));
+  rescheduleRows.filter(r => r.task_ids && r.task_ids.length).forEach(r => r.task_ids.forEach(tid => needsRescheduleTaskIds.add(tid)));
 
   const decorated = openTasks.map(t => {
     const proj = projects.find(p => p.id === t.proj) || {};

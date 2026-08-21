@@ -62,6 +62,13 @@ function computeScheduleStatusFromBlocks(blocks, projStatus) {
   // Does this block currently represent real, uncompleted coverage?
   // (Ignores the reschedule flag entirely — that's handled separately below.)
   const hasOpenCoverage = b => {
+    if (b.taskIds && b.taskIds.length) {
+      // Multi-task block — active if ANY of its hand-picked tasks is still open.
+      return b.taskIds.some(tid => {
+        const open = _schedTaskOpen(tid);
+        return open === null ? true : open; // stale ref: don't let one bad id sink the whole block
+      });
+    }
     if (b.taskId) {
       const open = _schedTaskOpen(b.taskId);
       if (open !== null) return open;
@@ -114,7 +121,7 @@ async function loadScheduleStatus(projId) {
     const { data, error } = await sb.from('schedule_blocks').select('*').eq('proj_id', projId);
     if (error) throw error;
     const blocks = (data || []).map(r => (typeof schedRowToBlock === 'function' ? schedRowToBlock(r) : {
-      start: r.start_date, end: r.end_date, taskId: r.task_id || null, sectionId: r.section_id || null, flag: r.flag || null,
+      start: r.start_date, end: r.end_date, taskId: r.task_id || null, sectionId: r.section_id || null, taskIds: r.task_ids || null, flag: r.flag || null,
     }));
     scheduleStatusCache[projId] = computeScheduleStatusFromBlocks(blocks, (projectInfo[projId]||{}).status);
   } catch(e) {
