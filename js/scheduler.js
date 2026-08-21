@@ -2191,11 +2191,52 @@ function renderSchedTaskList(projId) {
   }
   section.style.display = 'block';
 
+  // Tasks already covered by a DIFFERENT active block (single-task, multi-task,
+  // or via a section) shouldn't be offered again — that's what caused Scott to
+  // keep seeing task 1 in the picker after it was already scheduled. Reschedule-
+  // flagged blocks don't count as coverage here either, same rule as everywhere
+  // else: that flag means "needs a new one," so the task should still be pickable.
+  const editId = document.getElementById('schedEditId').value;
+  const coverageByTask = {};
+  schedBlocks
+    .filter(b => b.id !== editId && b.flag !== 'reschedule')
+    .forEach(b => {
+      if (b.taskId && !coverageByTask[b.taskId]) coverageByTask[b.taskId] = { date: b.start, blockId: b.id };
+      if (b.taskIds) b.taskIds.forEach(tid => { if (!coverageByTask[tid]) coverageByTask[tid] = { date: b.start, blockId: b.id }; });
+      if (b.sectionId) {
+        tasks.filter(t => t.sectionId === b.sectionId).forEach(t => {
+          if (!coverageByTask[t._id]) coverageByTask[t._id] = { date: b.start, blockId: b.id };
+        });
+      }
+    });
+  const schedShortDate = dateStr => {
+    if (!dateStr) return '';
+    const [y,m,d] = dateStr.split('-').map(Number);
+    return new Date(y, m-1, d).toLocaleString('default', { month: 'short', day: 'numeric' });
+  };
+
   const taskRowHtml = t => {
-    const sel    = schedMultiSelectMode ? schedSelectedTaskIds.includes(t._id) : (t._id === schedSelectedTaskId);
+    const covered = coverageByTask[t._id];
     const stLbl  = STATUS_LABELS[t.status] || t.status || 'New';
     const stClr  = STATUS_COLORS[t.status] || '#888';
     const lineNo = t.taskNum ? `#${t.taskNum}` : '—';
+
+    if (covered) {
+      return `<div class="sched-proj-opt" style="opacity:0.55;cursor:not-allowed" title="Already scheduled — ${schedShortDate(covered.date)}">
+        <div style="display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;">
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);flex-shrink:0">${lineNo}</span>
+            <span style="font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${t.name}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:4px;padding-left:2px;">
+            <span style="font-size:10px;font-weight:600;color:${stClr};background:${stClr}18;padding:1px 6px;border-radius:4px;">${stLbl}</span>
+          </div>
+        </div>
+        <span style="font-size:10px;font-weight:600;color:var(--blue);background:rgba(55,138,221,0.14);padding:2px 8px;border-radius:4px;white-space:nowrap;flex-shrink:0;">${schedShortDate(covered.date)}</span>
+      </div>`;
+    }
+
+    const sel    = schedMultiSelectMode ? schedSelectedTaskIds.includes(t._id) : (t._id === schedSelectedTaskId);
     const checkGlyph = schedMultiSelectMode
       ? `<div class="sched-proj-opt-check" style="display:${sel?'block':'none'}">${sel?'&#x2611;':'&#x2610;'}</div>`
       : `<div class="sched-proj-opt-check">&#x2713;</div>`;
@@ -2212,6 +2253,7 @@ function renderSchedTaskList(projId) {
       ${checkGlyph}
     </div>`;
   };
+
 
   // Group by section, same strict-membership rule as the Tasks tab: a task
   // only belongs under a section if sectionId points to a real section for
