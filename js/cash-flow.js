@@ -374,17 +374,35 @@ function _cfBallantineSortedWithCarry() {
   const sorted = _cfBallantineSorted();
   const carriedBank = _cfCarriedWithDate(sorted, 'bankBalance');
   const carriedAr   = _cfCarriedWithDate(sorted, 'arOutstanding');
-  return sorted.map((e, i) => Object.assign({}, e, {
+  const withCarry = sorted.map((e, i) => Object.assign({}, e, {
     carriedBankBalance: carriedBank[i].value,
     carriedBankAsOf: carriedBank[i].asOfDate,
     carriedArOutstanding: carriedAr[i].value,
     carriedArAsOf: carriedAr[i].asOfDate,
   }));
+  // Same idea as NULabs' Net Cash Flow — day-over-day change in Bank
+  // Balance, since there's no separate Available Cash concept here (no
+  // Schwab, no Held for Owners to net out for Ballantine).
+  let prevBank = null;
+  return withCarry.map(e => {
+    const netFlow = (prevBank != null && e.carriedBankBalance != null) ? (e.carriedBankBalance - prevBank) : null;
+    if (e.carriedBankBalance != null) prevBank = e.carriedBankBalance;
+    return Object.assign({}, e, { netFlow });
+  });
 }
 
 function ballantineLatest() {
   const sorted = _cfBallantineSortedWithCarry();
   return sorted.length ? sorted[sorted.length - 1] : null;
+}
+
+// Same idea as cfTrailing7NetFlow() for NULabs — sum of the last 7 rows'
+// day-over-day netFlow (Bank Balance change) values.
+function cfBallantineTrailing7NetFlow() {
+  const sorted = _cfBallantineSortedWithCarry();
+  const last7 = sorted.slice(-7);
+  const flows = last7.map(e => e.netFlow).filter(v => v != null);
+  return flows.length ? flows.reduce((s, v) => s + v, 0) : null;
 }
 
 // ── Multi Company combined total ────────────────────────────────────────
@@ -690,14 +708,43 @@ function _cfRenderBallantineSection(fmt$) {
   const arAsOfLabel = !latest || !latest.carriedArAsOf ? 'No entries yet'
     : (latest.carriedArAsOf === latest.entryDate ? 'as of ' + _cfFmtDate(latest.carriedArAsOf) : 'carried from ' + _cfFmtDate(latest.carriedArAsOf));
 
+  // Same Net Cash Flow — Today / Trailing 7 pills as NULabs, just driven by
+  // Bank Balance change instead of Available Cash (Ballantine has no Held
+  // for Owners/Schwab concept to net out).
+  const netToday      = latest ? latest.netFlow : null;
+  const netTrailing7  = ballantineEntries.length ? cfBallantineTrailing7NetFlow() : null;
+  const netTodayColor = netToday     == null ? 'var(--muted)' : netToday     >= 0 ? 'var(--green)' : 'var(--red)';
+  const net7Color     = netTrailing7 == null ? 'var(--muted)' : netTrailing7 >= 0 ? 'var(--green)' : 'var(--red)';
+
+  const prevEntry = sorted.length > 1 ? sorted[sorted.length - 2] : null;
+  const netTodayLabel = !latest ? ''
+    : !prevEntry ? 'First entry — nothing to compare yet'
+    : (_cfDaysBetween(prevEntry.entryDate, latest.entryDate) <= 1
+        ? _cfFmtDate(latest.entryDate)
+        : 'since ' + _cfFmtDate(prevEntry.entryDate));
+  const last7 = sorted.slice(-7);
+  const net7RangeLabel = last7.length > 1 ? _cfFmtDate(last7[0].entryDate) + ' – ' + _cfFmtDate(last7[last7.length - 1].entryDate)
+    : (last7.length === 1 ? _cfFmtDate(last7[0].entryDate) : '');
+
   const recent = sorted.slice(-30).reverse();
 
   return `
-    <div class="cf-kpi-row" style="grid-template-columns:repeat(2,minmax(0,1fr));max-width:600px">
+    <div class="cf-kpi-row" style="grid-template-columns:repeat(4,minmax(0,1fr));max-width:1100px">
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">Bank Balance</div>
         <div class="cf-kpi-value">${fmt$(latest ? latest.carriedBankBalance : null)}</div>
         <div class="cf-kpi-sub">${bankAsOfLabel}</div>
+      </div>
+      <div class="cf-kpi-card">
+        <div class="cf-kpi-label">Net Cash Flow — Today</div>
+        <div class="cf-kpi-value" style="color:${netTodayColor}">${netToday == null ? '—' : (netToday >= 0 ? '+' : '') + fmt$(netToday)}</div>
+        <div class="cf-kpi-sub">${netTodayLabel}</div>
+        <div class="cf-kpi-sub" style="color:var(--muted)">Change in Bank Balance</div>
+      </div>
+      <div class="cf-kpi-card">
+        <div class="cf-kpi-label">Net Cash Flow — Trailing 7</div>
+        <div class="cf-kpi-value" style="color:${net7Color}">${netTrailing7 == null ? '—' : (netTrailing7 >= 0 ? '+' : '') + fmt$(netTrailing7)}</div>
+        <div class="cf-kpi-sub">Last ${Math.min(sorted.length, 7)} ${Math.min(sorted.length, 7) === 1 ? 'entry' : 'entries'}${net7RangeLabel ? ' · ' + net7RangeLabel : ''}</div>
       </div>
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">AR Outstanding</div>
@@ -722,8 +769,15 @@ function _cfRenderBallantineSection(fmt$) {
         <canvas id="cfBallantineBankChart" height="110"></canvas>
       </div>
       <div class="cf-chart-card">
+        <div class="cf-chart-title">💧 Daily Net Cash Flow</div>
+        <div style="font-size:11px;color:var(--muted);margin:-6px 0 10px">Change in Bank Balance, entry to entry</div>
+        <canvas id="cfBallantineNetFlowChart" height="110"></canvas>
+      </div>
+    </div>
+    <div class="cf-charts-row" style="margin-top:20px">
+      <div class="cf-chart-card" style="flex:1 1 100%">
         <div class="cf-chart-title">🧾 AR Outstanding</div>
-        <canvas id="cfBallantineArChart" height="110"></canvas>
+        <canvas id="cfBallantineArChart" height="90"></canvas>
       </div>
     </div>
 
@@ -1003,6 +1057,52 @@ function _cfDrawBallantineCharts(sorted) {
         scales: {
           x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(0,0,0,0.08)' } },
           y: { ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$' + (v / 1000).toFixed(0) + 'k' : '$' + v }, grid: { color: 'rgba(0,0,0,0.08)' } },
+        },
+      },
+    });
+  }
+
+  const netCanv = document.getElementById('cfBallantineNetFlowChart');
+  if (netCanv) {
+    const existing = Chart.getChart(netCanv);
+    if (existing) existing.destroy();
+    const netData = sorted.map(e => e.netFlow);
+    const netTrendData = _cfMovingAvg(netData);
+    const maxAbsNet = Math.max(100, ...netData.map(v => Math.abs(v || 0)), ...netTrendData.map(v => Math.abs(v || 0)));
+    new Chart(netCanv, {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: 'Net Cash Flow',
+            data: netData,
+            backgroundColor: netData.map(v => v == null ? 'rgba(150,150,150,0.25)' : v >= 0 ? 'rgba(76,175,125,0.7)' : 'rgba(224,92,92,0.7)'),
+            borderColor: netData.map(v => v == null ? 'rgba(150,150,150,0.5)' : v >= 0 ? '#4caf7d' : '#e05c5c'),
+            borderWidth: 1, borderRadius: 4, order: 1,
+          },
+          {
+            type: 'line',
+            label: 'Trailing 7-Entry Avg',
+            data: netTrendData,
+            borderColor: '#c07a1a', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4,
+            fill: false, tension: 0.3, spanGaps: true, order: 0,
+          },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true, position: 'top', align: 'end', labels: { color: '#9a9aaa', font: { size: 10 }, boxWidth: 12, boxHeight: 8, padding: 8 } },
+          tooltip: { callbacks: { label: ctx => ctx.parsed.y == null ? ' No prior entry to compare' : ' ' + ctx.dataset.label + ': ' + (ctx.parsed.y >= 0 ? '+' : '') + '$' + ctx.parsed.y.toLocaleString('en-US', { maximumFractionDigits: 0 }) } },
+        },
+        scales: {
+          x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(0,0,0,0.08)' } },
+          y: {
+            beginAtZero: true, suggestedMin: -maxAbsNet, suggestedMax: maxAbsNet,
+            ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => (v < 0 ? '(' : '') + '$' + Math.abs(v >= 1000 || v <= -1000 ? v / 1000 : v).toFixed(0) + (Math.abs(v) >= 1000 ? 'k' : '') + (v < 0 ? ')' : '') },
+            grid: { color: 'rgba(0,0,0,0.08)' },
+          },
         },
       },
     });
