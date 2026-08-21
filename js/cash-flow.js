@@ -19,6 +19,22 @@ let cashFlowLoaded       = false;
 let cashFlowLoading      = false;
 let _cfEditingEntryId    = null; // id of entry currently open in the modal, or null for "new"
 
+// ── Ballantine (separate co-owned company) ─────────────────────────────────
+// Ballantine is a different company Russ co-owns, not part of NULabs. Same
+// screen, same permission group, but its own table (see
+// ballantine_cash_flow_migration.sql) — its entries are on their own
+// independent timeline, and mixing two companies' books into NULabs' own
+// cash_flow_entries rows would be exactly the kind of accidental blending
+// this whole tracker was built to avoid. Deliberately lean: just Bank
+// Balance and AR Outstanding, both carried forward like Schwab — no DSO,
+// since Ballantine doesn't invoice through any system Workspace can read.
+const BALLANTINE_TABLE = 'ballantine_cash_flow_entries';
+let ballantineEntries          = []; // [{id, entryDate, bankBalance, arOutstanding, notes, createdBy}]
+let ballantineLoaded           = false;
+let ballantineLoading          = false;
+let _cfEditingBallantineId     = null;
+window._cfActiveCompany = window._cfActiveCompany || 'nulabs'; // 'nulabs' | 'ballantine' — which company's detail view is showing
+
 // ── Data layer ──────────────────────────────────────────────────────────
 async function loadCashFlowEntries(force) {
   if (!sb) return [];
@@ -85,6 +101,65 @@ async function deleteCashFlowEntryById(id) {
   if (!sb || !id) return false;
   const { error } = await sb.from(CASH_FLOW_TABLE).delete().eq('id', id);
   if (error) { console.error('[cash-flow] delete error:', error); if (typeof toast === 'function') toast('⚠ Could not delete entry'); return false; }
+  return true;
+}
+
+// ── Ballantine data layer ───────────────────────────────────────────────
+async function loadBallantineEntries(force) {
+  if (!sb) return [];
+  if (ballantineLoaded && !force) return ballantineEntries;
+  if (ballantineLoading) return ballantineEntries;
+  ballantineLoading = true;
+  try {
+    const PAGE = 1000;
+    let all = [], page = 0;
+    while (true) {
+      const { data, error } = await sb.from(BALLANTINE_TABLE)
+        .select('*')
+        .order('entry_date', { ascending: true })
+        .range(page * PAGE, page * PAGE + PAGE - 1);
+      if (error) { console.error('[cash-flow] Ballantine load error:', error); break; }
+      if (!data || data.length === 0) break;
+      all = all.concat(data);
+      if (data.length < PAGE) break;
+      page++;
+    }
+    ballantineEntries = all.map(r => ({
+      id:            r.id,
+      entryDate:     r.entry_date,
+      bankBalance:   r.bank_balance   != null ? parseFloat(r.bank_balance)   : null,
+      arOutstanding: r.ar_outstanding != null ? parseFloat(r.ar_outstanding): null,
+      notes:         r.notes || '',
+      createdBy:     r.created_by || '',
+    }));
+    ballantineLoaded = true;
+  } finally {
+    ballantineLoading = false;
+  }
+  return ballantineEntries;
+}
+
+async function upsertBallantineEntry(entry) {
+  if (!sb) return null;
+  const row = {
+    entry_date:      entry.entryDate,
+    bank_balance:    entry.bankBalance,
+    ar_outstanding:  entry.arOutstanding,
+    notes:           entry.notes || null,
+    created_by:      entry.createdBy || (typeof currentEmployee !== 'undefined' && currentEmployee ? currentEmployee.name : null),
+  };
+  const { data, error } = await sb.from(BALLANTINE_TABLE)
+    .upsert(row, { onConflict: 'entry_date' })
+    .select()
+    .single();
+  if (error) { console.error('[cash-flow] Ballantine save error:', error); if (typeof toast === 'function') toast('⚠ Could not save Ballantine entry: ' + (error.message || error.code || '')); return null; }
+  return data;
+}
+
+async function deleteBallantineEntryById(id) {
+  if (!sb || !id) return false;
+  const { error } = await sb.from(BALLANTINE_TABLE).delete().eq('id', id);
+  if (error) { console.error('[cash-flow] Ballantine delete error:', error); if (typeof toast === 'function') toast('⚠ Could not delete Ballantine entry'); return false; }
   return true;
 }
 
@@ -288,6 +363,47 @@ function cfDSO() {
   return latest.carriedArOutstanding / avgDailySales;
 }
 
+// ── Ballantine calculations ─────────────────────────────────────────────
+function _cfBallantineSorted() {
+  return [...ballantineEntries].sort((a, b) => a.entryDate < b.entryDate ? -1 : a.entryDate > b.entryDate ? 1 : 0);
+}
+
+// Bank Balance and AR Outstanding both carry forward, same "leave blank if
+// unchanged" pattern as NULabs — reuses the same generic helper.
+function _cfBallantineSortedWithCarry() {
+  const sorted = _cfBallantineSorted();
+  const carriedBank = _cfCarriedWithDate(sorted, 'bankBalance');
+  const carriedAr   = _cfCarriedWithDate(sorted, 'arOutstanding');
+  return sorted.map((e, i) => Object.assign({}, e, {
+    carriedBankBalance: carriedBank[i].value,
+    carriedBankAsOf: carriedBank[i].asOfDate,
+    carriedArOutstanding: carriedAr[i].value,
+    carriedArAsOf: carriedAr[i].asOfDate,
+  }));
+}
+
+function ballantineLatest() {
+  const sorted = _cfBallantineSortedWithCarry();
+  return sorted.length ? sorted[sorted.length - 1] : null;
+}
+
+// ── Multi Company combined total ────────────────────────────────────────
+// Russ's own personal-level view across both companies — deliberately NOT
+// the same figure as NULabs' own "Available Cash" card. Per Russ: include
+// Schwab (even though it's excluded from NULabs' own Bank Balance/Available
+// Cash since it isn't liquid) and don't net out Held for Owners — he's not
+// using this figure operationally right now, he just wants the flat total
+// value across everything. NULabs' own cards are unaffected by this and
+// keep their stricter, liquid-only definitions.
+function _cfCombinedTotals() {
+  const nu = cfLatestEntry() ? _cfSortedWithTotal().slice(-1)[0] : null;
+  const ba = ballantineLatest();
+  const bank = (nu ? (nu.carriedBankBalance || 0) + (nu.carriedSchwab || 0) : 0) + (ba ? (ba.carriedBankBalance || 0) : 0);
+  const ar = (nu && nu.carriedArOutstanding != null ? nu.carriedArOutstanding : 0) + (ba && ba.carriedArOutstanding != null ? ba.carriedArOutstanding : 0);
+  const hasAny = !!(nu || ba);
+  return { bank: hasAny ? bank : null, ar: hasAny ? ar : null, total: hasAny ? bank + ar : null };
+}
+
 // ── Dashboard button injection ────────────────────────────────────────────
 // renderDashboard() replaces #dashWrap's innerHTML wholesale on every call,
 // so the button has to be re-injected after every original call, not just
@@ -352,7 +468,9 @@ async function openCashFlowPanel(el) {
   }
   const wrap = document.getElementById('cashFlowWrap');
   if (wrap) wrap.innerHTML = '<div class="cf-loading">⏳ Loading cash flow data…</div>';
-  await loadCashFlowEntries();
+  // Load both companies up front — the Multi Company total banner needs
+  // both regardless of which company's detail view is currently active.
+  await Promise.all([loadCashFlowEntries(), loadBallantineEntries()]);
   renderCashFlowPanel();
 }
 
@@ -361,10 +479,68 @@ function renderCashFlowPanel() {
   const wrap = document.getElementById('cashFlowWrap');
   if (!wrap) return;
 
+  const activeCompany = window._cfActiveCompany || 'nulabs';
+  const fmt$ = n => n == null ? '—' : '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const fmtDays = n => n == null ? '—' : n.toFixed(1) + ' days';
+  const combined = _cfCombinedTotals();
+
+  const header = `
+    <div class="cf-header">
+      <button class="cf-back-btn" onclick="if(typeof openDashboardPanel==='function')openDashboardPanel(document.getElementById('navDashboard'))">&larr; Back to Dashboard</button>
+      <h2 class="cf-title">💵 Cash Flow Tracker</h2>
+      <button class="cf-add-btn" onclick="${activeCompany === 'ballantine' ? 'openBallantineEntryModal()' : 'openCashFlowEntryModal()'}">+ Add / Edit Entry</button>
+    </div>
+
+    <div class="cf-kpi-card" style="margin-bottom:16px">
+      <div class="cf-kpi-label">Multi Company Total — NULabs + Ballantine</div>
+      <div style="display:flex;gap:36px;margin-top:6px;flex-wrap:wrap">
+        <div>
+          <div class="cf-kpi-value">${fmt$(combined.bank)}</div>
+          <div class="cf-kpi-sub">Combined Bank Balance — TD + Schwab + Ballantine (gross, not netted for Held for Owners)</div>
+        </div>
+        <div>
+          <div class="cf-kpi-value">${fmt$(combined.ar)}</div>
+          <div class="cf-kpi-sub">Combined AR Outstanding — both companies</div>
+        </div>
+        <div>
+          <div class="cf-kpi-value">${fmt$(combined.total)}</div>
+          <div class="cf-kpi-sub">Multi Company Total — Bank Balance + AR Outstanding</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="cf-series-row" style="margin-bottom:18px">
+      ${[['nulabs', 'NULabs'], ['ballantine', 'Ballantine']].map(([key, label]) => {
+        const active = activeCompany === key;
+        return `<button class="cf-range-btn${active ? ' active' : ''}" onclick="setCfActiveCompany('${key}')">${label}</button>`;
+      }).join('')}
+    </div>
+  `;
+
+  wrap.innerHTML = header + (activeCompany === 'ballantine' ? _cfRenderBallantineSection(fmt$) : _cfRenderNULabsSection(fmt$, fmtDays));
+
+  setTimeout(() => {
+    if (activeCompany === 'ballantine') {
+      _cfDrawBallantineCharts(_cfFilterByRange(_cfBallantineSortedWithCarry(), window._cfChartRange || 'all'));
+    } else {
+      _cfDrawCharts(_cfFilterByRange(_cfSortedWithTotal(), window._cfChartRange || 'all'));
+    }
+  }, 60);
+}
+
+// Switches which company's detail view is showing and re-renders the whole
+// panel. A full re-render (rather than a partial swap) is simplest here —
+// the NULabs and Ballantine sections differ enough in KPI cards, charts,
+// and table columns that trying to patch just one part in place isn't
+// worth the complexity for a screen this infrequently switched.
+function setCfActiveCompany(company) {
+  window._cfActiveCompany = company;
+  renderCashFlowPanel();
+}
+
+function _cfRenderNULabsSection(fmt$, fmtDays) {
   const sorted = _cfSortedWithTotal();
   const latest = sorted.length ? sorted[sorted.length - 1] : null;
-  const fmt$     = n => n == null ? '—' : '$' + n.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-  const fmtDays  = n => n == null ? '—' : n.toFixed(1) + ' days';
 
   const bankBalance   = latest ? latest.carriedBankBalance : null; // TD Bank's most recently known reading — Schwab shown separately, not blended in
   const availableCash  = latest ? latest.availableCash : null;
@@ -400,13 +576,7 @@ function renderCashFlowPanel() {
 
   const recent = sorted.slice(-30).reverse(); // most recent first
 
-  wrap.innerHTML = `
-    <div class="cf-header">
-      <button class="cf-back-btn" onclick="if(typeof openDashboardPanel==='function')openDashboardPanel(document.getElementById('navDashboard'))">&larr; Back to Dashboard</button>
-      <h2 class="cf-title">💵 Cash Flow Tracker</h2>
-      <button class="cf-add-btn" onclick="openCashFlowEntryModal()">+ Add / Edit Entry</button>
-    </div>
-
+  return `
     <div class="cf-kpi-row">
       <div class="cf-kpi-card">
         <div class="cf-kpi-label">Bank Balance</div>
@@ -509,8 +679,75 @@ function renderCashFlowPanel() {
       <div class="cf-modal-note" style="margin-top:10px">* Value carried forward from the last day it was actually entered — that day's row didn't include a fresh reading.</div>`}
     </div>
   `;
+}
 
-  setTimeout(() => _cfDrawCharts(_cfFilterByRange(sorted, window._cfChartRange || 'all')), 60);
+function _cfRenderBallantineSection(fmt$) {
+  const sorted = _cfBallantineSortedWithCarry();
+  const latest = sorted.length ? sorted[sorted.length - 1] : null;
+
+  const bankAsOfLabel = !latest || !latest.carriedBankAsOf ? 'No entries yet'
+    : (latest.carriedBankAsOf === latest.entryDate ? 'as of ' + _cfFmtDate(latest.carriedBankAsOf) : 'carried from ' + _cfFmtDate(latest.carriedBankAsOf));
+  const arAsOfLabel = !latest || !latest.carriedArAsOf ? 'No entries yet'
+    : (latest.carriedArAsOf === latest.entryDate ? 'as of ' + _cfFmtDate(latest.carriedArAsOf) : 'carried from ' + _cfFmtDate(latest.carriedArAsOf));
+
+  const recent = sorted.slice(-30).reverse();
+
+  return `
+    <div class="cf-kpi-row" style="grid-template-columns:repeat(2,minmax(0,1fr));max-width:600px">
+      <div class="cf-kpi-card">
+        <div class="cf-kpi-label">Bank Balance</div>
+        <div class="cf-kpi-value">${fmt$(latest ? latest.carriedBankBalance : null)}</div>
+        <div class="cf-kpi-sub">${bankAsOfLabel}</div>
+      </div>
+      <div class="cf-kpi-card">
+        <div class="cf-kpi-label">AR Outstanding</div>
+        <div class="cf-kpi-value">${fmt$(latest ? latest.carriedArOutstanding : null)}</div>
+        <div class="cf-kpi-sub">${arAsOfLabel}</div>
+      </div>
+    </div>
+    <div class="cf-modal-note" style="margin:-10px 0 18px">No DSO for Ballantine — it doesn't invoice through any system Workspace can read, so there's no sales data to calculate it from.</div>
+
+    <div class="cf-range-row">
+      <span class="cf-range-label">Chart range:</span>
+      ${['1m','3m','6m','1y','all'].map(r => {
+        const labels = {'1m':'1M','3m':'3M','6m':'6M','1y':'1Y','all':'All'};
+        const active = (window._cfChartRange || 'all') === r;
+        return `<button class="cf-range-btn${active ? ' active' : ''}" data-range="${r}" onclick="setCfChartRange('${r}')">${labels[r]}</button>`;
+      }).join('')}
+    </div>
+
+    <div class="cf-charts-row">
+      <div class="cf-chart-card">
+        <div class="cf-chart-title">📈 Bank Balance</div>
+        <canvas id="cfBallantineBankChart" height="110"></canvas>
+      </div>
+      <div class="cf-chart-card">
+        <div class="cf-chart-title">🧾 AR Outstanding</div>
+        <canvas id="cfBallantineArChart" height="110"></canvas>
+      </div>
+    </div>
+
+    <div class="cf-table-card" style="margin-top:20px">
+      <div class="cf-table-title">Recent Entries — Ballantine</div>
+      ${recent.length === 0 ? '<div class="cf-empty">No entries yet. Click “+ Add / Edit Entry” to log the first day.</div>' : `
+      <div style="overflow-x:auto">
+        <table class="cf-table">
+          <thead>
+            <tr><th>Date</th><th>Bank Balance</th><th>AR Outstanding</th><th></th></tr>
+          </thead>
+          <tbody>
+            ${recent.map(e => `<tr>
+                <td>${_cfFmtDate(e.entryDate)}</td>
+                <td title="${e.bankBalance != null ? 'Entered this day' : 'Carried forward — no new reading this day'}">${e.bankBalance != null ? fmt$(e.bankBalance) : (e.carriedBankBalance != null ? fmt$(e.carriedBankBalance) + ' *' : '—')}</td>
+                <td title="${e.arOutstanding != null ? 'Entered this day' : 'Carried forward — no new reading this day'}">${e.arOutstanding != null ? fmt$(e.arOutstanding) : (e.carriedArOutstanding != null ? fmt$(e.carriedArOutstanding) + ' *' : '—')}</td>
+                <td><button class="cf-row-edit-btn" onclick="openBallantineEntryModal('${e.id}')">Edit</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="cf-modal-note" style="margin-top:10px">* Value carried forward from the last day it was actually entered — that day's row didn't include a fresh reading.</div>`}
+    </div>
+  `;
 }
 
 // ── Chart time-range filter ───────────────────────────────────────────────
@@ -534,10 +771,14 @@ function _cfFilterByRange(sortedEntries, range) {
 // entries table don't flicker when someone's just zooming the charts.
 function setCfChartRange(range) {
   window._cfChartRange = range;
-  document.querySelectorAll('.cf-range-btn').forEach(btn => {
+  document.querySelectorAll('.cf-range-btn[data-range]').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.range === range);
   });
-  _cfDrawCharts(_cfFilterByRange(_cfSortedWithTotal(), range));
+  if ((window._cfActiveCompany || 'nulabs') === 'ballantine') {
+    _cfDrawBallantineCharts(_cfFilterByRange(_cfBallantineSortedWithCarry(), range));
+  } else {
+    _cfDrawCharts(_cfFilterByRange(_cfSortedWithTotal(), range));
+  }
 }
 
 // Swaps which line the Bank Balance chart plots — TD Bank alone, Schwab
@@ -733,6 +974,68 @@ function _cfDrawCharts(sorted) {
   }
 }
 
+// Ballantine's own Bank Balance and AR Outstanding charts — same trend-line
+// treatment as NULabs' charts, just no DSO axis (no invoice data to compute
+// it from) and no TD/Schwab series toggle (there's only one balance here).
+function _cfDrawBallantineCharts(sorted) {
+  if (typeof Chart === 'undefined') return;
+  const labels = sorted.map(e => _cfFmtDate(e.entryDate));
+
+  const bankCanv = document.getElementById('cfBallantineBankChart');
+  if (bankCanv) {
+    const existing = Chart.getChart(bankCanv);
+    if (existing) existing.destroy();
+    const bankData = sorted.map(e => e.carriedBankBalance);
+    new Chart(bankCanv, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'Bank Balance', data: bankData, borderColor: '#5b9cf6', backgroundColor: 'rgba(91,156,246,0.15)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, spanGaps: true, order: 1 },
+          { label: 'Trailing 7-Entry Avg', data: _cfMovingAvg(bankData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true, position: 'top', align: 'end', labels: { color: '#9a9aaa', font: { size: 10 }, boxWidth: 12, boxHeight: 8, padding: 8 } },
+        },
+        scales: {
+          x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(0,0,0,0.08)' } },
+          y: { ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$' + (v / 1000).toFixed(0) + 'k' : '$' + v }, grid: { color: 'rgba(0,0,0,0.08)' } },
+        },
+      },
+    });
+  }
+
+  const arCanv = document.getElementById('cfBallantineArChart');
+  if (arCanv) {
+    const existing = Chart.getChart(arCanv);
+    if (existing) existing.destroy();
+    const arData = sorted.map(e => e.carriedArOutstanding);
+    new Chart(arCanv, {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          { label: 'AR Outstanding', data: arData, borderColor: '#e8a234', backgroundColor: 'rgba(232,162,52,0.12)', borderWidth: 2, pointRadius: 2, fill: true, tension: 0.25, spanGaps: true, order: 1 },
+          { label: 'Trailing 7-Entry Avg', data: _cfMovingAvg(arData), borderColor: '#c07a1a', backgroundColor: 'rgba(192,122,26,0.15)', borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 4, fill: false, tension: 0.3, spanGaps: true, order: 0 },
+        ],
+      },
+      options: {
+        responsive: true,
+        plugins: {
+          legend: { display: true, position: 'top', align: 'end', labels: { color: '#9a9aaa', font: { size: 10 }, boxWidth: 12, boxHeight: 8, padding: 8 } },
+        },
+        scales: {
+          x: { ticks: { color: '#9a9aaa', font: { size: 9 }, maxTicksLimit: 8 }, grid: { color: 'rgba(0,0,0,0.08)' } },
+          y: { ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$' + (v / 1000).toFixed(0) + 'k' : '$' + v }, grid: { color: 'rgba(0,0,0,0.08)' } },
+        },
+      },
+    });
+  }
+}
+
 // ── Entry modal (add / edit) ──────────────────────────────────────────────
 function _cfEnsureModal() {
   if (document.getElementById('cfEntryModal')) return;
@@ -876,6 +1179,137 @@ async function deleteCashFlowEntryFromModal() {
   if (!ok) return;
   await loadCashFlowEntries(true);
   closeCashFlowEntryModal();
+  renderCashFlowPanel();
+  if (typeof toast === 'function') toast('✓ Entry deleted');
+}
+
+// ── Ballantine entry modal (add / edit) ─────────────────────────────────
+// Deliberately its own modal rather than reusing the NULabs one — different
+// fields entirely (just Bank Balance, AR Outstanding, Notes), and keeping
+// them separate avoids any chance of a save from one modal touching the
+// other company's table.
+function _cfEnsureBallantineModal() {
+  if (document.getElementById('cfBallantineModal')) return;
+  const div = document.createElement('div');
+  div.innerHTML = `
+    <div class="modal-backdrop" id="cfBallantineModal" onclick="if(event.target===this)closeBallantineEntryModal()">
+      <div class="modal" style="width:440px;max-width:94vw">
+        <div class="modal-header">
+          <div class="modal-title" id="cfBallantineModalTitle">Ballantine Cash Flow Entry</div>
+          <button class="modal-close" onclick="closeBallantineEntryModal()">&#x2715;</button>
+        </div>
+        <div class="modal-body">
+          <div class="field" style="margin-bottom:14px">
+            <label class="field-label">Date <span style="color:var(--red)">*</span></label>
+            <input class="f-input" id="cfBallantineDate" type="date" style="color-scheme:dark" onchange="_cfLoadExistingBallantineForDate()" />
+          </div>
+          <div class="field-row" style="display:flex;gap:12px;margin-bottom:14px">
+            <div class="field" style="flex:1">
+              <label class="field-label">Bank Balance</label>
+              <input class="f-input" id="cfBallantineBankBalance" type="number" step="0.01" placeholder="Leave blank if unchanged" />
+            </div>
+            <div class="field" style="flex:1">
+              <label class="field-label">AR Outstanding</label>
+              <input class="f-input" id="cfBallantineAr" type="number" step="0.01" placeholder="Leave blank if unchanged" />
+            </div>
+          </div>
+          <div class="field">
+            <label class="field-label">Notes</label>
+            <input class="f-input" id="cfBallantineNotes" type="text" placeholder="Optional notes…" autocomplete="off" />
+          </div>
+          <div class="cf-modal-note">Ballantine doesn't invoice through any system Workspace can read, so there's no DSO here — just Bank Balance and AR Outstanding. Both only need a new number on the days they actually change — leave a field blank and the last known value carries forward automatically.</div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="cfBallantineDeleteBtn" onclick="deleteBallantineEntryFromModal()" style="margin-right:auto;display:none;color:var(--red)">&#x1F5D1; Delete</button>
+          <button class="btn btn-ghost" onclick="closeBallantineEntryModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveBallantineEntryFromModal()">Save</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(div.firstElementChild);
+}
+
+function openBallantineEntryModal(entryId) {
+  _cfEnsureBallantineModal();
+  const modal = document.getElementById('cfBallantineModal');
+  const dateInput = document.getElementById('cfBallantineDate');
+  const delBtn = document.getElementById('cfBallantineDeleteBtn');
+  _cfEditingBallantineId = entryId || null;
+
+  const entry = entryId ? ballantineEntries.find(e => e.id === entryId) : null;
+
+  document.getElementById('cfBallantineModalTitle').textContent = entry ? 'Edit Ballantine Entry' : 'New Ballantine Entry';
+  dateInput.value = entry ? entry.entryDate : new Date().toISOString().slice(0, 10);
+  document.getElementById('cfBallantineBankBalance').value = entry && entry.bankBalance != null ? entry.bankBalance : '';
+  document.getElementById('cfBallantineAr').value          = entry && entry.arOutstanding != null ? entry.arOutstanding : '';
+  document.getElementById('cfBallantineNotes').value       = entry ? entry.notes : '';
+  delBtn.style.display = entry ? '' : 'none';
+
+  modal.classList.add('open');
+  modal.style.display = 'flex';
+}
+
+function closeBallantineEntryModal() {
+  const modal = document.getElementById('cfBallantineModal');
+  if (!modal) return;
+  modal.classList.remove('open');
+  modal.style.display = 'none';
+  _cfEditingBallantineId = null;
+}
+
+// Same "don't silently overwrite an existing day" protection as the NULabs
+// modal — picking a date that already has a Ballantine entry loads it for
+// editing instead of leaving the modal in "new entry" mode.
+function _cfLoadExistingBallantineForDate() {
+  const dateInput = document.getElementById('cfBallantineDate');
+  const existing = ballantineEntries.find(e => e.entryDate === dateInput.value);
+  if (existing && existing.id !== _cfEditingBallantineId) {
+    openBallantineEntryModal(existing.id);
+  }
+}
+
+async function saveBallantineEntryFromModal() {
+  const entryDate = document.getElementById('cfBallantineDate').value;
+  if (!entryDate) { if (typeof toast === 'function') toast('⚠ Date is required'); return; }
+
+  const num = id => {
+    const v = document.getElementById(id).value;
+    return v === '' ? null : parseFloat(v);
+  };
+
+  // Same "preserve on blank" logic as Schwab/Held for Owners on the NULabs
+  // side — a blank field when editing an existing day means "unchanged,"
+  // not "clear this," so it's pulled from the existing row rather than
+  // written as null.
+  const existingEntry = _cfEditingBallantineId ? ballantineEntries.find(e => e.id === _cfEditingBallantineId) : null;
+  const bankInput = num('cfBallantineBankBalance');
+  const bankBalance = bankInput != null ? bankInput : (existingEntry ? existingEntry.bankBalance : null);
+  const arInput = num('cfBallantineAr');
+  const arOutstanding = arInput != null ? arInput : (existingEntry ? existingEntry.arOutstanding : null);
+
+  const entry = {
+    entryDate,
+    bankBalance,
+    arOutstanding,
+    notes: document.getElementById('cfBallantineNotes').value.trim(),
+  };
+
+  const saved = await upsertBallantineEntry(entry);
+  if (!saved) return;
+
+  await loadBallantineEntries(true);
+  closeBallantineEntryModal();
+  renderCashFlowPanel();
+  if (typeof toast === 'function') toast('✓ Ballantine entry saved');
+}
+
+async function deleteBallantineEntryFromModal() {
+  if (!_cfEditingBallantineId) return;
+  if (!confirm('Delete this Ballantine entry?')) return;
+  const ok = await deleteBallantineEntryById(_cfEditingBallantineId);
+  if (!ok) return;
+  await loadBallantineEntries(true);
+  closeBallantineEntryModal();
   renderCashFlowPanel();
   if (typeof toast === 'function') toast('✓ Entry deleted');
 }
