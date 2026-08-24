@@ -662,7 +662,7 @@ function renderTasksPanel(projId) {
       <div style="display:flex;gap:8px;align-items:center">
         ${isManager() ? `<button class="btn btn-ghost itt-select-toggle-btn ${selectMode?'active':''}" style="font-size:12.5px;border:1px solid var(--border)" onclick="toggleTaskSelectMode('${projId}')" title="Select multiple tasks to move into a section">${selectMode ? '✕ Cancel Select' : '☑ Select'}</button>` : ''}
         ${isManager() ? `<button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="openAllLogsPanel('${projId}')" title="View all test logs for this job (read-only)">📋 Show all Logs</button>` : ''}
-        ${isManager() ? `<button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="addSectionHeader('${projId}')">+ Section</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="openBulkAddModal('${projId}',null)" title="Add multiple tasks at once">+ Bulk</button>` : ''}
+        ${isManager() ? `<button class="btn btn-primary" style="font-size:12.5px" onclick="openTaskModalForProject('${projId}')">+ Add Task</button><button class="btn btn-ghost" style="font-size:12.5px;border:1px solid var(--border)" onclick="addSectionHeader('${projId}')">+ Section</button>` : ''}
       </div>
     </div>
     </div>
