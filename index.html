@@ -485,11 +485,30 @@
               </div>
               <div class="proj-filter-col">
                 <label>Status</label>
-                <div class="nav-filter-chips" id="filterStatusChips" style="max-width:360px"></div>
+                <div class="nav-filter-chips" id="filterStatusChips" style="max-width:600px"></div>
               </div>
-              <div class="proj-filter-col">
-                <label>Condition</label>
-                <div class="nav-filter-chips" id="filterPhaseChips" style="max-width:360px"></div>
+            </div>
+            <div class="proj-filter-row" style="padding-top:10px;border-top:1px solid var(--border)">
+              <div class="proj-filter-col" style="flex:1;min-width:480px">
+                <label>Task Condition</label>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                  <select id="taskCondMode" class="proj-filter-select" onchange="onTaskCondModeChange()">
+                    <option value="missing">Task doesn't contain</option>
+                    <option value="has">Task contains</option>
+                  </select>
+                  <select id="taskCondField" class="proj-filter-select" onchange="onTaskCondFieldChange()">
+                    <option value="salesCat">Sales Category</option>
+                    <option value="status">Task Status</option>
+                    <option value="assign">Assignee</option>
+                    <option value="quoteNum">Quote #</option>
+                    <option value="poNumber">PO #</option>
+                    <option value="name">Task Name</option>
+                  </select>
+                  <!-- Populated by renderTaskCondControl(): chip multi-select for Sales Category /
+                       Task Status / Assignee, or an op + text box for the free-text fields. -->
+                  <div id="taskCondControl" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
+                </div>
+                <div style="font-size:10px;color:var(--muted);margin-top:4px">Example — active jobs with no procedure task: Task doesn't contain / Sales Category / pick <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">42</code> and <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">44</code> below (combine with Status → Active above)</div>
               </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid var(--border)">

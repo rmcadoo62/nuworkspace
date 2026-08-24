@@ -525,21 +525,26 @@ function renderProjectsTable() {
     });
   }
 
-  if (navFilter.status.size > 0 || navFilter.phase.size > 0) {
+  if (navFilter.status.size > 0) {
     filtered = filtered.filter(p => {
       const info = projectInfo[p.id] || {};
       // Never filter out closed projects via status filter when showClosed is on
       if (showClosed && (info.status || 'active') === 'closed') return true;
-      const statusMatch = navFilter.status.size === 0 || navFilter.status.has(info.status || 'active');
-      const phaseMatch  = navFilter.phase.size  === 0 || navFilter.phase.has(info.phase  || '');
-      return statusMatch && phaseMatch;
+      return navFilter.status.has(info.status || 'active');
     });
   }
 
+  // Task Condition filter — "Has / Has NO task where [field] [op] [value]".
+  // Runs in-memory against taskStore; combines with everything above via AND,
+  // same as the other filter axes.
+  if (hasActiveTaskCond()) {
+    filtered = filtered.filter(p => projectMatchesTaskCond(p, navFilter.taskCond));
+  }
+
   const closedCount = projects.filter(p => (projectInfo[p.id] || {}).status === 'closed').length;
-  if (subEl) subEl.textContent = filtered.length + ' of ' + projects.length + ' projects' + 
+  if (subEl) subEl.textContent = filtered.length + ' of ' + projects.length + ' projects' +
     (!showClosed && closedCount > 0 ? ` (${closedCount} closed hidden)` : '') +
-    (navFilter.status.size > 0 || navFilter.phase.size > 0 || namePattern ? ' (filtered)' : '');
+    (navFilter.status.size > 0 || namePattern || hasActiveTaskCond() ? ' (filtered)' : '');
 
   const STATUS_META = {
     jobprep:     { bg:'#a78bfa22', color:'#a78bfa', dot:'#a78bfa', label:'Job Preparation' },
@@ -782,10 +787,187 @@ function navToProject(projId) {
 // ===== PROJECT NAV FILTER =====
 const NAV_FILTER_STATUS = ['jobprep','pending','pendretest','active','onhold','complete','testcomplete','closed'];
 const NAV_FILTER_STATUS_LABELS = {jobprep:'Job Preparation',pending:'Pending',pendretest:'Pending - ReTest',active:'Active',onhold:'On Hold',complete:'Complete',testcomplete:'Testing Complete',closed:'Closed'};
-const NAV_FILTER_PHASE  = ['Waiting on TP Approval','Within 3 Months','3 to 6 Months','No Time Frame'];
+// NAV_FILTER_PHASE (the "Condition" filter — Waiting on TP Approval / Within 3
+// Months / etc.) was removed: that field is no longer tracked, so filtering by
+// it was dead weight. Kept nothing behind — see navFilter below (no .phase).
+
+// ===== TASK CONDITION FILTER =====
+// "Task contains / doesn't contain a task where [field] [is one of / op] [value]"
+// — a third filter axis alongside Name Pattern / Status. Runs
+// entirely against the in-memory taskStore (already realtime-synced from
+// Supabase), so it needs no server round-trip. This is what answers questions
+// like "active jobs with no procedure task" without the AI report's guesswork.
+//
+// Sales Category, Task Status, and Assignee are enumerable — the drawer shows
+// them as a chip multi-select (like Status/Condition above) instead of a
+// free-text box, so nobody has to remember or type category codes. Sales
+// Category's chip list is built live from whatever codes actually appear in
+// taskStore (the code list isn't fixed/known ahead of time); Task Status uses
+// the app's known status enum; Assignee is built from the employees roster.
+// Quote #, PO #, and Task Name stay free-text (contains/is exactly) since
+// those values aren't a fixed set. Revenue Type was dropped — every task here
+// is fixed-price, so it was never a useful filter.
+const TASK_STATUS_OPTIONS = [
+  { value: 'new',        label: 'New' },
+  { value: 'inprogress', label: 'In Progress' },
+  { value: 'prohold',    label: 'On Hold' },
+  { value: 'accthold',   label: 'Acct Hold' },
+  { value: 'complete',   label: 'Complete' },
+  { value: 'billed',     label: 'Billed' },
+  { value: 'cancelled',  label: 'Cancelled' },
+];
+
+const TASK_COND_FIELDS = {
+  salesCat: { label: 'Sales Category', get: t => (t.salesCat || '').toString(), enumerable: true,
+    optionsFn: () => {
+      const set = new Set((typeof taskStore !== 'undefined' ? taskStore : []).map(t => (t.salesCat || '').toString().trim()).filter(Boolean));
+      return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).map(v => ({ value: v, label: v }));
+    } },
+  status: { label: 'Task Status', get: t => (t.status || '').toString(), enumerable: true,
+    optionsFn: () => TASK_STATUS_OPTIONS },
+  assign: { label: 'Assignee', get: t => (t.assign || '').toString(), enumerable: true,
+    optionsFn: () => (typeof employees !== 'undefined' ? employees : [])
+      .filter(e => e.isActive !== false)
+      .map(e => ({ value: e.initials, label: e.name }))
+      .sort((a, b) => a.label.localeCompare(b.label)) },
+  quoteNum: { label: 'Quote #',   get: t => (t.quoteNum || '').toString(), enumerable: false },
+  poNumber: { label: 'PO #',      get: t => (t.poNumber || '').toString(), enumerable: false },
+  name:     { label: 'Task Name', get: t => (t.name     || '').toString(), enumerable: false },
+};
+const TASK_COND_OPS = {
+  in:       { label: 'is one of (comma list)', test: (v, val) => val.split(',').map(s => s.trim().toLowerCase()).filter(Boolean).includes(v.toLowerCase()) },
+  equals:   { label: 'is exactly',             test: (v, val) => v.toLowerCase() === val.trim().toLowerCase() },
+  contains: { label: 'contains',               test: (v, val) => v.toLowerCase().includes(val.trim().toLowerCase()) },
+};
+
+function taskCondMatchesTask(t, cond) {
+  const fieldDef = TASK_COND_FIELDS[cond.field];
+  const opDef    = TASK_COND_OPS[cond.op];
+  if (!fieldDef || !opDef) return false;
+  return opDef.test(fieldDef.get(t), cond.value);
+}
+
+// True if project p satisfies the active task condition. cond.mode 'has' requires
+// at least one matching task; 'missing' requires zero matching tasks.
+function projectMatchesTaskCond(p, cond) {
+  if (!cond || !cond.value || !cond.value.trim()) return true;
+  const projTasks = taskStore.filter(t => t.proj === p.id);
+  const anyMatch = projTasks.some(t => taskCondMatchesTask(t, cond));
+  return cond.mode === 'has' ? anyMatch : !anyMatch;
+}
+
+function hasActiveTaskCond() {
+  return !!(navFilter.taskCond && navFilter.taskCond.value && navFilter.taskCond.value.trim());
+}
+
+function currentTaskCondModeField() {
+  return {
+    mode:  document.getElementById('taskCondMode')?.value  || 'missing',
+    field: document.getElementById('taskCondField')?.value || 'salesCat',
+  };
+}
+
+// Builds the dynamic middle part of the Task Condition row: a chip multi-select
+// for enumerable fields (Sales Category / Task Status / Assignee), or an
+// op + text box for free-text fields (Quote #, PO #, Task Name).
+function renderTaskCondControl() {
+  const wrap = document.getElementById('taskCondControl');
+  if (!wrap) return;
+  const field = document.getElementById('taskCondField')?.value || 'salesCat';
+  const fieldDef = TASK_COND_FIELDS[field];
+  if (!fieldDef) return;
+
+  if (fieldDef.enumerable) {
+    const opts = fieldDef.optionsFn();
+    const selected = new Set((navFilter.taskCond && navFilter.taskCond.field === field ? navFilter.taskCond.value : '')
+      .split(',').map(s => s.trim()).filter(Boolean));
+    wrap.innerHTML = opts.length
+      ? `<div class="nav-filter-chips" id="taskCondChips" style="max-width:520px">` +
+          opts.map(o => `<button type="button" class="nav-filter-chip ${selected.has(o.value) ? 'sel' : ''}" onclick="toggleTaskCondChipValue('${o.value.replace(/'/g, "\\'")}')">${o.label}</button>`).join('') +
+        `</div>`
+      : `<span style="font-size:11.5px;color:var(--muted)">No ${fieldDef.label.toLowerCase()} values found yet.</span>`;
+  } else {
+    const cond = (navFilter.taskCond && navFilter.taskCond.field === field) ? navFilter.taskCond : null;
+    wrap.innerHTML = `
+      <select id="taskCondOp" class="proj-filter-select" onchange="updateTaskCondFromUI()">
+        <option value="contains">contains</option>
+        <option value="equals">is exactly</option>
+      </select>
+      <input type="text" id="taskCondValue" placeholder="value…" oninput="updateTaskCondFromUI()" style="width:180px" />`;
+    const opSel  = document.getElementById('taskCondOp');
+    const valInp = document.getElementById('taskCondValue');
+    if (opSel)  opSel.value  = cond?.op || 'contains';
+    if (valInp) valInp.value = cond?.value || '';
+  }
+}
+
+// Field select changed — the prior selection/value doesn't carry over to a
+// different field, so reset it and rebuild the control for the new field.
+function onTaskCondFieldChange() {
+  navFilter.taskCond = null;
+  renderTaskCondControl();
+  updateTaskCondFromUI();
+}
+
+function onTaskCondModeChange() {
+  updateTaskCondFromUI();
+}
+
+// Toggles one chip's value for an enumerable field (Sales Category / Task
+// Status / Assignee), joining the selected set into the same comma-list
+// format the free-text "is one of" path already used — no change needed to
+// the matching engine above.
+function toggleTaskCondChipValue(value) {
+  const { mode, field } = currentTaskCondModeField();
+  const selected = new Set((navFilter.taskCond && navFilter.taskCond.field === field ? navFilter.taskCond.value : '')
+    .split(',').map(s => s.trim()).filter(Boolean));
+  if (selected.has(value)) selected.delete(value); else selected.add(value);
+  const joined = [...selected].join(', ');
+  navFilter.taskCond = joined ? { mode, field, op: 'in', value: joined } : null;
+  activeFilterName = null; // modified — no longer matches a saved filter
+  renderTaskCondControl();
+  updateNavFilterDot();
+  renderSavedFiltersBar();
+  updateProjViewsLabel();
+  persistFilterState();
+  if (document.getElementById('panel-projects')?.classList.contains('active')) renderProjectsTable();
+}
+
+// Reflects navFilter.taskCond into the drawer's mode/field selects, then
+// rebuilds whichever control (chips or op+text) belongs to the current field.
+function syncTaskCondUI() {
+  const cond = navFilter.taskCond || { mode: 'missing', field: 'salesCat' };
+  const m = document.getElementById('taskCondMode');
+  const f = document.getElementById('taskCondField');
+  if (m) m.value = cond.mode  || 'missing';
+  if (f) f.value = cond.field || 'salesCat';
+  renderTaskCondControl();
+}
+
+// Reads the free-text op+value path back into navFilter.taskCond (the chip
+// path writes directly via toggleTaskCondChipValue). Also called on mode
+// change to re-sync/re-render without touching the current selection.
+function updateTaskCondFromUI() {
+  const { mode, field } = currentTaskCondModeField();
+  const fieldDef = TASK_COND_FIELDS[field];
+  if (fieldDef && fieldDef.enumerable) {
+    // Chip-driven fields keep their value as-is; just refresh mode.
+    if (navFilter.taskCond) navFilter.taskCond.mode = mode;
+  } else {
+    const op    = document.getElementById('taskCondOp')?.value    || 'contains';
+    const value = document.getElementById('taskCondValue')?.value || '';
+    navFilter.taskCond = value.trim() ? { mode, field, op, value } : null;
+  }
+  activeFilterName = null; // modified — no longer matches a saved filter
+  updateNavFilterDot();
+  renderSavedFiltersBar();
+  updateProjViewsLabel();
+  persistFilterState();
+  if (document.getElementById('panel-projects')?.classList.contains('active')) renderProjectsTable();
+}
 
 let showClosed = false;
-let navFilter = { status: new Set(), phase: new Set(), namePattern: '' };
+let navFilter = { status: new Set(), namePattern: '', taskCond: null };
 let projSortCol = 'name';
 let projColFilters = {}; // { fieldKey: 'filterText' }
 let projSortDir = 'asc';
@@ -804,8 +986,8 @@ function setSavedFilters(filters) {
   try {
     const saved = JSON.parse(localStorage.getItem('nuworkspace_nav_filter') || '{}');
     if (saved.status) navFilter.status = new Set(saved.status);
-    if (saved.phase)  navFilter.phase  = new Set(saved.phase);
     if (saved.namePattern) navFilter.namePattern = saved.namePattern;
+    if (saved.taskCond) navFilter.taskCond = saved.taskCond;
     if (saved.activeFilterName) activeFilterName = saved.activeFilterName;
     if (saved.sortCol) projSortCol = saved.sortCol;
     if (saved.sortDir) projSortDir = saved.sortDir;
@@ -814,6 +996,7 @@ function setSavedFilters(filters) {
   document.addEventListener('DOMContentLoaded', () => {
     const inp = document.getElementById('filterNamePattern');
     if (inp && navFilter.namePattern) inp.value = navFilter.namePattern;
+    syncTaskCondUI();
     updateNavFilterDot();
     renderSavedFiltersBar();
     updateProjViewsLabel();
@@ -822,8 +1005,8 @@ function setSavedFilters(filters) {
 
 function persistFilterState() {
   localStorage.setItem('nuworkspace_nav_filter', JSON.stringify({
-    status: [...navFilter.status], phase: [...navFilter.phase],
-    namePattern: navFilter.namePattern, activeFilterName,
+    status: [...navFilter.status],
+    namePattern: navFilter.namePattern, taskCond: navFilter.taskCond, activeFilterName,
     sortCol: projSortCol, sortDir: projSortDir,
   }));
 }
@@ -903,20 +1086,18 @@ function toggleNavFilter() {
   btn.classList.toggle('active', open);
   if (open) {
     buildNavFilterChips();
+    buildColToggleChips();
     const inp = document.getElementById('filterNamePattern');
     if (inp) inp.value = navFilter.namePattern || '';
+    syncTaskCondUI();
   }
 }
 
 function buildNavFilterChips() {
   const sc = document.getElementById('filterStatusChips');
-  const pc = document.getElementById('filterPhaseChips');
   if (sc) sc.innerHTML = NAV_FILTER_STATUS.map(s => `
     <button class="nav-filter-chip ${navFilter.status.has(s)?'sel':''}"
       onclick="toggleNavFilterChip('status','${s}',this)">${NAV_FILTER_STATUS_LABELS[s]||s}</button>`).join('');
-  if (pc) pc.innerHTML = NAV_FILTER_PHASE.map(p => `
-    <button class="nav-filter-chip ${navFilter.phase.has(p)?'sel':''}"
-      onclick="toggleNavFilterChip('phase','${p}',this)">${p}</button>`).join('');
 }
 
 function toggleNavFilterChip(group, value, el) {
@@ -931,12 +1112,13 @@ function toggleNavFilterChip(group, value, el) {
 
 function clearNavFilter() {
   navFilter.status.clear();
-  navFilter.phase.clear();
   navFilter.namePattern = '';
+  navFilter.taskCond = null;
   activeFilterName = null;
   const inp = document.getElementById('filterNamePattern');
   if (inp) inp.value = '';
   buildNavFilterChips();
+  syncTaskCondUI();
   renderSavedFiltersBar();
   updateNavFilterDot();
   persistFilterState();
@@ -951,8 +1133,10 @@ function saveNamedFilter() {
   if (!name) { toast('Enter a name for this filter'); nameInp?.focus(); return; }
   const namePattern = document.getElementById('filterNamePattern')?.value.trim() || '';
   navFilter.namePattern = namePattern;
+  // navFilter.taskCond is already current — updateTaskCondFromUI() keeps it in sync on every
+  // change to the drawer's task-condition inputs, same as the status chips do.
   const filters = getSavedFilters().filter(f => f.name !== name); // overwrite if exists
-  filters.push({ name, status: [...navFilter.status], phase: [...navFilter.phase], namePattern, colVis: getProjCols(), colOrder: getProjColOrder() });
+  filters.push({ name, status: [...navFilter.status], namePattern, taskCond: navFilter.taskCond, colVis: getProjCols(), colOrder: getProjColOrder() });
   setSavedFilters(filters);
   activeFilterName = name;
   if (nameInp) nameInp.value = '';
@@ -971,8 +1155,8 @@ function applyNamedFilter(name) {
   const f = filters.find(x => x.name === name);
   if (!f) return;
   navFilter.status = new Set(f.status || []);
-  navFilter.phase  = new Set(f.phase  || []);
   navFilter.namePattern = f.namePattern || '';
+  navFilter.taskCond = f.taskCond || null;
   if (f.colVis) setProjCols(f.colVis);
   if (f.colOrder) setProjColOrder(f.colOrder);
   activeFilterName = name;
@@ -980,6 +1164,7 @@ function applyNamedFilter(name) {
   buildColToggleChips();
   const inp = document.getElementById('filterNamePattern');
   if (inp) inp.value = navFilter.namePattern;
+  syncTaskCondUI();
   persistFilterState();
   updateNavFilterDot();
   renderSavedFiltersBar();
@@ -1010,8 +1195,8 @@ function resetProjectsToDefault() {
   } catch {}
   projColFilters = {};
   navFilter.status.clear();
-  navFilter.phase.clear();
   navFilter.namePattern = '';
+  navFilter.taskCond = null;
   projSortCol = 'name';
   projSortDir = 'asc';
   activeFilterName = null;
@@ -1023,6 +1208,7 @@ function resetProjectsToDefault() {
     i.value = ''; i.style.borderColor = ''; i.style.background = '';
   });
   buildNavFilterChips();
+  syncTaskCondUI();
   buildColToggleChips();
   updateNavFilterDot();
   renderSavedFiltersBar();
@@ -1096,8 +1282,8 @@ function selectProjView(name) {
     } catch {}
     projColFilters = {};
     navFilter.status.clear();
-    navFilter.phase.clear();
     navFilter.namePattern = '';
+    navFilter.taskCond = null;
     projSortCol = 'name';
     projSortDir = 'asc';
     activeFilterName = null;
@@ -1108,6 +1294,7 @@ function selectProjView(name) {
       i.value = ''; i.style.borderColor = ''; i.style.background = '';
     });
     buildNavFilterChips();
+    syncTaskCondUI();
     buildColToggleChips();
     updateNavFilterDot();
     renderSavedFiltersBar();
@@ -1167,7 +1354,7 @@ function renderSavedFiltersBar() {
 function saveNavFilter() { saveNamedFilter(); } // backward compat
 
 function updateNavFilterDot() {
-  const hasFilter = navFilter.status.size > 0 || navFilter.phase.size > 0 || !!navFilter.namePattern;
+  const hasFilter = navFilter.status.size > 0 || !!navFilter.namePattern || hasActiveTaskCond();
   const dot = document.getElementById('navFilterDot');
   if (dot) dot.style.display = hasFilter ? 'inline-block' : 'none';
 }
@@ -1187,62 +1374,13 @@ async function toggleShowClosed() {
   renderProjectsTable();
 }
 
-function toggleNavFilter() {
-  const panel = document.getElementById('navFilterPanel');
-  const btn   = document.getElementById('navFilterBtn');
-  const open  = panel.classList.toggle('open');
-  btn.classList.toggle('active', open);
-  if (open) { buildNavFilterChips(); buildColToggleChips(); }
-}
-
-function buildNavFilterChips() {
-  const sc = document.getElementById('filterStatusChips');
-  const pc = document.getElementById('filterPhaseChips');
-  if (!sc || !pc) return;
-  sc.innerHTML = NAV_FILTER_STATUS.map(s => `
-    <button class="nav-filter-chip ${navFilter.status.has(s)?'sel':''}"
-      onclick="toggleNavFilterChip('status','${s}',this)">${NAV_FILTER_STATUS_LABELS[s]||s}</button>`).join('');
-  pc.innerHTML = NAV_FILTER_PHASE.map(p => `
-    <button class="nav-filter-chip ${navFilter.phase.has(p)?'sel':''}"
-      onclick="toggleNavFilterChip('phase','${p}',this)">${p}</button>`).join('');
-}
-
-function toggleNavFilterChip(group, value, el) {
-  if (navFilter[group].has(value)) { navFilter[group].delete(value); el.classList.remove('sel'); }
-  else { navFilter[group].add(value); el.classList.add('sel'); }
-  renderProjectNav();
-  updateNavFilterDot();
-  if (document.getElementById('panel-projects')?.classList.contains('active')) renderProjectsTable();
-}
-
-function clearNavFilter() {
-  navFilter.status.clear();
-  navFilter.phase.clear();
-  localStorage.removeItem('nuworkspace_nav_filter');
-  buildNavFilterChips();
-  renderProjectNav();
-  updateNavFilterDot();
-  renderProjectsTable();
-  toast('Filter cleared');
-}
-
-function saveNavFilter() {
-  localStorage.setItem('nuworkspace_nav_filter', JSON.stringify({
-    status: [...navFilter.status],
-    phase:  [...navFilter.phase],
-  }));
-  document.getElementById('navFilterPanel').classList.remove('open');
-  document.getElementById('navFilterBtn').classList.remove('active');
-  updateNavFilterDot();
-  renderProjectsTable();
-  toast('Filter saved');
-}
-
-function updateNavFilterDot() {
-  const hasFilter = navFilter.status.size > 0 || navFilter.phase.size > 0;
-  const dot = document.getElementById('navFilterDot');
-  if (dot) dot.style.display = hasFilter ? 'inline-block' : 'none';
-}
+// NOTE: this file used to carry a second, weaker set of definitions for
+// toggleNavFilter / buildNavFilterChips / toggleNavFilterChip / clearNavFilter /
+// saveNavFilter / updateNavFilterDot right here. Because later function
+// declarations win, those dupes silently shadowed the fuller versions above —
+// e.g. Clear stopped resetting Name Pattern, and the filter dot didn't light
+// up for a Name-Pattern-only filter. Removed as part of adding the Task
+// Condition filter so the new axis doesn't get shadowed the same way.
 
 function renderProjectNav(){
   // Sidebar project list removed — projects now shown in table view
