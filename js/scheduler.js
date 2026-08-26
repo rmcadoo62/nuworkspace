@@ -435,12 +435,25 @@ function buildBlockDisplayLines(block, opts) {
   if (block.empId || block.empEventType || rid.startsWith('emp_')) {
     const empId   = block.empId || (rid.startsWith('emp_') ? rid.slice(4) : null);
     const emp     = empId ? (typeof employees !== 'undefined' ? employees : []).find(e => e.id === empId) : null;
-    const empName = emp ? emp.name : (block.label || '');
-    const evtLbl  = block.empEventType === 'vacation' ? 'Vacation' : block.empEventType === 'sick' ? 'Sick' : block.empEventType === 'ooo' ? 'Out of Office' : 'Work';
-    const lbl = block.label || (empName ? empName + ' \u2014 ' + evtLbl : evtLbl);
+    const empName = emp ? emp.name : '';
+    const evtFull = block.empEventType === 'vacation' ? 'Vacation' : block.empEventType === 'sick' ? 'Sick' : block.empEventType === 'ooo' ? 'Out of Office' : block.empEventType === 'work' ? 'Working - off site' : 'Out';
+    const evtAbbr = block.empEventType === 'vacation' ? 'Vaca' : block.empEventType === 'sick' ? 'Sick' : block.empEventType === 'ooo' ? 'OOO' : block.empEventType === 'work' ? 'WFH' : 'Out';
     const timeStr = (block.startTime || block.endTime)
       ? [fmt(block.startTime), fmt(block.endTime)].filter(Boolean).join('\u2013') : '';
-    lines.push(lbl + (timeStr ? '  ' + timeStr : ''));
+
+    if (includeLabel) {
+      // Tooltip: full detail. Any custom label text lives here, never on
+      // the bar itself — that's what caused it to truncate ("1/2" -> "1/")
+      // on narrow half-day bars in the first place.
+      lines.push([empName, evtFull].filter(Boolean).join(' \u2014 ') + (timeStr ? '  ' + timeStr : ''));
+      if (block.label) lines.push(block.label);
+    } else {
+      // Bar text: short and fixed-length, so it always fits regardless of
+      // how narrow the bar is. The row already shows the employee's name,
+      // and the bar's own half-day position already shows AM vs PM visually,
+      // so neither is repeated in the text.
+      lines.push(evtAbbr);
+    }
     return lines;
   }
 
@@ -1045,9 +1058,17 @@ function renderSched() {
       x = xStart + 2;
       w = Math.max(xEnd - xStart - 4, hourW - 4); // at least 1 hour wide
     } else {
-      // Account for half-day start/end offsets
-      const startHalfPx = block._startHalf ? Math.round(dayW / 2) : 0;
-      const endHalfAdj  = block._endHalf   ? Math.round(dayW / 2) : dayW;
+      // Account for half-day start/end offsets. Prefer the block's real
+      // startTime/endTime (set via the modal or AM/PM quick-fill) when
+      // present — that's the actual source of truth now. _startHalf/_endHalf
+      // (set only by manual drag-resize) remain a fallback so older blocks
+      // that never got real times still render correctly.
+      const useStartTime = block.startTime && block.start >= rangeStartStr;
+      const useEndTime   = block.endTime   && block.end   <= rangeEndStr;
+      const startHour = useStartTime ? parseInt(block.startTime.split(':')[0], 10) : null;
+      const endHour   = useEndTime   ? parseInt(block.endTime.split(':')[0], 10)   : null;
+      const startHalfPx = (block._startHalf || (startHour !== null && startHour >= 12)) ? Math.round(dayW / 2) : 0;
+      const endHalfAdj  = (block._endHalf   || (endHour   !== null && endHour   <= 12)) ? Math.round(dayW / 2) : dayW;
       x = startOff * dayW + startHalfPx + 2;
       w = Math.max((endOff - startOff) * dayW + endHalfAdj - startHalfPx - 4, Math.round(dayW / 2) - 4);
     }
@@ -1750,13 +1771,18 @@ function moveSchedTooltip(e) {
     tt.style.display = 'none';
     return;
   }
-  // Also hide if near left or right edge of bar
+  // Also hide if near left or right edge of bar — a fixed 18px each side
+  // works fine on wide room/project bars, but eats almost the entire width
+  // of a narrow half-day employee bar, leaving only a sliver in dead center
+  // where the tooltip would ever show. Scale the dead zone to bar width
+  // instead, so at least half the bar stays hoverable no matter how narrow.
   const bar = target && target.closest ? target.closest('.sched-bar') : null;
   if (bar) {
     const rect = bar.getBoundingClientRect();
+    const edgeZone = Math.min(18, rect.width * 0.2);
     const fromLeft  = e.clientX - rect.left;
     const fromRight = rect.right - e.clientX;
-    if (fromLeft < 18 || fromRight < 18) { tt.style.display = 'none'; return; }
+    if (fromLeft < edgeZone || fromRight < edgeZone) { tt.style.display = 'none'; return; }
   }
   tt.style.left = (e.clientX + 14) + 'px';
   tt.style.top  = (e.clientY - 50) + 'px';
