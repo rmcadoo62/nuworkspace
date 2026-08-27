@@ -172,9 +172,6 @@ function openTaskModal(){
   tPri='low'; tAssign=new Set(); tTags=[];
   document.getElementById('taskTitle').value='';
   document.getElementById('taskDesc').value='';
-  document.getElementById('taskStatus').value='new';
-  document.getElementById('taskDue').value='';
-  document.getElementById('taskDue').max = new Date().toISOString().slice(0,10);
   document.getElementById('taskSalesCat').value='';
   document.getElementById('taskFixedPrice').value='';
   if (document.getElementById('taskRevenueType')) { document.getElementById('taskRevenueType').value='fixed'; toggleTaskFixedPriceField('fixed'); }
@@ -189,27 +186,10 @@ function openTaskModal(){
 
 function closeTaskModal(){document.getElementById('taskModal').classList.remove('open');}
 
-// ── Completion Date → Status (New Task modal) ─────────────────────────────
-// Mirrors the inline-table rule (see inlineSave): entering a current/past
-// date while New/In Progress auto-completes the task; clearing it reverts to
-// New (no Start Date field exists in this modal). Every other status is
-// untouched — per Scott, those must be changed via the Status dropdown.
-function handleTaskDueChange() {
-  const dueFld = document.getElementById('taskDue');
-  const statusFld = document.getElementById('taskStatus');
-  if (!dueFld || !statusFld) return;
-  const todayStr = new Date().toISOString().slice(0,10);
-  if (dueFld.value && dueFld.value > todayStr) {
-    if (typeof toast === 'function') toast('⚠ Completion date cannot be in the future.', 'error');
-    dueFld.value = '';
-    return;
-  }
-  if (dueFld.value && (statusFld.value === 'new' || statusFld.value === 'inprogress')) {
-    statusFld.value = 'complete';
-  } else if (!dueFld.value && statusFld.value === 'complete') {
-    statusFld.value = 'new';
-  }
-}
+// Status and Completed Date are no longer set from this modal — every task
+// created here (or via the +Add Task button) starts at 'new' automatically.
+// Status changes (including Completed Date, which is status-driven) happen
+// exclusively through the inline table editor from here on.
 
 function buildTaskChips(){
   const grid = document.getElementById('taskChipGrid');
@@ -316,67 +296,11 @@ function showEmptyIfNeeded(containerId, count, msg) {
 function updateStatsBar() { /* stats bar removed */ }
 
 
-// ===== SAVE TASK — push to store =====
-// ===== SAVE TASK — push to store =====
-window.saveTask = function saveTask(another=false){
-  const title=document.getElementById('taskTitle').value.trim();
-  if(!title){
-    const inp=document.getElementById('taskTitle');
-    inp.style.borderColor='var(--red)';inp.style.boxShadow='0 0 0 3px rgba(224,92,92,0.18)';
-    inp.focus();setTimeout(()=>{inp.style.borderColor='';inp.style.boxShadow='';},1800);return;
-  }
-  const due=document.getElementById('taskDue').value;
-  let dueLabel='';
-  if(due){const d=new Date(due+'T00:00:00');dueLabel=d.toLocaleDateString('en-US',{month:'short',day:'numeric'});}
-  const assign=[...tAssign][0]||'AL';
-  const status=document.getElementById('taskStatus').value;
-  const projId = lockedProjectId || document.getElementById('taskProject').value;
-  const overdue = due && new Date(due+'T00:00:00') < new Date();
-
-  const today = new Date().toISOString().split('T')[0];
-
-  // Add to store
-  const newTask = {
-    name: title,
-    assign,
-    due: dueLabel,
-    overdue,
-    done: status === 'complete',
-    proj: projId,
-    status,
-    priority: tPri,
-    section: 'sprint',
-    createdAt: today,
-    _id: Date.now(),
-  };
-  taskStore.unshift(newTask);
-
-  closeTaskModal();
-  toast('"'+(title.length>40?title.slice(0,40)+'...':title)+'" created');
-
-  // Re-render all views with current filter
-  renderAllViews();
-
-  // Always refresh the tasks sub-panel if we're on it or switch to it
-  if (activeProjectId) {
-    renderTasksPanel(activeProjectId);
-    // If tasks sub-panel is visible, keep it; otherwise switch to it
-    const subTasks = document.getElementById('sub-tasks');
-    if (subTasks && subTasks.classList.contains('active')) {
-      // already visible, already re-rendered above
-    } else if (document.getElementById('panel-project')?.classList.contains('active')) {
-      switchProjTab('sub-tasks');
-    }
-  }
-
-  // Refresh info task list if info sub-panel is active
-  const subInfo = document.getElementById('sub-info');
-  if (subInfo && subInfo.classList.contains('active') && activeProjectId) {
-    renderInfoTasks(activeProjectId, currentTaskFilter);
-  }
-
-  if(another)setTimeout(()=>openTaskModal(),340);
-}
+// Note: saveTask() is defined once, further down (near "SUPABASE SAVE TASK
+// PATCH") — the DB-backed version that actually inserts into Supabase. An
+// earlier local-only duplicate used to live here, immediately shadowed at
+// load and never reachable; removed for clarity since it also referenced
+// the now-removed taskStatus/taskDue fields.
 
 
 // ===== EMPTY STATE CSS =====
@@ -576,16 +500,21 @@ function renderTasksPanel(projId) {
 
     const canEditTask = typeof can === 'function' ? can('edit_tasks') : true;
     const empM = (t.assignId && employees.find(e => e.id === t.assignId)) || employees.find(e => e.initials === t.assign) || {color:'#555'};
+    // Approved is only offered on procedure tasks (sales cat 42/44) — or, if
+    // salesCat later changes away from 42/44 on an already-approved task,
+    // it stays listed so the value doesn't silently vanish out from under it.
+    const _isProcCat = t.salesCat === '42' || t.salesCat === '44';
     const statusOpts = ['new','inprogress','prohold','accthold','complete','cancelled']
       .concat(t.status === 'billed' ? ['billed'] : [])
+      .concat((_isProcCat || t.status === 'approved') ? ['approved'] : [])
       .map(s => {
-        const labels = {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed'};
+        const labels = {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed','approved':'Approved'};
         return `<option value="${s}" ${t.status===s?'selected':''}>${labels[s]}</option>`;
       }).join('');
-    // Billed tasks freeze status, price, billed date, AND completed date.
-    // Only unlock_billed may edit them; every other field stays gated on
-    // edit_tasks as before.
-    const billedLock = (t.status === 'billed') && !((typeof can === 'function') && can('unlock_billed'));
+    // Billed AND Approved tasks freeze status, price, billed date, AND
+    // completed date. Only unlock_billed may edit them; every other field
+    // stays gated on edit_tasks as before.
+    const billedLock = (t.status === 'billed' || t.status === 'approved') && !((typeof can === 'function') && can('unlock_billed'));
     const canEditBilled = canEditTask && !billedLock;
     const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
       `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
@@ -943,6 +872,10 @@ function tpToggleDone(taskId, projId) {
 //   • Billed tasks are frozen. Only the `unlock_billed` capability may change
 //     them, and even then a confirm fires. (Billed is set solely from the
 //     Reports → Billing Queue, which captures the PeachTree invoice #.)
+//     Exception: billed → approved is exempt from this gate — approving a
+//     billed procedure is normal forward progress in the job-status flow,
+//     not a reopen, and doesn't touch price/billing data. Every other
+//     change away from billed still requires unlock_billed.
 //   • A completed (non-billed) task prompts a confirm before its status
 //     changes, to catch accidental un-completes.
 function guardStatusChange(t, newStatus) {
@@ -950,6 +883,7 @@ function guardStatusChange(t, newStatus) {
   const cur = t.status;
   if (cur === newStatus) return true;
   if (cur === 'billed') {
+    if (newStatus === 'approved') return true;
     const privileged = (typeof can === 'function') && can('unlock_billed');
     if (!privileged) {
       if (typeof toast === 'function') toast('🔒 Billed task is locked. Ask Linda to unlock.', 'error');
@@ -968,9 +902,10 @@ async function inlineSave(taskId, projId, field, value) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
 
-  // Billed tasks freeze price, billed date, and completed date too (status
-  // is handled by guardStatusChange below). Only unlock_billed may edit them.
-  if (t.status === 'billed' && (field === 'fixedPrice' || field === 'billedDate' || field === 'completedDate')) {
+  // Billed AND Approved tasks freeze price, billed date, and completed date
+  // too (status itself is handled by guardStatusChange below). Only
+  // unlock_billed may edit them.
+  if ((t.status === 'billed' || t.status === 'approved') && (field === 'fixedPrice' || field === 'billedDate' || field === 'completedDate')) {
     const privileged = (typeof can === 'function') && can('unlock_billed');
     if (!privileged) {
       if (typeof toast === 'function') toast('🔒 Billed task is locked. Ask Linda to unlock.', 'error');
@@ -993,7 +928,7 @@ async function inlineSave(taskId, projId, field, value) {
       return;
     }
     t.status = value;
-    t.done = (value === 'complete' || value === 'done' || value === 'billed');
+    t.done = (value === 'complete' || value === 'done' || value === 'billed' || value === 'approved');
 
     // Auto-set dates on status transitions
     const extraUpdates = {};
@@ -1002,18 +937,21 @@ async function inlineSave(taskId, projId, field, value) {
     // Stamps are sticky by intent — but if status moves AWAY from the state
     // that set them, the stamp becomes a "ghost" that misleads reports.
     // Mirror the set-rules below so each stamp is cleared in exactly the
-    // statuses it would never be set in.
+    // statuses it would never be set in. Approved is downstream of both
+    // billed (fixed-price) and complete (no-charge), so it's included
+    // alongside them everywhere below — moving to Approved must never wipe
+    // the billedDate/completedDate that got it there.
     if (value !== 'cancelled' && t.cancelledDate) {
       t.cancelledDate = '';
       extraUpdates.cancelled_date = null;
     }
-    if (value !== 'billed' && t.billedDate) {
+    if (value !== 'billed' && value !== 'approved' && t.billedDate) {
       t.billedDate = '';
       extraUpdates.billed_date = null;
     }
-    // completed_date is set for complete/done/billed — clear only when
-    // moving to a status that wouldn't have set it (new/inprogress/cancelled)
-    if (!['complete','done','billed'].includes(value) && t.completedDate) {
+    // completed_date is set for complete/done/billed/approved — clear only
+    // when moving to a status that wouldn't have set it (new/inprogress/cancelled)
+    if (!['complete','done','billed','approved'].includes(value) && t.completedDate) {
       t.completedDate = '';
       extraUpdates.completed_date = null;
     }
@@ -1035,6 +973,10 @@ async function inlineSave(taskId, projId, field, value) {
         t.completedDate = today;
         extraUpdates.completed_date = today;
       }
+    }
+    if (value === 'approved' && !t.completedDate) {
+      t.completedDate = today;
+      extraUpdates.completed_date = today;
     }
     if (value === 'cancelled' && !t.cancelledDate) {
       t.cancelledDate = today;
@@ -1328,9 +1270,6 @@ async function openEditTaskModal(taskId) {
 
   document.getElementById('etTitle').value = t.name || '';
   document.getElementById('etDesc').value = t.desc || '';
-  document.getElementById('etStatus').value = t.status || 'inprogress';
-  document.getElementById('etDue').value = t.completedDate || t.due_raw || '';
-  document.getElementById('etDue').max = new Date().toISOString().slice(0,10);
   document.getElementById('etSalesCat').value = t.salesCat || '';
   document.getElementById('etFixedPrice').value = t.fixedPrice || '';
   if (document.getElementById('etRevenueType')) {
@@ -1419,37 +1358,10 @@ function etTogAssign(id, initials, el) {
   el.querySelector('.chip-chk').innerHTML = '&#x2713;';
 }
 
-async function updateCompletedDateFromStatus() {
-  const status = document.getElementById('etStatus').value;
-  const dueFld = document.getElementById('etDue');
-  if ((status === 'complete' || status === 'billed') && !dueFld.value) {
-    dueFld.value = new Date().toISOString().slice(0,10);
-  }
-}
-
-// ── Completion Date → Status (Edit Task modal) ────────────────────────────
-// Reverse direction of updateCompletedDateFromStatus above. Same rule as the
-// inline table: entering a date while New/In Progress auto-completes;
-// clearing it while Complete reverts — to In Progress if the task already
-// has a Start Date on record, else New. (This modal has no Start Date field
-// of its own, so the check reads the stored task record.)
-function handleEtDueChange() {
-  const dueFld = document.getElementById('etDue');
-  const statusFld = document.getElementById('etStatus');
-  if (!dueFld || !statusFld) return;
-  const todayStr = new Date().toISOString().slice(0,10);
-  if (dueFld.value && dueFld.value > todayStr) {
-    if (typeof toast === 'function') toast('⚠ Completion date cannot be in the future.', 'error');
-    dueFld.value = '';
-    return;
-  }
-  if (dueFld.value && (statusFld.value === 'new' || statusFld.value === 'inprogress')) {
-    statusFld.value = 'complete';
-  } else if (!dueFld.value && statusFld.value === 'complete') {
-    const t = taskStore.find(x => x._id === editingTaskId);
-    statusFld.value = (t && t.taskStartDate) ? 'inprogress' : 'new';
-  }
-}
+// Status and Completed Date are no longer editable from this modal — both
+// are exclusively set via the inline table editor now (Completed Date is
+// status-driven there). saveEditTask() below leaves whatever status/
+// completed_date the task already has untouched.
 
 async function saveEditTask() {
   const title = document.getElementById('etTitle').value.trim();
@@ -1459,8 +1371,6 @@ async function saveEditTask() {
     return;
   }
 
-  const due        = document.getElementById('etDue').value;
-  const status     = document.getElementById('etStatus').value;
   const salesCat   = document.getElementById('etSalesCat').value;
   const fixedPrice = parseFloat(document.getElementById('etFixedPrice').value) || 0;
   const revenueType = document.getElementById('etRevenueType') ? document.getElementById('etRevenueType').value : 'fixed';
@@ -1471,21 +1381,18 @@ async function saveEditTask() {
   const _prevAssignId = _prevTask.assignId || (employees.find(e => e.initials === _prevTask.assign)||{}).id || '';
   const _editProjId   = _prevTask.proj || activeProjectId;
   const desc       = document.getElementById('etDesc').value.trim();
-  const dueLabel   = due ? new Date(due + 'T00:00:00').toLocaleDateString('en-US', {month:'short', day:'numeric'}) : '';
-  const isOverdue  = due ? new Date(due + 'T00:00:00') < new Date() && status !== 'done' : false;
-
-  // Auto-set completed date if marking complete/billed with no date
-  const completedDate = due || ((status === 'complete' || status === 'billed') ? new Date().toISOString().slice(0,10) : null);
 
   const _newSectionId = document.getElementById('etSectionSelect')?.value || null;
 
+  // Status and completed_date are intentionally omitted — this modal no
+  // longer edits them. Whatever the task's current status/completion date
+  // already is stays untouched by a save here.
   const updates = {
     name: title, description: desc, assignee: assign, assignee_id: assignEmp ? assignEmp.id : null,
-    completed_date: completedDate||null, due_date: null, status, priority: etPri,
+    priority: etPri,
     sales_category: salesCat||null,
     fixed_price: fixedPrice||null,
     revenue_type: revenueType,
-    done: status === 'complete',
     section_id: _newSectionId || null,
   };
 
@@ -1503,9 +1410,8 @@ async function saveEditTask() {
   if (idx > -1) {
     taskStore[idx] = {
       ...taskStore[idx],
-      name: title, desc, assign, assignId, due: dueLabel, due_raw: '', completedDate: completedDate||'',
-      status, priority: etPri, salesCat, fixedPrice, revenueType,
-      done: status === 'complete', overdue: isOverdue,
+      name: title, desc, assign, assignId,
+      priority: etPri, salesCat, fixedPrice, revenueType,
     };
   }
 
@@ -1795,11 +1701,10 @@ window.saveTask = async function(another=false) {
   const title = document.getElementById('taskTitle').value.trim();
   if (!title) { document.getElementById('taskTitle').style.borderColor='var(--red)'; setTimeout(()=>document.getElementById('taskTitle').style.borderColor='',1800); return; }
 
-  const due   = document.getElementById('taskDue').value;
   const assignId = [...tAssign][0] || '';
   const assignEmp = employees.find(e => e.id === assignId);
   const assign = assignEmp ? assignEmp.initials : assignId;
-  const status= document.getElementById('taskStatus').value;
+  const status = 'new'; // every task created here starts New — status changes happen inline
   const projId= lockedProjectId || document.getElementById('taskProject').value;
   const salesCat = document.getElementById('taskSalesCat').value;
   const fixedPrice = parseFloat(document.getElementById('taskFixedPrice').value) || 0;
@@ -1855,9 +1760,9 @@ window.saveTask = async function(another=false) {
     name: title,
     description: document.getElementById('taskDesc').value.trim(),
     project_id: projId, assignee: assign, assignee_id: assignEmp ? assignEmp.id : null,
-    completed_date: (status === 'complete' || status === 'done' || status === 'billed') ? (due||null) : null,
+    completed_date: null, // always New at creation — no completion date yet
     due_date: null, status, priority: tPri,
-    section: 'sprint', done: status==='done',
+    section: 'sprint', done: false,
     sales_category: salesCat||null,
     fixed_price: fixedPrice||null,
     revenue_type: document.getElementById('taskRevenueType') ? document.getElementById('taskRevenueType').value : 'fixed',
@@ -1872,16 +1777,14 @@ window.saveTask = async function(another=false) {
   window._localInsertIds.add(saved.id);
   setTimeout(() => window._localInsertIds?.delete(saved.id), 8000);
 
-  const dueLabel = due ? new Date(due+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '';
-  // 'due' field is now Completed Date
   const _revType = document.getElementById('taskRevenueType') ? document.getElementById('taskRevenueType').value : 'fixed';
   taskStore.push({
-    _id: saved.id, taskNum: _nextNum, name: title, assign, assignId, due: dueLabel, due_raw: '',
-    completedDate: (status === 'complete' || status === 'done' || status === 'billed') ? due : '',
+    _id: saved.id, taskNum: _nextNum, name: title, assign, assignId, due: '', due_raw: '',
+    completedDate: '',
     salesCat, fixedPrice,
     sectionId: _sectionId || null,
-    overdue: due ? new Date(due+'T00:00:00') < new Date() && status!=='done' : false,
-    done: status==='done', proj: projId, status, priority: tPri, section:'sprint',
+    overdue: false,
+    done: false, proj: projId, status, priority: tPri, section:'sprint',
     createdAt: today, revenueType: _revType,
   });
 

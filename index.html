@@ -1172,24 +1172,6 @@
         </select>
       </div>
       <div class="field-row">
-        <div class="field">
-          <label class="field-label">Status</label>
-          <select class="f-select" id="taskStatus">
-            <option value="new" selected>New</option>
-            <option value="inprogress">In Progress</option>
-            <option value="prohold">Production Hold</option>
-            <option value="accthold">Accounting Hold</option>
-            <option value="complete">Complete</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="billed">Billed</option>
-          </select>
-        </div>
-        <div class="field">
-          <label class="field-label">Completed Date</label>
-          <input class="f-input" id="taskDue" type="date" style="color-scheme:dark" onchange="handleTaskDueChange()" />
-        </div>
-      </div>
-      <div class="field-row">
       <div class="field">
         <label class="field-label">Sales Category</label>
         <select class="f-select" id="taskSalesCat">
@@ -1358,24 +1340,6 @@
         <select class="f-select" id="etSectionSelect">
           <option value="">— No section —</option>
         </select>
-      </div>
-      <div class="field-row">
-        <div class="field">
-          <label class="field-label">Status</label>
-          <select class="f-select" id="etStatus" onchange="updateCompletedDateFromStatus()">
-            <option value="new">New</option>
-            <option value="inprogress">In Progress</option>
-            <option value="prohold">Production Hold</option>
-            <option value="accthold">Accounting Hold</option>
-            <option value="complete">Complete</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="billed">Billed</option>
-          </select>
-        </div>
-        <div class="field">
-          <label class="field-label">Completed Date</label>
-          <input class="f-input" id="etDue" type="date" style="color-scheme:dark" onchange="handleEtDueChange()" />
-        </div>
       </div>
       <div class="field-row">
         <div class="field">
