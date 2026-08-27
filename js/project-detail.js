@@ -231,24 +231,14 @@ async function computeAndApplyJobStatus(projId) {
 
   if (newStatus === info.status) return; // no change — don't write or log
 
-  const oldStatus = info.status;
   info.status = newStatus;
+  // dbUpdate below is all that's needed — trg_audit_project_info
+  // (fn_audit_track, keyed by audit_config.projects) already logs every
+  // project_info.status change automatically with correct actor attribution.
+  // An earlier version of this function also inserted an explicit
+  // activity_log row here, which just duplicated that trigger — removed.
   if (sb) {
     dbUpdate('project_info', projId, { status: newStatus });
-    // Explicit audit trail entry — this is a system-computed transition, not
-    // a manual click, so it's worth being unambiguous in the log about why
-    // the status moved.
-    try {
-      const proj = (typeof projects !== 'undefined') ? projects.find(p => p.id === projId) : null;
-      await sb.from('activity_log').insert({
-        employee_id: currentEmployee ? currentEmployee.id : null,
-        employee_name: currentEmployee ? currentEmployee.name : 'System',
-        record_type: 'projects', record_id: projId,
-        record_label: proj ? proj.name : projId,
-        field_changed: 'Status Auto-Updated',
-        old_value: oldStatus, new_value: newStatus,
-      });
-    } catch (e) { console.warn('job status audit log failed (non-fatal):', e); }
   }
   if (activeProjectId === projId) {
     renderProjStickyHeader(projId);
@@ -561,7 +551,7 @@ function renderInfoSheet(projId) {
     <div class="info-sections" style="margin-top:20px">
       <div class="info-section" style="grid-column:1/-1">
         <div class="info-section-title">Approvals &amp; Compliance</div>
-        <div class="info-fields" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px">
+        <div class="info-fields" style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px">
           ${pickField('DPAS', info.dpas, 'dpas', projId, [
             {value:'DO', label:'DO', color:'var(--purple)'},
             {value:'DX', label:'DX', color:'var(--amber)'}
@@ -579,12 +569,6 @@ function renderInfoSheet(projId) {
             {value:'Yes', label:'Yes', color:'var(--green)'},
             {value:'No',  label:'No',  color:'var(--muted)'},
             {value:'CNF', label:'CNF', color:'var(--blue)'}
-          ])}
-          ${pickField('TP Approval', info.tpApproval, 'tpApproval', projId, [
-            {value:'Yes',          label:'Yes',          color:'var(--green)'},
-            {value:'No',           label:'No',           color:'var(--red)'},
-            {value:'Partial',      label:'Partial',      color:'var(--amber)'},
-            {value:'Not Required', label:'Not Required', color:'var(--muted)'}
           ])}
         </div>
       </div>

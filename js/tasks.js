@@ -549,8 +549,8 @@ function renderTasksPanel(projId) {
           <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%" ${canEditTask ? '' : 'disabled'}>${salesOpts}</select>
         </div>
         <div class="${canEditTask ? 'itt-name '+( t.done?'done':'')+' itt-cell-edit' : 'itt-name '+(t.done?'done':'')}" ${canEditTask ? `onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()"` : ''}>${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red)">NC</span>':''}</div>
-        <div onclick="event.stopPropagation()" style="display:flex;align-items:center">
-          <select class="status-pill-select" style="color:#000;background:${(t.status||'new')==='new'?'#fff':statusColor(t.status||'new')+('80')};border-color:${(t.status||'new')==='new'?'#bbb':statusColor(t.status||'new')+('99')}"
+        <div onclick="event.stopPropagation()" style="display:flex;align-items:center;min-width:0;overflow:hidden">
+          <select class="status-pill-select" style="min-width:0;flex:1;color:#000;background:${(t.status||'new')==='new'?'#fff':statusColor(t.status||'new')+('80')};border-color:${(t.status||'new')==='new'?'#bbb':statusColor(t.status||'new')+('99')}"
             onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'" ${canEditBilled ? '' : 'disabled'}${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${statusOpts}</select>
           ${approvedCheckbox}
         </div>
