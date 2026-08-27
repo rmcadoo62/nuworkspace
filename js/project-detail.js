@@ -3030,8 +3030,8 @@ function renderInfoTasks(projId, filter) {
 }
 
 // ── Task column resize ──
-const ITT_DEFAULTS={num:'36px',pri:'28px',cat:'50px',task:'1fr',status:'130px',quote:'80px',price:'90px',created:'75px',hrs:'60px',bhrs:'60px',assign:'70px',start:'80px',comp:'80px'};
-const ITT_MINS={num:28,pri:20,cat:36,task:80,status:80,quote:60,price:60,created:60,hrs:50,bhrs:50,assign:50,start:60,comp:60};
+const ITT_DEFAULTS={num:'36px',pri:'28px',cat:'50px',task:'1fr',status:'190px',quote:'80px',price:'90px',created:'75px',hrs:'60px',bhrs:'60px',assign:'70px',start:'80px',comp:'80px'};
+const ITT_MINS={num:28,pri:20,cat:36,task:80,status:130,quote:60,price:60,created:60,hrs:50,bhrs:50,assign:50,start:60,comp:60};
 function ittGetW(){try{return Object.assign({},ITT_DEFAULTS,JSON.parse(localStorage.getItem('ittCols')||'{}'));}catch{return Object.assign({},ITT_DEFAULTS);}}
 function ittSetW(w){Object.entries(w).forEach(([k,v])=>document.documentElement.style.setProperty('--itc-'+k,v));}
 function ittSaveW(w){try{const s={};Object.entries(w).forEach(([k,v])=>{if(v!==ITT_DEFAULTS[k])s[k]=v;});localStorage.setItem('ittCols',JSON.stringify(s));}catch{}}

@@ -518,7 +518,7 @@ function renderTasksPanel(projId) {
     // used everywhere else (revenue reports, Invoicing, syncProjBilledRevenue).
     const _isProcCat = t.salesCat === '42' || t.salesCat === '44';
     const approvedCheckbox = _isProcCat
-      ? `<label onclick="event.stopPropagation()" title="TP Approved" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;font-size:9px;font-weight:700;color:${t.approved?'#5b9cf6':'var(--muted)'};cursor:${canEditTask?'pointer':'default'};white-space:nowrap">
+      ? `<label onclick="event.stopPropagation()" title="TP Approved" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;font-size:9px;font-weight:700;color:${t.approved?'#5b9cf6':'var(--muted)'};cursor:${canEditTask?'pointer':'default'};white-space:nowrap;flex-shrink:0">
           <input type="checkbox" ${t.approved?'checked':''} ${canEditTask?'':'disabled'} onchange="inlineSave('${t._id}','${projId}','approved',this.checked)" style="cursor:${canEditTask?'pointer':'default'}">APPR</label>`
       : '';
     const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
@@ -549,7 +549,7 @@ function renderTasksPanel(projId) {
           <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%" ${canEditTask ? '' : 'disabled'}>${salesOpts}</select>
         </div>
         <div class="${canEditTask ? 'itt-name '+( t.done?'done':'')+' itt-cell-edit' : 'itt-name '+(t.done?'done':'')}" ${canEditTask ? `onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()"` : ''}>${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red)">NC</span>':''}</div>
-        <div onclick="event.stopPropagation()" style="display:flex;align-items:center;min-width:0;overflow:hidden">
+        <div onclick="event.stopPropagation()" style="display:flex;align-items:center;min-width:0;overflow:hidden;padding-right:16px;box-sizing:border-box">
           <select class="status-pill-select" style="min-width:0;flex:1;color:#000;background:${(t.status||'new')==='new'?'#fff':statusColor(t.status||'new')+('80')};border-color:${(t.status||'new')==='new'?'#bbb':statusColor(t.status||'new')+('99')}"
             onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'" ${canEditBilled ? '' : 'disabled'}${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${statusOpts}</select>
           ${approvedCheckbox}
