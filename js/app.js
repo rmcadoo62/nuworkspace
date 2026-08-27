@@ -180,6 +180,28 @@ function confirmDeleteTask() {
       }
     }
 
+    // Cloudflare Access identity cross-check — see verifySessionMatchesCfAccess()
+    // in auth.js for the full writeup. Cloudflare Access authenticates the
+    // browser at the edge; it has no idea whether the app-level Supabase
+    // session already sitting in this browser (via the shared .nulabs.com
+    // cookie) actually belongs to the person who just cleared that gate. On a
+    // shared machine (e.g. the lab PC), a previous person's still-valid
+    // session cookie would otherwise silently carry over to whoever passes
+    // Cloudflare Access next. Run this BEFORE loadAllData()/afterLogin() so a
+    // mismatched session never gets the chance to render anyone's dashboard.
+    if (session?.user && typeof verifySessionMatchesCfAccess === 'function') {
+      const sessionOk = await verifySessionMatchesCfAccess(session);
+      if (!sessionOk) {
+        // Mismatch found and the stale session was already signed out inside
+        // verifySessionMatchesCfAccess() — fall through exactly like the
+        // "no session" path below.
+        document.getElementById('appShell').style.display = 'none';
+        document.getElementById('loginScreen').style.display = 'flex';
+        showAppLoader(false);
+        return;
+      }
+    }
+
     if (session?.user) {
       try {
         await loadAllData(); // load data with confirmed valid session

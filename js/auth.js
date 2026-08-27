@@ -951,6 +951,76 @@ function updateTsStatusBadge(key) {
 // ===== AUTH FUNCTIONS =====
 // ===== AUTH FUNCTIONS =====
 
+// ============================================================================
+// CLOUDFLARE ACCESS IDENTITY CHECK
+// ============================================================================
+// Cloudflare Access authenticates the *browser* at the network edge (Gmail +
+// an emailed one-time code) before it can reach NUWorkspace at all. That is a
+// completely separate layer from the app's own Supabase login session, which
+// is just a cookie sitting in the browser (see nulabs-session-storage.js —
+// scoped to all of .nulabs.com, 30-day lifetime, by design, so SSO carries
+// over to NUForce). Access has no way to know that; it only checks "is this
+// browser allowed in," never "does the app-level session belong to this
+// person." On a shared machine, a previous person's still-valid session
+// cookie silently rides along with whoever clears Access next.
+//
+// This surfaced 2026-08-27: Robert Hoff cleared Cloudflare Access on the lab
+// PC and was dropped straight into Kevin K's still-open NUWorkspace session
+// from earlier that day — nothing had ever challenged that stale cookie.
+//
+// Fix: when startup() finds an existing Supabase session, cross-check it
+// against the identity Cloudflare Access asserts for *this* browser via the
+// standard /cdn-cgi/access/get-identity endpoint (available for free on any
+// origin sitting behind Access — no team-domain config needed on our side).
+// If they don't match, the stored session belongs to someone else — sign it
+// out and fall through to the normal login screen instead of silently
+// continuing as the wrong person.
+//
+// Fails OPEN by design: if the endpoint 404s/errors (local dev, an origin not
+// actually behind Access, a transient network hiccup) this returns null and
+// startup() proceeds exactly as it did before this check existed. We only
+// ever act on a POSITIVE mismatch — never on "couldn't tell" — so this can't
+// lock out a normal login just because the Access check itself misbehaves.
+async function getCloudflareAccessEmail() {
+  try {
+    const res = await fetch('/cdn-cgi/access/get-identity', { credentials: 'include' });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return (data && data.email) ? String(data.email).toLowerCase() : null;
+  } catch (e) {
+    console.warn('[CF Access] Identity check unavailable (failing open):', e);
+    return null;
+  }
+}
+
+// Returns true if `session` is safe to continue with. Returns false if it
+// found a mismatch and force-signed the session out — caller should then
+// treat this exactly like the "no session" path (show the login screen).
+async function verifySessionMatchesCfAccess(session) {
+  if (!session?.user?.email) return true; // nothing to compare against
+  const cfEmail = await getCloudflareAccessEmail();
+  if (!cfEmail) return true; // couldn't verify — fail open, don't block login
+  const sessionEmail = session.user.email.toLowerCase();
+  if (cfEmail === sessionEmail) return true;
+
+  console.warn('[CF Access] Stored NUWorkspace session (' + sessionEmail + ') does not ' +
+    'match the Cloudflare Access identity for this browser (' + cfEmail + '). Forcing sign-out.');
+  // Audit trail — same table doLogin() already writes to (CMMC AU.L2-3.3.1).
+  try {
+    await sb.from('activity_log').insert({
+      employee_id: null, employee_name: cfEmail,
+      record_type: 'auth', record_id: null,
+      record_label: cfEmail, field_changed: 'session_identity_mismatch',
+      old_value: sessionEmail, new_value: cfEmail,
+    });
+  } catch (_) {}
+  await sb.auth.signOut().catch(() => {});
+  if (typeof toast === 'function') {
+    toast('🔒 Signed out — this browser had a different user\'s session');
+  }
+  return false;
+}
+
 async function doLogin() {
   const btn = document.getElementById('loginBtn');
   if (btn.disabled) return; // prevent double-submission from rapid Enter presses
@@ -1311,10 +1381,10 @@ function _showViewAsBanner() {
     document.body.appendChild(banner);
   }
   banner.innerHTML =
-    '<span>\uD83D\uDC41 VIEW-ONLY \u2014 Viewing as <span style="text-decoration:underline">' +
-    (viewAsEmployee?.name || '?') + '</span> \u00B7 acting as ' +
+    '<span>👁 VIEW-ONLY — Viewing as <span style="text-decoration:underline">' +
+    (viewAsEmployee?.name || '?') + '</span> · acting as ' +
     (realEmployee?.name || 'admin') + '</span>' +
-    '<button onclick="exitViewAs()" style="background:#1a1207;color:#e8a234;border:none;border-radius:5px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer">\u2715 Exit View</button>';
+    '<button onclick="exitViewAs()" style="background:#1a1207;color:#e8a234;border:none;border-radius:5px;padding:4px 12px;font-size:11px;font-weight:700;cursor:pointer">✕ Exit View</button>';
   banner.style.display = 'flex';
   const shell = document.getElementById('appShell');
   if (shell) { shell.style.marginTop = '34px'; shell.style.height = 'calc(100% - 34px)'; }
@@ -1342,7 +1412,7 @@ function _installViewAsWriteGuard() {
       builder[method] = function(...args) {
         if (isImpersonating()) {
           console.warn('[ViewAs] Blocked ' + method + ' on ' + table);
-          if (typeof toast === 'function') toast('\uD83D\uDD12 Read-only \u2014 exit View-As to make changes');
+          if (typeof toast === 'function') toast('🔒 Read-only — exit View-As to make changes');
           return _makeBlockedChain();
         }
         return orig.apply(builder, args);
