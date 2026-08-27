@@ -500,22 +500,27 @@ function renderTasksPanel(projId) {
 
     const canEditTask = typeof can === 'function' ? can('edit_tasks') : true;
     const empM = (t.assignId && employees.find(e => e.id === t.assignId)) || employees.find(e => e.initials === t.assign) || {color:'#555'};
-    // Approved is only offered on procedure tasks (sales cat 42/44) — or, if
-    // salesCat later changes away from 42/44 on an already-approved task,
-    // it stays listed so the value doesn't silently vanish out from under it.
-    const _isProcCat = t.salesCat === '42' || t.salesCat === '44';
     const statusOpts = ['new','inprogress','prohold','accthold','complete','cancelled']
       .concat(t.status === 'billed' ? ['billed'] : [])
-      .concat((_isProcCat || t.status === 'approved') ? ['approved'] : [])
       .map(s => {
-        const labels = {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed','approved':'Approved'};
+        const labels = {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed'};
         return `<option value="${s}" ${t.status===s?'selected':''}>${labels[s]}</option>`;
       }).join('');
-    // Billed AND Approved tasks freeze status, price, billed date, AND
-    // completed date. Only unlock_billed may edit them; every other field
-    // stays gated on edit_tasks as before.
-    const billedLock = (t.status === 'billed' || t.status === 'approved') && !((typeof can === 'function') && can('unlock_billed'));
+    // Billed tasks freeze status, price, billed date, AND completed date.
+    // Only unlock_billed may edit them; every other field stays gated on
+    // edit_tasks as before. Approval (below) is deliberately NOT gated by
+    // this lock — a billed task can still be marked approved by anyone with
+    // edit_tasks, since approval doesn't touch price/billing data at all.
+    const billedLock = (t.status === 'billed') && !((typeof can === 'function') && can('unlock_billed'));
     const canEditBilled = canEditTask && !billedLock;
+    // Approval checkbox — procedure tasks only (sales cat 42/44). Independent
+    // flag, not a status value, so it never affects "is this billed" checks
+    // used everywhere else (revenue reports, Invoicing, syncProjBilledRevenue).
+    const _isProcCat = t.salesCat === '42' || t.salesCat === '44';
+    const approvedCheckbox = _isProcCat
+      ? `<label onclick="event.stopPropagation()" title="TP Approved" style="display:inline-flex;align-items:center;gap:3px;margin-left:6px;font-size:9px;font-weight:700;color:${t.approved?'#5b9cf6':'var(--muted)'};cursor:${canEditTask?'pointer':'default'};white-space:nowrap">
+          <input type="checkbox" ${t.approved?'checked':''} ${canEditTask?'':'disabled'} onchange="inlineSave('${t._id}','${projId}','approved',this.checked)" style="cursor:${canEditTask?'pointer':'default'}">APPR</label>`
+      : '';
     const salesOpts = ['','11','12','13','33','41','42','43','44','51','52','53','54','55','56','57','58','59','67','91','92','93','94','95','96','98','99'].map(v =>
       `<option value="${v}" ${(t.salesCat||'')===v?'selected':''}>${v||'—'}</option>`).join('');
     const loggedH = getHoursForTask(t.name, t.proj, t._id);
@@ -544,9 +549,10 @@ function renderTasksPanel(projId) {
           <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%" ${canEditTask ? '' : 'disabled'}>${salesOpts}</select>
         </div>
         <div class="${canEditTask ? 'itt-name '+( t.done?'done':'')+' itt-cell-edit' : 'itt-name '+(t.done?'done':'')}" ${canEditTask ? `onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()"` : ''}>${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red)">NC</span>':''}</div>
-        <div onclick="event.stopPropagation()">
+        <div onclick="event.stopPropagation()" style="display:flex;align-items:center">
           <select class="status-pill-select" style="color:#000;background:${(t.status||'new')==='new'?'#fff':statusColor(t.status||'new')+('80')};border-color:${(t.status||'new')==='new'?'#bbb':statusColor(t.status||'new')+('99')}"
             onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'" ${canEditBilled ? '' : 'disabled'}${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${statusOpts}</select>
+          ${approvedCheckbox}
         </div>
         <div class="itt-quote ${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditQuoteNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#000;${canEditTask?'cursor:text':''}">${t.quoteNum||'—'}</div>
         <div class="itt-po ${canEditTask?'itt-cell-edit':''}" ${canEditTask?`onclick="inlineEditPoNum('${t._id}','${projId}');event.stopPropagation()"`:''}  style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);${canEditTask?'cursor:text':''}"> ${t.poNumber||'—'}</div>
@@ -872,10 +878,6 @@ function tpToggleDone(taskId, projId) {
 //   • Billed tasks are frozen. Only the `unlock_billed` capability may change
 //     them, and even then a confirm fires. (Billed is set solely from the
 //     Reports → Billing Queue, which captures the PeachTree invoice #.)
-//     Exception: billed → approved is exempt from this gate — approving a
-//     billed procedure is normal forward progress in the job-status flow,
-//     not a reopen, and doesn't touch price/billing data. Every other
-//     change away from billed still requires unlock_billed.
 //   • A completed (non-billed) task prompts a confirm before its status
 //     changes, to catch accidental un-completes.
 function guardStatusChange(t, newStatus) {
@@ -883,7 +885,6 @@ function guardStatusChange(t, newStatus) {
   const cur = t.status;
   if (cur === newStatus) return true;
   if (cur === 'billed') {
-    if (newStatus === 'approved') return true;
     const privileged = (typeof can === 'function') && can('unlock_billed');
     if (!privileged) {
       if (typeof toast === 'function') toast('🔒 Billed task is locked. Ask Linda to unlock.', 'error');
@@ -902,10 +903,12 @@ async function inlineSave(taskId, projId, field, value) {
   const t = taskStore.find(x => x._id === taskId);
   if (!t) return;
 
-  // Billed AND Approved tasks freeze price, billed date, and completed date
-  // too (status itself is handled by guardStatusChange below). Only
-  // unlock_billed may edit them.
-  if ((t.status === 'billed' || t.status === 'approved') && (field === 'fixedPrice' || field === 'billedDate' || field === 'completedDate')) {
+  // Billed tasks freeze price, billed date, and completed date too (status
+  // is handled by guardStatusChange below). Only unlock_billed may edit them.
+  // Approval (field === 'approved') is deliberately NOT included here — it
+  // doesn't touch price/billing data, so it stays editable by anyone with
+  // edit_tasks even on a billed, locked task.
+  if ((t.status === 'billed') && (field === 'fixedPrice' || field === 'billedDate' || field === 'completedDate')) {
     const privileged = (typeof can === 'function') && can('unlock_billed');
     if (!privileged) {
       if (typeof toast === 'function') toast('🔒 Billed task is locked. Ask Linda to unlock.', 'error');
@@ -928,7 +931,7 @@ async function inlineSave(taskId, projId, field, value) {
       return;
     }
     t.status = value;
-    t.done = (value === 'complete' || value === 'done' || value === 'billed' || value === 'approved');
+    t.done = (value === 'complete' || value === 'done' || value === 'billed');
 
     // Auto-set dates on status transitions
     const extraUpdates = {};
@@ -937,21 +940,18 @@ async function inlineSave(taskId, projId, field, value) {
     // Stamps are sticky by intent — but if status moves AWAY from the state
     // that set them, the stamp becomes a "ghost" that misleads reports.
     // Mirror the set-rules below so each stamp is cleared in exactly the
-    // statuses it would never be set in. Approved is downstream of both
-    // billed (fixed-price) and complete (no-charge), so it's included
-    // alongside them everywhere below — moving to Approved must never wipe
-    // the billedDate/completedDate that got it there.
+    // statuses it would never be set in.
     if (value !== 'cancelled' && t.cancelledDate) {
       t.cancelledDate = '';
       extraUpdates.cancelled_date = null;
     }
-    if (value !== 'billed' && value !== 'approved' && t.billedDate) {
+    if (value !== 'billed' && t.billedDate) {
       t.billedDate = '';
       extraUpdates.billed_date = null;
     }
-    // completed_date is set for complete/done/billed/approved — clear only
-    // when moving to a status that wouldn't have set it (new/inprogress/cancelled)
-    if (!['complete','done','billed','approved'].includes(value) && t.completedDate) {
+    // completed_date is set for complete/done/billed — clear only when
+    // moving to a status that wouldn't have set it (new/inprogress/cancelled)
+    if (!['complete','done','billed'].includes(value) && t.completedDate) {
       t.completedDate = '';
       extraUpdates.completed_date = null;
     }
@@ -974,10 +974,6 @@ async function inlineSave(taskId, projId, field, value) {
         extraUpdates.completed_date = today;
       }
     }
-    if (value === 'approved' && !t.completedDate) {
-      t.completedDate = today;
-      extraUpdates.completed_date = today;
-    }
     if (value === 'cancelled' && !t.cancelledDate) {
       t.cancelledDate = today;
       extraUpdates.cancelled_date = today;
@@ -990,6 +986,16 @@ async function inlineSave(taskId, projId, field, value) {
         const { error: e2 } = await sb.from('tasks').update(extraUpdates).eq('id', taskId);
         if (e2) console.error('date save error (run SQL migration):', e2.message);
       }
+    }
+  }
+  else if (field === 'approved') {
+    // Independent of status entirely — no billed-lock gate (see comment on
+    // the freeze check above), no date stamps, no confirm dialog. Just a
+    // flag flip that feeds the job-status formula's Active trigger.
+    t.approved = !!value;
+    if (sb) {
+      const { error } = await sb.from('tasks').update({ approved: t.approved }).eq('id', taskId);
+      if (error) console.error('approved save', error);
     }
   }
   else if (field === 'salesCat')    { t.salesCat = value; }
@@ -1099,7 +1105,7 @@ async function inlineSave(taskId, projId, field, value) {
   // Job status automation only cares about status and sales-category changes
   // (procedure-task membership + open/closed state) — everything else on a
   // task (price, assignee, dates alone) doesn't move the formula.
-  if ((field === 'status' || field === 'salesCat') && typeof computeAndApplyJobStatus === 'function') {
+  if ((field === 'status' || field === 'salesCat' || field === 'approved') && typeof computeAndApplyJobStatus === 'function') {
     await computeAndApplyJobStatus(projId);
   }
   setTimeout(ittInitResizers,0);
@@ -1795,7 +1801,7 @@ window.saveTask = async function(another=false) {
   taskStore.push({
     _id: saved.id, taskNum: _nextNum, name: title, assign, assignId, due: '', due_raw: '',
     completedDate: '',
-    salesCat, fixedPrice,
+    salesCat, fixedPrice, approved: false,
     sectionId: _sectionId || null,
     overdue: false,
     done: false, proj: projId, status, priority: tPri, section:'sprint',
@@ -2197,6 +2203,7 @@ async function saveBulkTasks() {
       completedDate: '',
       salesCat: defaults.salesCat,
       fixedPrice: pt.fixedPrice,
+      approved: false,
       budgetHours: pt.budgetHours,
       sectionId: sectionId || null,
       overdue: false,

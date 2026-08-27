@@ -12,11 +12,10 @@ const STATUS_COLORS = {
   'complete':   '#888899',
   'cancelled':  '#5b7fa6',
   'billed':     '#c084fc',
-  'approved':   '#5b9cf6',
 };
 function statusColor(s) { return STATUS_COLORS[s] || '#7a7a85'; }
 function statusLabel(s) {
-  return {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed','approved':'Approved'}[s] || s;
+  return {'new':'New','inprogress':'In Progress','prohold':'Production Hold','accthold':'Accounting Hold','complete':'Complete','cancelled':'Cancelled','billed':'Billed'}[s] || s;
 }
 
 const TASK_STATUSES = {
@@ -27,7 +26,6 @@ const TASK_STATUSES = {
     complete: {dot:'#888899', label:'Complete'},
     cancelled: {dot:'#5b7fa6', label:'Cancelled'},
     billed:    {dot:'#c084fc', label:'Billed'},
-    approved:  {dot:'#5b9cf6', label:'Approved'},
   };
 const COLORS=['#5b9cf6','#a78bfa','#e8a234','#4caf7d','#e05c5c','#f472b6','#34d399','#fb923c','#60a5fa','#c084fc','#facc15','#2dd4bf'];
 const EMOJIS=['📦','🚀','💡','🎯','🛠️','📊','🔬','🎨','📱','💻','🌐','📝','🔒','⚡','🤝','🏆','📌','🗂️','🔑','🛡️','🌟','🧩'];

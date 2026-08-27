@@ -493,6 +493,7 @@ async function loadClosedProject(projId) {
         createdAt: r.created_at ? r.created_at.split('T')[0] : '',
         revenueType: r.revenue_type||'fixed',
         isLegacyImport: r.is_legacy_import === true,
+        approved: r.approved||false,
       });
     });
 
@@ -628,6 +629,7 @@ function _mapTaskRow(r) {
     poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
     createdAt: r.created_at ? r.created_at.split('T')[0] : '',
     revenueType: r.revenue_type||'fixed',
+    approved: r.approved||false,
   };
 }
 
@@ -814,6 +816,7 @@ function setupRealtime() {
         poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
         createdAt: r.created_at ? r.created_at.split('T')[0] : '',
         revenueType: r.revenue_type||'fixed',
+        approved: r.approved||false,
       });
       const proj = projects.find(p => p.id === r.project_id);
       toast('✅ New task: ' + r.name + (proj ? ' on ' + proj.name : ''));
@@ -831,6 +834,7 @@ function setupRealtime() {
         t.section = r.section||t.section; t.fixedPrice = r.fixed_price ? parseFloat(r.fixed_price) : t.fixedPrice;
         t.completedDate = r.completed_date||''; t.billedDate = r.billed_date||'';
         t.cancelledDate = r.cancelled_date||'';
+        t.approved = r.approved||false;
       }
       if (!wasDone && r.done) toast('✓ Task completed: ' + r.name);
       refreshCurrentView();

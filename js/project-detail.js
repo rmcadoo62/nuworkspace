@@ -155,27 +155,33 @@ function refreshScheduleStatus(projId) {
 //   'tentative', NOT 'rescheduled' or 'not_scheduled')
 //       -> inprogress                                    (sticky, checked first)
 //   else if any procedure task (sales cat 42/44, not cancelled) is still open
-//     (open = fixed-price not yet billed/approved, OR no-charge not yet
-//      complete/approved)
+//     (open = fixed-price not yet billed, OR no-charge not yet complete —
+//      the separate 'approved' flag does NOT affect this; a task can be
+//      billed AND approved at the same time)
 //       -> jobprep      (UI label "Procedure")
 //   else if no procedure task exists on the job at all
 //       -> active                                          (default)
-//   else if any procedure task's status = 'approved'
+//   else if any procedure task's 'approved' flag is true
 //       -> active
 //   else
 //       -> pending
 //
-// Called from the ORIGINATING action only (task status/salesCat change,
-// task create/delete, schedule block save/drag/delete) — not from the
-// realtime receive handlers — so only the acting client computes+writes,
+// Called from the ORIGINATING action only (task status/salesCat/approved
+// change, task create/delete, schedule block save/drag/delete) — not from
+// the realtime receive handlers — so only the acting client computes+writes,
 // and every other connected client just picks up the resulting project_info
 // UPDATE through the existing realtime subscription. Avoids duplicate writes
 // when multiple people are looking at the same job.
 const JOB_STATUS_AUTOMATED_SET = ['jobprep', 'pending', 'active', 'inprogress'];
 
+// "Open" is purely a status question (still needs billing/completion) —
+// deliberately independent of the 'approved' flag. A billed-and-approved
+// task is just as resolved, procedure-wise, as a billed-and-unapproved one;
+// approval only changes whether the JOB can reach Active, not whether the
+// procedure task itself still counts as open.
 function _isProcedureTaskOpen(t) {
-  if (t.revenueType === 'nocharge') return t.status !== 'complete' && t.status !== 'approved';
-  return t.status !== 'billed' && t.status !== 'approved';
+  if (t.revenueType === 'nocharge') return t.status !== 'complete';
+  return t.status !== 'billed';
 }
 
 async function computeAndApplyJobStatus(projId) {
@@ -219,7 +225,7 @@ async function computeAndApplyJobStatus(projId) {
 
     if (openProcTasks.length > 0) newStatus = 'jobprep';
     else if (procTasks.length === 0) newStatus = 'active';
-    else if (procTasks.some(t => t.status === 'approved')) newStatus = 'active';
+    else if (procTasks.some(t => !!t.approved)) newStatus = 'active';
     else newStatus = 'pending';
   }
 
