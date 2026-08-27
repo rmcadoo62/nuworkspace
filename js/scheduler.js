@@ -421,6 +421,37 @@ function getProjInfo(projId) {
   return { proj, info };
 }
 
+// Resolve the test/task label to show in the tooltip and expanded bars.
+// A room block can be linked to this project three different ways from the
+// modal's task picker: a single task (taskId), a hand-picked subset of tasks
+// (taskIds, via the "select multiple tasks" toggle), or an entire section
+// (sectionId, e.g. "10'' Valve"). Only taskId used to be checked here, so a
+// block scheduled against a section or a multi-task pick showed no test name
+// at all in the popup — with the test center listed on the far left and
+// nothing to confirm the test itself, there was no way to tell if an entry
+// was on the correct line.
+function resolveBlockTaskLabel(block) {
+  const tasks = (typeof taskStore !== 'undefined' ? taskStore : []);
+  if (block.taskId) {
+    const task = tasks.find(t => t._id === block.taskId);
+    return task ? task.name : '';
+  }
+  if (block.taskIds && block.taskIds.length) {
+    const names = block.taskIds
+      .map(id => { const t = tasks.find(t => t._id === id); return t ? t.name : null; })
+      .filter(Boolean);
+    if (!names.length) return '';
+    if (names.length <= 3) return names.join(', ');
+    return names.slice(0, 2).join(', ') + ' +' + (names.length - 2) + ' more';
+  }
+  if (block.sectionId) {
+    const sections = (typeof sectionStore !== 'undefined' ? sectionStore : []);
+    const sec = sections.find(s => s._id === block.sectionId);
+    return sec ? sec.name : '';
+  }
+  return '';
+}
+
 // Build the display lines shown inside a bar / chip
 // opts.includeLabel — when true, append block.label to Line 1 of project-assigned
 // room blocks ("Project · Client · <label>"). Compact bars leave this off so they
@@ -467,10 +498,8 @@ function buildBlockDisplayLines(block, opts) {
       // Line 1: project name (contains number) · client [· block label]
       // Label is appended here so it shows on every bar (compact + expanded + tooltip)
       lines.push([pi.proj.name, pi.info.client, block.label].filter(Boolean).join('  \u00B7  '));
-      // Next line: time · task name
-      const task = block.taskId
-        ? (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === block.taskId) : null;
-      const line2 = [timeStr, task ? task.name : ''].filter(Boolean).join('  \u00B7  ');
+      // Next line: time · test/task name (single task, multi-task pick, or section)
+      const line2 = [timeStr, resolveBlockTaskLabel(block)].filter(Boolean).join('  \u00B7  ');
       if (line2) lines.push(line2);
       // Line 3: DCAS · Witness
       const dcasRaw = (pi.info.dcas||'').trim().toUpperCase();
@@ -510,10 +539,7 @@ function buildExpandedBarHtml(block, availH) {
   const dcasLbl  = dcasRaw === 'YES' || dcasRaw === 'CNF' ? 'DCAS \u2713' : dcasRaw === 'NO' ? 'DCAS \u2717' : '';
   const witLbl   = witRaw  === 'YES' || witRaw  === 'CNF' ? 'Witness \u2713' : witRaw === 'NO' ? 'Witness \u2717' : '';
 
-  const task = block.taskId
-    ? (typeof taskStore !== 'undefined' ? taskStore : []).find(t => t._id === block.taskId)
-    : null;
-  const taskName = task ? task.name : '';
+  const taskName = resolveBlockTaskLabel(block);
 
   const sh = `text-shadow:0 1px 2px rgba(0,0,0,0.3);`;
   const line = (txt, fs = '10px', fw = '500', op = '0.9') =>
