@@ -580,6 +580,171 @@ async function loadFullProjectTimesheets(projId) {
   }
 }
 
+// ===== REALTIME RESYNC =====
+// ===== REALTIME RESYNC =====
+// Supabase Realtime does NOT back-fill missed events after a dropped/
+// reconnected websocket (laptop sleep, wifi blip, backgrounded tab). A client
+// can silently fall behind with zero signal that it happened — the symptom
+// being "my screen shows a different task status than yours until I hit
+// refresh." This section closes that gap with two triggers (tab regaining
+// focus, and a realtime channel reporting it dropped-then-recovered), both
+// funneling into one targeted resync rather than a full loadAllData() reload
+// (which would flash the loading screen and reset in-progress UI state).
+
+// Shared row → object mapping, used by BOTH the live realtime UPDATE handler
+// below and resyncCoreData(), so the two can never silently drift apart.
+function _mapProjectInfoRow(r) {
+  return {
+    pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
+    phase: r.phase||'Waiting on TP Approval', status: r.status||'active',
+    startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
+    client: r.client||'', clientContact: r.client_contact||'',
+    clientEmail: r.client_email||'', clientPhone: r.client_phone||'',
+    clientId: r.client_id||null, contactId: r.contact_id||null,
+    billingType: r.billing_type||'Fixed Fee', invoiced: r.invoiced||'',
+    remaining: r.remaining||'', notes: r.notes||'', desc: r.description||'',
+    dcas: r.dcas||'', customerWitness: r.customer_witness||'',
+    tpApproval: r.tp_approval||'', dpas: r.dpas||'', cui: r.cui||'',
+    testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'',
+    quoteNumber: r.quote_number||'', creditHold: r.credit_hold||false,
+    needUpdatedPo: r.need_updated_po||false, testcompleteDate: r.testcomplete_date||'',
+    billedRevenue: r.billed_revenue ? parseFloat(r.billed_revenue) : 0,
+    expectedRevenue: r.expected_revenue ? parseFloat(r.expected_revenue) : 0,
+    actualHours: r.actual_hours ? parseFloat(r.actual_hours) : 0,
+  };
+}
+
+function _mapTaskRow(r) {
+  return {
+    _id: r.id, taskNum: r.task_num||0, name: r.name, desc: r.description||'', assign: r.assignee||'', assignId: r.assignee_id||'',
+    due: r.due_date ? new Date(r.due_date+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric'}) : '',
+    due_raw: r.due_date||'', overdue: false, done: r.done||false,
+    proj: r.project_id||'', status: r.status||'new', priority: r.priority||'medium',
+    section: r.section||'sprint', sectionId: r.section_id||null, salesCat: r.sales_category||'',
+    fixedPrice: r.fixed_price ? parseFloat(r.fixed_price) : 0,
+    budgetHours: r.budget_hours ? parseFloat(r.budget_hours) : 0,
+    taskStartDate: r.task_start_date||'', completedDate: r.completed_date||'',
+    billedDate: r.billed_date||'', cancelledDate: r.cancelled_date||'', quoteNum: r.quote_number||'',
+    poNumber: r.po_number||'', peachtreeInv: r.peachtree_inv||'',
+    createdAt: r.created_at ? r.created_at.split('T')[0] : '',
+    revenueType: r.revenue_type||'fixed',
+  };
+}
+
+// Re-render whichever panel is currently visible. Moved to module scope
+// (was local to setupRealtime) so resyncCoreData() can call it too.
+function refreshCurrentView() {
+  const active = document.querySelector('.view-panel.active');
+  if (!active) return;
+  const id = active.id;
+  if (id === 'panel-dashboard') renderDashboard();
+  else if (id === 'panel-projects') { document.querySelector('#navProjects') && openProjectsTable(document.getElementById('navProjects')); }
+  else if (id === 'panel-project') {
+    if (activeProjectId) {
+      renderProjSummary(activeProjectId);
+      const activeSub = document.querySelector('.proj-sub.active');
+      if (activeSub) {
+        const sid = activeSub.id;
+        if (sid === 'sub-info') renderInfoSheet(activeProjectId);
+        else if (sid === 'sub-tasks') renderTasksPanel(activeProjectId);
+        else if (sid === 'sub-expenses') renderExpensesPanel(activeProjectId);
+      }
+    }
+  }
+  else if (id === 'panel-timesheet') renderTimesheet();
+}
+
+let _resyncInFlight = false;
+let _lastResyncAt = 0;
+
+// Targeted catch-up fetch — NOT a full loadAllData() reload. Re-fetches only
+// the two tables that drive what people are complaining goes stale
+// (project_info status, task status) plus invalidates the active project's
+// schedule-status cache, then re-renders. Throttled to avoid piling up calls
+// if the tab flickers visible/hidden or a channel flaps.
+async function resyncCoreData(force) {
+  if (!sb || !currentUser) return;
+  if (_resyncInFlight) return;
+  const now = Date.now();
+  if (!force && (now - _lastResyncAt) < 5000) return;
+  _resyncInFlight = true;
+  _lastResyncAt = now;
+  try {
+    // ── project_info: small table, full rebuild is cheap and authoritative ──
+    const { data: infoRows, error: infoErr } = await sb.from('project_info').select('*');
+    if (infoErr) throw infoErr;
+    (infoRows || []).forEach(r => { projectInfo[r.project_id] = _mapProjectInfoRow(r); });
+
+    // ── tasks: same "open projects only" scope loadAllData() already uses ──
+    const openProjIds = projects
+      .filter(p => ((projectInfo[p.id]||{}).status || 'active') !== 'closed')
+      .map(p => p.id);
+    if (openProjIds.length) {
+      let taskRows = [], page = 0;
+      while (true) {
+        const { data, error } = await sb.from('tasks').select('*')
+          .in('project_id', openProjIds)
+          .order('created_at', { ascending: true })
+          .range(page * 1000, page * 1000 + 999);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        taskRows = taskRows.concat(data);
+        if (data.length < 1000) break;
+        page++;
+      }
+      const freshIds = new Set(taskRows.map(r => r.id));
+      // Update/insert
+      taskRows.forEach(r => {
+        const idx = taskStore.findIndex(t => t._id === r.id);
+        if (idx > -1) taskStore[idx] = { ...taskStore[idx], ..._mapTaskRow(r) };
+        else taskStore.push(_mapTaskRow(r));
+      });
+      // Drop tasks that vanished server-side while disconnected — but only
+      // within the open-project scope we just fetched, so lazily-loaded
+      // closed-project tasks elsewhere in taskStore are never touched.
+      taskStore = taskStore.filter(t => !openProjIds.includes(t.proj) || freshIds.has(t._id));
+    }
+
+    // Schedule status is cached per-project and only recomputed on demand —
+    // invalidate the active project's cache so its pill/status reflects
+    // whatever just came back, next time it's rendered.
+    if (activeProjectId && typeof refreshScheduleStatus === 'function') {
+      refreshScheduleStatus(activeProjectId);
+    }
+    if (typeof updateClosingBadge === 'function') updateClosingBadge();
+    refreshCurrentView();
+    if (activeProjectId && typeof renderProjStickyHeader === 'function') {
+      renderProjStickyHeader(activeProjectId);
+    }
+    console.log('[resync] core data refreshed');
+  } catch (e) {
+    console.warn('[resync] failed (will retry on next trigger):', e);
+  } finally {
+    _resyncInFlight = false;
+  }
+}
+
+// Trigger 1: tab regains focus after being backgrounded.
+if (!window._resyncVisibilityBound) {
+  window._resyncVisibilityBound = true;
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') resyncCoreData();
+  });
+}
+
+// Trigger 2: a realtime channel reports it dropped, then recovers. Passed as
+// the callback to every .subscribe() call in setupRealtime below. Supabase
+// channel statuses: 'SUBSCRIBED' | 'CHANNEL_ERROR' | 'TIMED_OUT' | 'CLOSED'.
+let _rtWasDown = false;
+function _onChannelStatus(status) {
+  if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+    _rtWasDown = true;
+  } else if (status === 'SUBSCRIBED' && _rtWasDown) {
+    _rtWasDown = false;
+    resyncCoreData(true); // force — this is exactly the case the throttle shouldn't block
+  }
+}
+
 // ===== REALTIME SUBSCRIPTIONS =====
 // ===== REALTIME SUBSCRIPTIONS =====
 function setupRealtime() {
@@ -587,26 +752,8 @@ function setupRealtime() {
   if (window._realtimeActive) return; // prevent double-subscription
   window._realtimeActive = true;
 
-  // Helper: re-render whichever panel is currently visible
-  function refreshCurrentView() {
-    const active = document.querySelector('.view-panel.active');
-    if (!active) return;
-    const id = active.id;
-    if (id === 'panel-dashboard') renderDashboard();
-    else if (id === 'panel-projects') { document.querySelector('#navProjects') && openProjectsTable(document.getElementById('navProjects')); }
-    else if (id === 'panel-project') {
-      if (activeProjectId) {
-        renderProjSummary(activeProjectId);
-        const activeSub = document.querySelector('.proj-sub.active');
-        if (activeSub) {
-          const sid = activeSub.id;
-          if (sid === 'sub-info') renderInfoSheet(activeProjectId);
-          else if (sid === 'sub-expenses') renderExpensesPanel(activeProjectId);
-        }
-      }
-    }
-    else if (id === 'panel-timesheet') renderTimesheet();
-  }
+  // refreshCurrentView() is now defined at module scope, above — used here
+  // and by resyncCoreData().
 
   // ── PROJECTS ──────────────────────────────────────────────
   sb.channel('rt-projects')
@@ -628,7 +775,7 @@ function setupRealtime() {
       projects = projects.filter(p => p.id !== payload.old.id);
       refreshCurrentView();
     })
-    .subscribe();
+    .subscribe(_onChannelStatus);
 
   // ── PROJECT_INFO ───────────────────────────────────────────
   sb.channel('rt-project-info')
@@ -636,24 +783,7 @@ function setupRealtime() {
       const r = payload.new || payload.old;
       if (!r) return;
       if (payload.eventType !== 'DELETE') {
-        projectInfo[r.project_id] = {
-          pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
-          phase: r.phase||'Waiting on TP Approval', status: r.status||'active',
-          startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
-          client: r.client||'', clientContact: r.client_contact||'',
-          clientEmail: r.client_email||'', clientPhone: r.client_phone||'',
-          clientId: r.client_id||null, contactId: r.contact_id||null,
-          billingType: r.billing_type||'Fixed Fee', invoiced: r.invoiced||'',
-          remaining: r.remaining||'', notes: r.notes||'', desc: r.description||'',
-          dcas: r.dcas||'', customerWitness: r.customer_witness||'',
-          tpApproval: r.tp_approval||'', dpas: r.dpas||'', cui: r.cui||'',
-          testDesc: r.test_description||'', testArticleDesc: r.test_article_description||'',
-          quoteNumber: r.quote_number||'', creditHold: r.credit_hold||false,
-          needUpdatedPo: r.need_updated_po||false, testcompleteDate: r.testcomplete_date||'',
-          billedRevenue: r.billed_revenue ? parseFloat(r.billed_revenue) : 0,
-          expectedRevenue: r.expected_revenue ? parseFloat(r.expected_revenue) : 0,
-          actualHours: r.actual_hours ? parseFloat(r.actual_hours) : 0,
-        };
+        projectInfo[r.project_id] = _mapProjectInfoRow(r);
       } else {
         delete projectInfo[r.project_id];
       }
@@ -663,7 +793,7 @@ function setupRealtime() {
       if (typeof updateClosingBadge === 'function') updateClosingBadge();
       refreshCurrentView();
     })
-    .subscribe();
+    .subscribe(_onChannelStatus);
 
   // ── TASKS ──────────────────────────────────────────────────
   sb.channel('rt-tasks')
@@ -709,7 +839,7 @@ function setupRealtime() {
       taskStore = taskStore.filter(t => t._id !== payload.old.id);
       refreshCurrentView();
     })
-    .subscribe();
+    .subscribe(_onChannelStatus);
 
   // ── SCHEDULE_BLOCKS ────────────────────────────────────────
   // schedBlocks lives inside the scheduler IIFE — use the exposed window handlers
@@ -726,7 +856,7 @@ function setupRealtime() {
       if (typeof window.schedRealtimeDelete === 'function') window.schedRealtimeDelete(payload.old);
       _schedRerender();
     })
-    .subscribe();
+    .subscribe(_onChannelStatus);
 
   // ── CHATTER_NOTIFS (live bell for current user) ───────────────────────────
   const _myEmpId = currentEmployee?.id;
@@ -741,7 +871,7 @@ function setupRealtime() {
           loadNotifs();
         }
       })
-      .subscribe();
+      .subscribe(_onChannelStatus);
   }
 
   // ── DIRECT_MESSAGES (live DM bubble) ──────────────────────────────────────
@@ -759,7 +889,7 @@ function setupRealtime() {
           window.dmOnIncomingMessage(payload);
         }
       })
-      .subscribe();
+      .subscribe(_onChannelStatus);
 
     // Also watch for new conversation_participants rows naming me — that's
     // someone adding me to a group. Refresh the conv list so it appears.
@@ -796,7 +926,7 @@ function setupRealtime() {
           window.dmOnParticipantUpdate(payload);
         }
       })
-      .subscribe();
+      .subscribe(_onChannelStatus);
   }
 
   // ── FEEDBACK_SUBMISSIONS (live Issue Tracker badge for Russ) ──────────────
@@ -830,7 +960,7 @@ function setupRealtime() {
           renderIssueTracker();
         }
       })
-      .subscribe();
+      .subscribe(_onChannelStatus);
   }
 
   console.log('\u2713 Realtime subscriptions active (projects, project_info, tasks, schedule_blocks, chatter_notifs, direct_messages, feedback_submissions)');
