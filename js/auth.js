@@ -522,6 +522,22 @@ function renderTimesheet() {
     }).join('');
   }
 
+  // Section/unit color palette — same list tasks.js uses for its section
+  // stripes on the Tasks tab, so a unit's color means the same thing here.
+  const TS_SECTION_PALETTE = ['#1D9E75', '#D4537E', '#534AB7', '#D85A30', '#378ADD'];
+
+  // Color lookup for a project's sections, indexed the same way tasks.js's
+  // sectionColorMap is built — position within that project's sections, in
+  // taskNum order — so "10'' Valve" renders the same color on the Timesheet
+  // as it does on the Tasks tab.
+  function _tsSectionColorMap(projId) {
+    const secs = sectionStore.filter(s => s.projId === projId)
+      .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+    const map = {};
+    secs.forEach((s, i) => { map[s._id] = TS_SECTION_PALETTE[i % TS_SECTION_PALETTE.length]; });
+    return map;
+  }
+
   // Build the task dropdown options for a given project id (symbol + sort + color)
   function _tsBuildTaskOptions(projId, row) {
     // Leading symbol per status — carries meaning independent of color
@@ -546,10 +562,6 @@ function renderTimesheet() {
     });
 
     const allTasks = taskStore.filter(t => t.proj === projId && !usedTaskIds.has(t._id));
-    const active = allTasks.filter(t => !DONE.includes(t.status||'new'))
-      .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
-    const done = allTasks.filter(t => DONE.includes(t.status))
-      .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
 
     function buildOpt(t) {
       const status = t.status || 'new';
@@ -566,13 +578,66 @@ function renderTimesheet() {
              (isSelected?'selected':'')+'>'+text+'</option>';
     }
 
+    // Units/sections on this job (e.g. "10'' Valve", "Model 1250A"). Same
+    // strict-membership rule the Tasks tab and Scheduler already use: a task
+    // only belongs under a section if its sectionId points to a real section
+    // for THIS project — a stale/cross-project sectionId falls into
+    // "Unsectioned" instead of silently disappearing or landing under the
+    // wrong unit. Reported by Robert Hoff (Job #13507, "10'' Valve" vs
+    // "Model 1250A") — without this, telling which unit an hour belonged to
+    // meant flipping back to the Tasks tab to check every task name.
+    const sections = sectionStore.filter(s => s.projId === projId)
+      .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+
     let html = '<option value="">— select task —</option>';
-    active.forEach(t => { html += buildOpt(t); });
-    if (done.length > 0) {
-      html += '<optgroup label="── completed / billed / cancelled ──">';
-      done.forEach(t => { html += buildOpt(t); });
-      html += '</optgroup>';
+
+    if (sections.length === 0) {
+      // Single-unit job — flat list, unchanged from before.
+      const active = allTasks.filter(t => !DONE.includes(t.status||'new'))
+        .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+      const done = allTasks.filter(t => DONE.includes(t.status))
+        .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+      active.forEach(t => { html += buildOpt(t); });
+      if (done.length > 0) {
+        html += '<optgroup label="── completed / billed / cancelled ──">';
+        done.forEach(t => { html += buildOpt(t); });
+        html += '</optgroup>';
+      }
+      return html;
     }
+
+    // Multi-unit job — one optgroup per section (same names/order as the
+    // Tasks tab), active tasks first then done ones (strikethrough already
+    // marks those). Anything without a valid sectionId lands in a trailing
+    // "Unsectioned" group instead of being hidden.
+    const validSecIds = new Set(sections.map(s => s._id));
+    const bySec = new Map();
+    const unsectioned = [];
+    allTasks.forEach(t => {
+      if (t.sectionId && validSecIds.has(t.sectionId)) {
+        if (!bySec.has(t.sectionId)) bySec.set(t.sectionId, []);
+        bySec.get(t.sectionId).push(t);
+      } else {
+        unsectioned.push(t);
+      }
+    });
+
+    function renderGroup(label, tasks) {
+      if (tasks.length === 0) return '';
+      const activeT = tasks.filter(t => !DONE.includes(t.status||'new'))
+        .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+      const doneT = tasks.filter(t => DONE.includes(t.status))
+        .sort((a,b) => (a.taskNum||0) - (b.taskNum||0));
+      let g = '<optgroup label="' + label.replace(/"/g,'&quot;') + '">';
+      activeT.forEach(t => { g += buildOpt(t); });
+      doneT.forEach(t => { g += buildOpt(t); });
+      g += '</optgroup>';
+      return g;
+    }
+
+    sections.forEach(s => { html += renderGroup(s.name, bySec.get(s._id) || []); });
+    html += renderGroup('Unsectioned', unsectioned);
+
     return html;
   }
 
@@ -589,16 +654,34 @@ function renderTimesheet() {
     return '<span class="ts-task-status-pill" style="background:'+color+'22;color:'+color+';border:1px solid '+color+'55">'+sym+' '+lbl+'</span>';
   }
 
+  // Small badge showing which unit/section a selected task belongs to, so
+  // the unit is visible on the row itself without opening the dropdown or
+  // switching to the Tasks tab. Dot color matches _tsSectionColorMap, so a
+  // unit reads as the same color here as it does on the Tasks tab.
+  function _tsBuildSectionBadge(row) {
+    if (!row.taskId) return '';
+    const t = taskStore.find(x => x._id === row.taskId);
+    if (!t || !t.sectionId) return '';
+    const sec = sectionStore.find(s => s._id === t.sectionId && s.projId === row.projId);
+    if (!sec) return '';
+    const colorMap = _tsSectionColorMap(row.projId);
+    const dotColor = colorMap[sec._id] || '#7a7a85';
+    const safeName = sec.name.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    return '<span class="ts-section-badge" style="--sec-color:'+dotColor+'" title="Unit / section">'+safeName+'</span>';
+  }
+
   // Build a task sub-row (indented, no project picker — project is implied by group)
   function _tsBuildTaskSubRow(row, ri) {
     const rowTotal = Object.values(row.hours).reduce((a,b)=>a+b,0);
     const cells = _tsBuildDayCells(row, ri);
     const taskOpts = _tsBuildTaskOptions(row.projId, row);
+    const secBadge = _tsBuildSectionBadge(row);
     const pill = _tsBuildStatusPill(row);
     const labelCell = '<td class="ts-row-label ts-task-subrow-label">'+
         '<div class="ts-task-subrow-inner">'+
           '<select class="ts-task-select ts-task-select-grouped" id="ts-task-'+key+'-'+ri+'"'+
             ' onchange="setTsTask(\''+key+'\','+ri+',this.value)">'+taskOpts+'</select>'+
+          secBadge+
           pill+
         '</div>'+
       '</td>';
