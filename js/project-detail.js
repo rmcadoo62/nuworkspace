@@ -140,6 +140,116 @@ function refreshScheduleStatus(projId) {
   delete scheduleStatusCache[projId];
 }
 
+// ===== JOB STATUS AUTOMATION =====
+// ===== JOB STATUS AUTOMATION =====
+// Continuously-computed status for the four automated states. Recalculated
+// (not toggled step-by-step) every time it's called, from current task and
+// schedule data — so it self-corrects regardless of what changed. Only ever
+// applies to jobs currently sitting in one of the four automated statuses;
+// On Hold, Pending-ReTest, Complete, Closing, and Closed are never touched —
+// automation backs off completely once a job is manually moved into any of
+// those, until someone manually moves it back into the automated set.
+//
+//   if any task is in-progress OR any task has genuinely active schedule
+//   coverage (reuses computeScheduleStatusFromBlocks — 'scheduled' or
+//   'tentative', NOT 'rescheduled' or 'not_scheduled')
+//       -> inprogress                                    (sticky, checked first)
+//   else if any procedure task (sales cat 42/44, not cancelled) is still open
+//     (open = fixed-price not yet billed/approved, OR no-charge not yet
+//      complete/approved)
+//       -> jobprep      (UI label "Procedure")
+//   else if no procedure task exists on the job at all
+//       -> active                                          (default)
+//   else if any procedure task's status = 'approved'
+//       -> active
+//   else
+//       -> pending
+//
+// Called from the ORIGINATING action only (task status/salesCat change,
+// task create/delete, schedule block save/drag/delete) — not from the
+// realtime receive handlers — so only the acting client computes+writes,
+// and every other connected client just picks up the resulting project_info
+// UPDATE through the existing realtime subscription. Avoids duplicate writes
+// when multiple people are looking at the same job.
+const JOB_STATUS_AUTOMATED_SET = ['jobprep', 'pending', 'active', 'inprogress'];
+
+function _isProcedureTaskOpen(t) {
+  if (t.revenueType === 'nocharge') return t.status !== 'complete' && t.status !== 'approved';
+  return t.status !== 'billed' && t.status !== 'approved';
+}
+
+async function computeAndApplyJobStatus(projId) {
+  if (!projId) return;
+  const info = projectInfo[projId];
+  if (!info) return;
+  // Back off entirely if the job isn't currently in an automated status —
+  // On Hold / Pending-ReTest / Complete / Closing / Closed are hands-off.
+  if (!JOB_STATUS_AUTOMATED_SET.includes(info.status)) return;
+
+  const projTasks = (typeof taskStore !== 'undefined' ? taskStore : []).filter(t => t.proj === projId);
+
+  // ── In Progress check (sticky, evaluated first) ──────────────────────────
+  const anyTaskInProgress = projTasks.some(t => t.status === 'inprogress');
+
+  let hasActiveScheduleCoverage = false;
+  if (!anyTaskInProgress && sb) {
+    try {
+      const { data, error } = await sb.from('schedule_blocks').select('*').eq('proj_id', projId);
+      if (!error) {
+        const blocks = (data || []).map(r => (typeof schedRowToBlock === 'function' ? schedRowToBlock(r) : {
+          start: r.start_date, end: r.end_date, taskId: r.task_id || null, sectionId: r.section_id || null, taskIds: r.task_ids || null, flag: r.flag || null,
+        }));
+        const schedState = computeScheduleStatusFromBlocks(blocks, info.status);
+        hasActiveScheduleCoverage = schedState.state === 'scheduled' || schedState.state === 'tentative';
+      }
+    } catch (e) {
+      console.warn('computeAndApplyJobStatus: schedule check failed, continuing without it:', e);
+    }
+  }
+
+  let newStatus;
+  if (anyTaskInProgress || hasActiveScheduleCoverage) {
+    newStatus = 'inprogress';
+  } else {
+    // ── Procedure / Pending / Active ────────────────────────────────────
+    const procTasks = projTasks.filter(t =>
+      (t.salesCat === '42' || t.salesCat === '44') && t.status !== 'cancelled'
+    );
+    const openProcTasks = procTasks.filter(_isProcedureTaskOpen);
+
+    if (openProcTasks.length > 0) newStatus = 'jobprep';
+    else if (procTasks.length === 0) newStatus = 'active';
+    else if (procTasks.some(t => t.status === 'approved')) newStatus = 'active';
+    else newStatus = 'pending';
+  }
+
+  if (newStatus === info.status) return; // no change — don't write or log
+
+  const oldStatus = info.status;
+  info.status = newStatus;
+  if (sb) {
+    dbUpdate('project_info', projId, { status: newStatus });
+    // Explicit audit trail entry — this is a system-computed transition, not
+    // a manual click, so it's worth being unambiguous in the log about why
+    // the status moved.
+    try {
+      const proj = (typeof projects !== 'undefined') ? projects.find(p => p.id === projId) : null;
+      await sb.from('activity_log').insert({
+        employee_id: currentEmployee ? currentEmployee.id : null,
+        employee_name: currentEmployee ? currentEmployee.name : 'System',
+        record_type: 'projects', record_id: projId,
+        record_label: proj ? proj.name : projId,
+        field_changed: 'Status Auto-Updated',
+        old_value: oldStatus, new_value: newStatus,
+      });
+    } catch (e) { console.warn('job status audit log failed (non-fatal):', e); }
+  }
+  if (activeProjectId === projId) {
+    renderProjStickyHeader(projId);
+  }
+  if (typeof updateClosingBadge === 'function') updateClosingBadge();
+}
+
 function renderSchedulePill(projId) {
   let entry = scheduleStatusCache[projId];
   if (entry === undefined) {
@@ -181,10 +291,11 @@ function renderInfoSheet(projId) {
   const canEditInfo = (typeof can === 'function' && can('edit_project_info'));
 
   const statusMap = {
-    'jobprep':{label:'Job Preparation',bg:'rgba(167,139,250,0.15)',color:'#a78bfa',dot:'#a78bfa'},
+    'jobprep':{label:'Procedure',bg:'rgba(167,139,250,0.15)',color:'#a78bfa',dot:'#a78bfa'},
     'pending':{label:'Pending',bg:'rgba(232,162,52,0.15)',color:'#e8a234',dot:'#e8a234'},
     'pendretest':{label:'Pending - ReTest',bg:'rgba(251,146,60,0.15)',color:'#fb923c',dot:'#fb923c'},
     'active':{label:'Active',bg:'rgba(76,175,125,0.15)',color:'#4caf7d',dot:'#4caf7d'},
+    'inprogress':{label:'In Progress',bg:'rgba(45,212,191,0.15)',color:'#2dd4bf',dot:'#2dd4bf'},
     'onhold':{label:'On Hold',bg:'rgba(122,122,133,0.15)',color:'#7a7a85',dot:'#7a7a85'},
     'complete':{label:'Complete',bg:'rgba(91,156,246,0.15)',color:'#5b9cf6',dot:'#5b9cf6'},
     'testcomplete':{label:'Testing Complete',bg:'rgba(76,175,125,0.15)',color:'#4caf7d',dot:'#4caf7d'},
@@ -242,8 +353,8 @@ function renderInfoSheet(projId) {
             style="background:${st.bg};color:${st.color};border:1px solid ${st.color}44;border-radius:20px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;outline:none;font-family:'DM Sans',sans-serif;flex-shrink:0;"
             onchange="changeProjectStatus('${projId}',this)">
             ${[
-              ['jobprep','Job Preparation'],['pending','Pending'],['pendretest','Pending - ReTest'],
-              ['active','Active'],['onhold','On Hold'],['complete','Complete'],
+              ['jobprep','Procedure'],['pending','Pending'],['pendretest','Pending - ReTest'],
+              ['active','Active'],['inprogress','In Progress'],['onhold','On Hold'],['complete','Complete'],
               ['testcomplete','Testing Complete'],['closing','Closing (Pending)'],['closed','Closed']
             ].map(([k,l]) => '<option value="'+k+'" '+(info.status===k?'selected':'')+(k==='closing'?' disabled':'')+'>'+l+'</option>').join('')}
           </select>
@@ -741,6 +852,7 @@ async function changeProjectStatus(projId, selectEl) {
     pending:     {bg:'rgba(232,162,52,0.15)', color:'#e8a234'},
     pendretest:  {bg:'rgba(251,146,60,0.15)', color:'#fb923c'},
     active:      {bg:'rgba(76,175,125,0.15)', color:'#4caf7d'},
+    inprogress:  {bg:'rgba(45,212,191,0.15)', color:'#2dd4bf'},
     onhold:      {bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
     complete:    {bg:'rgba(91,156,246,0.15)', color:'#5b9cf6'},
     testcomplete:{bg:'rgba(76,175,125,0.15)', color:'#4caf7d'},
@@ -3128,10 +3240,11 @@ function renderProjStickyHeader(projId) {
   }
   const info = projectInfo[projId] || {};
   const statusMap = {
-    jobprep:{label:'Job Preparation',bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
+    jobprep:{label:'Procedure',bg:'rgba(167,139,250,0.15)',color:'#a78bfa'},
     pending:{label:'Pending',bg:'rgba(232,162,52,0.15)',color:'#e8a234'},
     pendretest:{label:'Pending - ReTest',bg:'rgba(251,146,60,0.15)',color:'#fb923c'},
     active:{label:'Active',bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
+    inprogress:{label:'In Progress',bg:'rgba(45,212,191,0.15)',color:'#2dd4bf'},
     onhold:{label:'On Hold',bg:'rgba(122,122,133,0.15)',color:'#7a7a85'},
     complete:{label:'Complete',bg:'rgba(91,156,246,0.15)',color:'#5b9cf6'},
     testcomplete:{label:'Testing Complete',bg:'rgba(76,175,125,0.15)',color:'#4caf7d'},
@@ -3145,8 +3258,8 @@ function renderProjStickyHeader(projId) {
     '<span style="font-size:22px">'+(proj.emoji||'📁')+'</span>'+
     '<span class="proj-sticky-name" onclick="editProjectName(\''+projId+'\')" title="Click to edit name" style="cursor:pointer">'+proj.name+'</span>'+
     '<select class="proj-status-select" style="background:'+st.bg+';color:'+st.color+';border:1px solid '+st.color+'44;border-radius:20px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;outline:none;font-family:\"DM Sans\",sans-serif;" onchange="changeProjectStatus(\x27'+projId+'\x27,this)">'+
-      [['jobprep','Job Preparation'],['pending','Pending'],['pendretest','Pending - ReTest'],
-       ['active','Active'],['onhold','On Hold'],['complete','Complete'],
+      [['jobprep','Procedure'],['pending','Pending'],['pendretest','Pending - ReTest'],
+       ['active','Active'],['inprogress','In Progress'],['onhold','On Hold'],['complete','Complete'],
        ['testcomplete','Testing Complete'],['closing','Closing (Pending)'],['closed','Closed']]
       .map(([k,l]) => '<option value="'+k+'" '+(info.status===k?'selected':'')+'>'+l+'</option>').join('')+
     '</select>'+

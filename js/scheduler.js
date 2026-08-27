@@ -1702,6 +1702,7 @@ function attachBarDrag(bar, block, rows, range, dayW, rowTops, rowHeights) {
         if (drag.hasMoved) {
           schedSaveBlock(block).then(() => renderSched());
           if (block.projId && typeof refreshScheduleStatus === 'function') refreshScheduleStatus(block.projId);
+          if (block.projId && typeof computeAndApplyJobStatus === 'function') computeAndApplyJobStatus(block.projId);
         } else {
           if (!schedReadOnly) openSchedModal(block.id);
         }
@@ -2482,7 +2483,7 @@ window.schedDateChanged = function() {
   }
 };
 
-function _doSaveSchedBlock() {
+async function _doSaveSchedBlock() {
   const _isEmpBlock = document.getElementById('schedBlockType')?.value === 'employee';
   const _empId      = _isEmpBlock ? (document.getElementById('schedEmpPicker')?.value || null) : null;
   const _empEvtType = _isEmpBlock ? (document.getElementById('schedEmpEventType')?.value || null) : null;
@@ -2557,6 +2558,8 @@ function _doSaveSchedBlock() {
     const _newProjId = _savedBlock ? (_savedBlock.projId || null) : null;
     if (_newProjId) refreshScheduleStatus(_newProjId);
     if (_prevProjId && _prevProjId !== _newProjId) refreshScheduleStatus(_prevProjId);
+    if (_newProjId && typeof computeAndApplyJobStatus === 'function') await computeAndApplyJobStatus(_newProjId);
+    if (_prevProjId && _prevProjId !== _newProjId && typeof computeAndApplyJobStatus === 'function') await computeAndApplyJobStatus(_prevProjId);
   }
   closeSchedModal();
   if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
@@ -2564,13 +2567,14 @@ function _doSaveSchedBlock() {
 
 window.saveSchedBlock   = _doSaveSchedBlock;
 
-window.deleteSchedBlock = function() {
+window.deleteSchedBlock = async function() {
   const editId = document.getElementById('schedEditId').value;
   const _delBlock = schedBlocks.find(b => b.id === editId);
   const _delProjId = _delBlock ? (_delBlock.projId || null) : null;
   schedBlocks = schedBlocks.filter(b => b.id !== editId);
   schedDeleteFromDB(editId);
   if (_delProjId && typeof refreshScheduleStatus === 'function') refreshScheduleStatus(_delProjId);
+  if (_delProjId && typeof computeAndApplyJobStatus === 'function') await computeAndApplyJobStatus(_delProjId);
   closeSchedModal();
   if (schedView === 'calendar') renderSchedCalendar(); else renderSched();
 };

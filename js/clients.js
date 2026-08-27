@@ -1133,8 +1133,8 @@ function renderClientDrawerBody() {
     const fmtH = h => h > 0 ? h.toFixed(1) + 'h' : '—';
     const fmtRate = (billed, hours) => (billed > 0 && hours > 0) ? '$' + (billed / hours).toFixed(2) + '/h' : '—';
 
-    const statusColors = { active:'rgba(46,158,98,0.15)', closed:'rgba(107,107,120,0.15)', jobprep:'rgba(91,156,246,0.15)' };
-    const statusText   = { active:'Active', closed:'Closed', jobprep:'Job Prep' };
+    const statusColors = { active:'rgba(46,158,98,0.15)', inprogress:'rgba(45,212,191,0.15)', closed:'rgba(107,107,120,0.15)', jobprep:'rgba(91,156,246,0.15)' };
+    const statusText   = { active:'Active', inprogress:'In Progress', closed:'Closed', jobprep:'Procedure' };
 
     // Totals across all jobs
     const totalBilled  = jobs.reduce((s,p) => s + ((projectInfo[p.id]||{}).billedRevenue||0), 0);

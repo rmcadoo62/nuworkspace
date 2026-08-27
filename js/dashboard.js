@@ -8,9 +8,13 @@ function renderDashboard() {
   const totalTasks   = taskStore.length;
   const doneTasks    = taskStore.filter(t => t.done).length;
   const overdueTasks = taskStore.filter(t => t.overdue && !t.done).length;
+  // Note: computed but not currently displayed anywhere in this file.
+  // Includes 'inprogress' alongside 'active' since In Progress jobs are, if
+  // anything, more actively worked than plain Active — excluding them would
+  // undercount.
   const activeProjCount = projects.filter(p => {
     const info = projectInfo[p.id];
-    return !info || info.status === 'active';
+    return !info || info.status === 'active' || info.status === 'inprogress';
   }).length;
 
   const pct = totalTasks ? Math.round(doneTasks / totalTasks * 100) : 0;
@@ -28,16 +32,18 @@ function renderDashboard() {
     .sort((a,b) => new Date(a.due_raw+'T00:00:00') - new Date(b.due_raw+'T00:00:00'))
     .slice(0, 8);
 
-  // Status style map
+  // Status style map (currently unreferenced in this file — kept in sync
+  // with the live status maps elsewhere in case it's wired up later)
   const statusStyle = {
     active:       {label:'Active',        bg:'rgba(76,175,125,0.15)',  color:'#4caf7d'},
+    inprogress:   {label:'In Progress',   bg:'rgba(45,212,191,0.15)',  color:'#2dd4bf'},
     'on-hold':    {label:'On Hold',       bg:'rgba(232,162,52,0.15)',  color:'#e8a234'},
     onhold:       {label:'On Hold',       bg:'rgba(232,162,52,0.15)',  color:'#e8a234'},
     complete:     {label:'Complete',      bg:'rgba(91,156,246,0.15)',  color:'#5b9cf6'},
     testcomplete: {label:'Test Complete', bg:'rgba(91,156,246,0.15)',  color:'#5b9cf6'},
     cancelled:    {label:'Cancelled',     bg:'rgba(224,92,92,0.15)',   color:'#e05c5c'},
     closed:       {label:'Closed',        bg:'rgba(85,85,102,0.15)',   color:'#888899'},
-    jobprep:      {label:'Job Prep',      bg:'rgba(167,139,250,0.15)', color:'#a78bfa'},
+    jobprep:      {label:'Procedure',     bg:'rgba(167,139,250,0.15)', color:'#a78bfa'},
     pending:      {label:'Pending',       bg:'rgba(232,162,52,0.15)',  color:'#e8a234'},
     pendretest:   {label:'Pend-Retest',   bg:'rgba(251,146,60,0.15)',  color:'#fb923c'},
   };

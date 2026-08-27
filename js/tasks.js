@@ -1096,6 +1096,12 @@ async function inlineSave(taskId, projId, field, value) {
   updateStatsBar();
   // Sync billed revenue to project_info when status or price changes
   if (field === 'status' || field === 'fixedPrice') syncProjBilledRevenue(projId);
+  // Job status automation only cares about status and sales-category changes
+  // (procedure-task membership + open/closed state) — everything else on a
+  // task (price, assignee, dates alone) doesn't move the formula.
+  if ((field === 'status' || field === 'salesCat') && typeof computeAndApplyJobStatus === 'function') {
+    await computeAndApplyJobStatus(projId);
+  }
   setTimeout(ittInitResizers,0);
   setTimeout(applyPermissions,0);
 }
@@ -1237,6 +1243,9 @@ async function inlineDeleteTask(taskId, projId) {
   else renderInfoTasks(projId, currentTaskFilter);
   renderProjSummary(projId);
   updateStatsBar();
+  // Deleting an open procedure task could clear the last thing holding a job
+  // at Procedure/Pending — recompute.
+  if (typeof computeAndApplyJobStatus === 'function') await computeAndApplyJobStatus(projId);
   setTimeout(ittInitResizers,0);
   setTimeout(applyPermissions,0);
 }
@@ -1428,10 +1437,14 @@ async function saveEditTask() {
     renderProjSummary(activeProjectId);
     renderExpectedRevenue(activeProjectId);
   }
+  // Sales Category can change which procedure tasks the job's status
+  // formula is even looking at — recompute after every edit here.
+  if (typeof computeAndApplyJobStatus === 'function') await computeAndApplyJobStatus(_editProjId);
 }
 
 async function deleteTask() {
   if (!editingTaskId) return;
+  const _delProjId = (taskStore.find(t => t._id === editingTaskId) || {}).proj || activeProjectId;
   if (sb) {
     const { error } = await sb.from('tasks').delete().eq('id', editingTaskId);
     if (error) { toast('⚠ Could not delete task'); return; }
@@ -1446,6 +1459,7 @@ async function deleteTask() {
     renderInfoTasks(activeProjectId, currentTaskFilter);
     renderExpectedRevenue(activeProjectId);
   }
+  if (typeof computeAndApplyJobStatus === 'function') await computeAndApplyJobStatus(_delProjId);
 }
 
 
@@ -1812,6 +1826,9 @@ window.saveTask = async function(another=false) {
       switchProjTab('sub-tasks');
     }
   }
+  // A new task can introduce (or fail to introduce) an open procedure task —
+  // recompute in case this flips Active -> Procedure.
+  if (typeof computeAndApplyJobStatus === 'function') await computeAndApplyJobStatus(projId);
   if (another) setTimeout(()=>openTaskModal(), 340);
 };
 

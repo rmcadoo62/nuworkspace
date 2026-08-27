@@ -407,10 +407,11 @@ function renderProjectsTable() {
   if (bubblesEl) {
     const openProjs = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed');
     const statusGroups = {
-      jobprep:     { label: 'Job Prep',     color: '#a78bfa', bg: 'rgba(167,139,250,0.08)' },
+      jobprep:     { label: 'Procedure',     color: '#a78bfa', bg: 'rgba(167,139,250,0.08)' },
       pending:     { label: 'Pending',       color: '#e8a234', bg: 'rgba(232,162,52,0.08)'  },
       pendretest:  { label: 'Pend. Retest', color: '#fb923c', bg: 'rgba(251,146,60,0.08)'  },
       active:      { label: 'Active',        color: '#4caf7d', bg: 'rgba(76,175,125,0.08)'  },
+      inprogress:  { label: 'In Progress',   color: '#2dd4bf', bg: 'rgba(45,212,191,0.08)'  },
       onhold:      { label: 'On Hold',       color: '#7a7a85', bg: 'rgba(122,122,133,0.08)' },
       complete:    { label: 'Complete',      color: '#5b9cf6', bg: 'rgba(91,156,246,0.08)'  },
       testcomplete:{ label: 'Test Complete', color: '#4caf7d', bg: 'rgba(76,175,125,0.08)'  },
@@ -547,10 +548,11 @@ function renderProjectsTable() {
     (navFilter.status.size > 0 || namePattern || hasActiveTaskCond() ? ' (filtered)' : '');
 
   const STATUS_META = {
-    jobprep:     { bg:'#a78bfa22', color:'#a78bfa', dot:'#a78bfa', label:'Job Preparation' },
+    jobprep:     { bg:'#a78bfa22', color:'#a78bfa', dot:'#a78bfa', label:'Procedure' },
     pending:     { bg:'#e8a23422', color:'#e8a234', dot:'#e8a234', label:'Pending' },
     pendretest:  { bg:'#fb923c22', color:'#fb923c', dot:'#fb923c', label:'Pending - ReTest' },
     active:      { bg:'#4caf7d22', color:'#4caf7d', dot:'#4caf7d', label:'Active' },
+    inprogress:  { bg:'#2dd4bf22', color:'#2dd4bf', dot:'#2dd4bf', label:'In Progress' },
     onhold:      { bg:'#7a7a8522', color:'#7a7a85', dot:'#7a7a85', label:'On Hold' },
     complete:    { bg:'#5b9cf622', color:'#5b9cf6', dot:'#5b9cf6', label:'Complete' },
     testcomplete:{ bg:'#4caf7d22', color:'#4caf7d', dot:'#4caf7d', label:'Testing Complete' },
@@ -785,8 +787,8 @@ function navToProject(projId) {
 
 // ===== PROJECT NAV FILTER =====
 // ===== PROJECT NAV FILTER =====
-const NAV_FILTER_STATUS = ['jobprep','pending','pendretest','active','onhold','complete','testcomplete','closed'];
-const NAV_FILTER_STATUS_LABELS = {jobprep:'Job Preparation',pending:'Pending',pendretest:'Pending - ReTest',active:'Active',onhold:'On Hold',complete:'Complete',testcomplete:'Testing Complete',closed:'Closed'};
+const NAV_FILTER_STATUS = ['jobprep','pending','pendretest','active','inprogress','onhold','complete','testcomplete','closed'];
+const NAV_FILTER_STATUS_LABELS = {jobprep:'Procedure',pending:'Pending',pendretest:'Pending - ReTest',active:'Active',inprogress:'In Progress',onhold:'On Hold',complete:'Complete',testcomplete:'Testing Complete',closed:'Closed'};
 // NAV_FILTER_PHASE (the "Condition" filter — Waiting on TP Approval / Within 3
 // Months / etc.) was removed: that field is no longer tracked, so filtering by
 // it was dead weight. Kept nothing behind — see navFilter below (no .phase).

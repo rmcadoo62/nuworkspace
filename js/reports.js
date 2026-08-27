@@ -1606,7 +1606,7 @@ async function renderStaleProjects() {
     cancelled: '#5b7fa6', billed: '#c084fc'
   };
   const statusLabels = {
-    jobprep: 'Job Prep', active: 'Active', inprogress: 'In Progress',
+    jobprep: 'Procedure', active: 'Active', inprogress: 'In Progress',
     prohold: 'Production Hold', accthold: 'Accounting Hold',
     complete: 'Complete', cancelled: 'Cancelled', billed: 'Billed'
   };
@@ -1840,8 +1840,10 @@ function buildAiContext() {
     "Today: " + today,
     "",
     "=== ENUMS (do not invent other values) ===",
-    "Project status: jobprep, pending, pendretest, active, onhold, complete, testcomplete, closed",
-    "Task status:    new, inprogress, complete, billed, cancelled",
+    "Project status: jobprep, pending, pendretest, active, inprogress, onhold, complete, testcomplete, closed",
+    "  NOTE: 'jobprep' is the stored value but the UI now labels it 'Procedure' — treat 'jobprep' and 'Procedure' as the same thing when answering. 'inprogress' is labeled 'In Progress' and is distinct from 'active'.",
+    "Task status:    new, inprogress, complete, billed, cancelled, approved",
+    "  NOTE: 'approved' only applies to procedure tasks (sales category 42/44) — it means the customer approved the test procedure.",
     "Revenue type:   fixed (billable), nocharge (not billable)",
     "Definitions:",
     "  'Billed'        = task.st === 'billed'",
@@ -1886,10 +1888,11 @@ function buildAiContext() {
     "=== ANSWERING RULES ===",
     "1. Use the data above. Do NOT say you lack visibility when the relevant data is present — if you have to look, look in the tasks array and compute.",
     "2. For 'projects with billed revenue in category X', filter OPEN-PROJECT TASKS where cat===X AND st==='billed', then group by project name and sum pr.",
-    "3. For 'jobprep projects…', filter by pst==='jobprep' (use the task's pst field, not the project status string).",
-    "4. When a category does not appear in the data, say so explicitly with zero — do not hedge.",
-    "5. Use markdown tables for multi-row answers. Keep numbers to whole dollars unless the user asks for cents.",
-    "6. If a question genuinely cannot be answered from the data above (e.g., needs data from timesheets, shipping, or closed projects), say exactly what is missing and stop — do not speculate."
+    "3. For 'jobprep' or 'Procedure' status projects, filter by pst==='jobprep' (use the task's pst field, not the project status string) — these are the same thing under different names.",
+    "4. 'In Progress' projects have pst==='inprogress' — do not confuse this with task-level st==='inprogress', which is a different field on a different object.",
+    "5. When a category does not appear in the data, say so explicitly with zero — do not hedge.",
+    "6. Use markdown tables for multi-row answers. Keep numbers to whole dollars unless the user asks for cents.",
+    "7. If a question genuinely cannot be answered from the data above (e.g., needs data from timesheets, shipping, or closed projects), say exactly what is missing and stop — do not speculate."
   ].join("\n");
 }
 
