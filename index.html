@@ -446,82 +446,110 @@
     <div class="view-panel" id="panel-projects" style="flex-direction:column;overflow:hidden;">
       <div class="projtbl-wrap" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;width:100%;box-sizing:border-box;">
 
-        <!-- FROZEN HEADER: title + inline bubbles + filters -->
-        <div class="projtbl-sticky-header" style="flex-shrink:0;padding:20px 32px 14px;background:var(--bg);border-bottom:1.5px solid var(--border);">
+        <!-- FROZEN HEADER: title + status strip + one-line filter bar -->
+        <div class="projtbl-sticky-header">
+
+          <!-- ── Row 1: title + view / columns / closed / new ────────────────── -->
           <div class="projtbl-toolbar">
             <div>
               <div class="projtbl-title">Projects</div>
               <div class="projtbl-sub" id="projtblSub"></div>
             </div>
-            <!-- Stat bubbles inline -->
-            <div id="projStatBubbles" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;flex:1;margin:0 16px"></div>
-            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-              <div class="proj-views-wrap" style="position:relative">
-                <button class="nav-filter-btn" id="projViewsBtn" onclick="toggleProjViewsDropdown(event)" title="Saved Views" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s">
-                  &#x1F441;&#xFE0F; View: <span id="projViewsLabel">Default</span> <span style="font-size:9px;margin-left:2px">&#x25BC;</span>
+
+            <div class="pf-head-right">
+
+              <!-- Saved views (naming + saving now lives in here) -->
+              <div class="pf-pop-wrap">
+                <button class="pf-btn" id="projViewsBtn" onclick="toggleProjViewsDropdown(event)" title="Saved views">
+                  &#x1F441;&#xFE0F; View: <b id="projViewsLabel">Default</b><span class="pf-caret">&#x25BC;</span>
                 </button>
-                <div id="projViewsDropdown" style="display:none;position:absolute;top:calc(100% + 4px);right:0;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);min-width:200px;z-index:9000;overflow:hidden"></div>
+                <div class="pf-pop pf-pop-right" id="projViewsDropdown" style="min-width:236px"></div>
               </div>
-              <button class="nav-filter-btn" id="navFilterBtn" onclick="toggleNavFilter()" title="Filter" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px">
-                &#x25BC; Filter <span id="navFilterDot" style="display:none" class="nav-filter-active-dot"></span>
-              </button>
-              <button id="showClosedBtn" onclick="toggleShowClosed()" style="padding:5px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .15s" title="Toggle closed jobs">
+
+              <!-- Column visibility + order -->
+              <div class="pf-pop-wrap">
+                <button class="pf-btn" id="projColBtn" onclick="pfTogglePop('projColPop', this)" title="Show, hide and reorder columns">
+                  &#x2630; Columns <span class="pf-count" id="projColCount">8</span><span class="pf-caret">&#x25BC;</span>
+                </button>
+                <div class="pf-pop pf-pop-right" id="projColPop" style="width:264px">
+                  <div class="pf-pop-head">
+                    <b>Columns</b>
+                    <button class="pf-pop-reset" onclick="pfResetColumns()">Reset</button>
+                  </div>
+                  <div class="pf-collist" id="colToggleChips"></div>
+                  <div class="pf-pop-foot"><span>Drag &#x22EE;&#x22EE; to reorder</span></div>
+                </div>
+              </div>
+
+              <button class="pf-btn" id="showClosedBtn" onclick="toggleShowClosed()" title="Toggle closed jobs">
                 &#x1F512; Show Closed
               </button>
+
               <button class="btn btn-primary" id="addProjBtn2" style="font-size:12.5px;display:none" onclick="openProjectModal()">+ New Project</button>
             </div>
           </div>
 
-          <!-- Saved filters bar -->
-          <div class="saved-filters-bar" id="savedFiltersBar" style="display:none"></div>
+          <!-- ── Row 2: status counts, now click-to-filter ───────────────────── -->
+          <div id="projStatBubbles" class="pf-statusbar"></div>
 
-          <!-- Filter drawer -->
-          <div class="proj-filter-drawer" id="navFilterPanel">
-            <div class="proj-filter-row">
-              <div class="proj-filter-col">
-                <label>Name Pattern</label>
-                <input type="text" id="filterNamePattern" placeholder='e.g. ^N (exclude) or 136' oninput="renderProjectsTable()" />
-                <div style="font-size:10px;color:var(--muted);margin-top:2px">Start with <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">^</code> to exclude, leave blank to include all</div>
-              </div>
-              <div class="proj-filter-col">
-                <label>Status</label>
-                <div class="nav-filter-chips" id="filterStatusChips" style="max-width:600px"></div>
-              </div>
+          <!-- ── Row 3: the filter bar ───────────────────────────────────────── -->
+          <div class="pf-bar">
+
+            <!-- Name pattern -->
+            <div class="pf-search" id="pfSearchWrap">
+              <span class="pf-search-ico">&#x1F50D;</span>
+              <input type="text" id="filterNamePattern" autocomplete="off"
+                     placeholder="Job name or number &mdash; ^N excludes"
+                     oninput="pfOnNameInput()"
+                     aria-label="Filter by job name or number" />
+              <button class="pf-search-x" onclick="pfClearName()" title="Clear">&#x2715;</button>
             </div>
-            <div class="proj-filter-row" style="padding-top:10px;border-top:1px solid var(--border)">
-              <div class="proj-filter-col" style="flex:1;min-width:480px">
-                <label>Task Condition</label>
-                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
-                  <select id="taskCondMode" class="proj-filter-select" onchange="onTaskCondModeChange()">
-                    <option value="missing">Task doesn't contain</option>
-                    <option value="has">Task contains</option>
-                  </select>
-                  <select id="taskCondField" class="proj-filter-select" onchange="onTaskCondFieldChange()">
-                    <option value="salesCat">Sales Category</option>
-                    <option value="status">Task Status</option>
-                    <option value="assign">Assignee</option>
-                    <option value="quoteNum">Quote #</option>
-                    <option value="poNumber">PO #</option>
-                    <option value="name">Task Name</option>
-                  </select>
-                  <!-- Populated by renderTaskCondControl(): chip multi-select for Sales Category /
-                       Task Status / Assignee, or an op + text box for the free-text fields. -->
-                  <div id="taskCondControl" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"></div>
+
+            <!-- Task condition -->
+            <div class="pf-pop-wrap">
+              <button class="pf-btn" id="projTaskBtn" onclick="pfTogglePop('projTaskPop', this)" title="Filter by the tasks a job does or doesn't have">
+                &#x26A1; Task condition<span class="pf-caret">&#x25BC;</span>
+              </button>
+              <div class="pf-pop pf-pop-left" id="projTaskPop" style="width:432px">
+                <div class="pf-pop-head">
+                  <b>Task condition</b>
+                  <button class="pf-pop-reset" onclick="pfClearTaskCond()">Clear</button>
                 </div>
-                <div style="font-size:10px;color:var(--muted);margin-top:4px">Example — active jobs with no procedure task: Task doesn't contain / Sales Category / pick <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">42</code> and <code style="background:var(--surface2);padding:1px 4px;border-radius:3px">44</code> below (combine with Status → Active above)</div>
+                <div class="pf-pop-body">
+                  <div class="pf-cond-row">
+                    <input type="hidden" id="taskCondMode" value="missing" />
+                    <div class="pf-modeseg" role="group" aria-label="Match mode">
+                      <button type="button" id="pfModeHas"     onclick="pfSetTaskMode('has')">Has a task</button>
+                      <button type="button" id="pfModeMissing" onclick="pfSetTaskMode('missing')">Has no task</button>
+                    </div>
+                    <span class="pf-cond-word">where</span>
+                    <select id="taskCondField" class="pf-select" onchange="onTaskCondFieldChange()">
+                      <option value="salesCat">Sales Category</option>
+                      <option value="status">Task Status</option>
+                      <option value="assign">Assignee</option>
+                      <option value="quoteNum">Quote #</option>
+                      <option value="poNumber">PO #</option>
+                      <option value="name">Task Name</option>
+                    </select>
+                  </div>
+                  <!-- filled by renderTaskCondControl(): chips for enumerable fields, op+text otherwise -->
+                  <div id="taskCondControl" class="pf-cond-values"></div>
+                  <div class="pf-preview" id="pfTaskPreview"></div>
+                </div>
               </div>
             </div>
-            <div style="display:flex;gap:8px;align-items:center;padding-top:10px;border-top:1px solid var(--border)">
-              <input type="text" id="filterSaveName" placeholder="Filter name…" style="background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:6px 10px;outline:none;width:160px;transition:border-color var(--transition);" onfocus="this.style.borderColor='var(--amber-dim)'" onblur="this.style.borderColor='var(--border)'" />
-              <button class="nav-filter-save" onclick="saveNamedFilter()" style="padding:6px 14px">&#x2713; Save Filter</button>
-              <button class="nav-filter-clear" onclick="clearNavFilter()" style="padding:6px 12px">Clear</button>
-              <button onclick="resetProjectsToDefault()" style="padding:6px 12px;background:transparent;border:1px solid var(--border);border-radius:7px;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:500;cursor:pointer;transition:all .15s" onmouseover="this.style.borderColor='var(--amber-dim)';this.style.color='var(--amber)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'" title="Reset columns, filters, and sort to defaults">&#x21BA; Reset to Default</button>
-            </div>
-            <div style="padding-top:12px;border-top:1px solid var(--border);margin-top:4px">
-              <div style="font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Optional Columns</div>
-              <div style="display:flex;flex-wrap:wrap;gap:6px" id="colToggleChips"></div>
+
+            <div class="pf-bar-div"></div>
+
+            <!-- Active filters, always visible -->
+            <div class="pf-pills" id="pfPills"></div>
+
+            <div class="pf-bar-right">
+              <button class="pf-link" id="pfClearAll" onclick="clearNavFilter()" disabled>Clear all</button>
+              <button class="pf-link" onclick="pfOpenSaveView(event)">Save view</button>
             </div>
           </div>
+
         </div><!-- /projtbl-sticky-header -->
 
         <!-- SCROLLABLE TABLE -->

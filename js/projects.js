@@ -319,22 +319,26 @@ function toggleProjCol(key) {
   const vis = getProjCols(); vis[key] = !isProjColVisible(key); setProjCols(vis);
   buildColToggleChips(); renderProjectsTable();
 }
+// Columns are a vertical list inside the Columns popover, not three rows of
+// wrapped chips. Same drag handlers, same data-col-key, same .proj-col-chip
+// class the drag cleanup relies on.
 function buildColToggleChips() {
   const wrap = document.getElementById('colToggleChips');
   if (!wrap) return;
   const defs = getOrderedProjColDefs();
   wrap.innerHTML = defs.map(c => {
     const on = isProjColVisible(c.key);
-    // Drag handle (⋮⋮) + chip. Whole chip is draggable; click toggles visibility (but not when dragging).
-    return `<span class="proj-col-chip" draggable="true" data-col-key="${c.key}"
+    return `<button type="button" class="pf-colrow proj-col-chip ${on ? 'on' : ''}" draggable="true" data-col-key="${c.key}"
       ondragstart="projColDragStart(event)" ondragover="projColDragOver(event)"
       ondrop="projColDrop(event)" ondragend="projColDragEnd(event)" ondragleave="projColDragLeave(event)"
-      onclick="projColChipClick(event,'${c.key}')"
-      style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px 3px 6px;border-radius:12px;font-size:11px;font-weight:600;cursor:grab;user-select:none;background:${on?'var(--amber-glow)':'var(--surface2)'};color:${on?'var(--amber)':'var(--muted)'};border:1px solid ${on?'var(--amber-dim)':'var(--border)'};transition:all .15s">
-      <span class="proj-col-chip-drag" style="cursor:grab;opacity:.5;font-size:10px;line-height:1;padding:0 1px" title="Drag to reorder">⋮⋮</span>
-      <span>${on?'✓':'+'} ${c.label}</span>
-    </span>`;
+      onclick="projColChipClick(event,'${c.key}')">
+      <span class="pf-grip" title="Drag to reorder">&#x22EE;&#x22EE;</span>
+      <span>${c.label}</span>
+      <span class="pf-box">${on ? '&#x2713;' : ''}</span>
+    </button>`;
   }).join('');
+  const cnt = document.getElementById('projColCount');
+  if (cnt) cnt.textContent = defs.filter(c => isProjColVisible(c.key)).length;
 }
 
 // ===== COLUMN CHIP DRAG/DROP =====
@@ -391,30 +395,39 @@ function renderProjectsTable() {
   const subEl = document.getElementById('projtblSub');
   if (!container) return;
 
-  // ── Stat bubbles ──
+  // ── Status strip (doubles as the status filter) ──
   const bubblesEl = document.getElementById('projStatBubbles');
   if (bubblesEl) {
     const openProjs = projects.filter(p => (projectInfo[p.id]||{}).status !== 'closed');
     const statusGroups = {
-      jobprep:     { label: 'Procedure',     color: '#a78bfa', bg: 'rgba(167,139,250,0.08)' },
-      pending:     { label: 'Pending',       color: '#e8a234', bg: 'rgba(232,162,52,0.08)'  },
-      pendretest:  { label: 'Pend. Retest', color: '#fb923c', bg: 'rgba(251,146,60,0.08)'  },
-      active:      { label: 'Active',        color: '#4caf7d', bg: 'rgba(76,175,125,0.08)'  },
-      inprogress:  { label: 'In Progress',   color: '#2dd4bf', bg: 'rgba(45,212,191,0.08)'  },
-      onhold:      { label: 'On Hold',       color: '#7a7a85', bg: 'rgba(122,122,133,0.08)' },
-      complete:    { label: 'Complete',      color: '#5b9cf6', bg: 'rgba(91,156,246,0.08)'  },
-      testcomplete:{ label: 'Test Complete', color: '#4caf7d', bg: 'rgba(76,175,125,0.08)'  },
-      closing:     { label: 'Closing',       color: '#e8a234', bg: 'rgba(232,162,52,0.08)'  },
+      jobprep:     { label: 'Procedure',     color: '#a78bfa' },
+      pending:     { label: 'Pending',       color: '#e8a234' },
+      pendretest:  { label: 'Pend. Retest',  color: '#fb923c' },
+      active:      { label: 'Active',        color: '#4caf7d' },
+      inprogress:  { label: 'In Progress',   color: '#2dd4bf' },
+      onhold:      { label: 'On Hold',       color: '#7a7a85' },
+      complete:    { label: 'Complete',      color: '#5b9cf6' },
+      testcomplete:{ label: 'Test Complete', color: '#4caf7d' },
+      closing:     { label: 'Closing',       color: '#e8a234' },
     };
-    const bubble = (label, count, color, bg) =>
-      `<div style="background:${bg};border:1px solid ${color}44;border-radius:8px;padding:5px 12px;cursor:default;display:flex;align-items:center;gap:8px;flex-shrink:0">
-        <div style="font-size:18px;font-family:'DM Serif Display',serif;color:var(--text);line-height:1;font-weight:400">${count}</div>
-        <div style="font-size:9px;color:${color};font-weight:700;text-transform:uppercase;letter-spacing:.5px;line-height:1.2">${label}</div>
-      </div>`;
-    let html = bubble('All Open', openProjs.length, '#5b9cf6', 'rgba(91,156,246,0.08)');
+    const hex2rgba = (h, a) => {
+      const n = parseInt(h.slice(1), 16);
+      return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+    };
+    const stat = (key, label, count, color, on) =>
+      `<button type="button" class="pf-stat" aria-pressed="${on}"
+         style="--pf-sc:${color};--pf-sc-bg:${hex2rgba(color,0.10)}"
+         onclick="pfToggleStatus('${key}')"
+         title="${key === '__all' ? 'Show every open job' : 'Filter to ' + label}">
+        <span class="pf-stat-n">${count}</span><span class="pf-stat-l">${label}</span>
+      </button>`;
+
+    let html = stat('__all', 'All Open', openProjs.length, '#5b9cf6', navFilter.status.size === 0);
     Object.entries(statusGroups).forEach(([status, meta]) => {
       const count = openProjs.filter(p => (projectInfo[p.id]||{}).status === status).length;
-      if (count > 0) html += bubble(meta.label, count, meta.color, meta.bg);
+      // show a status if it has jobs, or if it is currently selected (so it can always be turned off)
+      if (count > 0 || navFilter.status.has(status))
+        html += stat(status, meta.label, count, meta.color, navFilter.status.has(status));
     });
     bubblesEl.innerHTML = html;
   }
@@ -1066,18 +1079,10 @@ function setProjSort(col) {
   renderProjectsTable();
 }
 
+// The filter drawer was replaced by the always-visible filter bar. Kept as a
+// no-op close so any remaining caller stays harmless.
 function toggleNavFilter() {
-  const panel = document.getElementById('navFilterPanel');
-  const btn   = document.getElementById('navFilterBtn');
-  const open  = panel.classList.toggle('open');
-  btn.classList.toggle('active', open);
-  if (open) {
-    buildNavFilterChips();
-    buildColToggleChips();
-    const inp = document.getElementById('filterNamePattern');
-    if (inp) inp.value = navFilter.namePattern || '';
-    syncTaskCondUI();
-  }
+  pfClosePops();
 }
 
 function buildNavFilterChips() {
@@ -1101,6 +1106,7 @@ function clearNavFilter() {
   navFilter.status.clear();
   navFilter.namePattern = '';
   navFilter.taskCond = null;
+  projColFilters = {};          // "Clear all" clears the per-column boxes too
   activeFilterName = null;
   const inp = document.getElementById('filterNamePattern');
   if (inp) inp.value = '';
@@ -1117,24 +1123,22 @@ function clearNavFilter() {
 function saveNamedFilter() {
   const nameInp = document.getElementById('filterSaveName');
   const name = nameInp ? nameInp.value.trim() : '';
-  if (!name) { toast('Enter a name for this filter'); nameInp?.focus(); return; }
+  if (!name) { toast('Enter a name for this view'); nameInp && nameInp.focus(); return; }
   const namePattern = document.getElementById('filterNamePattern')?.value.trim() || '';
   navFilter.namePattern = namePattern;
-  // navFilter.taskCond is already current — updateTaskCondFromUI() keeps it in sync on every
-  // change to the drawer's task-condition inputs, same as the status chips do.
+  // navFilter.taskCond is already current — updateTaskCondFromUI() keeps it in sync.
   const filters = getSavedFilters().filter(f => f.name !== name); // overwrite if exists
-  filters.push({ name, status: [...navFilter.status], namePattern, taskCond: navFilter.taskCond, colVis: getProjCols(), colOrder: getProjColOrder() });
+  filters.push({ name, status: [...navFilter.status], namePattern, taskCond: navFilter.taskCond,
+                 colVis: getProjCols(), colOrder: getProjColOrder() });
   setSavedFilters(filters);
   activeFilterName = name;
   if (nameInp) nameInp.value = '';
-  renderSavedFiltersBar();
   persistFilterState();
-  document.getElementById('navFilterPanel').classList.remove('open');
-  document.getElementById('navFilterBtn').classList.remove('active');
-  updateNavFilterDot();
+  pfClosePops();
+  renderProjViewsDropdown();
   renderProjectsTable();
   updateProjViewsLabel();
-  toast('✓ Filter "' + name + '" saved');
+  toast('\u2713 View "' + name + '" saved');
 }
 
 function applyNamedFilter(name) {
@@ -1157,9 +1161,7 @@ function applyNamedFilter(name) {
   renderSavedFiltersBar();
   updateProjViewsLabel();
   renderProjectsTable();
-  // Close filter panel if open
-  document.getElementById('navFilterPanel').classList.remove('open');
-  document.getElementById('navFilterBtn').classList.remove('active');
+  pfClosePops();
 }
 
 function deleteNamedFilter(name) {
@@ -1205,62 +1207,49 @@ function resetProjectsToDefault() {
 }
 
 // ===== VIEWS DROPDOWN =====
+// Views open/close through the shared popover system, so opening one popover
+// closes the others.
 function toggleProjViewsDropdown(ev) {
-  if (ev) { ev.stopPropagation(); }
-  const dd = document.getElementById('projViewsDropdown');
-  if (!dd) return;
-  const open = dd.style.display === 'block';
-  if (open) { dd.style.display = 'none'; return; }
+  if (ev) ev.stopPropagation();
   renderProjViewsDropdown();
-  dd.style.display = 'block';
-  // Close on outside click (one-shot)
-  setTimeout(() => {
-    const handler = (e) => {
-      if (!dd.contains(e.target) && e.target.id !== 'projViewsBtn') {
-        dd.style.display = 'none';
-        document.removeEventListener('click', handler);
-      }
-    };
-    document.addEventListener('click', handler);
-  }, 0);
+  pfTogglePop('projViewsDropdown', document.getElementById('projViewsBtn'));
 }
 
+// The views menu now also holds the "save current as" box.
 function renderProjViewsDropdown() {
   const dd = document.getElementById('projViewsDropdown');
   if (!dd) return;
   const filters = getSavedFilters();
-  const activeName = activeFilterName;
-  const rowStyle = 'padding:8px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12.5px;transition:background .1s;';
-  const defaultRow = `<div style="${rowStyle}background:${!activeName?'var(--amber-glow)':'transparent'};color:${!activeName?'var(--amber)':'var(--text)'}"
-    onmouseover="if(this.style.background==='transparent')this.style.background='var(--surface2)'"
-    onmouseout="this.style.background='${!activeName?'var(--amber-glow)':'transparent'}'"
-    onclick="selectProjView('')"
-    title="The default view — all defaults, no saved filter active">
-    <span style="font-size:11px;width:14px;text-align:center">${!activeName?'✓':''}</span>
-    <span style="font-weight:500">Default</span>
-  </div>`;
-  const filterRows = filters.map(f => {
-    const isActive = activeName === f.name;
-    const safeName = f.name.replace(/'/g, "\\'");
-    return `<div style="${rowStyle}background:${isActive?'var(--amber-glow)':'transparent'};color:${isActive?'var(--amber)':'var(--text)'}"
-      onmouseover="if(this.style.background==='transparent')this.style.background='var(--surface2)'"
-      onmouseout="this.style.background='${isActive?'var(--amber-glow)':'transparent'}'"
-      onclick="selectProjView('${safeName}')">
-      <span style="font-size:11px;width:14px;text-align:center">${isActive?'✓':''}</span>
-      <span style="flex:1;font-weight:500">${f.name}</span>
-      <span onclick="event.stopPropagation();deleteProjView('${safeName}')" title="Delete this view" style="color:var(--muted);font-size:11px;padding:2px 5px;border-radius:3px;transition:all .1s" onmouseover="this.style.background='rgba(208,64,64,0.15)';this.style.color='var(--red)'" onmouseout="this.style.background='transparent';this.style.color='var(--muted)'">&#x2715;</span>
+  const active  = activeFilterName;
+
+  const row = (name, isActive, deletable) => {
+    const safe = (name || '').replace(/'/g, "\\'");
+    return `<button type="button" class="pf-vrow ${isActive ? 'active' : ''}" onclick="selectProjView('${deletable ? safe : ''}')">
+      <span class="pf-tick">${isActive ? '&#x2713;' : ''}</span>
+      <span style="flex:1">${name}</span>
+      ${deletable ? `<span class="pf-vdel" onclick="event.stopPropagation();deleteProjView('${safe}')" title="Delete this view">&#x2715;</span>` : ''}
+    </button>`;
+  };
+
+  const body = row('Default', !active, false)
+    + (filters.length ? '<div class="pf-vsep"></div>' : '')
+    + filters.map(f => row(f.name, active === f.name, true)).join('');
+
+  dd.innerHTML = `<div style="padding:4px 0">${body}</div>
+    <div class="pf-vsave">
+      <span class="pf-vhint">Saves the current filters, columns and column order.</span>
+      <div class="pf-vsave-row">
+        <input type="text" id="filterSaveName" placeholder="Name this view&hellip;" autocomplete="off"
+               onkeydown="if(event.key==='Enter')saveNamedFilter()" />
+        <button type="button" onclick="saveNamedFilter()">Save</button>
+      </div>
     </div>`;
-  }).join('');
-  const separator = filters.length ? `<div style="height:1px;background:var(--border);margin:2px 0"></div>` : '';
-  const manageHint = filters.length
-    ? ''
-    : `<div style="padding:10px 12px;font-size:11px;color:var(--muted);font-style:italic;">No saved views yet. Set up columns/filters and click "✓ Save Filter" in the filter drawer.</div>`;
-  dd.innerHTML = defaultRow + separator + filterRows + manageHint;
+  const lbl = document.getElementById('projViewsLabel');
+  if (lbl) lbl.textContent = active || 'Default';
 }
 
 function selectProjView(name) {
-  const dd = document.getElementById('projViewsDropdown');
-  if (dd) dd.style.display = 'none';
+  pfClosePops();
   if (!name) {
     // "Default" chosen — same as reset, but skip the confirm prompt
     try {
@@ -1308,42 +1297,19 @@ function updateProjViewsLabel() {
   lbl.textContent = activeFilterName || 'Default';
 }
 
+// The saved-filters bar was removed with the drawer; this is now the hook that
+// refreshes the filter bar. Every existing call site keeps working unchanged.
 function renderSavedFiltersBar() {
-  const bar = document.getElementById('savedFiltersBar');
-  if (!bar) return;
-  const filters = getSavedFilters();
-  const hasColFilters = Object.keys(projColFilters).length > 0;
-
-  if (!filters.length && !hasColFilters) { bar.style.display = 'none'; return; }
-  bar.style.display = 'flex';
-
-  const colFilterPill = hasColFilters
-    ? `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 5px 3px 10px;border-radius:12px;font-size:11px;font-weight:600;background:rgba(192,122,26,0.12);color:var(--amber);border:1px solid var(--amber-dim);white-space:nowrap;">
-        &#x1F50D; Column Filters Active
-        <span onclick="clearProjColFilters()" title="Clear column filters" style="cursor:pointer;display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:rgba(192,122,26,0.2);color:var(--amber);font-size:11px;line-height:1;font-weight:700;transition:background .15s" onmouseover="this.style.background='rgba(192,122,26,0.4)'" onmouseout="this.style.background='rgba(192,122,26,0.2)'">&#x2715;</span>
-      </span>`
-    : '';
-
-  const savedPart = filters.length
-    ? '<span style="font-size:11px;font-weight:600;color:var(--muted);letter-spacing:.5px;text-transform:uppercase;white-space:nowrap;">Saved:</span>' +
-      filters.map(f => `
-        <span class="saved-filter-chip ${activeFilterName===f.name?'active':''}" onclick="applyNamedFilter('${f.name.replace(/'/g,"\\'")}')" title="Apply filter">
-          ${f.name}
-          <span class="sf-del" onclick="event.stopPropagation();deleteNamedFilter('${f.name.replace(/'/g,"\\'")}')">&#x2715;</span>
-        </span>`).join('')
-    : '';
-
-  bar.innerHTML = (colFilterPill && savedPart)
-    ? colFilterPill + '<span style="width:1px;height:16px;background:var(--border);align-self:center;flex-shrink:0;margin:0 4px"></span>' + savedPart
-    : colFilterPill + savedPart;
+  pfSyncBar();
 }
 
 function saveNavFilter() { saveNamedFilter(); } // backward compat
 
+// Central sync point for the filter bar. Called from toggleNavFilterChip,
+// updateTaskCondFromUI, toggleTaskCondChipValue, clearNavFilter, applyNamedFilter
+// and resetProjectsToDefault, so the bar always matches state.
 function updateNavFilterDot() {
-  const hasFilter = navFilter.status.size > 0 || !!navFilter.namePattern || hasActiveTaskCond();
-  const dot = document.getElementById('navFilterDot');
-  if (dot) dot.style.display = hasFilter ? 'inline-block' : 'none';
+  pfSyncBar();
 }
 
 async function toggleShowClosed() {
@@ -1354,8 +1320,7 @@ async function toggleShowClosed() {
   projColFilters = {};
   const btn = document.getElementById('showClosedBtn');
   if (btn) {
-    btn.style.color = showClosed ? 'var(--amber)' : 'var(--muted)';
-    btn.style.borderColor = showClosed ? 'var(--amber-dim)' : 'var(--border)';
+    btn.classList.toggle('on', showClosed);
     btn.innerHTML = showClosed ? '&#x1F513; Hide Closed' : '&#x1F512; Show Closed';
   }
   renderProjectsTable();
@@ -1593,3 +1558,212 @@ window.toggleInfoTask = async function(idx, projId) {
     if (pctEl) pctEl.textContent = pct+'%';
   }
 };
+
+
+// ===== PROJECTS FILTER BAR =====
+// One always-visible filter bar replaces the old drawer. Everything below is
+// presentation: the filter state itself still lives in navFilter / projColFilters.
+let _pfOpenPop = null;
+
+// 'closing' is a real project status but isn't in NAV_FILTER_STATUS_LABELS.
+const PF_EXTRA_STATUS_LABELS = { closing: 'Closing (Pending)' };
+
+function pfTogglePop(id, btn) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const wasOpen = el.classList.contains('open');
+  pfClosePops();
+  if (wasOpen) return;
+  if (id === 'projColPop') buildColToggleChips();
+  if (id === 'projTaskPop') syncTaskCondUI();
+  el.classList.add('open');
+  if (btn) btn.classList.add('on');
+  _pfOpenPop = { el, btn };
+  pfSyncBar();
+}
+
+function pfClosePops() {
+  document.querySelectorAll('.pf-pop.open').forEach(p => p.classList.remove('open'));
+  _pfOpenPop = null;
+  pfSyncBar();
+}
+
+// One document-level dismisser for every popover in the header.
+document.addEventListener('click', (e) => {
+  if (!_pfOpenPop) return;
+  // A click that re-rendered the popover's own contents (toggling a column,
+  // a category chip, deleting a view) leaves e.target detached from the
+  // document — that is our own re-render, not an outside click.
+  if (!document.body.contains(e.target)) return;
+  if (_pfOpenPop.el.contains(e.target)) return;
+  if (_pfOpenPop.btn && _pfOpenPop.btn.contains(e.target)) return;
+  pfClosePops();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _pfOpenPop) pfClosePops(); });
+
+/* ---- name pattern ---- */
+function pfOnNameInput() {
+  navFilter.namePattern = document.getElementById('filterNamePattern')?.value || '';
+  activeFilterName = null;
+  persistFilterState();
+  renderProjectsTable();   // renderProjectsTable() calls renderSavedFiltersBar() -> pfSyncBar()
+  updateProjViewsLabel();
+}
+function pfClearName() {
+  const inp = document.getElementById('filterNamePattern');
+  if (inp) inp.value = '';
+  pfOnNameInput();
+}
+
+/* ---- status strip ---- */
+function pfToggleStatus(key) {
+  if (key === '__all') navFilter.status.clear();
+  else if (navFilter.status.has(key)) navFilter.status.delete(key);
+  else navFilter.status.add(key);
+  activeFilterName = null;
+  persistFilterState();
+  renderProjectNav();
+  updateProjViewsLabel();
+  renderProjectsTable();
+}
+
+/* ---- task condition ---- */
+function pfSetTaskMode(mode) {
+  const m = document.getElementById('taskCondMode');
+  if (m) m.value = mode;
+  onTaskCondModeChange();   // existing function; re-reads mode and re-renders
+  pfSyncBar();
+}
+function pfClearTaskCond() {
+  navFilter.taskCond = null;
+  activeFilterName = null;
+  syncTaskCondUI();
+  persistFilterState();
+  updateProjViewsLabel();
+  renderProjectsTable();
+}
+
+// Human-readable label for one task-condition value (codes -> names).
+function pfTaskValueLabel(field, value) {
+  if (field === 'status') {
+    const m = TASK_STATUS_OPTIONS.find(o => o.value === value);
+    return m ? m.label : value;
+  }
+  if (field === 'assign') {
+    const e = (typeof employees !== 'undefined' ? employees : []).find(x => x.initials === value);
+    return e ? e.name : value;
+  }
+  return value;
+}
+
+// "Jobs with no task in sales category 42 or 44."
+function pfTaskSentence() {
+  const c = navFilter.taskCond;
+  if (!c || !c.value || !c.value.trim()) return '';
+  const vals = c.value.split(',').map(s => s.trim()).filter(Boolean).map(v => pfTaskValueLabel(c.field, v));
+  const verb = c.mode === 'has' ? 'with a task' : 'with no task';
+  const prep = c.field === 'salesCat' ? 'in sales category'
+             : c.field === 'status'   ? 'whose status is'
+             : c.field === 'assign'   ? 'assigned to'
+             : 'whose ' + (TASK_COND_FIELDS[c.field]?.label || c.field).toLowerCase() + ' contains';
+  return `Jobs <em>${verb}</em> ${prep} <em>${vals.join(' or ')}</em>.`;
+}
+
+/* ---- open the views popover with the name box focused ---- */
+function pfOpenSaveView(ev) {
+  if (ev) ev.stopPropagation();
+  const dd = document.getElementById('projViewsDropdown');
+  if (dd && !dd.classList.contains('open')) toggleProjViewsDropdown(ev);
+  setTimeout(() => document.getElementById('filterSaveName')?.focus(), 30);
+}
+
+/* ---- reset only the columns (the Columns popover's Reset) ---- */
+function pfResetColumns() {
+  try {
+    localStorage.removeItem('projColVis');
+    localStorage.removeItem('projColOrder');
+  } catch (e) {}
+  buildColToggleChips();
+  renderProjectsTable();
+  toast('↺ Columns reset to default');
+}
+
+/* ---- the one function that keeps the bar honest ---- */
+function pfSyncBar() {
+  // active filter pills
+  const box = document.getElementById('pfPills');
+  if (box) {
+    const pills = [];
+    const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;');
+    const pill = (label, value, onRemove) =>
+      `<span class="pf-pill"><span class="pf-pill-k">${label}:</span>${esc(value)}
+        <button type="button" onclick="${onRemove}" title="Remove this filter">&#x2715;</button></span>`;
+
+    if (navFilter.namePattern) pills.push(pill('Name', navFilter.namePattern, 'pfClearName()'));
+
+    navFilter.status.forEach(s => {
+      const lbl = NAV_FILTER_STATUS_LABELS[s] || PF_EXTRA_STATUS_LABELS[s] || s;
+      pills.push(pill('Status', lbl, `pfToggleStatus('${s}')`));
+    });
+
+    if (typeof hasActiveTaskCond === 'function' && hasActiveTaskCond()) {
+      const c = navFilter.taskCond;
+      const vals = c.value.split(',').map(s => s.trim()).filter(Boolean)
+                    .map(v => pfTaskValueLabel(c.field, v)).join(', ');
+      const label = (c.mode === 'has' ? 'Has ' : 'No ') + (TASK_COND_FIELDS[c.field]?.label || c.field).toLowerCase();
+      pills.push(pill(label, vals, 'pfClearTaskCond()'));
+    }
+
+    if (Object.keys(projColFilters).length) {
+      pills.push(pill('Column search', Object.keys(projColFilters).length + ' active', 'clearProjColFilters()'));
+    }
+
+    box.innerHTML = pills.length ? pills.join('')
+      : '<span class="pf-pills-empty">No filters &mdash; showing all open jobs</span>';
+
+    const clearBtn = document.getElementById('pfClearAll');
+    if (clearBtn) clearBtn.disabled = pills.length === 0;
+  }
+
+  // search box clear affordance
+  const sw = document.getElementById('pfSearchWrap');
+  const si = document.getElementById('filterNamePattern');
+  if (sw && si) sw.classList.toggle('filled', !!si.value);
+
+  // task button lit when a condition is set (or its popover is open)
+  const tb = document.getElementById('projTaskBtn');
+  if (tb) {
+    const on = (typeof hasActiveTaskCond === 'function' && hasActiveTaskCond())
+      || document.getElementById('projTaskPop')?.classList.contains('open');
+    tb.classList.toggle('on', !!on);
+  }
+
+  // closed toggle + views/columns button states
+  const cb = document.getElementById('showClosedBtn');
+  if (cb) cb.classList.toggle('on', !!showClosed);
+  const vb = document.getElementById('projViewsBtn');
+  if (vb) vb.classList.toggle('on', !!document.getElementById('projViewsDropdown')?.classList.contains('open'));
+  const colb = document.getElementById('projColBtn');
+  if (colb) colb.classList.toggle('on', !!document.getElementById('projColPop')?.classList.contains('open'));
+
+  // mode segment + plain-English preview inside the task popover
+  const mode = document.getElementById('taskCondMode')?.value || 'missing';
+  document.getElementById('pfModeHas')?.setAttribute('aria-pressed', String(mode === 'has'));
+  document.getElementById('pfModeMissing')?.setAttribute('aria-pressed', String(mode === 'missing'));
+  const prev = document.getElementById('pfTaskPreview');
+  if (prev) {
+    const s = pfTaskSentence();
+    prev.innerHTML = s || 'Pick one or more values &mdash; the rule reads back here in plain English.';
+  }
+
+  // column count badge
+  const cnt = document.getElementById('projColCount');
+  if (cnt) cnt.textContent = PROJ_COL_DEFS.filter(c => isProjColVisible(c.key)).length;
+}
+
+/* Show Closed button text — toggleShowClosed() already flips showClosed and
+   re-renders; this keeps its label/appearance in the new button style. */
+document.addEventListener('DOMContentLoaded', () => {
+  syncTaskCondUI();
+  pfSyncBar();
+});
