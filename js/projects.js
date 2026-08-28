@@ -163,8 +163,6 @@ const PROJ_COL_DEFS = [
     colorRule: dcasColor },
   { key: 'witness',       label: 'Cust. Witness',        ptc: 'witness',  default: false, width: '130px',
     colorRule: witnessColor },
-  { key: 'tpApproval',    label: 'TP Approval',          ptc: 'tpappr',   default: false, width: '100px',
-    colorRule: tpApprovalColor },
   { key: 'dpas',          label: 'DPAS',                 ptc: 'dpas',     default: false, width: '70px'  },
   { key: 'cui',           label: 'CUI',                  ptc: 'cui',      default: false, width: '80px'  },
   { key: 'creditHold',    label: 'Credit Hold',          ptc: 'credit',   default: false, width: '90px'  },
@@ -195,14 +193,6 @@ function witnessColor(v) {
   if (s === 'cnf' || s === 'confirmed') return _COLOR_GREEN;
   return null;
 }
-// TP Approval: Yes=Green, No=Red, Partial=Yellow, Not Required=none
-function tpApprovalColor(v) {
-  const s = (v || '').toString().trim().toLowerCase();
-  if (s === 'yes' || s === 'y') return _COLOR_GREEN;
-  if (s === 'no'  || s === 'n') return _COLOR_RED;
-  if (s === 'partial') return _COLOR_AMBER;
-  return null;
-}
 function inHouseColor(v) {
   if (v === true) return { bg: 'rgba(46,158,98,0.15)', color: '#2e9e62' };
   return null;
@@ -217,16 +207,15 @@ function inHouseColor(v) {
 // gated by the same capability the detail Info sheet uses: edit_project_info.
 
 // col key (PROJ_COL_DEFS) -> editor type
-const PROJ_INLINE_TYPE   = { dcas:'enum', witness:'enum', tpApproval:'enum', cui:'enum' };
+const PROJ_INLINE_TYPE   = { dcas:'enum', witness:'enum', cui:'enum' };
 // col key -> projectInfo field name
-const PROJ_INLINE_FIELD  = { dcas:'dcas', witness:'customerWitness', tpApproval:'tpApproval', cui:'cui' };
+const PROJ_INLINE_FIELD  = { dcas:'dcas', witness:'customerWitness', cui:'cui' };
 // projectInfo field name -> project_info DB column
-const PROJ_INLINE_COLMAP = { dcas:'dcas', customerWitness:'customer_witness', tpApproval:'tp_approval', cui:'cui', tentativeTestDate:'tentative_test_date' };
+const PROJ_INLINE_COLMAP = { dcas:'dcas', customerWitness:'customer_witness', cui:'cui', tentativeTestDate:'tentative_test_date' };
 // enum option sets — mirror the detail Info sheet (pickField) exactly: same values, same colors
 const PROJ_INLINE_OPTS = {
   dcas:            [{value:'No',label:'No',color:'var(--muted)'},{value:'Yes',label:'Yes',color:'var(--green)'},{value:'CNF',label:'CNF',color:'var(--blue)'}],
   customerWitness: [{value:'Yes',label:'Yes',color:'var(--green)'},{value:'No',label:'No',color:'var(--muted)'},{value:'CNF',label:'CNF',color:'var(--blue)'}],
-  tpApproval:      [{value:'Yes',label:'Yes',color:'var(--green)'},{value:'No',label:'No',color:'var(--red)'},{value:'Partial',label:'Partial',color:'var(--amber)'},{value:'Not Required',label:'Not Required',color:'var(--muted)'}],
   cui:             [{value:'No',label:'No',color:'var(--muted)'},{value:'Yes',label:'Yes',color:'var(--red)'}],
 };
 
@@ -446,7 +435,6 @@ function renderProjectsTable() {
     else if (projSortCol === 'tentativeTest') { va = scheduleSortKey(a.id); vb = scheduleSortKey(b.id); }
     else if (projSortCol === 'testcomplete')  { va = ia.testcompleteDate||''; vb = ib.testcompleteDate||''; }
     else if (projSortCol === 'witness')       { va = ia.customerWitness||''; vb = ib.customerWitness||''; }
-    else if (projSortCol === 'tpApproval')    { va = ia.tpApproval||''; vb = ib.tpApproval||''; }
     else if (projSortCol === 'dpas')          { va = ia.dpas||''; vb = ib.dpas||''; }
     else if (projSortCol === 'cui')           { va = ia.cui||'';    vb = ib.cui||''; }
     else if (projSortCol === 'creditHold')    { va = String(ia.creditHold||false); vb = String(ib.creditHold||false); }
@@ -627,9 +615,6 @@ function renderProjectsTable() {
     } else if (c.key === 'witness') {
       val = `<span style="font-size:11px">${truncate(info.customerWitness,30)}</span>`;
       rawValue = info.customerWitness;
-    } else if (c.key === 'tpApproval') {
-      val = `<span style="font-size:11px">${info.tpApproval||'—'}</span>`;
-      rawValue = info.tpApproval;
     } else if (c.key === 'dpas') {
       val = `<span style="font-size:11px;color:var(--muted)">${info.dpas||'—'}</span>`;
     } else if (c.key === 'cui') {
