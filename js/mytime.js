@@ -114,6 +114,8 @@
     }
     paintAll();
     manageTick();
+    // A timer survives a page reload, so surface it again on load.
+    if (running) openRunPanel();
   }
 
   const taskOf = id => (typeof taskStore !== 'undefined' && Array.isArray(taskStore))
@@ -139,8 +141,7 @@
       }).select().single();
       if (error) throw error;
       running = data;
-      paintAll(); manageTick();
-      say('▶ Timer started');
+      paintAll(); manageTick(); openRunPanel();
     } catch (e) {
       warn('start failed', e);
       say('⚠ Could not start timer: ' + (e.message || 'unknown error'));
@@ -156,6 +157,7 @@
       if (error) throw error;
       totals.set(r.task_id, (totals.get(r.task_id) || 0) + sec);
       running = null;
+      closeRunPanel();
       paintAll(); manageTick();
       if (!quiet) say('⏹ Logged ' + fmtHours(sec));
     } catch (e) {
@@ -237,6 +239,48 @@
       await load();
       say('✓ Entry removed');
     } catch (e) { warn('delete failed', e); say('⚠ Could not remove entry'); }
+  }
+
+  // ---- floating "now tracking" panel ---------------------------------------
+  // A 12px cell is a poor stop target while you're actually working, so a
+  // running timer also gets a large panel with a big STOP button. Hiding it
+  // (×) leaves the timer running — the row control still stops it.
+  let runPanel = null, runPanelHidden = false;
+
+  function closeRunPanel() { if (runPanel) { runPanel.remove(); runPanel = null; } }
+
+  function openRunPanel() {
+    if (!running) return;
+    runPanelHidden = false;
+    if (!runPanel) {
+      runPanel = document.createElement('div');
+      runPanel.className = 'mytime-run';
+      runPanel.innerHTML =
+          '<div class="mytime-run-top">'
+        +   '<span class="mytime-run-label">&#9679; TRACKING</span>'
+        +   '<button class="mytime-run-hide" title="Hide — the timer keeps running">&times;</button>'
+        + '</div>'
+        + '<div class="mytime-run-task"></div>'
+        + '<div class="mytime-run-proj"></div>'
+        + '<div class="mytime-run-clock">0:00</div>'
+        + '<button class="mytime-run-stop">&#9209;&nbsp;&nbsp;STOP</button>';
+      runPanel.querySelector('.mytime-run-hide').onclick = () => { runPanelHidden = true; closeRunPanel(); };
+      runPanel.querySelector('.mytime-run-stop').onclick = () => stop();
+      document.body.appendChild(runPanel);
+    }
+    paintRunPanel();
+  }
+
+  function paintRunPanel() {
+    if (!running) { closeRunPanel(); return; }
+    if (runPanelHidden || !runPanel) return;
+    const t = taskOf(running.task_id);
+    const proj = (typeof projects !== 'undefined' && t) ? projects.find(p => p.id === t.proj) : null;
+    runPanel.querySelector('.mytime-run-task').textContent =
+      (t && t.name) || running.task_name || 'Task';
+    runPanel.querySelector('.mytime-run-proj').textContent =
+      (proj && proj.name) || running.project_name || '';
+    runPanel.querySelector('.mytime-run-clock').textContent = fmtClock(runningSeconds());
   }
 
   // ---- session popover -----------------------------------------------------
@@ -338,7 +382,11 @@
         (running && running.task_id === taskId) ? stop() : start(taskId);
       };
       wrap.querySelector('.mytime-hours').onclick = ev => {
-        ev.stopPropagation(); openPop(taskId, wrap);
+        ev.stopPropagation();
+        // While this task's timer is running, the ticking number reopens the
+        // big panel (handy if it was hidden). Sessions stay on right-click.
+        if (running && running.task_id === taskId) openRunPanel();
+        else openPop(taskId, wrap);
       };
       wrap.oncontextmenu = ev => { ev.preventDefault(); ev.stopPropagation(); openPop(taskId, wrap); };
       cell.appendChild(wrap);
@@ -359,6 +407,7 @@
   function paintAll() {
     if (!ready) return;
     document.querySelectorAll('.itt-row[data-task-id]').forEach(paintRow);
+    paintRunPanel();
   }
 
   function manageTick() {
@@ -387,6 +436,27 @@
     .mytime-hours:hover{text-decoration:underline;}
     .mytime-hours.running{animation:mytimePulse 1.6s ease-in-out infinite;}
     @keyframes mytimePulse{0%,100%{opacity:1}50%{opacity:.45}}
+    .mytime-run{position:fixed;right:24px;bottom:24px;z-index:10000;width:250px;
+      max-width:calc(100vw - 48px);background:var(--surface2);
+      border:1px solid var(--amber-dim);border-radius:14px;padding:15px 18px 18px;
+      box-shadow:0 18px 48px rgba(0,0,0,.5);font-family:'DM Sans',sans-serif;}
+    .mytime-run-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;}
+    .mytime-run-label{font-size:9.5px;font-weight:700;letter-spacing:1.4px;color:var(--amber);
+      animation:mytimePulse 1.6s ease-in-out infinite;}
+    .mytime-run-hide{background:none;border:none;color:var(--muted);font-size:17px;
+      cursor:pointer;line-height:1;padding:0 2px;}
+    .mytime-run-hide:hover{color:var(--text);}
+    .mytime-run-task{font-size:13.5px;font-weight:600;color:var(--text);line-height:1.3;
+      word-break:break-word;}
+    .mytime-run-proj{font-size:11px;color:var(--muted);margin-top:3px;}
+    .mytime-run-clock{font-family:'JetBrains Mono',monospace;font-size:38px;font-weight:700;
+      color:var(--amber);text-align:center;margin:14px 0 16px;letter-spacing:1px;
+      font-variant-numeric:tabular-nums;}
+    .mytime-run-stop{width:100%;background:var(--amber);border:none;border-radius:9px;
+      color:#0e0e0f;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:700;
+      letter-spacing:.5px;padding:12px;cursor:pointer;transition:filter .15s;}
+    .mytime-run-stop:hover{filter:brightness(1.08);}
+    .mytime-run-stop:active{transform:translateY(1px);}
     .mytime-pop{position:fixed;z-index:9999;width:290px;background:var(--surface2);
       border:1px solid var(--border);border-radius:10px;padding:12px;
       box-shadow:0 12px 32px rgba(0,0,0,.45);font-family:'DM Sans',sans-serif;}
