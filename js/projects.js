@@ -1345,19 +1345,40 @@ function renderProjectNav(){
 
 // ===== PROJECT MODAL =====
 // ===== PROJECT MODAL =====
-let pColor=COLORS[0],pEmoji='📁',pTeam=new Set();
+let pColor=COLORS[0],pEmoji='📁',pTeam=new Set(),pPrivate=false;
 
 function openProjectModal(){
-  pColor=COLORS[0]; pEmoji='📁'; pTeam=new Set();
+  pColor=COLORS[0]; pEmoji='📁'; pTeam=new Set(); pPrivate=false;
   document.getElementById('projName').value='';
   document.getElementById('projDesc').value='';
   document.getElementById('projStart').value='';
   document.getElementById('projEnd').value='';
   document.getElementById('projEmojiBtn').textContent=pEmoji;
   document.getElementById('emojiPickerWrap').style.display='none';
+
+  // Private projects are owner-only. The control isn't rendered at all for
+  // anyone else — nothing to mis-click, and nothing to ask about.
+  const isOwner = !!(typeof currentEmployee !== 'undefined' && currentEmployee && currentEmployee.isOwner);
+  const privField = document.getElementById('projPrivateField');
+  const privCheck = document.getElementById('projPrivate');
+  if (privCheck) privCheck.checked = false;
+  if (privField) privField.style.display = isOwner ? '' : 'none';
+  // The member picker only means anything for a private project — for any other
+  // project nothing reads it, so it stays hidden until Private is ticked.
+  const teamField = document.getElementById('projTeamField');
+  if (teamField) teamField.style.display = 'none';
+
   buildSwatches(); buildEmojiGrid(); buildProjTeam();
   document.getElementById('projectModal').classList.add('open');
   setTimeout(()=>document.getElementById('projName').focus(),80);
+}
+
+// Toggling Private reveals the member picker.
+function togProjPrivate(on){
+  pPrivate = !!on;
+  const teamField = document.getElementById('projTeamField');
+  if (teamField) teamField.style.display = pPrivate ? '' : 'none';
+  if (pPrivate) buildProjTeam();
 }
 
 function closeProjectModal(){document.getElementById('projectModal').classList.remove('open');}
@@ -1508,12 +1529,34 @@ async function saveProject() {
     }
   }
 
-  const row = { name, description: desc, color: pColor, emoji: pEmoji };
+  const row = { name, description: desc, color: pColor, emoji: pEmoji, is_private: pPrivate };
   const saved = await dbInsert('projects', row);
   if (!saved) {
     toast('⚠ Could not save project — check connection');
     if (btn) { btn.disabled = false; btn.textContent = 'Create Project'; }
     return;
+  }
+
+  // Private project → write the roster. A database trigger already enrols the
+  // creator, so you cannot lock yourself out; this adds everyone else picked.
+  // (That trigger is why creating from here is safer than flipping is_private
+  // in the SQL editor, which has no user identity to enrol.)
+  if (pPrivate) {
+    try {
+      const me = (typeof currentEmployee !== 'undefined' && currentEmployee) ? currentEmployee.id : null;
+      const ids = new Set(pTeam);
+      if (me) ids.add(me);
+      const rows = [...ids].map(id => ({ project_id: saved.id, employee_id: id, added_by: me }));
+      if (rows.length) {
+        const { error } = await sb.from('project_members').upsert(rows, { onConflict: 'project_id,employee_id' });
+        if (error) throw error;
+      }
+    } catch (e) {
+      console.error('project_members', e);
+      // The project exists and the creator is enrolled by the trigger, so this
+      // is recoverable — say so rather than implying the whole save failed.
+      toast('⚠ Project created, but some members were not added: ' + (e.message || 'unknown'));
+    }
   }
 
   const today = new Date().toISOString().split('T')[0];

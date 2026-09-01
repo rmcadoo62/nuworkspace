@@ -2,7 +2,7 @@
 // mytime.js — stopwatch front-end for normal timesheet entry
 //
 // One line in index.html:
-//     <script src="js/mytime.js?v=7"></script>
+//     <script src="js/mytime.js?v=13"></script>
 // Delete that line and the feature is gone. tasks.js is never edited.
 //
 // ── How this works ─────────────────────────────────────────────────────────
@@ -259,29 +259,36 @@
       say('⚠ Could not save time: ' + (e.message || 'unknown error'));
     }
   }
-
   // ---- time editor: backfill and correct entries ---------------------------
   // Writes straight to timesheet_entries, the same rows the stopwatch creates.
   // Deliberately NOT quarter-hour rounded: rounding exists to tame stopwatch
   // precision, not to override a number you typed on purpose.
   //
-  // Accepts "1.5", "90m", "1h30m", "1pm-2pm", "13:00-14:15".
+  // A new day is entered as free text — "1.5", "90m", "1h30m", "1pm-2pm",
+  // "9am-11:30am", "13:00-14:15" — because that's how you actually think about
+  // time you just worked. Existing days keep a number field with quarter-hour
+  // arrows, which is the right control for nudging a value that's already there.
   function parseAmount(text) {
     const raw = (text || '').trim().toLowerCase();
     if (!raw) return null;
 
-    const range = raw.match(/^(.+?)\s*(?:-|to|–)\s*(.+)$/);
+    const range = raw.match(/^(.+?)\s*(?:-|to|–|—)\s*(.+)$/);
     if (range) {
       const a = parseClock(range[1]), b = parseClock(range[2]);
       if (a == null || b == null || b <= a) return null;
       return Math.round(((b - a) / 60) * 100) / 100;
     }
+    // `\d*\.?\d+` so a leading-dot decimal (".5", ".25") parses like "0.5".
     let mins = 0, ok = false;
-    const hm = raw.match(/(\d+(?:\.\d+)?)\s*h/), mm = raw.match(/(\d+(?:\.\d+)?)\s*m/);
+    const hm = raw.match(/(\d*\.?\d+)\s*h/), mm = raw.match(/(\d*\.?\d+)\s*m/);
     if (hm) { mins += parseFloat(hm[1]) * 60; ok = true; }
     if (mm) { mins += parseFloat(mm[1]);      ok = true; }
-    if (!ok && /^\d+(\.\d+)?$/.test(raw)) { mins = parseFloat(raw) * 60; ok = true; }
+    if (!ok && /^\d*\.?\d+$/.test(raw)) { mins = parseFloat(raw) * 60; ok = true; }
     if (!ok || !(mins > 0)) return null;
+    // A bare number means hours, so "30" is 30 hours — almost certainly a typo
+    // for 30 minutes. Refuse anything that can't fit in a day rather than
+    // silently recording it.
+    if (mins > 24 * 60) return null;
     return Math.round((mins / 60) * 100) / 100;
   }
   function parseClock(t) {
@@ -369,72 +376,164 @@
         && !e.target.closest('.mytime-hrs-hit')) closeEditor();
   });
 
-  async function openEditor(taskId, anchor) {
+  // `pos` keeps the panel exactly where it already is when we rebuild it after
+  // an edit. Without it we'd re-measure the anchor — but repaintApp() has by
+  // then replaced the task row, so the anchor is detached, getBoundingClientRect()
+  // returns all zeros, and the panel jumps to the top-left corner.
+  // Nothing is written until Save. Edits, additions and removals are all staged
+  // in memory, so an accidental × is visible and reversible instead of being an
+  // instant, silent delete — which is exactly how an hour got lost once.
+  async function openEditor(taskId, anchor, pos) {
     closeEditor();
     const projId = projOf(taskId);
     const days = await taskDays(taskId);
-    const total = days.reduce((s, d) => s + d.hours, 0);
-    const fmtD = d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 
-    const list = days.length ? days.map((d, i) =>
-        `<div class="mytime-day" data-i="${i}">
-           <span class="mytime-day-when">${esc(fmtD(d.date))}</span>
-           <input class="mytime-day-inp" type="number" step="0.25" min="0" value="${d.hours}">
-           <span class="mytime-day-h">h</span>
-           <button class="mytime-day-del" title="Remove this day">&times;</button>
-         </div>`).join('')
-      : '<div class="mytime-empty">No time recorded on this task yet.</div>';
+    // staged rows: { key, date, orig, hours, isNew, removed }
+    const staged = days.map(d => ({
+      key: localDate(d.date), date: d.date, orig: d.hours, hours: d.hours,
+      isNew: false, removed: false,
+    }));
 
-    const today = localDate(new Date());
     const el = document.createElement('div');
     el.className = 'mytime-pop';
     el.innerHTML =
         `<div class="mytime-pop-head"><span>${esc(nameOf(taskId) || 'Task')}</span>`
-      + `<span class="mytime-pop-total">${total ? total.toFixed(2) + 'h' : '0h'}</span></div>`
-      + `<div class="mytime-pop-list">${list}</div>`
-      + `<div class="mytime-add">`
-      +   `<input type="date" class="mytime-date" value="${today}">`
-      +   `<input type="text" class="mytime-amt" placeholder="1.5, 90m, 1pm-2pm">`
-      +   `<button class="mytime-add-btn">Add</button>`
-      + `</div>`
-      + `<div class="mytime-hint">Adds to that day. Edit a number above to correct it.</div>`;
+      +   `<span class="mytime-pop-total"></span></div>`
+      + `<div class="mytime-pop-list"></div>`
+      + `<button class="mytime-addrow" type="button">+ Add a day</button>`
+      + `<div class="mytime-foot">`
+      +   `<span class="mytime-dirty"></span>`
+      +   `<button class="mytime-cancel" type="button">Cancel</button>`
+      +   `<button class="mytime-save" type="button" disabled>Save</button>`
+      + `</div>`;
     document.body.appendChild(el);
     editor = el;
 
-    const r = anchor.getBoundingClientRect();
-    el.style.top  = Math.min(window.innerHeight - el.offsetHeight - 12, r.bottom + 6) + 'px';
-    el.style.left = Math.min(window.innerWidth  - el.offsetWidth  - 12, Math.max(8, r.left - 120)) + 'px';
-
-    // inline correction
-    el.querySelectorAll('.mytime-day').forEach(rowEl => {
-      const d = days[parseInt(rowEl.getAttribute('data-i'), 10)];
-      const inp = rowEl.querySelector('.mytime-day-inp');
-      inp.onchange = async () => {
-        const v = parseFloat(inp.value);
-        if (isNaN(v) || v < 0) { inp.value = d.hours; return; }
-        if (await setDayHours(taskId, projId, d.date, v)) openEditor(taskId, anchor);
-      };
-      rowEl.querySelector('.mytime-day-del').onclick = async () => {
-        if (await setDayHours(taskId, projId, d.date, 0)) openEditor(taskId, anchor);
-      };
-    });
-
-    const addBtn = el.querySelector('.mytime-add-btn');
-    addBtn.onclick = async () => {
-      const amt = parseAmount(el.querySelector('.mytime-amt').value);
-      if (amt == null) { say('⚠ Try "1.5", "90m", "1h30m", or "1pm-2pm"'); return; }
-      const dstr = el.querySelector('.mytime-date').value;
-      if (!dstr) { say('⚠ Pick a date'); return; }
-      const dt = new Date(dstr + 'T00:00:00');
-      const existing = days.find(x => localDate(x.date) === dstr);
-      if (await setDayHours(taskId, projId, dt, (existing ? existing.hours : 0) + amt)) {
-        say('✓ Added ' + amt.toFixed(2) + 'h');
-        openEditor(taskId, anchor);
+    if (pos) {
+      el.style.top = pos.top + 'px'; el.style.left = pos.left + 'px';
+    } else {
+      const r = anchor ? anchor.getBoundingClientRect() : null;
+      // A detached anchor measures as all zeros — centre rather than corner it.
+      if (!r || (!r.width && !r.height)) {
+        el.style.top  = Math.max(12, (window.innerHeight - el.offsetHeight) / 2) + 'px';
+        el.style.left = Math.max(12, (window.innerWidth  - el.offsetWidth)  / 2) + 'px';
+      } else {
+        el.style.top  = Math.min(window.innerHeight - el.offsetHeight - 12, r.bottom + 6) + 'px';
+        el.style.left = Math.min(window.innerWidth  - el.offsetWidth  - 12, Math.max(8, r.left - 120)) + 'px';
       }
+    }
+
+    const listEl  = el.querySelector('.mytime-pop-list');
+    const totalEl = el.querySelector('.mytime-pop-total');
+    const saveBtn = el.querySelector('.mytime-save');
+    const dirtyEl = el.querySelector('.mytime-dirty');
+
+    const isDirty = () => staged.some(s =>
+      (s.removed && !s.isNew) || (!s.removed && s.hours !== s.orig));
+
+    function refresh() {
+      const t = staged.filter(s => !s.removed).reduce((sum, s) => sum + (s.hours || 0), 0);
+      totalEl.textContent = t ? t.toFixed(2) + 'h' : '0h';
+      const d = isDirty();
+      saveBtn.disabled = !d;
+      dirtyEl.textContent = d ? 'unsaved changes' : '';
+      const empty = listEl.querySelector('.mytime-empty');
+      if (staged.length && empty) empty.remove();
+      if (!staged.length && !empty) {
+        listEl.innerHTML = '<div class="mytime-empty">No time recorded on this task yet.</div>';
+      }
+    }
+
+    const fmtD = d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    function addRowEl(s) {
+      const row = document.createElement('div');
+      row.className = 'mytime-day';
+      row.innerHTML = s.isNew
+        ? `<input type="date" class="mytime-day-date" value="${s.key}">`
+          + `<input class="mytime-day-txt" type="text" placeholder="1.5, 90m, 1pm-2pm">`
+          + `<span class="mytime-day-parsed"></span>`
+          + `<button class="mytime-day-del" type="button" title="Remove">&times;</button>`
+        : `<span class="mytime-day-when">${esc(fmtD(s.date))}</span>`
+          + `<input class="mytime-day-inp" type="number" step="0.25" min="0" value="${s.hours}">`
+          + `<span class="mytime-day-h">h</span><button class="mytime-day-del" type="button" title="Remove">&times;</button>`;
+      listEl.appendChild(row);
+
+      const inp = row.querySelector('.mytime-day-inp');
+      if (inp) inp.oninput = () => {
+        const v = parseFloat(inp.value);
+        s.hours = isNaN(v) || v < 0 ? 0 : v;
+        refresh();
+      };
+
+      // Free-text entry for a new day, echoing back what it understood so the
+      // parse is never a guess.
+      const txt = row.querySelector('.mytime-day-txt');
+      if (txt) {
+        const parsedEl = row.querySelector('.mytime-day-parsed');
+        txt.oninput = () => {
+          const raw = txt.value.trim();
+          const v = parseAmount(raw);
+          s.hours = v || 0;
+          if (!raw)        { parsedEl.textContent = '';  parsedEl.className = 'mytime-day-parsed'; }
+          else if (v == null) { parsedEl.textContent = '?'; parsedEl.className = 'mytime-day-parsed bad'; }
+          else             { parsedEl.textContent = v.toFixed(2) + 'h'; parsedEl.className = 'mytime-day-parsed ok'; }
+          refresh();
+        };
+      }
+      const dateInp = row.querySelector('.mytime-day-date');
+      if (dateInp) dateInp.onchange = () => {
+        s.key = dateInp.value;
+        s.date = new Date(dateInp.value + 'T00:00:00');
+        refresh();
+      };
+      // Removal is staged, not done. Click again to put it back.
+      row.querySelector('.mytime-day-del').onclick = () => {
+        if (s.isNew && !s.removed) { staged.splice(staged.indexOf(s), 1); row.remove(); refresh(); return; }
+        s.removed = !s.removed;
+        row.classList.toggle('removed', s.removed);
+        row.querySelector('.mytime-day-del').innerHTML = s.removed ? '&#8630;' : '&times;';
+        row.querySelector('.mytime-day-del').title = s.removed ? 'Keep it after all' : 'Remove';
+        if (inp) inp.disabled = s.removed;
+        refresh();
+      };
+    }
+
+    if (!staged.length) listEl.innerHTML = '<div class="mytime-empty">No time recorded on this task yet.</div>';
+    staged.forEach(addRowEl);
+    refresh();
+
+    el.querySelector('.mytime-addrow').onclick = () => {
+      const s = { key: localDate(new Date()), date: new Date(), orig: 0, hours: 0, isNew: true, removed: false };
+      staged.push(s);
+      const empty = listEl.querySelector('.mytime-empty'); if (empty) empty.remove();
+      addRowEl(s);
+      refresh();
+      const rows = listEl.querySelectorAll('.mytime-day');
+      const last = rows[rows.length - 1];
+      if (last) last.querySelector('.mytime-day-inp').focus();
     };
-    el.querySelector('.mytime-amt').addEventListener('keydown', ev => {
-      if (ev.key === 'Enter') addBtn.click();
-    });
+
+    el.querySelector('.mytime-cancel').onclick = () => closeEditor();
+
+    saveBtn.onclick = async () => {
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      let failed = 0;
+      for (const s of staged) {
+        const target = s.removed ? 0 : s.hours;
+        if (!s.isNew && target === s.orig) continue;   // untouched
+        if (s.isNew && target <= 0) continue;          // added then left blank
+        const ok = await setDayHours(taskId, projId, s.date, target);
+        if (!ok) failed++;
+      }
+      if (failed) {
+        saveBtn.textContent = 'Save'; saveBtn.disabled = false;
+        say('⚠ ' + failed + ' change' + (failed === 1 ? '' : 's') + ' could not be saved');
+        return;
+      }
+      say('✓ Saved');
+      closeEditor();
+    };
   }
 
   const esc = s => String(s == null ? '' : s)
@@ -621,16 +720,37 @@
     .mytime-day:hover .mytime-day-del{color:var(--muted);}
     .mytime-day-del:hover{color:var(--red);}
     .mytime-empty{font-size:13px;color:var(--muted);padding:10px 0;}
-    .mytime-add{display:flex;gap:8px;}
-    .mytime-date,.mytime-amt{background:var(--surface3);border:1px solid var(--border);
-      border-radius:7px;color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;
-      padding:8px 10px;outline:none;min-width:0;}
-    .mytime-date{width:145px;} .mytime-amt{flex:1;}
-    .mytime-amt:focus,.mytime-date:focus{border-color:var(--amber-dim);}
-    .mytime-add-btn{background:var(--amber);border:none;border-radius:7px;color:#0e0e0f;
-      font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;padding:8px 16px;cursor:pointer;}
-    .mytime-add-btn:hover{filter:brightness(1.08);}
-    .mytime-hint{margin-top:10px;font-size:10.5px;color:var(--muted);text-align:center;}
+    .mytime-day.removed{opacity:.45;}
+    .mytime-day.removed .mytime-day-when{text-decoration:line-through;}
+    .mytime-day.removed .mytime-day-del{color:var(--amber);}
+    .mytime-day-date{background:var(--surface3);border:1px solid var(--border);border-radius:6px;
+      color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:4px 7px;
+      outline:none;width:135px;flex:none;min-width:0;}
+    .mytime-day-date:focus{border-color:var(--amber-dim);}
+    .mytime-day-txt{background:var(--surface3);border:1px solid var(--border);border-radius:6px;
+      color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:5px 8px;
+      outline:none;flex:1;min-width:0;}
+    .mytime-day-txt:focus{border-color:var(--amber-dim);}
+    .mytime-day-parsed{font-family:'JetBrains Mono',monospace;font-size:11.5px;
+      min-width:46px;text-align:right;}
+    .mytime-day-parsed.ok{color:var(--amber);}
+    .mytime-day-parsed.bad{color:var(--red);}
+    .mytime-addrow{width:100%;background:transparent;border:1px dashed var(--border);
+      border-radius:7px;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:12.5px;
+      padding:8px;cursor:pointer;margin-bottom:14px;transition:all .15s;}
+    .mytime-addrow:hover{border-color:var(--amber-dim);color:var(--amber);background:var(--amber-glow);}
+    .mytime-foot{display:flex;align-items:center;gap:8px;}
+    .mytime-dirty{flex:1;font-size:11px;color:var(--amber);}
+    .mytime-cancel{background:transparent;border:1.5px solid var(--border);border-radius:7px;
+      color:var(--text);font-family:'DM Sans',sans-serif;font-size:13px;font-weight:600;
+      padding:8px 14px;cursor:pointer;}
+    .mytime-cancel:hover{border-color:var(--muted);}
+    .mytime-save{background:var(--amber);border:1.5px solid var(--amber);border-radius:7px;
+      color:#0e0e0f;font-family:'DM Sans',sans-serif;font-size:13px;font-weight:700;
+      padding:8px 18px;cursor:pointer;transition:opacity .15s;}
+    .mytime-save:hover:not(:disabled){filter:brightness(1.08);}
+    .mytime-save:disabled{opacity:.35;cursor:default;background:transparent;
+      border-color:var(--border);color:var(--muted);}
   `;
   document.head.appendChild(css);
 
