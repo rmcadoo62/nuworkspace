@@ -234,12 +234,14 @@ function confirmBulkBill() {
 async function bulkMarkBilled() {
   const ids = [...bqSelected];
   const today = new Date().toISOString().split('T')[0];
+  const affectedProjIds = new Set();
   ids.forEach(id => {
     const t = taskStore.find(x => x._id === id);
     if (!t) return;
     t.status = 'billed';
     if (!t.billedDate)    t.billedDate    = today;
     if (!t.completedDate) t.completedDate = today;
+    if (t.proj) affectedProjIds.add(t.proj);
   });
   if (sb) {
     for (const id of ids) {
@@ -250,6 +252,16 @@ async function bulkMarkBilled() {
         completed_date: t.completedDate,
       }).eq('id', id);
       if (error) console.error('bulkMarkBilled', error);
+    }
+  }
+  // Billing Queue writes straight to Supabase, bypassing inlineSave() — the
+  // one path everything else uses to trigger a job-status recompute. Without
+  // this, every job billed here would silently keep showing its pre-billing
+  // status until someone happened to touch a task on it later. Bulk billing
+  // routinely spans multiple jobs at once, so recompute each one affected.
+  if (typeof computeAndApplyJobStatus === 'function') {
+    for (const projId of affectedProjIds) {
+      await computeAndApplyJobStatus(projId);
     }
   }
   bqSelected.clear();

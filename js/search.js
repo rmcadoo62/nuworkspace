@@ -127,7 +127,9 @@ function runGlobalSearch(q) {
     projMatches.forEach(p => {
       const info = projectInfo[p.id] || {};
       const hit = _gsNumberHit(q, info.po, info.quoteNumber);
-      const sub = hit ? hit + (info.status ? ' · ' + info.status : '') : (info.status||'');
+      const _gsProjStatusLabels = {jobprep:'Procedure',pending:'Pending',pendretest:'Pending - ReTest',active:'Active',inprogress:'In Progress',onhold:'On Hold',complete:'Complete',testcomplete:'Testing Complete',closing:'Closing (Pending)',closed:'Closed'};
+      const statusLbl = info.status ? (_gsProjStatusLabels[info.status] || info.status) : '';
+      const sub = hit ? hit + (statusLbl ? ' · ' + statusLbl : '') : statusLbl;
       html += '<div class="gs-item" data-action="project" data-id="' + p.id + '">' +
         '<span class="gs-item-icon">' + (p.emoji||'📁') + '</span>' +
         '<div><div class="gs-item-main">' + p.name + '</div>' +
