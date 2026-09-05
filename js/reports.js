@@ -1085,8 +1085,13 @@ function renderInProgressReport() {
 
 // ---- Revenue Projection (Scheduled by month + Not Yet Scheduled) ----
 // Uses the task-level schedule (schedule_blocks.task_id) to answer "when
-// does this task's revenue land." A task's projected month = the earliest
-// schedule_blocks.start_date linked to it. Tasks with no linked block at
+// does this task's revenue land." A task's projected month = the LATEST
+// schedule_blocks.end_date linked to it — revenue lands when the work
+// finishes and becomes billable, not when it starts. A test that runs
+// 8/28 → 9/8 is September revenue. Using the latest end (rather than the
+// earliest) matters only for tasks covered by more than one block, e.g. a
+// test split across two chamber sessions or a re-run: the money isn't
+// billable until the last of those finishes. Tasks with no linked block at
 // all (e.g. cat 96 teardown/ship, which structurally never gets a lab-room
 // or equipment block) fall into "Not Yet Scheduled" rather than being
 // silently dropped.
@@ -1116,7 +1121,7 @@ async function renderRevenueProjectionReport() {
   let blockRows = [];
   if (sb) {
     const { data, error } = await sb.from('schedule_blocks')
-      .select('task_id, section_id, task_ids, start_date, flag')
+      .select('task_id, section_id, task_ids, start_date, end_date, flag')
       .or('task_id.not.is.null,section_id.not.is.null,task_ids.not.is.null');
     if (error) console.error('renderRevenueProjectionReport:', error);
     blockRows = data || [];
@@ -1125,22 +1130,26 @@ async function renderRevenueProjectionReport() {
   const coverageRows  = blockRows.filter(r => r.flag !== 'reschedule');
   const rescheduleRows = blockRows.filter(r => r.flag === 'reschedule');
 
-  // Earliest start_date per task_id / section_id, from valid coverage only.
+  // Latest end_date per task_id / section_id, from valid coverage only.
   // A multi-task block (task_ids) contributes its date to every task in the
   // array, same as a single task_id block contributes to just the one.
-  const earliestByTask = {};
-  const earliestBySection = {};
+  // end_date falls back to start_date for any legacy single-day block that
+  // was written without one.
+  const blockEnd = r => r.end_date || r.start_date || null;
+  const latestEndByTask = {};
+  const latestEndBySection = {};
   coverageRows.forEach(r => {
-    if (!r.start_date) return;
-    if (r.task_id && (!earliestByTask[r.task_id] || r.start_date < earliestByTask[r.task_id])) {
-      earliestByTask[r.task_id] = r.start_date;
+    const d = blockEnd(r);
+    if (!d) return;
+    if (r.task_id && (!latestEndByTask[r.task_id] || d > latestEndByTask[r.task_id])) {
+      latestEndByTask[r.task_id] = d;
     }
-    if (r.section_id && (!earliestBySection[r.section_id] || r.start_date < earliestBySection[r.section_id])) {
-      earliestBySection[r.section_id] = r.start_date;
+    if (r.section_id && (!latestEndBySection[r.section_id] || d > latestEndBySection[r.section_id])) {
+      latestEndBySection[r.section_id] = d;
     }
     if (r.task_ids && r.task_ids.length) {
       r.task_ids.forEach(tid => {
-        if (!earliestByTask[tid] || r.start_date < earliestByTask[tid]) earliestByTask[tid] = r.start_date;
+        if (!latestEndByTask[tid] || d > latestEndByTask[tid]) latestEndByTask[tid] = d;
       });
     }
   });
@@ -1154,8 +1163,11 @@ async function renderRevenueProjectionReport() {
   const decorated = openTasks.map(t => {
     const proj = projects.find(p => p.id === t.proj) || {};
     const info = projectInfo[t.proj] || {};
-    const sched = earliestByTask[t._id]
-      || (t.sectionId ? earliestBySection[t.sectionId] : null)
+    // Task's own block wins; otherwise fall back to the end of its section's
+    // schedule (this is what places cat 96 teardown/ship, which never gets a
+    // block of its own — it can't happen before the section's last block ends).
+    const sched = latestEndByTask[t._id]
+      || (t.sectionId ? latestEndBySection[t.sectionId] : null)
       || null;
     const needsReschedule = !sched && (
       needsRescheduleTaskIds.has(t._id) ||
@@ -1165,8 +1177,8 @@ async function renderRevenueProjectionReport() {
       ...t,
       projName: proj.name || '—',
       pm: info.pm || '',
-      scheduledDate: sched,
-      scheduledMonth: sched ? sched.slice(0,7) : null, // YYYY-MM
+      scheduledEnd: sched,                             // YYYY-MM-DD, last day of work
+      scheduledMonth: sched ? sched.slice(0,7) : null, // YYYY-MM, month revenue lands
       needsReschedule,
     };
   });
@@ -1199,7 +1211,7 @@ async function renderRevenueProjectionReport() {
         <div>${t.name||''}${t.needsReschedule ? ' <span style="font-size:10.5px;font-weight:600;color:var(--amber);background:rgba(201,168,0,0.12);padding:1px 6px;border-radius:4px;margin-left:4px">&#x21BB; Needs rescheduled</span>' : ''}</div>
       </td>
       <td style="padding:8px 14px;font-size:12px;color:var(--muted);text-align:right">${t.salesCat||'—'}</td>
-      <td style="padding:8px 14px;font-size:12px;color:var(--muted);text-align:right">${t.scheduledDate||'—'}</td>
+      <td style="padding:8px 14px;font-size:12px;color:var(--muted);text-align:right">${t.scheduledEnd||'—'}</td>
       <td style="text-align:right;padding:8px 14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--green);font-weight:600">${fmt$(t.fixedPrice)}</td>
     </tr>`;
 
@@ -1208,7 +1220,7 @@ async function renderRevenueProjectionReport() {
       <tr>
         <th style="text-align:left;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Task / Project</th>
         <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>
-        <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Scheduled</th>
+        <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Finishes</th>
         <th style="text-align:right;padding:10px 14px;font-size:10.5px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>
       </tr>
     </thead>`;
@@ -1251,7 +1263,7 @@ async function renderRevenueProjectionReport() {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:18px;flex-wrap:wrap;gap:10px">
         <div>
           <div style="font-family:'DM Serif Display',serif;font-size:22px;color:var(--text)">📈 Revenue Projection</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:2px">Open-project task value, grouped by scheduled month</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">Open-project task value, grouped by the month the work finishes</div>
         </div>
         <button class="btn btn-ghost" style="font-size:12px" onclick="renderRevenueProjectionReport()">↻ Refresh</button>
       </div>
