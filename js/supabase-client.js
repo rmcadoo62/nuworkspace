@@ -112,7 +112,7 @@ async function loadAllData() {
       .map(p => p.id);
 
     // Phase 2: load remaining tables in parallel, filtering tasks to open projects only
-    const [taskRows, empRows, clientRows, contactRows, expRows, , sectionRows, roleRows, billedMonthlyRows, billedCatRows, articleRows, projectContactRows, bookingTaskRows] = await Promise.all([
+    const [taskRows, empRows, clientRows, contactRows, expRows, , sectionRows, roleRows, billedMonthlyRows, billedCatRows, articleRows, projectContactRows, bookingTaskRows, checklistRows] = await Promise.all([
       (async () => {
         // Only load tasks for open projects (145 open vs 2252 closed)
         let rows = [], page = 0;
@@ -183,6 +183,10 @@ async function loadAllData() {
         }
         return rows;
       })(),
+      // Task checklists — loaded for ALL tasks, not just open projects. The
+      // table is tiny next to tasks, and it means loadClosedProject() needs no
+      // change: a closed job's checklists are already in memory.
+      fetchAllPages('task_checklist', '*', null, null),
     ]);
 
     // Projects
@@ -279,6 +283,15 @@ async function loadAllData() {
     sectionStore = sectionRows.map(r => ({
       _id: r.id, projId: r.project_id, name: r.name,
       taskNum: r.task_num||0, collapsed: r.collapsed||false,
+    }));
+
+    // Task Checklists
+    checklistStore = (checklistRows || []).map(r => ({
+      _id: r.id,
+      taskId: r.task_id,
+      name: r.name || '',
+      done: r.done || false,
+      sortOrder: r.sort_order || 0,
     }));
 
     // Permission Roles
@@ -841,7 +854,45 @@ function setupRealtime() {
     })
     .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'tasks' }, payload => {
       taskStore = taskStore.filter(t => t._id !== payload.old.id);
+      if (typeof clForgetTask === 'function') clForgetTask(payload.old.id);
       refreshCurrentView();
+    })
+    .subscribe(_onChannelStatus);
+
+  // ── TASK_CHECKLIST ─────────────────────────────────────────
+  // Two techs on the same task see each other's ticks without a reload.
+  // Optional — delete this channel and everything else still works; checkboxes
+  // just won't update until the next page load.
+  sb.channel('rt-task-checklist')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'task_checklist' }, payload => {
+      const r = payload.new || payload.old;
+      if (!r) return;
+
+      if (payload.eventType === 'DELETE') {
+        checklistStore = checklistStore.filter(c => c._id !== r.id);
+      } else {
+        const row = {
+          _id: r.id, taskId: r.task_id, name: r.name || '',
+          done: r.done || false, sortOrder: r.sort_order || 0,
+        };
+        const idx = checklistStore.findIndex(c => c._id === r.id);
+        if (idx > -1) checklistStore[idx] = row;
+        else checklistStore.push(row);
+      }
+
+      // Never re-render out from under someone mid-keystroke — renderTasksPanel
+      // rebuilds innerHTML, which would wipe a half-typed item.
+      const el = document.activeElement;
+      if (el && el.classList && el.classList.contains('cl-add-input')) return;
+
+      const projPanel = document.getElementById('panel-project');
+      const tasksSub  = document.getElementById('sub-tasks');
+      if (activeProjectId
+          && projPanel && projPanel.classList.contains('active')
+          && tasksSub  && tasksSub.classList.contains('active')
+          && typeof renderTasksPanel === 'function') {
+        renderTasksPanel(activeProjectId);
+      }
     })
     .subscribe(_onChannelStatus);
 
@@ -967,7 +1018,7 @@ function setupRealtime() {
       .subscribe(_onChannelStatus);
   }
 
-  console.log('\u2713 Realtime subscriptions active (projects, project_info, tasks, schedule_blocks, chatter_notifs, direct_messages, feedback_submissions)');
+  console.log('\u2713 Realtime subscriptions active (projects, project_info, tasks, task_checklist, schedule_blocks, chatter_notifs, direct_messages, feedback_submissions)');
 }
 
 // Re-render the scheduler if it's currently visible

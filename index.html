@@ -1374,6 +1374,22 @@
         <textarea class="f-textarea" id="etDesc" rows="3" maxlength="600" oninput="cc(this,'etDescCnt',600)"></textarea>
         <div class="char-cnt"><span id="etDescCnt">0</span> / 600</div>
       </div>
+      <div class="field">
+        <label class="field-label">Checklist <span style="font-size:10px;color:var(--muted);font-weight:400">(steps &mdash; no price, no hours)</span></label>
+        <div class="et-checklist">
+          <div class="et-checklist-head">
+            <span class="lbl">Steps</span>
+            <span class="et-checklist-count" id="etChecklistCount">0 / 0</span>
+          </div>
+          <div id="etChecklistBody"></div>
+          <div class="cl-add">
+            <span class="cl-plus">+</span>
+            <input type="text" class="cl-add-input" id="etChecklistAdd"
+              placeholder="add item" maxlength="200" autocomplete="off"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();clModalAdd(this);}">
+          </div>
+        </div>
+      </div>
       <div class="modal-div"></div>
       <div class="field" id="etSectionField" style="display:none">
         <label class="field-label">Section <span style="font-size:10px;color:var(--muted);font-weight:400">(optional)</span></label>

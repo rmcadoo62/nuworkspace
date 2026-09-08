@@ -548,7 +548,7 @@ function renderTasksPanel(projId) {
         <div onclick="event.stopPropagation()">
           <select class="inline-edit-select" onchange="inlineSave('${t._id}','${projId}','salesCat',this.value)" style="color:var(--amber);font-family:'JetBrains Mono',monospace;font-size:10px;padding:2px 2px;width:100%" ${canEditTask ? '' : 'disabled'}>${salesOpts}</select>
         </div>
-        <div class="${canEditTask ? 'itt-name '+( t.done?'done':'')+' itt-cell-edit' : 'itt-name '+(t.done?'done':'')}" ${canEditTask ? `onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()"` : ''}>${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red)">NC</span>':''}</div>
+        <div class="${canEditTask ? 'itt-name '+( t.done?'done':'')+' itt-cell-edit' : 'itt-name '+(t.done?'done':'')}" ${canEditTask ? `onclick="inlineEditName('${t._id}','${projId}');event.stopPropagation()"` : ''}>${t.name}${t.revenueType==='nocharge'?'<span style="margin-left:6px;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px;background:rgba(208,64,64,0.12);color:var(--red)">NC</span>':''}${clBadgeHtml(t._id)}</div>
         <div onclick="event.stopPropagation()" style="display:flex;align-items:center;min-width:0;overflow:hidden;padding-right:16px;box-sizing:border-box">
           <select class="status-pill-select" style="min-width:0;flex:1;color:#000;background:${(t.status||'new')==='new'?'#fff':statusColor(t.status||'new')+('80')};border-color:${(t.status||'new')==='new'?'#bbb':statusColor(t.status||'new')+('99')}"
             onchange="inlineSave('${t._id}','${projId}','status',this.value);this.style.color='#000';this.style.background=this.value==='new'?'#fff':statusColor(this.value)+'80';this.style.borderColor=this.value==='new'?'#bbb':statusColor(this.value)+'99'" ${canEditBilled ? '' : 'disabled'}${billedLock ? ' title="Billed — locked. Unlock from the Billing Queue."' : ''}>${statusOpts}</select>
@@ -580,7 +580,7 @@ function renderTasksPanel(projId) {
           ${can('edit_tasks') ? '<button class="itt-row-action-btn" onclick="openEditTaskModal(\''+t._id+'\');event.stopPropagation()">&#x270E;</button>' : ''}
           <button class="itt-row-action-btn tlog-log-btn${(typeof taskLogHas==='function' && taskLogHas(t._id)) ? ' has-log' : ''}" onclick="openTaskLogPanel('${t._id}');event.stopPropagation()" title="Test log">&#x1F4CB;</button>
         </div>
-      </div>`;
+      </div>${clPanelHtml(t._id)}`;
   }).join('');
 
   wrap.setAttribute('data-filter', activeFilter);
@@ -1244,6 +1244,7 @@ async function inlineDeleteTask(taskId, projId) {
     if (error) { toast('⚠ Could not delete task'); return; }
   }
   taskStore = taskStore.filter(t => t._id !== taskId);
+  clForgetTask(taskId);
   toast('Task deleted');
   if (document.getElementById('panel-tasks')?.classList.contains('active')) renderTasksPanel(projId);
   else renderInfoTasks(projId, currentTaskFilter);
@@ -1317,6 +1318,9 @@ async function openEditTaskModal(taskId) {
     }
   }
 
+  // Checklist working copy — edits are held until Save Changes
+  clOpenModalChecklist(taskId);
+
   document.getElementById('editTaskModal').classList.add('open');
   setTimeout(() => document.getElementById('etTitle').focus(), 80);
 }
@@ -1324,6 +1328,8 @@ async function openEditTaskModal(taskId) {
 function closeEditTaskModal() {
   document.getElementById('editTaskModal').classList.remove('open');
   editingTaskId = null;
+  _etChecklist = [];          // discard unsaved checklist edits
+  _etChecklistDeleted = [];
 }
 
 function etSelPri(btn) {
@@ -1430,6 +1436,9 @@ async function saveEditTask() {
     };
   }
 
+  // Checklist: apply the working copy while editingTaskId is still set
+  await clSaveModalChanges(editingTaskId);
+
   closeEditTaskModal();
   toast('Task updated');
   // Notify the assignee if the assignment changed to a new person.
@@ -1456,6 +1465,7 @@ async function deleteTask() {
     if (error) { toast('⚠ Could not delete task'); return; }
   }
   taskStore = taskStore.filter(t => t._id !== editingTaskId);
+  clForgetTask(editingTaskId);
   closeEditTaskModal();
   toast('Task deleted');
   if (typeof myTasksRefresh === 'function') myTasksRefresh();
@@ -3029,3 +3039,313 @@ document.addEventListener('keydown', e => {
     if (ov && ov.classList.contains('open')) closeQuickSectionPicker();
   }
 });
+
+
+// ===== TASK CHECKLISTS =====
+// ===== TASK CHECKLISTS =====
+// Lightweight steps inside a task. Deliberately NOT subtasks: a checklist item
+// has no price, no budget hours, no assignee, no due date, and no time can be
+// logged against it. The task stays the billing and costing unit.
+//
+// Nothing outside this block and the edit modal reads task_checklist, which is
+// why getHoursForTask, syncProjBilledRevenue, billed_revenue_*, task_cost,
+// timesheets, scheduler, My Tasks, reports, search and the job pack are all
+// untouched. If an item ever needs its own price or its own hours, it isn't a
+// checklist any more — it's a subtask, and this design no longer applies.
+//
+// The expansion panel is rendered as a SIBLING of .itt-row, never a child.
+// That is what keeps it out of taskDrop()'s allItems renumbering and out of
+// reach of closest('.itt-row') during a drag.
+
+let checklistStore = [];        // [{_id, taskId, name, done, sortOrder}]
+const _clExpanded = new Set();  // taskIds whose panel is open in the task table
+
+function clItems(taskId) {
+  return checklistStore
+    .filter(c => c.taskId === taskId)
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+}
+
+function clCounts(taskId) {
+  const items = clItems(taskId);
+  return { done: items.filter(i => i.done).length, total: items.length };
+}
+
+function _clEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Re-render the tasks panel for whichever project this task belongs to.
+// focusAdd re-focuses that task's "add item" input after the rebuild, so
+// typing several items in a row feels continuous.
+function _clRerender(taskId, focusAdd) {
+  const t = taskStore.find(x => x._id === taskId);
+  const projId = (t && t.proj) || activeProjectId;
+  if (projId && typeof renderTasksPanel === 'function') renderTasksPanel(projId);
+  if (focusAdd) {
+    setTimeout(() => {
+      const el = document.querySelector('.cl-add-input[data-task="' + taskId + '"]');
+      if (el) el.focus();
+    }, 0);
+  }
+}
+
+// ── HTML builders, called from renderTasksPanel ────────────────────────────
+
+// Sits in the Task name cell, next to where the NC badge already goes.
+function clBadgeHtml(taskId) {
+  const canEdit = (typeof can === 'function') ? can('edit_tasks') : true;
+  const c = clCounts(taskId);
+
+  if (c.total === 0) {
+    if (!canEdit) return '';
+    return `<button class="cl-hint" title="Start a checklist"
+      onclick="clStart('${taskId}');event.stopPropagation()">+ &#9745;</button>`;
+  }
+
+  const open = _clExpanded.has(taskId);
+  const allDone = c.done === c.total;
+  return `<button class="cl-badge${open ? ' open' : ''}${allDone ? ' all-done' : ''}"
+    title="${open ? 'Hide checklist' : 'Show checklist'}"
+    onclick="clToggle('${taskId}');event.stopPropagation()"
+    ><span class="cl-chev">&#9654;</span>&#9745; ${c.done}/${c.total}</button>`;
+}
+
+// Emitted immediately AFTER the closing </div> of .itt-row — a sibling row in
+// the .itt-table grid, which is a single-column grid, so it just becomes the
+// next row. It never participates in the 17-column .itt-row grid.
+function clPanelHtml(taskId) {
+  if (!_clExpanded.has(taskId)) return '';
+  const canEdit = (typeof can === 'function') ? can('edit_tasks') : true;
+  const items = clItems(taskId);
+
+  const rows = items.map(i => `
+    <div class="cl-item${i.done ? ' done' : ''}">
+      <button class="cl-check${i.done ? ' done' : ''}"
+        title="${i.done ? 'Uncheck' : 'Check off'}"
+        onclick="clToggleItem('${i._id}');event.stopPropagation()">&#10003;</button>
+      <span class="cl-text">${_clEsc(i.name)}</span>
+      ${canEdit ? `<button class="cl-del" title="Delete item"
+        onclick="clDeleteItem('${i._id}');event.stopPropagation()">&#10005;</button>` : ''}
+    </div>`).join('');
+
+  const empty = items.length === 0
+    ? '<div class="cl-empty">No items yet &mdash; add the first step below.</div>'
+    : '';
+
+  const add = canEdit ? `
+    <div class="cl-add">
+      <span class="cl-plus">+</span>
+      <input type="text" class="cl-add-input" data-task="${taskId}"
+        placeholder="add item" maxlength="200" autocomplete="off"
+        onclick="event.stopPropagation()"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();clAddItem('${taskId}',this);}else if(event.key==='Escape'){this.value='';this.blur();}">
+    </div>` : '';
+
+  return `<div class="cl-panel" onclick="event.stopPropagation()">${empty}${rows}${add}</div>`;
+}
+
+// ── Mutations from the task table (each saves immediately) ─────────────────
+
+function clToggle(taskId) {
+  if (_clExpanded.has(taskId)) _clExpanded.delete(taskId);
+  else _clExpanded.add(taskId);
+  _clRerender(taskId);
+}
+
+function clStart(taskId) {
+  if (typeof can === 'function' && !can('edit_tasks')) { toast('Permission denied'); return; }
+  _clExpanded.add(taskId);
+  _clRerender(taskId, true);
+}
+
+async function clAddItem(taskId, inputEl) {
+  if (typeof can === 'function' && !can('edit_tasks')) { toast('Permission denied'); return; }
+  const name = (inputEl.value || '').trim();
+  if (!name) return;
+  inputEl.value = '';
+
+  const sort = Math.max(0, ...clItems(taskId).map(i => i.sortOrder || 0)) + 1;
+  let newId = 'local-' + Date.now();
+
+  if (sb) {
+    const { data, error } = await sb.from('task_checklist')
+      .insert({ task_id: taskId, name, done: false, sort_order: sort })
+      .select().single();
+    if (error) { console.error('checklist insert', error); toast('⚠ Could not add item'); return; }
+    newId = data.id;
+  }
+
+  checklistStore.push({ _id: newId, taskId, name, done: false, sortOrder: sort });
+  _clRerender(taskId, true);
+}
+
+// Deliberately NOT gated on edit_tasks — a tech running the test needs to tick
+// off steps. Change this line if you'd rather it match the other inline edits.
+async function clToggleItem(itemId) {
+  const item = checklistStore.find(c => c._id === itemId);
+  if (!item) return;
+
+  const next = !item.done;
+  item.done = next;
+
+  if (sb && !String(itemId).startsWith('local-')) {
+    const { error } = await sb.from('task_checklist')
+      .update({ done: next, completed_at: next ? new Date().toISOString() : null })
+      .eq('id', itemId);
+    if (error) { item.done = !next; console.error('checklist update', error); toast('⚠ Could not save'); return; }
+  }
+
+  _clRerender(item.taskId);
+
+  // A nudge, not an automatic status change — status still only moves when a
+  // person moves it, so guardStatusChange and the billing rules stay in charge.
+  const c = clCounts(item.taskId);
+  if (next && c.total > 0 && c.done === c.total) {
+    toast('✓ All ' + c.total + ' checklist items done — ready to mark complete?');
+  }
+}
+
+async function clDeleteItem(itemId) {
+  if (typeof can === 'function' && !can('edit_tasks')) { toast('Permission denied'); return; }
+  const item = checklistStore.find(c => c._id === itemId);
+  if (!item) return;
+  const taskId = item.taskId;
+
+  if (sb && !String(itemId).startsWith('local-')) {
+    const { error } = await sb.from('task_checklist').delete().eq('id', itemId);
+    if (error) { console.error('checklist delete', error); toast('⚠ Could not delete item'); return; }
+  }
+
+  checklistStore = checklistStore.filter(c => c._id !== itemId);
+  _clRerender(taskId);
+}
+
+// ── Edit-modal working copy ────────────────────────────────────────────────
+// The modal has Cancel, so its edits are held in a working copy and only
+// written on Save Changes. Cancel throws them away.
+
+let _etChecklist = [];          // working copy while the modal is open
+let _etChecklistDeleted = [];   // ids removed during this editing session
+
+function clOpenModalChecklist(taskId) {
+  _etChecklist = clItems(taskId).map(i => ({ ...i }));
+  _etChecklistDeleted = [];
+  const addEl = document.getElementById('etChecklistAdd');
+  if (addEl) addEl.value = '';
+  clRenderModalList();
+}
+
+function clRenderModalList() {
+  const body = document.getElementById('etChecklistBody');
+  const cnt  = document.getElementById('etChecklistCount');
+  if (!body) return;
+
+  const done = _etChecklist.filter(i => i.done).length;
+  if (cnt) {
+    cnt.textContent = done + ' / ' + _etChecklist.length;
+    cnt.classList.toggle('all-done', _etChecklist.length > 0 && done === _etChecklist.length);
+  }
+
+  body.innerHTML = _etChecklist.length === 0
+    ? '<div class="cl-empty">No items yet &mdash; add the first step below.</div>'
+    : _etChecklist.map((i, idx) => `
+      <div class="cl-item${i.done ? ' done' : ''}">
+        <button type="button" class="cl-check${i.done ? ' done' : ''}"
+          title="${i.done ? 'Uncheck' : 'Check off'}"
+          onclick="clModalToggle(${idx})">&#10003;</button>
+        <span class="cl-text">${_clEsc(i.name)}</span>
+        <button type="button" class="cl-del" title="Remove item"
+          onclick="clModalDelete(${idx})">&#10005;</button>
+      </div>`).join('');
+}
+
+function clModalToggle(idx) {
+  if (!_etChecklist[idx]) return;
+  _etChecklist[idx].done = !_etChecklist[idx].done;
+  clRenderModalList();
+}
+
+function clModalDelete(idx) {
+  const item = _etChecklist[idx];
+  if (!item) return;
+  if (item._id && !String(item._id).startsWith('new-')) _etChecklistDeleted.push(item._id);
+  _etChecklist.splice(idx, 1);
+  clRenderModalList();
+}
+
+function clModalAdd(inputEl) {
+  const name = (inputEl.value || '').trim();
+  if (!name) return;
+  const sort = Math.max(0, ..._etChecklist.map(i => i.sortOrder || 0)) + 1;
+  _etChecklist.push({
+    _id: 'new-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+    taskId: editingTaskId, name, done: false, sortOrder: sort,
+  });
+  inputEl.value = '';
+  clRenderModalList();
+  inputEl.focus();
+}
+
+// Called from saveEditTask(), BEFORE closeEditTaskModal() nulls editingTaskId.
+async function clSaveModalChanges(taskId) {
+  if (!taskId) return;
+  const origById = new Map(clItems(taskId).map(i => [i._id, i]));
+
+  for (const delId of _etChecklistDeleted) {
+    if (sb) {
+      const { error } = await sb.from('task_checklist').delete().eq('id', delId);
+      if (error) { console.error('checklist delete', error); continue; }
+    }
+    checklistStore = checklistStore.filter(c => c._id !== delId);
+  }
+
+  for (let idx = 0; idx < _etChecklist.length; idx++) {
+    const item = _etChecklist[idx];
+    const sort = idx + 1;                        // renumber to the on-screen order
+    const isNew = String(item._id).startsWith('new-');
+
+    if (isNew) {
+      let newId = 'local-' + Date.now() + '-' + idx;
+      if (sb) {
+        const { data, error } = await sb.from('task_checklist')
+          .insert({
+            task_id: taskId, name: item.name, done: item.done, sort_order: sort,
+            completed_at: item.done ? new Date().toISOString() : null,
+          })
+          .select().single();
+        if (error) { console.error('checklist insert', error); continue; }
+        newId = data.id;
+      }
+      checklistStore.push({ _id: newId, taskId, name: item.name, done: item.done, sortOrder: sort });
+    } else {
+      const before = origById.get(item._id);
+      const changed = !before || before.name !== item.name
+        || before.done !== item.done || before.sortOrder !== sort;
+      if (changed && sb) {
+        const upd = { name: item.name, done: item.done, sort_order: sort };
+        // Only stamp completed_at when doneness actually flipped, so re-saving
+        // a task doesn't keep resetting the timestamp on already-done items.
+        if (!before || before.done !== item.done) {
+          upd.completed_at = item.done ? new Date().toISOString() : null;
+        }
+        const { error } = await sb.from('task_checklist').update(upd).eq('id', item._id);
+        if (error) { console.error('checklist update', error); continue; }
+      }
+      const live = checklistStore.find(c => c._id === item._id);
+      if (live) { live.name = item.name; live.done = item.done; live.sortOrder = sort; }
+    }
+  }
+
+  _etChecklist = [];
+  _etChecklistDeleted = [];
+}
+
+// Drop a deleted task's items from memory. The DB side is handled by
+// ON DELETE CASCADE, so this is purely to keep checklistStore honest.
+function clForgetTask(taskId) {
+  checklistStore = checklistStore.filter(c => c.taskId !== taskId);
+  _clExpanded.delete(taskId);
+}
