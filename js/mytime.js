@@ -2,7 +2,7 @@
 // mytime.js — stopwatch front-end for normal timesheet entry
 //
 // One line in index.html:
-//     <script src="js/mytime.js?v=13"></script>
+//     <script src="js/mytime.js?v=14"></script>
 // Delete that line and the feature is gone. tasks.js is never edited.
 //
 // ── How this works ─────────────────────────────────────────────────────────
@@ -68,6 +68,21 @@
            String(d.getMonth() + 1).padStart(2, '0') + '-' +
            String(d.getDate()).padStart(2, '0');
   }
+  const fmtHm = d => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+
+  // Notes live in notes_json, keyed by day exactly like hours_json — the same
+  // field the timesheet grid shows as a cell comment. Kept short so a day that
+  // accumulates several sittings stays readable.
+  function appendNote(existingJson, day, note) {
+    let nj = {};
+    try { nj = JSON.parse(existingJson || '{}') || {}; } catch (_) {}
+    const prior = (nj[day] || '').trim();
+    let combined = prior ? prior + ' · ' + note : note;
+    if (combined.length > 240) combined = '…' + combined.slice(-239);
+    nj[day] = combined;
+    return nj;
+  }
+
   // The week_start the app uses: the Sunday on or before this date.
   function weekStartOf(d) {
     const s = new Date(d);
@@ -206,22 +221,33 @@
   }
 
   // Commit the sitting into timesheet_entries, then clear the stopwatch.
-  async function stop(quiet) {
+  // `overrideHours` logs a corrected amount instead of the elapsed time — used
+  // when a forgotten timer is reconciled. `discard` throws the sitting away.
+  async function stop(quiet, overrideHours, discard) {
     if (!timer) return;
     const t = timer, secs = elapsedSeconds();
     const projId = t.project_id, taskId = t.task_id;
 
     try {
-      if (secs >= MIN_SECONDS) {
-        const hrs  = roundQuarter(secs / 3600);
+      const hrs = discard ? 0
+        : (typeof overrideHours === 'number' ? Math.round(overrideHours * 100) / 100
+                                             : roundQuarter(secs / 3600));
+
+      if (!discard && hrs > 0 && (typeof overrideHours === 'number' || secs >= MIN_SECONDS)) {
         const when = new Date(t.sitting_started_at || t.started_at || Date.now());
         const ws   = weekStartOf(when);
         const day  = String(when.getDay());          // 0=Sun … 6=Sat, as stored
 
+        // Provenance. The timesheet stores day totals, so without this a wrong
+        // entry is just a number with no way to tell where it came from.
+        const note = typeof overrideHours === 'number'
+          ? fmtHm(when) + ' – forgotten timer, logged ' + hrs.toFixed(2) + 'h by hand'
+          : fmtHm(when) + '–' + fmtHm(new Date()) + ' (timer)';
+
         // Read–modify–write: hours_json must be MERGED, not replaced, so an
         // existing day's hours (or another day in the same week) survive.
         const { data: rows, error: selErr } = await sb.from('timesheet_entries')
-          .select('id, hours_json')
+          .select('id, hours_json, notes_json')
           .eq('week_start', ws).eq('employee_id', currentEmployee.id)
           .eq('task_id', taskId).eq('project_id', projId).limit(1);
         if (selErr) throw selErr;
@@ -230,7 +256,9 @@
           const hj = JSON.parse(rows[0].hours_json || '{}');
           hj[day] = Math.round(((parseFloat(hj[day]) || 0) + hrs) * 100) / 100;
           const { error } = await sb.from('timesheet_entries')
-            .update({ hours_json: JSON.stringify(hj) }).eq('id', rows[0].id);
+            .update({ hours_json: JSON.stringify(hj),
+                      notes_json: JSON.stringify(appendNote(rows[0].notes_json, day, note)) })
+            .eq('id', rows[0].id);
           if (error) throw error;
         } else {
           const { error } = await sb.from('timesheet_entries').insert({
@@ -238,12 +266,13 @@
             task_id: taskId, project_id: projId,
             task_name: t.task_name || nameOf(taskId),
             is_overhead: false, hours_json: JSON.stringify({ [day]: hrs }),
+            notes_json: JSON.stringify({ [day]: note }),
           });
           if (error) throw error;
         }
         if (!quiet) say('⏹ Logged ' + hrs.toFixed(2) + 'h');
       } else if (!quiet) {
-        say('Timer discarded — under 2 minutes');
+        say(discard ? 'Timer discarded' : 'Timer discarded — under 2 minutes');
       }
 
       await sb.from('active_timers').delete().eq('employee_id', currentEmployee.id);
@@ -308,19 +337,21 @@
     const out = [];
     try {
       const { data, error } = await sb.from('timesheet_entries')
-        .select('id, week_start, hours_json')
+        .select('id, week_start, hours_json, notes_json')
         .eq('employee_id', currentEmployee.id).eq('task_id', taskId)
         .eq('is_overhead', false);
       if (error) throw error;
       (data || []).forEach(r => {
-        let hj = {};
+        let hj = {}, nj = {};
         try { hj = JSON.parse(r.hours_json || '{}'); } catch (_) {}
+        try { nj = JSON.parse(r.notes_json || '{}') || {}; } catch (_) {}
         Object.keys(hj).forEach(k => {
           const h = parseFloat(hj[k]) || 0;
           if (h <= 0) return;
           const d = new Date(r.week_start + 'T00:00:00');
           d.setDate(d.getDate() + parseInt(k, 10));
-          out.push({ rowId: r.id, weekStart: r.week_start, dayIdx: parseInt(k, 10), date: d, hours: h });
+          out.push({ rowId: r.id, weekStart: r.week_start, dayIdx: parseInt(k, 10),
+                     date: d, hours: h, note: (nj[k] || '') });
         });
       });
     } catch (e) { warn('taskDays failed', e.message || e); }
@@ -334,20 +365,38 @@
     const day = String(dateObj.getDay());
     try {
       const { data: rows, error: selErr } = await sb.from('timesheet_entries')
-        .select('id, hours_json')
+        .select('id, hours_json, notes_json')
         .eq('week_start', ws).eq('employee_id', currentEmployee.id)
         .eq('task_id', taskId).eq('project_id', projId).limit(1);
       if (selErr) throw selErr;
 
+      const stamp = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
       if (rows && rows.length) {
         const hj = JSON.parse(rows[0].hours_json || '{}');
-        if (hours > 0) hj[day] = Math.round(hours * 100) / 100; else delete hj[day];
+        const prev = parseFloat(hj[day]) || 0;
+        let nj = {};
+        try { nj = JSON.parse(rows[0].notes_json || '{}') || {}; } catch (_) {}
+
+        if (hours > 0) {
+          hj[day] = Math.round(hours * 100) / 100;
+          // Only note an actual change, so opening and closing the panel is silent.
+          if (hj[day] !== prev) {
+            nj = appendNote(rows[0].notes_json, day,
+                            'set to ' + hj[day].toFixed(2) + 'h by hand ' + stamp);
+          }
+        } else {
+          delete hj[day];
+          delete nj[day];               // the day is gone; its provenance goes too
+        }
+
         if (Object.keys(hj).length === 0) {
           const { error } = await sb.from('timesheet_entries').delete().eq('id', rows[0].id);
           if (error) throw error;
         } else {
           const { error } = await sb.from('timesheet_entries')
-            .update({ hours_json: JSON.stringify(hj) }).eq('id', rows[0].id);
+            .update({ hours_json: JSON.stringify(hj), notes_json: JSON.stringify(nj) })
+            .eq('id', rows[0].id);
           if (error) throw error;
         }
       } else if (hours > 0) {
@@ -355,6 +404,7 @@
           week_start: ws, employee_id: currentEmployee.id,
           task_id: taskId, project_id: projId, task_name: nameOf(taskId),
           is_overhead: false, hours_json: JSON.stringify({ [day]: Math.round(hours * 100) / 100 }),
+          notes_json: JSON.stringify({ [day]: 'added by hand ' + stamp }),
         });
         if (error) throw error;
       }
@@ -391,7 +441,7 @@
     // staged rows: { key, date, orig, hours, isNew, removed }
     const staged = days.map(d => ({
       key: localDate(d.date), date: d.date, orig: d.hours, hours: d.hours,
-      isNew: false, removed: false,
+      note: d.note || '', isNew: false, removed: false,
     }));
 
     const el = document.createElement('div');
@@ -458,6 +508,14 @@
           + `<input class="mytime-day-inp" type="number" step="0.25" min="0" value="${s.hours}">`
           + `<span class="mytime-day-h">h</span><button class="mytime-day-del" type="button" title="Remove">&times;</button>`;
       listEl.appendChild(row);
+      // Provenance under the row — the whole point of recording it is being
+      // able to look at a wrong number and see where it came from.
+      if (s.note) {
+        const n = document.createElement('div');
+        n.className = 'mytime-day-note';
+        n.textContent = s.note;
+        listEl.appendChild(n);
+      }
 
       const inp = row.querySelector('.mytime-day-inp');
       if (inp) inp.oninput = () => {
@@ -558,6 +616,16 @@
         + '<div class="mytime-run-task"></div>'
         + '<div class="mytime-run-proj"></div>'
         + '<div class="mytime-run-clock">0:00</div>'
+        + '<div class="mytime-run-stale">'
+        +   '<div class="mytime-stale-msg"></div>'
+        +   '<div class="mytime-stale-row">'
+        +     '<span>Log</span>'
+        +     '<input class="mytime-stale-inp" type="number" step="0.25" min="0">'
+        +     '<span>h</span>'
+        +     '<button class="mytime-stale-log">Log it</button>'
+        +   '</div>'
+        +   '<button class="mytime-stale-discard">Discard — I wasn\'t working</button>'
+        + '</div>'
         + '<div class="mytime-run-btns">'
         +   '<button class="mytime-run-pause"></button>'
         +   '<button class="mytime-run-stop"></button>'
@@ -566,19 +634,36 @@
       runPanel.querySelector('.mytime-run-hide').onclick  = () => { runPanelHidden = true; closeRunPanel(); };
       runPanel.querySelector('.mytime-run-pause').onclick = () => (timer && timer.started_at ? pause() : resume());
       runPanel.querySelector('.mytime-run-stop').onclick  = () => stop();
+      runPanel.querySelector('.mytime-stale-log').onclick = () => {
+        const v = parseFloat(runPanel.querySelector('.mytime-stale-inp').value);
+        if (isNaN(v) || v < 0) return;
+        stop(false, v);
+      };
+      runPanel.querySelector('.mytime-stale-discard').onclick = () => stop(false, 0, true);
       document.body.appendChild(runPanel);
     }
     paintRunPanel();
   }
 
+  // A timer running longer than this was almost certainly forgotten, so the
+  // panel stops offering to log it and starts asking what actually happened.
+  const STALE_SECONDS = 4 * 3600;
+  const isStale = () => !!timer && elapsedSeconds() >= STALE_SECONDS;
+
   function paintRunPanel() {
     if (!timer) { closeRunPanel(); return; }
+    // A forgotten timer shouldn't stay out of sight — going stale un-hides the
+    // panel so it can't keep counting behind your back.
+    if (isStale() && (runPanelHidden || !runPanel)) { runPanelHidden = false; openRunPanel(); return; }
     if (runPanelHidden || !runPanel) return;
     const isPaused = !timer.started_at;
     const secs = elapsedSeconds();
+    const stale = isStale();
+
     runPanel.classList.toggle('paused', isPaused);
+    runPanel.classList.toggle('stale', stale);
     runPanel.querySelector('.mytime-run-label').innerHTML =
-      isPaused ? '&#10073;&#10073; PAUSED' : '&#9679; TRACKING';
+      stale ? '&#9888; STILL RUNNING?' : (isPaused ? '&#10073;&#10073; PAUSED' : '&#9679; TRACKING');
     runPanel.querySelector('.mytime-run-task').textContent =
       nameOf(timer.task_id) || timer.task_name || 'Task';
     runPanel.querySelector('.mytime-run-proj').textContent = projNameOf(timer.project_id);
@@ -586,10 +671,22 @@
     runPanel.querySelector('.mytime-run-pause').innerHTML =
       isPaused ? '&#9654;&nbsp; RESUME' : '&#10073;&#10073;&nbsp; PAUSE';
     runPanel.querySelector('.mytime-run-stop').innerHTML = '&#9209;&nbsp; STOP';
-    // Say plainly what will be written, so quarter-hour rounding is no surprise.
-    runPanel.querySelector('.mytime-run-note').textContent =
-      secs >= MIN_SECONDS ? ('will log ' + roundQuarter(secs / 3600).toFixed(2) + 'h')
-                          : 'under 2 min — will be discarded';
+
+    if (stale) {
+      const started = new Date(timer.sitting_started_at || timer.started_at);
+      const msg = runPanel.querySelector('.mytime-stale-msg');
+      msg.textContent = 'Running since ' + started.toLocaleDateString('en-US',
+          { weekday: 'short', month: 'short', day: 'numeric' }) + ' at ' + fmtHm(started)
+        + ' — that\'s ' + (secs / 3600).toFixed(1) + 'h. How long did you actually work?';
+      const inp = runPanel.querySelector('.mytime-stale-inp');
+      if (document.activeElement !== inp && !inp.value) inp.value = '';
+      runPanel.querySelector('.mytime-run-note').textContent = '';
+    } else {
+      // Say plainly what will be written, so quarter-hour rounding is no surprise.
+      runPanel.querySelector('.mytime-run-note').textContent =
+        secs >= MIN_SECONDS ? ('will log ' + roundQuarter(secs / 3600).toFixed(2) + 'h')
+                            : 'under 2 min — will be discarded';
+    }
   }
 
   // ---- the ▶ button on task rows ------------------------------------------
@@ -695,6 +792,27 @@
     .mytime-run.paused .mytime-run-stop{background:transparent;border-color:var(--border);color:var(--text);}
     .mytime-run-pause:active,.mytime-run-stop:active{transform:translateY(1px);}
     .mytime-run-note{margin-top:9px;text-align:center;font-size:10.5px;color:var(--muted);}
+    .mytime-run-stale{display:none;}
+    .mytime-run.stale{border-color:var(--red);}
+    .mytime-run.stale .mytime-run-label{color:var(--red);animation:none;}
+    .mytime-run.stale .mytime-run-clock{color:var(--red);font-size:30px;margin:10px 0 12px;}
+    .mytime-run.stale .mytime-run-stale{display:block;margin-bottom:12px;}
+    .mytime-run.stale .mytime-run-btns{opacity:.55;}
+    .mytime-stale-msg{font-size:11.5px;color:var(--text);line-height:1.5;margin-bottom:10px;}
+    .mytime-stale-row{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);}
+    .mytime-stale-inp{width:64px;background:var(--surface3);border:1px solid var(--border);
+      border-radius:6px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:13px;
+      padding:6px 8px;outline:none;text-align:right;}
+    .mytime-stale-inp:focus{border-color:var(--amber-dim);}
+    .mytime-stale-log{flex:1;background:var(--amber);border:none;border-radius:7px;color:#0e0e0f;
+      font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:7px 10px;cursor:pointer;}
+    .mytime-stale-log:hover{filter:brightness(1.08);}
+    .mytime-stale-discard{width:100%;margin-top:8px;background:transparent;
+      border:1px solid var(--border);border-radius:7px;color:var(--muted);
+      font-family:'DM Sans',sans-serif;font-size:11.5px;padding:7px;cursor:pointer;}
+    .mytime-stale-discard:hover{border-color:var(--red);color:var(--red);}
+    .mytime-day-note{font-size:10.5px;color:var(--muted);line-height:1.45;
+      padding:2px 2px 6px;word-break:break-word;}
     .mytime-hrs-hit{cursor:pointer;}
     .mytime-hrs-hit:hover{outline:1px dashed var(--amber-dim);outline-offset:-2px;border-radius:4px;}
     .mytime-pop{position:fixed;z-index:10001;width:390px;max-width:calc(100vw - 32px);
