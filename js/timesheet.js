@@ -183,6 +183,13 @@ function isWeekLocked(key) {
   const status = Object.values(tsWeekStatuses).find(s => s.weekKey === weekDate && s.employeeId === emp.id);
   // Rejected timesheets are always editable so corrections can be made
   if (!status) return false;
+  // Approver override — editAndApprove() deliberately opens a submitted or
+  // approved week in proxy mode so the approver can correct it in place.
+  // Without this bypass renderTimesheet() disables every input (it gates the
+  // cells on isWeekLocked) and the injected "Save & Approve" button has
+  // nothing to save. Scoped to the exact week status being edited, so it can
+  // never unlock anyone else's week — including the approver's own.
+  if (window._editApproveWsId && status.id === window._editApproveWsId) return false;
   return status.status === 'submitted' || status.status === 'approved';
 }
 
@@ -546,13 +553,32 @@ async function saveTsNow(key) {
 // synchronously without a second DB roundtrip.
 let _cachedPendingVacationCount = 0;
 
+// Employee IDs whose timesheets the current user may act on.
+//
+// Managers (payroll, owners) see everyone, so a sheet a supervisor already
+// approved can still be sent back when payroll spots an error. A plain
+// approver sees only the people who list them as approverId, exactly as
+// before. This mirrors the rule _approveeEmployeeIds() already applies to the
+// Vacation tab — until now the two tabs of the SAME panel disagreed about
+// whose requests a manager was allowed to see.
+//
+// Deliberately different from _approveeEmployeeIds() in one way: this KEEPS
+// the current user in the set. A self-approver's own week has always rendered
+// here with a "(You)" tag, and dropping it would be a silent regression.
+function _timesheetApproveeIds() {
+  if (!currentEmployee) return [];
+  const mgr = (typeof isManager === 'function') && isManager();
+  return employees
+    .filter(e => mgr || e.approverId === currentEmployee.id)
+    .map(e => e.id);
+}
+
 function _pendingTimesheetCountForApprover() {
   if (!currentEmployee) return 0;
-  return Object.values(tsWeekStatuses).filter(s => {
-    if (s.status !== 'submitted') return false;
-    const emp = employees.find(e => e.id === s.employeeId);
-    return emp && emp.approverId === currentEmployee.id;
-  }).length;
+  const ids = _timesheetApproveeIds();
+  return Object.values(tsWeekStatuses)
+    .filter(s => s.status === 'submitted' && ids.includes(s.employeeId))
+    .length;
 }
 
 // Resolves which employee IDs the current user is responsible for approving.
@@ -657,14 +683,18 @@ async function resetTimesheetToDraft(weekStatusId) {
   const ws = Object.values(tsWeekStatuses).find(s => s.id === weekStatusId);
   if (!ws) return;
   if (sb) {
+    // rejection_note cleared too — a reopen is a clean slate, and leaving the
+    // old note behind made a reopened week show a stale rejection reason on
+    // the employee's timesheet.
     const { error } = await sb.from('timesheet_weeks')
-      .update({ status: 'open', approved_by: null, submitted_by: null })
+      .update({ status: 'open', approved_by: null, submitted_by: null, rejection_note: null })
       .eq('id', weekStatusId);
     if (error) { toast('⚠ Could not reopen timesheet'); console.error(error); return; }
   }
   ws.status = 'open';
   ws.approvedBy = null;
   ws.submittedBy = null;
+  ws.rejectionNote = '';
   toast('✓ Timesheet reopened — employee can now edit and resubmit');
   renderApprovalsPanel();
   updateApprovalsBadge();
@@ -759,101 +789,137 @@ function _injectApprovalsTabStylesOnce() {
   document.head.appendChild(style);
 }
 
-// ── Timesheet tab — original approval queue rendering, unchanged behavior ──
+// The rejection note is free text typed by an approver and was being
+// interpolated raw into the card markup. Harmless in practice, but an
+// apostrophe or angle bracket in a reason would mangle the card, so escape it.
+function _tsEsc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, c =>
+    ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+}
+
+// Builds one approval card. Used for BOTH the needs-action list and the
+// approved list — previously the approved list had its own stripped-down copy
+// of this markup with no reject-note field, which is why an approved week
+// could only ever be reopened, never returned with a reason.
+function _buildApprovalCard(ws) {
+  const emp = employees.find(e => e.id === ws.employeeId);
+  if (!emp) return '';
+
+  const storeKey = emp.id + '|' + ws.weekKey;
+  let totalHrs = 0;
+  (tsData[storeKey] || []).forEach(r => Object.values(r.hours).forEach(h => totalHrs += h));
+  const ohStore = tsData['oh_' + storeKey] || {};
+  OVERHEAD_CATS.forEach(cat => Object.values(ohStore[cat] || {}).forEach(h => totalHrs += h));
+
+  const statusBadge = {
+    submitted: '<span class="ts-status-badge ts-status-submitted">&#x23F3; Pending Review</span>',
+    approved:  '<span class="ts-status-badge ts-status-approved">&#x2713; Approved</span>',
+    rejected:  '<span class="ts-status-badge ts-status-rejected">&#x2717; Rejected</span>',
+    open:      '<span class="ts-status-badge ts-status-draft">&#x270F; Awaiting Resubmit</span>',
+    draft:     '<span class="ts-status-badge ts-status-draft">&#x270F; Awaiting Resubmit</span>',
+  }[ws.status] || '';
+
+  const isActionable = ws.status === 'submitted' || ws.status === 'open' || ws.status === 'draft';
+  const isApproved   = ws.status === 'approved';
+  const fmtWeek = (() => { const d = new Date(ws.weekKey+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); })();
+  const isSelf = emp.id === currentEmployee?.id;
+  const wsId = ws.id;
+  const empId = ws.employeeId;
+  const weekKey = ws.weekKey;
+
+  // Who approved it — payroll needs to see whose approval they're overriding
+  // before they send a sheet back.
+  const approver = ws.approvedBy ? employees.find(e => e.id === ws.approvedBy) : null;
+
+  let actions = '';
+  if (isActionable) {
+    actions += '<button class="btn-approve" onclick="approveTimesheet(\''+wsId+'\')">&#x2713; Approve</button>';
+    actions += '<button class="btn-reject" onclick="showRejectInput(\''+wsId+'\')">&#x2717; Reject</button>';
+    actions += '<button class="btn-view-ts" style="border-color:rgba(124,92,191,.4);color:var(--purple)" onclick="editAndApprove(\''+wsId+'\',\''+empId+'\',\''+weekKey+'\')">&#x270F; Edit &amp; Approve</button>';
+  }
+  if (isApproved) {
+    // The path that was missing entirely: send an ALREADY-APPROVED week back
+    // to the employee with a reason. Reuses the same note field as a normal
+    // reject, so the employee sees why in the red bar on their own timesheet.
+    actions += '<button class="btn-reject" onclick="showRejectInput(\''+wsId+'\')">&#x2717; Reject</button>';
+    actions += '<button class="btn-view-ts" style="border-color:rgba(124,92,191,.4);color:var(--purple)" onclick="editAndApprove(\''+wsId+'\',\''+empId+'\',\''+weekKey+'\')">&#x270F; Edit &amp; Approve</button>';
+  }
+  if (isApproved || ws.status === 'rejected') {
+    actions += '<button class="btn-reject" style="background:rgba(232,162,52,0.15);color:var(--amber);border-color:rgba(232,162,52,0.4)" onclick="resetTimesheetToDraft(\''+wsId+'\')">&#x21A9; Reopen</button>';
+  }
+  actions += '<button class="btn-view-ts" onclick="viewEmployeeTimesheet(\''+empId+'\',\''+weekKey+'\')">View</button>';
+
+  return '<div class="approval-card" id="acard-'+wsId+'"'+(isApproved ? ' style="opacity:.85"' : '')+'>'+
+    '<div class="approval-emp-av" style="background:'+emp.color+'">'+emp.initials+'</div>'+
+    '<div class="approval-info">'+
+      '<div class="approval-emp-name">'+emp.name+(isSelf ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(You)</span>' : '')+'</div>'+
+      '<div class="approval-week">Week of '+fmtWeek+' &middot; '+statusBadge+
+        (isApproved && approver ? ' <span style="color:var(--muted);font-size:11px">&middot; by '+approver.name+'</span>' : '')+
+        (ws.rejectionNote ? ' <span style="color:var(--muted);font-size:11px">&middot; "'+_tsEsc(ws.rejectionNote)+'"</span>' : '')+
+      '</div>'+
+    '</div>'+
+    '<span class="approval-hours">'+totalHrs.toFixed(1)+'h</span>'+
+    '<div class="approval-actions">'+actions+'</div>'+
+    '<div class="reject-note-wrap" id="reject-wrap-'+wsId+'">'+
+      '<input class="reject-note-input" id="reject-note-'+wsId+'" placeholder="Reason sent back to the employee (optional)…" />'+
+      '<button class="btn-reject" onclick="confirmReject(\''+wsId+'\')">Send</button>'+
+      '<button class="btn-view-ts" onclick="hideRejectInput(\''+wsId+'\')">Cancel</button>'+
+    '</div>'+
+  '</div>';
+}
+
+// -- Timesheet tab --------------------------------------------------------
+// Two sections, BOTH always rendered:
+//   needs action      - submitted / rejected / reopened weeks
+//   recently approved - approved weeks, still rejectable and reopenable
+//
+// The approved block used to live inside an `if (all.length === 0)` early
+// return. The moment an approver had a single pending or awaiting-resubmit
+// sheet, the whole approved list -- and with it the only Reopen button in the
+// app -- vanished. That is how an approved-with-errors week became unfixable.
 function _renderApprovalsTimesheetTab() {
   const content = document.getElementById('approvalsTabContent');
   if (!content) return;
 
-  // Get submitted timesheets for this approver's employees
-  const myEmployeeIds = employees.filter(e => e.approverId === currentEmployee?.id).map(e => e.id);
+  const myEmployeeIds = _timesheetApproveeIds();
+  const mine = Object.values(tsWeekStatuses).filter(s => myEmployeeIds.includes(s.employeeId));
 
-  const pending   = Object.values(tsWeekStatuses).filter(s => s.status === 'submitted' && myEmployeeIds.includes(s.employeeId));
-  const rejected  = Object.values(tsWeekStatuses).filter(s => s.status === 'rejected'  && myEmployeeIds.includes(s.employeeId));
-  const approved  = Object.values(tsWeekStatuses).filter(s => s.status === 'approved'  && myEmployeeIds.includes(s.employeeId))
-    .sort((a,b) => b.weekKey.localeCompare(a.weekKey)).slice(0, 10); // show last 10 approved
-  const draft    = Object.values(tsWeekStatuses).filter(s => (s.status === 'open' || s.status === 'draft') && myEmployeeIds.includes(s.employeeId));
-  const all = [...pending, ...rejected, ...draft];
+  const byWeekThenName = (a, b) => {
+    const w = (b.weekKey || '').localeCompare(a.weekKey || '');
+    if (w !== 0) return w;
+    const an = employees.find(e => e.id === a.employeeId)?.name || '';
+    const bn = employees.find(e => e.id === b.employeeId)?.name || '';
+    return an.localeCompare(bn);
+  };
 
-  if (all.length === 0) {
-    content.innerHTML = '<div style="font-size:14px;color:var(--muted);margin-bottom:14px">' + pending.length + ' pending</div>'+
-      '<div style="color:var(--muted);font-size:13px;padding:20px 0">✓ All timesheets reviewed — nothing pending.</div>'+
-      (approved.length > 0 ? '<div style="margin-top:20px"><div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px">Recently Approved</div>' +
-        approved.map(ws => {
-          const emp = employees.find(e => e.id === ws.employeeId);
-          if (!emp) return '';
-          const fmtWeek = (() => { const d = new Date(ws.weekKey+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); })();
-          return '<div class="approval-card" style="opacity:.8">'+
-            '<div class="approval-emp-av" style="background:'+emp.color+'">'+emp.initials+'</div>'+
-            '<div class="approval-info">'+
-              '<div class="approval-emp-name">'+emp.name+'</div>'+
-              '<div class="approval-week">Week of '+fmtWeek+' · <span class="ts-status-badge ts-status-approved">✓ Approved</span></div>'+
-            '</div>'+
-            '<div class="approval-actions">'+
-              '<button class="btn-view-ts" onclick="viewEmployeeTimesheet(\''+ws.employeeId+'\',\''+ws.weekKey+'\')">View</button>'+
-              '<button class="btn-reject" style="background:rgba(232,162,52,0.15);color:var(--amber);border-color:rgba(232,162,52,0.4)" onclick="resetTimesheetToDraft(\''+ws.id+'\')">↩ Reopen</button>'+
-            '</div>'+
-          '</div>';
-        }).join('') + '</div>'
+  const pending  = mine.filter(s => s.status === 'submitted');
+  const rejected = mine.filter(s => s.status === 'rejected');
+  const draft    = mine.filter(s => s.status === 'open' || s.status === 'draft');
+  const needsAction = [...pending, ...rejected, ...draft].sort(byWeekThenName);
+
+  // Approved: the two most recent payroll weeks, not a flat "last 10".
+  // A flat cap silently truncates once a manager sees the whole company --
+  // ten cards can be less than one week of headcount, and the week payroll is
+  // actually working on would drop off the bottom.
+  const approvedAll = mine.filter(s => s.status === 'approved');
+  const recentWeeks = [...new Set(approvedAll.map(s => s.weekKey))]
+    .sort((a, b) => (b || '').localeCompare(a || ''))
+    .slice(0, 2);
+  const approved = approvedAll
+    .filter(s => recentWeeks.includes(s.weekKey))
+    .sort(byWeekThenName);
+
+  content.innerHTML =
+    '<div style="font-size:14px;color:var(--muted);margin-bottom:14px">'+pending.length+' pending</div>'+
+    (needsAction.length
+      ? needsAction.map(_buildApprovalCard).join('')
+      : '<div style="color:var(--muted);font-size:13px;padding:20px 0">&#x2713; All timesheets reviewed &mdash; nothing pending.</div>')+
+    (approved.length
+      ? '<div style="margin-top:28px">'+
+          '<div style="font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;margin-bottom:12px">Recently Approved</div>'+
+          approved.map(_buildApprovalCard).join('')+
+        '</div>'
       : '');
-    return;
-  }
-
-  const cards = all.map(ws => {
-    const emp = employees.find(e => e.id === ws.employeeId);
-    if (!emp) return '';
-
-    const storeKey = emp.id + '|' + ws.weekKey;
-    let totalHrs = 0;
-    (tsData[storeKey] || []).forEach(r => Object.values(r.hours).forEach(h => totalHrs += h));
-    const ohStore = tsData['oh_' + storeKey] || {};
-    OVERHEAD_CATS.forEach(cat => Object.values(ohStore[cat] || {}).forEach(h => totalHrs += h));
-
-    const statusBadge = {
-      submitted: '<span class="ts-status-badge ts-status-submitted">⏳ Pending Review</span>',
-      approved:  '<span class="ts-status-badge ts-status-approved">✓ Approved</span>',
-      rejected:  '<span class="ts-status-badge ts-status-rejected">✗ Rejected</span>',
-      open:      '<span class="ts-status-badge ts-status-draft">✏ Awaiting Resubmit</span>',
-      draft:     '<span class="ts-status-badge ts-status-draft">✏ Awaiting Resubmit</span>',
-    }[ws.status] || '';
-
-    const isPending = ws.status === 'submitted';
-    const isActionable = isPending || ws.status === 'open' || ws.status === 'draft';
-    const fmtWeek = (() => { const d = new Date(ws.weekKey+'T00:00:00'); return d.toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); })();
-    const isSelf = emp.id === currentEmployee?.id;
-    const wsId = ws.id;
-    const empId = ws.employeeId;
-    const weekKey = ws.weekKey;
-
-    let actions = '';
-    if (isActionable) {
-      actions += '<button class="btn-approve" onclick="approveTimesheet(\''+wsId+'\')">&#x2713; Approve</button>';
-      actions += '<button class="btn-reject" onclick="showRejectInput(\''+wsId+'\')">&#x2717; Reject</button>';
-      actions += '<button class="btn-view-ts" style="border-color:rgba(124,92,191,.4);color:var(--purple)" onclick="editAndApprove(\''+wsId+'\',\''+empId+'\',\''+weekKey+'\')">&#x270F; Edit &amp; Approve</button>';
-    }
-    if (ws.status === 'approved' || ws.status === 'rejected') {
-      actions += '<button class="btn-reject" style="background:rgba(232,162,52,0.15);color:var(--amber);border-color:rgba(232,162,52,0.4)" onclick="resetTimesheetToDraft(\''+wsId+'\')">&#x21A9; Reopen</button>';
-    }
-    actions += '<button class="btn-view-ts" onclick="viewEmployeeTimesheet(\''+empId+'\',\''+weekKey+'\')">View</button>';
-
-    return '<div class="approval-card" id="acard-'+wsId+'">'+
-      '<div class="approval-emp-av" style="background:'+emp.color+'">'+emp.initials+'</div>'+
-      '<div class="approval-info">'+
-        '<div class="approval-emp-name">'+emp.name+(isSelf ? ' <span style="font-size:10px;color:var(--muted);font-weight:400">(You)</span>' : '')+'</div>'+
-        '<div class="approval-week">Week of '+fmtWeek+' &middot; '+statusBadge+
-          (ws.rejectionNote ? ' <span style="color:var(--muted);font-size:11px">&middot; "'+ws.rejectionNote+'"</span>' : '')+
-        '</div>'+
-      '</div>'+
-      '<span class="approval-hours">'+totalHrs.toFixed(1)+'h</span>'+
-      '<div class="approval-actions">'+actions+'</div>'+
-      '<div class="reject-note-wrap" id="reject-wrap-'+wsId+'">'+
-        '<input class="reject-note-input" id="reject-note-'+wsId+'" placeholder="Rejection reason (optional)\u2026" />'+
-        '<button class="btn-reject" onclick="confirmReject(\''+wsId+'\')">Send</button>'+
-        '<button class="btn-view-ts" onclick="hideRejectInput(\''+wsId+'\')">Cancel</button>'+
-      '</div>'+
-    '</div>';
-  }).join('');
-
-  content.innerHTML = '<div style="font-size:14px;color:var(--muted);margin-bottom:14px">'+pending.length+' pending</div>' + cards;
 }
 
 // Toggle handler for the vacation-history "Show all / Show less" button.
@@ -1014,10 +1080,50 @@ async function confirmReject(wsId) {
   const ws = Object.values(tsWeekStatuses).find(s => s.id === wsId);
   if (!ws) return;
   const note = document.getElementById('reject-note-'+wsId)?.value.trim() || '';
+  const emp  = employees.find(e => e.id === ws.employeeId);
+  const wasApproved = ws.status === 'approved';
+
+  // Overriding someone else's approval is a bigger deal than rejecting a
+  // sheet still waiting for review, so confirm that one explicitly.
+  if (wasApproved) {
+    const approver = ws.approvedBy ? employees.find(e => e.id === ws.approvedBy) : null;
+    const who = approver ? approver.name + "'s approval" : 'the existing approval';
+    if (!confirm('Send this approved timesheet back to ' + (emp?.name || 'the employee') +
+                 ' for correction?\n\nThis clears ' + who + ' and unlocks the week for edits.')) return;
+  }
+
+  // approved_by must be cleared, otherwise a returned sheet keeps the old
+  // approval stamp and looks approved-and-rejected at the same time in
+  // Reports > Timesheets.
+  const { error } = await sb.from('timesheet_weeks')
+    .update({ status: 'rejected', rejection_note: note || null, approved_by: null })
+    .eq('id', wsId);
+  if (error) { toast('⚠ Could not return timesheet'); console.error('[confirmReject]', error); return; }
+
   ws.status = 'rejected';
   ws.rejectionNote = note;
-  await sb.from('timesheet_weeks').update({ status:'rejected', rejection_note: note || null }).eq('id', wsId);
-  toast('Timesheet returned to employee');
+  ws.approvedBy = null;
+
+  // Tell the employee. submitTimesheet() emails the approver, but nothing
+  // ever emailed the employee on the way back down — a returned sheet sat
+  // unnoticed until someone chased it by hand.
+  try {
+    await sb.functions.invoke('send-notification', {
+      body: {
+        type: 'timesheet_rejected',
+        data: {
+          employeeId:     ws.employeeId,
+          employeeName:   emp?.name || '',
+          weekDate:       ws.weekKey,
+          note:           note,
+          rejectedByName: currentEmployee?.name || '',
+          wasApproved:    wasApproved,
+        }
+      }
+    });
+  } catch(e) { console.warn('Timesheet reject notification failed:', e); }
+
+  toast(wasApproved ? '↩ Approved timesheet returned to employee' : 'Timesheet returned to employee');
   renderApprovalsPanel();
   updateApprovalsBadge();
 }
@@ -1029,6 +1135,9 @@ async function viewEmployeeTimesheet(empId, weekKey) {
     return Math.round((target - thisWeek) / (7*24*60*60*1000));
   })();
   tsWeekOffset = offset;
+  // Leaving an Edit & Approve session — drop the unlock token so the week
+  // opens read-only here, as a plain View should.
+  window._editApproveWsId = null;
   // Set proxy to the employee being viewed
   proxyEmployee = employees.find(e => e.id === empId) || null;
   // Don't use openTimesheetPanel as it resets proxyEmployee
