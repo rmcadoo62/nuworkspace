@@ -2,7 +2,7 @@
 // mytime.js — stopwatch front-end for normal timesheet entry
 //
 // One line in index.html:
-//     <script src="js/mytime.js?v=14"></script>
+//     <script src="js/mytime.js?v=17"></script>
 // Delete that line and the feature is gone. tasks.js is never edited.
 //
 // ── How this works ─────────────────────────────────────────────────────────
@@ -132,6 +132,9 @@
     log('ready — trackable projects:', trackable.size, timer ? '(timer running)' : '');
     paintAll(); manageTick();
     if (timer) openRunPanel();
+
+    // Only surface billing for someone who actually tracks time here.
+    if (trackable.size) { ensureBillingPanel(); ensureBillingNav(); }
   }
 
   // The app renders HRS LOGGED via getHoursForTask(), which reads the in-memory
@@ -813,6 +816,119 @@
     .mytime-stale-discard:hover{border-color:var(--red);color:var(--red);}
     .mytime-day-note{font-size:10.5px;color:var(--muted);line-height:1.45;
       padding:2px 2px 6px;word-break:break-word;}
+
+    /* ---- My Billing panel ---- */
+    .mb-head{display:flex;align-items:flex-start;justify-content:space-between;gap:24px;
+      margin-bottom:26px;flex-wrap:wrap;}
+    .mb-title{font-family:'DM Serif Display',serif;font-size:24px;color:var(--text);}
+    .mb-sub{font-size:12.5px;color:var(--muted);margin-top:5px;max-width:520px;line-height:1.6;}
+    .mb-big{text-align:right;}
+    .mb-big-val{font-family:'JetBrains Mono',monospace;font-size:30px;font-weight:700;color:var(--amber);}
+    .mb-big-lbl{font-size:10px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;
+      color:var(--muted);margin-top:3px;}
+    .mb-sec{font-size:10px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;
+      color:var(--muted);margin:26px 0 12px;display:flex;align-items:center;gap:10px;}
+    .mb-sec::after{content:'';flex:1;height:1px;background:var(--border);}
+    .mb-sec-meta{font-weight:600;letter-spacing:.4px;text-transform:none;font-size:11.5px;color:var(--text);}
+    .mb-tasks{display:flex;flex-direction:column;gap:1px;}
+    .mb-task{display:flex;align-items:center;gap:12px;padding:9px 12px;border-radius:7px;
+      background:var(--surface);border:1px solid transparent;}
+    .mb-task-name{flex:1;font-size:13px;color:var(--text);}
+    .mb-task-hrs{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);}
+    .mb-month-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;
+      margin:20px 0 4px;}
+    .mb-mtile{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:13px 16px;}
+    .mb-mval{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:700;color:var(--text);}
+    .mb-mval.mb-green{color:var(--green);} .mb-mval.mb-amber{color:var(--amber);}
+    .mb-mlbl{font-size:10.5px;color:var(--muted);margin-top:4px;line-height:1.4;}
+    .mb-month{border:1px solid var(--border);border-radius:10px;overflow:hidden;
+      background:var(--surface);margin-bottom:10px;}
+    .mb-month-head{display:flex;align-items:center;gap:12px;padding:9px 14px;background:var(--surface2);
+      border-bottom:1px solid var(--border);}
+    .mb-month-name{font-size:12.5px;font-weight:700;color:var(--text);}
+    .mb-month-meta{flex:1;font-size:11.5px;color:var(--muted);}
+    .mb-month-amt{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--amber);}
+    .mb-month-sel{background:transparent;border:1.5px solid var(--border);border-radius:6px;
+      color:var(--muted);font-family:'DM Sans',sans-serif;font-size:11px;font-weight:600;
+      padding:3px 10px;cursor:pointer;min-width:54px;}
+    .mb-month-sel:hover{border-color:var(--amber-dim);color:var(--amber);}
+    .mb-list{border-radius:10px;overflow:visible;}
+    .mb-row{display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;
+      border-bottom:1px solid var(--border);font-size:13px;}
+    .mb-row:last-child{border-bottom:none;}
+    .mb-row:hover{background:var(--surface2);}
+    .mb-cb{width:15px;height:15px;accent-color:var(--amber);cursor:pointer;flex-shrink:0;}
+    .mb-date{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);width:110px;flex-shrink:0;}
+    .mb-name{flex:1;color:var(--text);}
+    .mb-hrs{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--muted);
+      width:110px;text-align:right;flex-shrink:0;}
+    .mb-amt{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;
+      color:var(--amber);width:92px;text-align:right;flex-shrink:0;}
+    .mb-actions{display:flex;align-items:center;gap:10px;margin-top:12px;}
+    .mb-selinfo{flex:1;font-size:12px;color:var(--muted);}
+    .mb-selall{background:transparent;border:1.5px solid var(--border);border-radius:7px;
+      color:var(--text);font-family:'DM Sans',sans-serif;font-size:12.5px;padding:8px 14px;cursor:pointer;}
+    .mb-selall:hover{border-color:var(--amber-dim);color:var(--amber);}
+    .mb-mark{background:var(--amber);border:none;border-radius:7px;color:#0e0e0f;
+      font-family:'DM Sans',sans-serif;font-size:12.5px;font-weight:700;padding:8px 18px;cursor:pointer;}
+    .mb-mark:disabled{opacity:.35;cursor:default;background:transparent;
+      border:1.5px solid var(--border);color:var(--muted);}
+    .mb-run{border:1px solid var(--border);border-radius:10px;margin-bottom:10px;
+      overflow:hidden;background:var(--surface);}
+    .mb-run-head{display:flex;align-items:center;gap:12px;padding:10px 14px;
+      background:var(--surface2);font-size:12.5px;font-weight:600;color:var(--text);}
+    .mb-run-meta{flex:1;font-weight:400;color:var(--muted);font-size:11.5px;}
+    .mb-run-amt{font-family:'JetBrains Mono',monospace;color:var(--green);font-weight:700;}
+    .mb-hist{display:flex;align-items:center;gap:12px;padding:8px 14px;font-size:12.5px;
+      color:var(--muted);border-top:1px solid var(--border);}
+    .mb-undo{background:none;border:none;color:transparent;cursor:pointer;font-size:15px;padding:0 2px;}
+    .mb-hist:hover .mb-undo{color:var(--muted);}
+    .mb-undo:hover{color:var(--amber);}
+    .mb-empty{font-size:13px;color:var(--muted);padding:14px;}
+    /* two payers: BLI wears the app's amber, NULabs a cool blue, so a glance
+       at a row tells you who is paying without reading the label. */
+    .mb-payers{display:flex;gap:6px;flex-shrink:0;}
+    .mb-p{background:transparent;border:1.5px solid var(--border);border-radius:20px;
+      color:var(--muted);font-family:'DM Sans',sans-serif;font-size:11px;font-weight:700;
+      letter-spacing:.4px;padding:5px 12px;cursor:pointer;transition:all .15s;min-width:68px;}
+    .mb-p:hover{border-color:var(--muted);color:var(--text);}
+    .mb-p.on.bli{background:var(--amber);border-color:var(--amber);color:#0e0e0f;}
+    .mb-p.on.nu{background:#5b9cf6;border-color:#5b9cf6;color:#0b1220;}
+    .mb-task.bli{border-color:var(--amber-dim);background:var(--amber-glow);}
+    .mb-task.nu{border-color:rgba(91,156,246,.35);background:rgba(91,156,246,.08);}
+    .mb-tag{font-size:9.5px;font-weight:800;letter-spacing:.7px;padding:2px 7px;border-radius:20px;
+      flex-shrink:0;line-height:1.5;}
+    .mb-tag.bli{background:var(--amber-glow);color:var(--amber);border:1px solid var(--amber-dim);}
+    .mb-tag.nu{background:rgba(91,156,246,.12);color:#5b9cf6;border:1px solid rgba(91,156,246,.35);}
+    .mb-mtile.bli{border-color:var(--amber-dim);}
+    .mb-mtile.nu{border-color:rgba(91,156,246,.35);}
+    .mb-mval.mb-blue{color:#5b9cf6;}
+    .mb-msub{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);
+      margin-top:7px;padding-top:6px;border-top:1px solid var(--border);}
+    .mb-split{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);
+      font-weight:400;letter-spacing:.2px;}
+    .mb-grp{display:flex;align-items:baseline;gap:10px;margin:16px 0 5px;padding-bottom:5px;
+      border-bottom:1px solid var(--border);}
+    .mb-grp:first-child{margin-top:2px;}
+    .mb-grp-name{font-size:11px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;
+      color:var(--text);}
+    .mb-grp-meta{flex:1;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);}
+    .mb-task{flex-wrap:wrap;}
+    .mb-task.both{border-color:var(--border);}
+    .mb-slider{flex-basis:100%;display:flex;align-items:center;gap:12px;
+      padding:8px 2px 2px;margin-top:6px;border-top:1px dashed var(--border);}
+    .mb-sh{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;
+      white-space:nowrap;min-width:132px;}
+    .mb-sh.bli{color:var(--amber);}
+    .mb-sh.nu{color:#5b9cf6;text-align:right;}
+    .mb-range{flex:1;height:4px;-webkit-appearance:none;appearance:none;border-radius:3px;
+      background:linear-gradient(90deg,var(--amber) 0 50%,#5b9cf6 50% 100%);
+      outline:none;cursor:ew-resize;}
+    .mb-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:15px;height:15px;
+      border-radius:50%;background:var(--text);border:2px solid var(--surface);cursor:ew-resize;
+      box-shadow:0 1px 4px rgba(0,0,0,.4);}
+    .mb-range::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--text);
+      border:2px solid var(--surface);cursor:ew-resize;}
     .mytime-hrs-hit{cursor:pointer;}
     .mytime-hrs-hit:hover{outline:1px dashed var(--amber-dim);outline-offset:-2px;border-radius:4px;}
     .mytime-pop{position:fixed;z-index:10001;width:390px;max-width:calc(100vw - 32px);
@@ -871,6 +987,615 @@
       border-color:var(--border);color:var(--muted);}
   `;
   document.head.appendChild(css);
+
+  // ==========================================================================
+  // MY BILLING — what my own hours are worth, and to whom
+  //
+  // Two payers. Some work benefits Ballantine (BLI), a sister company sharing
+  // the building; some benefits NULabs; some benefits both, and those get a
+  // share each. Everything is valued at the same flat rate.
+  //
+  // BLI hours are money to collect. NULabs hours are a reference figure — the
+  // dollar value of direct work done on top of an owner's draw — so they are
+  // totalled the same way but never presented as a receivable. Which is exactly
+  // why the two sides SETTLE INDEPENDENTLY: you will invoice BLI and you will
+  // never "invoice" NULabs, so a shared day must be able to have its BLI half
+  // accounted for while its NULabs half stays open forever.
+  //
+  // That is the one thing to hold on to in here: every open/settled figure is
+  // keyed on (task, day, payer), never on (task, day). Getting that wrong makes
+  // a half-settled shared day re-split its own remainder.
+  //
+  // Nothing here touches NULabs revenue, job costing or the shared schema. It
+  // reads timesheet_entries and annotates them in two private tables.
+  // ==========================================================================
+
+  const MY_RATE = 100;                    // $/hour, snapshotted onto each row
+
+  const PAYERS = {
+    BLI:    { key: 'BLI',    label: 'BLI',    cls: 'bli', full: 'Ballantine' },
+    NULABS: { key: 'NULABS', label: 'NULabs', cls: 'nu',  full: 'NULabs' },
+  };
+  const PAYER_KEYS = ['BLI', 'NULABS'];
+  const otherPayer = p => (p === 'BLI' ? 'NULABS' : 'BLI');
+  const noShares = () => ({ BLI: 0, NULABS: 0 });
+
+  let billable = new Map();               // task_id -> { BLI: pct, NULABS: pct }
+  let billedBy = new Map();               // task|YYYY-MM-DD|payer -> share-hours settled
+  let billedRows = [];                    // history
+  let myEntries = [];                     // flattened {taskId, taskName, projId, date, hours}
+  let billSel = new Set();                // checked keys in the unaccounted list
+  let taskMeta = new Map();               // task_id -> { sectionId, num, projId }
+  let sectionMap = new Map();             // section_id -> { name, num, projId }
+  let projNames = new Map();              // project_id -> name
+
+  // Every key in this panel carries the payer. See the header comment.
+  const dayKey = (taskId, d, payer) => taskId + '|' + localDate(d) + '|' + payer;
+  const money = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const round2 = n => Math.round(n * 100) / 100;
+
+  const sharesOf = taskId => billable.get(taskId) || null;
+  const pctFor = (taskId, p) => { const s = billable.get(taskId); return s ? (s[p] || 0) : 0; };
+  const activePayers = taskId => {
+    const s = billable.get(taskId);
+    return s ? PAYER_KEYS.filter(k => s[k] > 0) : [];
+  };
+  const payerMeta = k => PAYERS[k] || { key: k, label: k || '?', cls: '', full: k || '?' };
+
+  // Each source is loaded independently. A brand-new table or column can 404
+  // until PostgREST reloads its schema cache, and one such failure must not
+  // blank the whole panel — you'd see "no hours" and think your data was gone.
+  let billingError = '';
+
+  async function loadBilling() {
+    myEntries = []; billable = new Map(); billedBy = new Map(); billedRows = [];
+    taskMeta = new Map(); sectionMap = new Map(); projNames = new Map();
+    billingError = '';
+
+    try {
+      const { data, error } = await sb.from('timesheet_entries')
+        .select('task_id, task_name, project_id, week_start, hours_json')
+        .eq('employee_id', currentEmployee.id).eq('is_overhead', false);
+      if (error) throw error;
+      (data || []).forEach(r => {
+        let hj = {};
+        try { hj = JSON.parse(r.hours_json || '{}'); } catch (_) {}
+        Object.keys(hj).forEach(k => {
+          const h = parseFloat(hj[k]) || 0;
+          if (h <= 0 || !r.task_id) return;
+          const d = new Date(r.week_start + 'T00:00:00');
+          d.setDate(d.getDate() + parseInt(k, 10));
+          myEntries.push({ taskId: r.task_id, taskName: r.task_name || nameOf(r.task_id) || 'Task',
+                           projId: r.project_id, date: d, hours: h });
+        });
+      });
+      myEntries.sort((a, b) => b.date - a.date);
+    } catch (e) {
+      warn('hours load failed', e.message || e);
+      billingError = 'Could not load your hours: ' + (e.message || 'unknown error');
+    }
+
+    // Section headings, so this list reads in the same order as the project
+    // page does. Purely cosmetic: if any of it fails the list falls back to one
+    // flat group, which is exactly what it was before.
+    try {
+      const taskIds = [...new Set(myEntries.map(e => e.taskId))];
+      const projIds = [...new Set(myEntries.map(e => e.projId).filter(Boolean))];
+      if (taskIds.length) {
+        const { data, error } = await sb.from('tasks')
+          .select('id, section_id, task_num, project_id').in('id', taskIds);
+        if (error) throw error;
+        (data || []).forEach(r => taskMeta.set(r.id, {
+          sectionId: r.section_id || null,
+          num: r.task_num == null ? 9999 : Number(r.task_num),
+          projId: r.project_id || null,
+        }));
+      }
+      if (projIds.length) {
+        const { data, error } = await sb.from('task_sections')
+          .select('id, name, task_num, project_id').in('project_id', projIds);
+        if (error) throw error;
+        (data || []).forEach(r => sectionMap.set(r.id, {
+          name: r.name || 'Section', num: Number(r.task_num) || 0, projId: r.project_id,
+        }));
+        const pr = await sb.from('projects').select('id, name').in('id', projIds);
+        if (pr.error) throw pr.error;
+        (pr.data || []).forEach(p => projNames.set(p.id, p.name || ''));
+      }
+    } catch (e) { warn('section load failed', e.message || e); }
+
+    try {
+      const { data, error } = await sb.from('my_billable_tasks')
+        .select('task_id, payer, pct').eq('employee_id', currentEmployee.id);
+      if (error) throw error;
+      (data || []).forEach(r => {
+        const s = billable.get(r.task_id) || noShares();
+        if (s[r.payer] !== undefined) s[r.payer] += Number(r.pct) || 0;
+        billable.set(r.task_id, s);
+      });
+      // A task whose shares all came back zero is unassigned, not "assigned 0%".
+      [...billable.keys()].forEach(k => {
+        const s = billable.get(k);
+        if (!PAYER_KEYS.some(p => s[p] > 0)) billable.delete(k);
+      });
+    } catch (e) {
+      warn('billable load failed', e.message || e);
+      billingError = 'Could not load billing settings: ' + (e.message || 'unknown error');
+    }
+
+    try {
+      const { data, error } = await sb.from('my_billed_time')
+        .select('*').eq('employee_id', currentEmployee.id)
+        .order('billed_on', { ascending: false });
+      if (error) throw error;
+      billedRows = data || [];
+      // r.hours is already this company's share in hours — never re-multiply
+      // it by r.pct. See the column comment in personal_billing_split_semantics.
+      billedRows.forEach(r => {
+        const k = r.task_id + '|' + r.work_date + '|' + (r.payer || 'BLI');
+        billedBy.set(k, (billedBy.get(k) || 0) + Number(r.hours));
+      });
+    } catch (e) {
+      warn('billed load failed', e.message || e);
+      billingError = 'Could not load billing history: ' + (e.message || 'unknown error');
+    }
+  }
+
+  // What one company owes on one day of one task, in hours.
+  const shareHours = (e, p) => round2(e.hours * (pctFor(e.taskId, p) / 100));
+
+  // ...minus what has already been settled for THAT COMPANY. Editing a day's
+  // hours upward resurfaces only the difference, and only on the side that grew.
+  const openHours = (e, p) =>
+    Math.max(0, round2(shareHours(e, p) - (billedBy.get(dayKey(e.taskId, e.date, p)) || 0)));
+
+  // ---- assignment ----------------------------------------------------------
+  // Rows are replaced wholesale rather than patched: inserting a second payer
+  // before clearing the first would trip the 100% guard, and a half-applied
+  // change to who owes what is worse than a failed one.
+  async function setShares(taskId, shares) {
+    const rows = PAYER_KEYS
+      .filter(p => (shares[p] || 0) > 0)
+      .map(p => ({ employee_id: currentEmployee.id, task_id: taskId, payer: p,
+                   pct: shares[p], updated_at: new Date().toISOString() }));
+    try {
+      const { error: delErr } = await sb.from('my_billable_tasks')
+        .delete().eq('employee_id', currentEmployee.id).eq('task_id', taskId);
+      if (delErr) throw delErr;
+
+      if (rows.length) {
+        const { error } = await sb.from('my_billable_tasks').insert(rows);
+        if (error) throw error;
+        const s = noShares();
+        rows.forEach(r => s[r.payer] = r.pct);
+        billable.set(taskId, s);
+      } else {
+        billable.delete(taskId);
+      }
+      // Selections naming a payer this task no longer has would be invisible
+      // but still counted in the totals below.
+      PAYER_KEYS.filter(p => !(shares[p] > 0)).forEach(p => {
+        [...billSel].forEach(k => { if (k.startsWith(taskId + '|') && k.endsWith('|' + p)) billSel.delete(k); });
+      });
+      renderBilling();
+    } catch (e) {
+      warn('setShares failed', e);
+      say('⚠ Could not save: ' + (e.message || ''));
+      await loadBilling(); renderBilling();
+    }
+  }
+
+  // Clicking a pill: off → on takes the whole task, or splits it evenly if the
+  // other company already has it. On → off hands the whole task to the other,
+  // or unassigns it entirely when there is no other.
+  function togglePayer(taskId, p) {
+    const cur = sharesOf(taskId) || noShares();
+    const oth = otherPayer(p);
+    const next = noShares();
+    if (cur[p] > 0) {
+      if (cur[oth] > 0) next[oth] = 100;
+    } else {
+      if (cur[oth] > 0) { next[p] = 50; next[oth] = 50; }
+      else next[p] = 100;
+    }
+    setShares(taskId, next);
+  }
+
+  const setSplit = (taskId, bliPct) =>
+    setShares(taskId, { BLI: bliPct, NULABS: 100 - bliPct });
+
+  async function markAccounted() {
+    // One row per (day, company) — a shared day settles one side at a time.
+    const picks = [];
+    myEntries.forEach(e => {
+      activePayers(e.taskId).forEach(p => {
+        if (!billSel.has(dayKey(e.taskId, e.date, p))) return;
+        const hrs = openHours(e, p);
+        if (hrs > 0) picks.push({ e, p, hrs });
+      });
+    });
+    if (!picks.length) return;
+
+    const rows = picks.map(({ e, p, hrs }) => ({
+      employee_id: currentEmployee.id, task_id: e.taskId, task_name: e.taskName,
+      project_id: e.projId, work_date: localDate(e.date), payer: p,
+      hours: hrs, pct: pctFor(e.taskId, p), rate: MY_RATE,
+      amount: round2(hrs * MY_RATE),
+    }));
+    try {
+      const { error } = await sb.from('my_billed_time').insert(rows);
+      if (error) throw error;
+      const byPayer = {};
+      rows.forEach(r => { byPayer[r.payer] = (byPayer[r.payer] || 0) + r.amount; });
+      const parts = PAYER_KEYS.filter(k => byPayer[k])
+        .map(k => payerMeta(k).label + ' ' + money(byPayer[k]));
+      say('✓ Accounted for ' + rows.length + ' entr' + (rows.length === 1 ? 'y' : 'ies')
+          + ' — ' + parts.join(' · '));
+      billSel.clear();
+      await loadBilling();
+      renderBilling();
+    } catch (e) { warn('markAccounted failed', e); say('⚠ Could not save: ' + (e.message || '')); }
+  }
+
+  async function unaccount(rowId) {
+    try {
+      const { error } = await sb.from('my_billed_time').delete().eq('id', rowId);
+      if (error) throw error;
+      await loadBilling(); renderBilling();
+      say('Moved back to not accounted for');
+    } catch (e) { warn('unaccount failed', e); say('⚠ Could not undo'); }
+  }
+
+  // ---- panel ---------------------------------------------------------------
+  function ensureBillingPanel() {
+    if (document.getElementById('panel-mybilling')) return;
+    const sibling = document.getElementById('panel-mytasks');
+    if (!sibling || !sibling.parentNode) return;
+    const p = document.createElement('div');
+    p.className = 'view-panel';
+    p.id = 'panel-mybilling';
+    p.style.cssText = 'flex-direction:column;overflow:hidden;';
+    p.innerHTML = '<div style="flex:1;overflow-y:auto;padding:24px 28px"><div id="myBillingWrap"></div></div>';
+    sibling.parentNode.insertBefore(p, sibling.nextSibling);
+  }
+
+  function ensureBillingNav() {
+    if (document.getElementById('navMyBilling')) return;
+    const anchor = document.getElementById('navMyTasks');
+    if (!anchor || !anchor.parentNode) return;
+    const item = document.createElement('div');
+    item.className = 'nav-item';
+    item.id = 'navMyBilling';
+    item.innerHTML = '<span class="icon">&#128176;</span> My Billing';
+    item.onclick = () => openBillingPanel(item);
+    anchor.parentNode.insertBefore(item, anchor.nextSibling);
+  }
+
+  async function openBillingPanel(el) {
+    ensureBillingPanel();
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    if (el) el.classList.add('active');
+    if (typeof activeProjectId !== 'undefined') activeProjectId = null;
+    const tb = document.getElementById('topbarName'); if (tb) tb.textContent = 'My Billing';
+    document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+    const panel = document.getElementById('panel-mybilling');
+    if (panel) panel.classList.add('active');
+    const wrap = document.getElementById('myBillingWrap');
+    if (wrap) wrap.innerHTML = '<div style="color:var(--muted);font-size:13px">Loading…</div>';
+    await loadBilling();
+    renderBilling();
+  }
+
+  function renderBilling() {
+    const wrap = document.getElementById('myBillingWrap');
+    if (!wrap) return;
+
+    // --- tasks with hours, for the payer pills ---
+    const byTask = new Map();
+    myEntries.forEach(e => {
+      const t = byTask.get(e.taskId) || { taskId: e.taskId, name: e.taskName, hours: 0 };
+      t.hours += e.hours; byTask.set(e.taskId, t);
+    });
+    const tasks = [...byTask.values()];
+
+    const taskRow = t => {
+      const on = activePayers(t.taskId);
+      const split = on.length === 2;
+      const bli = pctFor(t.taskId, 'BLI');
+      const cls = split ? ' both' : (on.length ? ' ' + payerMeta(on[0]).cls : '');
+      // The row's background is the split itself — amber up to BLI's share,
+      // blue after it — so the proportion reads without looking at a number.
+      const bg = split
+        ? ` style="background:linear-gradient(90deg,var(--amber-glow) 0 ${bli}%,rgba(91,156,246,.10) ${bli}% 100%)"`
+        : '';
+      const pills = PAYER_KEYS.map(k => {
+        const m = PAYERS[k], lit = pctFor(t.taskId, k) > 0;
+        const title = lit
+          ? (split ? 'Click to give the whole task to ' + PAYERS[otherPayer(k)].full
+                   : 'Click to unassign')
+          : (on.length ? 'Click to split it with ' + m.full : 'Charge to ' + m.full);
+        return `<button class="mb-p ${m.cls}${lit ? ' on' : ''}" data-task="${t.taskId}"
+                  data-payer="${k}" title="${esc(title)}">${m.label}</button>`;
+      }).join('');
+      const slider = split ? `<div class="mb-slider">
+            <span class="mb-sh bli" data-for="${t.taskId}" data-side="bli">BLI ${bli}% &middot; ${money(t.hours * bli / 100 * MY_RATE)}</span>
+            <input type="range" class="mb-range" data-task="${t.taskId}" data-hours="${t.hours}"
+                   min="5" max="95" step="5" value="${bli}">
+            <span class="mb-sh nu" data-for="${t.taskId}" data-side="nu">${money(t.hours * (100 - bli) / 100 * MY_RATE)} &middot; NULabs ${100 - bli}%</span>
+          </div>` : '';
+      return `<div class="mb-task${cls}" data-task="${t.taskId}"${bg}>
+          <span class="mb-task-name">${esc(t.name)}</span>
+          <span class="mb-task-hrs">${t.hours.toFixed(2)}h</span>
+          <span class="mb-payers">${pills}</span>
+          ${slider}
+        </div>`;
+    };
+
+    // Grouped by section, in the project's own order — same reading order as the
+    // project page, so you're not hunting for a task in a list sorted a third way.
+    const groups = [];
+    tasks.forEach(t => {
+      const meta = taskMeta.get(t.taskId) || {};
+      const sec = meta.sectionId ? sectionMap.get(meta.sectionId) : null;
+      const projId = meta.projId || t.projId || null;
+      const key = (projId || '-') + '|' + (meta.sectionId || '~none');
+      let g = groups.find(x => x.key === key);
+      if (!g) {
+        g = { key: key, projId: projId, name: sec ? sec.name : 'Unsectioned',
+              secNum: sec ? sec.num : 1e9,        // unsectioned sinks to the bottom
+              rows: [] };
+        groups.push(g);
+      }
+      g.rows.push(t);
+    });
+    const multiProj = new Set(groups.map(g => g.projId)).size > 1;
+    groups.sort((a, b) =>
+      (multiProj ? (projNames.get(a.projId) || '').localeCompare(projNames.get(b.projId) || '') : 0)
+      || a.secNum - b.secNum);
+    const numOf = t => (taskMeta.get(t.taskId) || {}).num || 9999;
+    groups.forEach(g => g.rows.sort((a, b) => numOf(a) - numOf(b) || a.name.localeCompare(b.name)));
+
+    // With no section data at all there is one nameless group; a lone
+    // "Unsectioned" banner over the whole list would be noise, so drop it.
+    const showHeads = !(groups.length === 1 && groups[0].secNum === 1e9);
+
+    const taskRows = groups.map(g => {
+      const hrs = g.rows.reduce((s, t) => s + t.hours, 0);
+      const by = {};
+      PAYER_KEYS.forEach(p => by[p] = g.rows.reduce((s, t) => s + t.hours * pctFor(t.taskId, p) / 100, 0) * MY_RATE);
+      const parts = PAYER_KEYS.filter(p => by[p] > 0).map(p => payerMeta(p).label + ' ' + money(by[p]));
+      const head = showHeads ? `<div class="mb-grp">
+            <span class="mb-grp-name">${esc(multiProj && g.projId ? (projNames.get(g.projId) || '') + ' · ' : '')}${esc(g.name)}</span>
+            <span class="mb-grp-meta">${hrs.toFixed(2)}h${parts.length ? ' &middot; ' + parts.join(' &middot; ') : ' &middot; unassigned'}</span>
+          </div>` : '';
+      return head + g.rows.map(taskRow).join('');
+    }).join('') || '<div class="mb-empty">No tracked hours yet.</div>';
+
+    // --- per-company totals -------------------------------------------------
+    const now = new Date();
+    const mk = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+    const monthKey = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    const monthName = d => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const inMonth = d => monthKey(d) === mk;
+
+    const stat = {};
+    PAYER_KEYS.forEach(k => stat[k] = { monthH: 0, allH: 0, openH: 0, openAmt: 0, settled: 0 });
+    myEntries.forEach(e => {
+      activePayers(e.taskId).forEach(p => {
+        const s = stat[p], h = shareHours(e, p);
+        s.allH += h;
+        if (inMonth(e.date)) s.monthH += h;
+        const oh = openHours(e, p);
+        s.openH += oh; s.openAmt += oh * MY_RATE;
+      });
+    });
+    billedRows.forEach(r => {
+      const s = stat[r.payer || 'BLI']; if (!s) return;
+      s.settled += Number(r.amount);
+    });
+
+    const workedMonth = myEntries.filter(e => inMonth(e.date)).reduce((s, e) => s + e.hours, 0);
+    const workedAll   = myEntries.reduce((s, e) => s + e.hours, 0);
+    const openTotal   = PAYER_KEYS.reduce((s, k) => s + stat[k].openAmt, 0);
+    const splitLine = pick => PAYER_KEYS
+      .map(k => payerMeta(k).label + ' ' + money(pick(stat[k])))
+      .join(' · ');
+
+    const payerTiles = PAYER_KEYS.map(k => {
+      const m = PAYERS[k], s = stat[k];
+      return `<div class="mb-mtile ${m.cls}">
+          <div class="mb-mval ${m.cls === 'nu' ? 'mb-blue' : 'mb-amber'}">${money(s.allH * MY_RATE)}</div>
+          <div class="mb-mlbl">${esc(m.label)} &mdash; all time &middot; ${s.allH.toFixed(2)}h</div>
+          <div class="mb-msub">${money(s.monthH * MY_RATE)} this month &middot; ${s.monthH.toFixed(2)}h<br>
+            ${money(s.settled)} settled &middot; ${money(s.openAmt)} open</div>
+        </div>`;
+    }).join('');
+
+    // --- not accounted for --------------------------------------------------
+    // One line per (day, company). A shared day appears twice, on purpose:
+    // you settle the BLI half and leave the NULabs half open.
+    const open = [];
+    myEntries.forEach(e => {
+      activePayers(e.taskId).forEach(p => {
+        const hrs = openHours(e, p);
+        if (hrs > 0) open.push({ e, p, hrs, amt: hrs * MY_RATE, k: dayKey(e.taskId, e.date, p) });
+      });
+    });
+    const selTotal = open.filter(o => billSel.has(o.k)).reduce((s, o) => s + o.amt, 0);
+
+    const fmtD = d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+    // Grouped by month, because that's the unit you invoice in.
+    const months = [];
+    open.forEach(o => {
+      const key = monthKey(o.e.date);
+      let g = months.find(m => m.key === key);
+      if (!g) {
+        g = { key: key, label: monthName(o.e.date), rows: [], hours: 0, amount: 0, by: {} };
+        PAYER_KEYS.forEach(p => g.by[p] = 0);
+        months.push(g);
+      }
+      g.rows.push(o); g.hours += o.hrs; g.amount += o.amt; g.by[o.p] += o.amt;
+    });
+
+    const openRows = months.map(g => {
+      const allPicked = g.rows.every(o => billSel.has(o.k));
+      const split = PAYER_KEYS.filter(k => g.by[k] > 0)
+        .map(k => payerMeta(k).label + ' ' + money(g.by[k])).join(' · ');
+      return `<div class="mb-month">
+          <div class="mb-month-head">
+            <button class="mb-month-sel" data-month="${g.key}">${allPicked ? 'Clear' : 'Select'}</button>
+            <span class="mb-month-name">${esc(g.label)}</span>
+            <span class="mb-month-meta">${g.rows.length} line${g.rows.length === 1 ? '' : 's'} &middot; ${g.hours.toFixed(2)}h
+              <span class="mb-split">&nbsp;&nbsp;${esc(split)}</span></span>
+            <span class="mb-month-amt">${money(g.amount)}</span>
+          </div>
+          ${g.rows.map(o => {
+            const m = payerMeta(o.p), pct = pctFor(o.e.taskId, o.p);
+            return `<label class="mb-row">
+                <input type="checkbox" class="mb-cb" data-k="${o.k}" ${billSel.has(o.k) ? 'checked' : ''}>
+                <span class="mb-date">${esc(fmtD(o.e.date))}</span>
+                <span class="mb-tag ${m.cls}">${esc(m.label)}</span>
+                <span class="mb-name">${esc(o.e.taskName)}</span>
+                <span class="mb-hrs">${o.hrs.toFixed(2)}h${pct < 100 ? ' of ' + o.e.hours.toFixed(2) + 'h × ' + pct + '%' : ''}</span>
+                <span class="mb-amt">${money(o.amt)}</span>
+              </label>`;
+          }).join('')}
+        </div>`;
+    }).join('') || '<div class="mb-empty">Nothing outstanding — every assigned hour is accounted for.</div>';
+
+    // --- history ---
+    const byRun = new Map();
+    billedRows.forEach(r => {
+      const g = byRun.get(r.billed_on) || { on: r.billed_on, n: 0, hours: 0, amount: 0, rows: [], by: {} };
+      g.n++; g.hours += Number(r.hours); g.amount += Number(r.amount);
+      const p = r.payer || 'BLI';
+      g.by[p] = (g.by[p] || 0) + Number(r.amount);
+      g.rows.push(r); byRun.set(r.billed_on, g);
+    });
+    const histRows = [...byRun.values()].map(g => {
+      const split = PAYER_KEYS.filter(k => g.by[k] > 0)
+        .map(k => payerMeta(k).label + ' ' + money(g.by[k])).join(' · ');
+      return `
+        <div class="mb-run">
+          <div class="mb-run-head">
+            <span>${esc(new Date(g.on + 'T00:00:00').toLocaleDateString('en-US',
+                  { month: 'short', day: 'numeric', year: 'numeric' }))}</span>
+            <span class="mb-run-meta">${g.n} line${g.n === 1 ? '' : 's'} &middot; ${g.hours.toFixed(2)}h
+              <span class="mb-split">&nbsp;&nbsp;${esc(split)}</span></span>
+            <span class="mb-run-amt">${money(g.amount)}</span>
+          </div>
+          ${g.rows.map(r => {
+            const m = payerMeta(r.payer || 'BLI');
+            return `<div class="mb-hist">
+              <span>${esc(new Date(r.work_date + 'T00:00:00').toLocaleDateString('en-US',
+                    { month: 'short', day: 'numeric' }))}</span>
+              <span class="mb-tag ${m.cls}">${esc(m.label)}</span>
+              <span class="mb-name">${esc(r.task_name || '')}</span>
+              <span class="mb-hrs">${Number(r.hours).toFixed(2)}h${Number(r.pct) < 100 ? ' @ ' + Number(r.pct) + '%' : ''}</span>
+              <span class="mb-amt">${money(Number(r.amount))}</span>
+              <button class="mb-undo" data-id="${r.id}" title="Move back to not accounted for">&#8630;</button>
+            </div>`;
+          }).join('')}
+        </div>`;
+    }).join('') || '<div class="mb-empty">Nothing accounted for yet.</div>';
+
+    wrap.innerHTML = `
+      ${billingError ? `<div class="mb-empty" style="color:var(--red)">${esc(billingError)}</div>` : ''}
+      <div class="mb-head">
+        <div>
+          <div class="mb-title">My Billing</div>
+          <div class="mb-sub">My own hours, valued at ${money(MY_RATE)}/hour and charged to one company or
+            split between them. BLI is work to collect on; NULabs is the dollar value of direct work done on
+            top of an owner&rsquo;s draw &mdash; a reference figure, not an invoice.</div>
+        </div>
+        <div class="mb-big">
+          <div class="mb-big-val">${money(openTotal)}</div>
+          <div class="mb-big-lbl">not accounted for</div>
+        </div>
+      </div>
+
+      <div class="mb-month-strip">
+        <div class="mb-mtile">
+          <div class="mb-mval">${workedMonth.toFixed(2)}h</div>
+          <div class="mb-mlbl">${esc(now.toLocaleDateString('en-US', { month: 'long' }))} &mdash; all hours worked</div>
+          <div class="mb-msub">${workedAll.toFixed(2)}h all time</div>
+        </div>
+        ${payerTiles}
+        <div class="mb-mtile">
+          <div class="mb-mval mb-amber">${money(openTotal)}</div>
+          <div class="mb-mlbl">not accounted for</div>
+          <div class="mb-msub">${esc(splitLine(s => s.openAmt))}</div>
+        </div>
+      </div>
+
+      <div class="mb-sec">Who pays for each task?
+        <span class="mb-sec-meta">light both to split it &mdash; then drag</span>
+      </div>
+      <div class="mb-tasks">${taskRows}</div>
+
+      <div class="mb-sec">Not accounted for
+        <span class="mb-sec-meta">${open.length} line${open.length === 1 ? '' : 's'} &middot; ${money(openTotal)}</span>
+      </div>
+      <div class="mb-list">${openRows}</div>
+      ${open.length ? `<div class="mb-actions">
+          <span class="mb-selinfo">${billSel.size} selected${billSel.size ? ' · ' + money(selTotal) : ''}</span>
+          <button class="mb-selall">Select all</button>
+          <button class="mb-mark" ${billSel.size ? '' : 'disabled'}>Mark accounted for</button>
+        </div>` : ''}
+
+      <div class="mb-sec">Accounted for</div>
+      <div class="mb-hist-wrap">${histRows}</div>`;
+
+    wrap.querySelectorAll('.mb-p').forEach(b => {
+      b.onclick = ev => { ev.preventDefault();
+        togglePayer(b.getAttribute('data-task'), b.getAttribute('data-payer'));
+      };
+    });
+    // Dragging repaints its own two labels; only the release writes, so a drag
+    // across the track is one save rather than nineteen.
+    wrap.querySelectorAll('.mb-range').forEach(r => {
+      const id = r.getAttribute('data-task'), hrs = parseFloat(r.getAttribute('data-hours')) || 0;
+      r.oninput = () => {
+        const v = parseInt(r.value, 10);
+        const a = wrap.querySelector('.mb-sh[data-for="' + id + '"][data-side="bli"]');
+        const b = wrap.querySelector('.mb-sh[data-for="' + id + '"][data-side="nu"]');
+        if (a) a.innerHTML = 'BLI ' + v + '% &middot; ' + money(hrs * v / 100 * MY_RATE);
+        if (b) b.innerHTML = money(hrs * (100 - v) / 100 * MY_RATE) + ' &middot; NULabs ' + (100 - v) + '%';
+        const row = r.closest('.mb-task');
+        if (row) row.style.background =
+          `linear-gradient(90deg,var(--amber-glow) 0 ${v}%,rgba(91,156,246,.10) ${v}% 100%)`;
+      };
+      r.onchange = () => setSplit(id, parseInt(r.value, 10));
+    });
+    wrap.querySelectorAll('.mb-cb').forEach(cb => {
+      cb.onchange = () => {
+        const k = cb.getAttribute('data-k');
+        if (cb.checked) billSel.add(k); else billSel.delete(k);
+        renderBilling();
+      };
+    });
+    wrap.querySelectorAll('.mb-month-sel').forEach(b => {
+      b.onclick = ev => { ev.preventDefault();
+        const g = months.find(m => m.key === b.getAttribute('data-month'));
+        if (!g) return;
+        const allPicked = g.rows.every(o => billSel.has(o.k));
+        g.rows.forEach(o => allPicked ? billSel.delete(o.k) : billSel.add(o.k));
+        renderBilling();
+      };
+    });
+    const selall = wrap.querySelector('.mb-selall');
+    if (selall) selall.onclick = () => {
+      const all = open.every(o => billSel.has(o.k));
+      open.forEach(o => all ? billSel.delete(o.k) : billSel.add(o.k));
+      renderBilling();
+    };
+    const mark = wrap.querySelector('.mb-mark');
+    if (mark) mark.onclick = () => markAccounted();
+    wrap.querySelectorAll('.mb-undo').forEach(b => {
+      b.onclick = () => unaccount(b.getAttribute('data-id'));
+    });
+  }
 
   // ---- boot ----------------------------------------------------------------
   let waited = 0;
