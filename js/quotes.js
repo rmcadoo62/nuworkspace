@@ -191,6 +191,26 @@ function setQuotesBubbleFilter(name) {
 function _qStartOfMonth() { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); }
 function _qStartOfYear()  { const d = new Date(); return new Date(d.getFullYear(), 0, 1); }
 
+// Parse a quote date for COMPARISON against the boundaries above.
+//
+// quotes.won_date is a text column holding 'YYYY-MM-DD'. Bare `new Date('2026-09-01')`
+// follows the ISO spec and parses that as UTC midnight, while _qStartOfMonth()
+// returns LOCAL midnight — which in Eastern is four hours later. The result was
+// that a quote won on the 1st of the month compared as *earlier* than the start
+// of that month and dropped out of "Mon. Won" entirely. Same for Jan 1 and
+// "YTD Won". Appending T00:00:00 forces local-midnight parsing so both sides of
+// the comparison sit in the same timezone.
+//
+// Values that already carry a time component (created_at and friends, which are
+// timestamptz and come back with an explicit offset) are passed through
+// untouched — they're already unambiguous.
+function _qParseDate(val) {
+  if (!val) return null;
+  const s = String(val).trim();
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(s + 'T00:00:00') : new Date(s);
+  return isNaN(d) ? null : d;
+}
+
 function _qIsOpen(r) {
   // Normalize: lowercase, collapse spaces/hyphens/slashes to underscores
   const s = String(r.stage || '').toLowerCase().replace(/[\s\-\/]+/g,'_');
@@ -219,14 +239,14 @@ function renderQuotesPanel() {
     } else if (quotesBubbleFilter === 'mon_won') {
       baseRows = baseRows.filter(r => {
         if (!_qIsWon(r)) return false;
-        const d = r.won_date ? new Date(r.won_date) : null;
-        return d && !isNaN(d) && d >= startMo;
+        const d = _qParseDate(r.won_date);
+        return d && d >= startMo;
       });
     } else if (quotesBubbleFilter === 'ytd_won') {
       baseRows = baseRows.filter(r => {
         if (!_qIsWon(r)) return false;
-        const d = r.won_date ? new Date(r.won_date) : null;
-        return d && !isNaN(d) && d >= startYr;
+        const d = _qParseDate(r.won_date);
+        return d && d >= startYr;
       });
     }
   }
@@ -290,12 +310,12 @@ function renderQuotesPanel() {
 
   for (const r of quotesData) {
     const total = parseFloat(r.total) || 0;
-    const wonAt    = r.won_date    ? new Date(r.won_date)   : null;
+    const wonAt    = _qParseDate(r.won_date);
     const isWon  = _qIsWon(r);
 
     if (_qIsOpen(r)) openSum += total;
 
-    if (isWon && wonAt && !isNaN(wonAt)) {
+    if (isWon && wonAt) {
       if (wonAt >= startMo) { monWCount++; monWSum += total; }
       if (wonAt >= startYr) { ytdWSum += total; }
     }
