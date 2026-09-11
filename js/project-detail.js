@@ -150,14 +150,20 @@ function refreshScheduleStatus(projId) {
 // automation backs off completely once a job is manually moved into any of
 // those, until someone manually moves it back into the automated set.
 //
-//   if ALL tasks with sales category NOT IN (41, 43) are Complete, Billed,
-//   or Cancelled (and at least one such task exists — an empty job can't
-//   be "testing complete")
-//       -> testcomplete                          (highest priority, checked first)
-//   else if any task is in-progress OR any task has genuinely active schedule
-//   coverage (reuses computeScheduleStatusFromBlocks — 'scheduled' or
-//   'tentative', NOT 'rescheduled' or 'not_scheduled')
-//       -> inprogress                                    (sticky, checked next)
+//   Test Reports (sales cat 41/43) are excluded from ALL of the checks
+//   below entirely — their own status (New/In Progress/Complete/whatever)
+//   never matters for job status. Per Scott: report status just doesn't
+//   factor into any of this.
+//
+//   if any TESTING task (i.e. not 41/43) is in-progress, OR any task has
+//   genuinely active schedule coverage (reuses computeScheduleStatusFromBlocks
+//   — 'scheduled' or 'tentative', NOT 'rescheduled' or 'not_scheduled')
+//       -> inprogress                          (highest priority, checked first —
+//                                                 active testing/procedure work wins)
+//   else if ALL testing tasks (not 41/43) are Complete, Billed, or Cancelled
+//   (and at least one such task exists — an empty job can't be "testing
+//   complete")
+//       -> testcomplete                                    (checked next)
 //   else if any procedure task (sales cat 42/44, not cancelled) is still open
 //     (open = fixed-price not yet billed, OR no-charge not yet complete —
 //      the separate 'approved' flag does NOT affect this; a task can be
@@ -210,38 +216,43 @@ async function computeAndApplyJobStatus(projId) {
   if (!JOB_STATUS_AUTOMATED_SET.includes(info.status)) return;
 
   const projTasks = (typeof taskStore !== 'undefined' ? taskStore : []).filter(t => t.proj === projId);
-
-  // ── Testing Complete check (highest priority) ────────────────────────────
+  // Test Reports (sales cat 41/43) are excluded from job-status computation
+  // entirely — their own status (New/In Progress/Complete/whatever) never
+  // affects In Progress, Testing Complete, or anything else below. Per
+  // Scott: report status just doesn't matter for any of this.
   const testingTasks = projTasks.filter(_isTestingTask);
-  const allTestingResolved = testingTasks.length > 0 && testingTasks.every(t =>
-    t.status === 'complete' || t.status === 'billed' || t.status === 'cancelled'
-  );
+
+  // ── In Progress check (sticky, checked first) — testing/procedure tasks
+  // only; a Test Report's own status is irrelevant here ───────────────────
+  const anyTaskInProgress = testingTasks.some(t => t.status === 'inprogress');
+
+  let hasActiveScheduleCoverage = false;
+  if (!anyTaskInProgress && sb) {
+    try {
+      const { data, error } = await sb.from('schedule_blocks').select('*').eq('proj_id', projId);
+      if (!error) {
+        const blocks = (data || []).map(r => (typeof schedRowToBlock === 'function' ? schedRowToBlock(r) : {
+          start: r.start_date, end: r.end_date, taskId: r.task_id || null, sectionId: r.section_id || null, taskIds: r.task_ids || null, flag: r.flag || null,
+        }));
+        const schedState = computeScheduleStatusFromBlocks(blocks, info.status);
+        hasActiveScheduleCoverage = schedState.state === 'scheduled' || schedState.state === 'tentative';
+      }
+    } catch (e) {
+      console.warn('computeAndApplyJobStatus: schedule check failed, continuing without it:', e);
+    }
+  }
 
   let newStatus;
-  if (allTestingResolved) {
-    newStatus = 'testcomplete';
+  if (anyTaskInProgress || hasActiveScheduleCoverage) {
+    newStatus = 'inprogress';
   } else {
-    // ── In Progress check (sticky, evaluated next) ──────────────────────
-    const anyTaskInProgress = projTasks.some(t => t.status === 'inprogress');
+    // ── Testing Complete check (checked next) ───────────────────────────
+    const allTestingResolved = testingTasks.length > 0 && testingTasks.every(t =>
+      t.status === 'complete' || t.status === 'billed' || t.status === 'cancelled'
+    );
 
-    let hasActiveScheduleCoverage = false;
-    if (!anyTaskInProgress && sb) {
-      try {
-        const { data, error } = await sb.from('schedule_blocks').select('*').eq('proj_id', projId);
-        if (!error) {
-          const blocks = (data || []).map(r => (typeof schedRowToBlock === 'function' ? schedRowToBlock(r) : {
-            start: r.start_date, end: r.end_date, taskId: r.task_id || null, sectionId: r.section_id || null, taskIds: r.task_ids || null, flag: r.flag || null,
-          }));
-          const schedState = computeScheduleStatusFromBlocks(blocks, info.status);
-          hasActiveScheduleCoverage = schedState.state === 'scheduled' || schedState.state === 'tentative';
-        }
-      } catch (e) {
-        console.warn('computeAndApplyJobStatus: schedule check failed, continuing without it:', e);
-      }
-    }
-
-    if (anyTaskInProgress || hasActiveScheduleCoverage) {
-      newStatus = 'inprogress';
+    if (allTestingResolved) {
+      newStatus = 'testcomplete';
     } else {
       // ── Procedure / Pending / Active ──────────────────────────────────
       const procTasks = projTasks.filter(t =>
@@ -254,7 +265,7 @@ async function computeAndApplyJobStatus(projId) {
       else if (procTasks.some(t => !!t.approved)) newStatus = 'active';
       else newStatus = 'pending';
     }
-  } // end else (not testcomplete)
+  }
 
   if (newStatus === info.status) return; // no change — don't write or log
 
