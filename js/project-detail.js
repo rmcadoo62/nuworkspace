@@ -150,10 +150,14 @@ function refreshScheduleStatus(projId) {
 // automation backs off completely once a job is manually moved into any of
 // those, until someone manually moves it back into the automated set.
 //
-//   if any task is in-progress OR any task has genuinely active schedule
+//   if ALL tasks with sales category NOT IN (41, 43) are Complete, Billed,
+//   or Cancelled (and at least one such task exists — an empty job can't
+//   be "testing complete")
+//       -> testcomplete                          (highest priority, checked first)
+//   else if any task is in-progress OR any task has genuinely active schedule
 //   coverage (reuses computeScheduleStatusFromBlocks — 'scheduled' or
 //   'tentative', NOT 'rescheduled' or 'not_scheduled')
-//       -> inprogress                                    (sticky, checked first)
+//       -> inprogress                                    (sticky, checked next)
 //   else if any procedure task (sales cat 42/44, not cancelled) is still open
 //     (open = fixed-price not yet billed, OR no-charge not yet complete —
 //      the separate 'approved' flag does NOT affect this; a task can be
@@ -172,7 +176,20 @@ function refreshScheduleStatus(projId) {
 // and every other connected client just picks up the resulting project_info
 // UPDATE through the existing realtime subscription. Avoids duplicate writes
 // when multiple people are looking at the same job.
-const JOB_STATUS_AUTOMATED_SET = ['jobprep', 'pending', 'active', 'inprogress'];
+//
+// Testing Complete is reversible like everything else here — no special
+// code needed. A new unresolved task (testing OR procedure) breaks the
+// "everything's resolved" condition immediately, so the next recompute
+// falls straight through to whichever of Procedure/Pending/Active/In
+// Progress actually fits now.
+const JOB_STATUS_AUTOMATED_SET = ['jobprep', 'pending', 'active', 'inprogress', 'testcomplete'];
+
+// "Testing" = every sales category except 41 and 43 (Test Report categories
+// — administrative, not actual test/procedure work). Deliberately includes
+// procedure tasks (42/44) too, not just lab-test categories.
+function _isTestingTask(t) {
+  return t.salesCat !== '41' && t.salesCat !== '43';
+}
 
 // "Open" is purely a status question (still needs billing/completion) —
 // deliberately independent of the 'approved' flag. A billed-and-approved
@@ -194,51 +211,71 @@ async function computeAndApplyJobStatus(projId) {
 
   const projTasks = (typeof taskStore !== 'undefined' ? taskStore : []).filter(t => t.proj === projId);
 
-  // ── In Progress check (sticky, evaluated first) ──────────────────────────
-  const anyTaskInProgress = projTasks.some(t => t.status === 'inprogress');
-
-  let hasActiveScheduleCoverage = false;
-  if (!anyTaskInProgress && sb) {
-    try {
-      const { data, error } = await sb.from('schedule_blocks').select('*').eq('proj_id', projId);
-      if (!error) {
-        const blocks = (data || []).map(r => (typeof schedRowToBlock === 'function' ? schedRowToBlock(r) : {
-          start: r.start_date, end: r.end_date, taskId: r.task_id || null, sectionId: r.section_id || null, taskIds: r.task_ids || null, flag: r.flag || null,
-        }));
-        const schedState = computeScheduleStatusFromBlocks(blocks, info.status);
-        hasActiveScheduleCoverage = schedState.state === 'scheduled' || schedState.state === 'tentative';
-      }
-    } catch (e) {
-      console.warn('computeAndApplyJobStatus: schedule check failed, continuing without it:', e);
-    }
-  }
+  // ── Testing Complete check (highest priority) ────────────────────────────
+  const testingTasks = projTasks.filter(_isTestingTask);
+  const allTestingResolved = testingTasks.length > 0 && testingTasks.every(t =>
+    t.status === 'complete' || t.status === 'billed' || t.status === 'cancelled'
+  );
 
   let newStatus;
-  if (anyTaskInProgress || hasActiveScheduleCoverage) {
-    newStatus = 'inprogress';
+  if (allTestingResolved) {
+    newStatus = 'testcomplete';
   } else {
-    // ── Procedure / Pending / Active ────────────────────────────────────
-    const procTasks = projTasks.filter(t =>
-      (t.salesCat === '42' || t.salesCat === '44') && t.status !== 'cancelled'
-    );
-    const openProcTasks = procTasks.filter(_isProcedureTaskOpen);
+    // ── In Progress check (sticky, evaluated next) ──────────────────────
+    const anyTaskInProgress = projTasks.some(t => t.status === 'inprogress');
 
-    if (openProcTasks.length > 0) newStatus = 'jobprep';
-    else if (procTasks.length === 0) newStatus = 'active';
-    else if (procTasks.some(t => !!t.approved)) newStatus = 'active';
-    else newStatus = 'pending';
-  }
+    let hasActiveScheduleCoverage = false;
+    if (!anyTaskInProgress && sb) {
+      try {
+        const { data, error } = await sb.from('schedule_blocks').select('*').eq('proj_id', projId);
+        if (!error) {
+          const blocks = (data || []).map(r => (typeof schedRowToBlock === 'function' ? schedRowToBlock(r) : {
+            start: r.start_date, end: r.end_date, taskId: r.task_id || null, sectionId: r.section_id || null, taskIds: r.task_ids || null, flag: r.flag || null,
+          }));
+          const schedState = computeScheduleStatusFromBlocks(blocks, info.status);
+          hasActiveScheduleCoverage = schedState.state === 'scheduled' || schedState.state === 'tentative';
+        }
+      } catch (e) {
+        console.warn('computeAndApplyJobStatus: schedule check failed, continuing without it:', e);
+      }
+    }
+
+    if (anyTaskInProgress || hasActiveScheduleCoverage) {
+      newStatus = 'inprogress';
+    } else {
+      // ── Procedure / Pending / Active ──────────────────────────────────
+      const procTasks = projTasks.filter(t =>
+        (t.salesCat === '42' || t.salesCat === '44') && t.status !== 'cancelled'
+      );
+      const openProcTasks = procTasks.filter(_isProcedureTaskOpen);
+
+      if (openProcTasks.length > 0) newStatus = 'jobprep';
+      else if (procTasks.length === 0) newStatus = 'active';
+      else if (procTasks.some(t => !!t.approved)) newStatus = 'active';
+      else newStatus = 'pending';
+    }
+  } // end else (not testcomplete)
 
   if (newStatus === info.status) return; // no change — don't write or log
 
   info.status = newStatus;
+  // Stamp testcompleteDate exactly like the manual changeProjectStatus()
+  // path does — always overwrite with today's date on (re-)entering
+  // testcomplete, so it reflects the most recent completion if a job
+  // leaves and comes back (e.g. after a revision) rather than the first.
+  const dbStatusPayload = { status: newStatus };
+  if (newStatus === 'testcomplete') {
+    const today = new Date().toISOString().slice(0,10);
+    info.testcompleteDate = today;
+    dbStatusPayload.testcomplete_date = today;
+  }
   // dbUpdate below is all that's needed — trg_audit_project_info
   // (fn_audit_track, keyed by audit_config.projects) already logs every
   // project_info.status change automatically with correct actor attribution.
   // An earlier version of this function also inserted an explicit
   // activity_log row here, which just duplicated that trigger — removed.
   if (sb) {
-    dbUpdate('project_info', projId, { status: newStatus });
+    dbUpdate('project_info', projId, dbStatusPayload);
   }
   if (activeProjectId === projId) {
     renderProjStickyHeader(projId);
