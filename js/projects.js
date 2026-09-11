@@ -109,10 +109,30 @@ async function loadBulkScheduleStatus() {
   if (typeof computeScheduleStatusFromBlocks !== 'function') return; // project-detail.js not loaded yet
   bulkScheduleLoading = true;
   try {
-    const { data, error } = await sb.from('schedule_blocks').select('proj_id,task_id,start_date,end_date,flag').not('proj_id', 'is', null);
-    if (error) throw error;
+    // Paginated. PostgREST caps a single response at 1000 rows and does not
+    // error when it truncates. Losing rows here is worse than losing them on
+    // the Scheduler grid: a project whose blocks don't arrive never lands in
+    // byProj, so getBulkScheduleEntry() falls through to its 'not_scheduled'
+    // default and the Schedule column shows "Not Scheduled" for a job that is
+    // fully booked — a plausible-looking wrong answer rather than a visible
+    // gap. .order('id') keeps the pages stable; without it the set of affected
+    // projects would shift between loads.
+    const PAGE = 1000;
+    let rows = [], page = 0;
+    while (true) {
+      const { data, error } = await sb.from('schedule_blocks')
+        .select('proj_id,task_id,start_date,end_date,flag')
+        .not('proj_id', 'is', null)
+        .order('id', { ascending: true })
+        .range(page * PAGE, page * PAGE + PAGE - 1);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      rows = rows.concat(data);
+      if (data.length < PAGE) break;
+      page++;
+    }
     const byProj = {};
-    (data || []).forEach(r => {
+    rows.forEach(r => {
       if (!byProj[r.proj_id]) byProj[r.proj_id] = [];
       byProj[r.proj_id].push({ start: r.start_date, end: r.end_date, taskId: r.task_id || null, flag: r.flag || null });
     });

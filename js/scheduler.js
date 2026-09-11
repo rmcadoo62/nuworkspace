@@ -55,7 +55,13 @@ const CAT_COLORS = {
 function getCatColor(cat) { return CAT_COLORS[cat] || '#888'; }
 
 // ---- Scheduler settings (colors + access) ──────────────────
-const SCHED_SETTINGS_KEY = 'nuws_sched_settings_v1';
+// (SCHED_SETTINGS_KEY / 'nuws_sched_settings_v1' removed along with its
+// one-time drain migration in loadSchedSettings(). Settings live in the
+// scheduler_settings table now.)
+//
+// The three keys below are NOT migrations and stay put — they are deliberately
+// per-browser UI preferences that are not meant to sync between machines:
+// which employees are hidden, which rooms are hidden, and custom row heights.
 const SCHED_EMP_VIS_KEY  = 'nuws_sched_emp_vis_v1';
 const SCHED_ROOM_VIS_KEY = 'nuws_sched_room_vis_v1';
 const SCHED_ROW_H_KEY    = 'nuws_sched_row_h_v1';
@@ -71,22 +77,6 @@ async function loadSchedSettings() {
     schedSettings = data.settings || {};
     if (!schedSettings.colors) schedSettings.colors = {};
     if (!schedSettings.access) schedSettings.access = {};
-    // One-time migration from localStorage
-    const legacy = localStorage.getItem(SCHED_SETTINGS_KEY);
-    if (legacy) {
-      try {
-        const old = JSON.parse(legacy);
-        if (old) {
-          if (old.colors && Object.keys(schedSettings.colors).length === 0)
-            schedSettings.colors = old.colors;
-          if (old.access && Object.keys(schedSettings.access).length === 0)
-            schedSettings.access = old.access;
-          await saveSchedSettings();
-          console.log('Migrated scheduler settings from localStorage to Supabase');
-        }
-      } catch(e) { console.warn('Settings migration failed:', e); }
-      localStorage.removeItem(SCHED_SETTINGS_KEY);
-    }
   } catch(e) {
     console.error('loadSchedSettings failed:', e);
     schedSettings = { colors: {}, access: {} };
@@ -294,7 +284,9 @@ function updateSchedColorStatus() {
 }
 
 // ---- State ----
-const SCHED_KEY = 'nuws_sched_v2';
+// (SCHED_KEY / 'nuws_sched_v2' removed — see schedLoad(). Blocks lived in
+// localStorage before the Supabase move; the one-time drain migration and this
+// key are gone. Nothing in the app has written that key in a long time.)
 let schedBlocks    = [];   // [{ id, cat, start, end, label?, projId? }]
 let schedZoom      = 'week';
 let schedOffset    = 0;
@@ -369,24 +361,31 @@ function blockToRow(b) {
 async function schedLoad() {
   if (!sb) return;
   try {
-    const { data, error } = await sb.from('schedule_blocks').select('*');
-    if (error) { console.error('schedLoad:', error); return; }
-    schedBlocks = (data || []).map(schedRowToBlock);
-    // One-time migration from localStorage
-    const legacy = localStorage.getItem(SCHED_KEY);
-    if (legacy) {
-      try {
-        const old = JSON.parse(legacy);
-        if (Array.isArray(old) && old.length > 0) {
-          const rows = old.map(blockToRow);
-          await sb.from('schedule_blocks').upsert(rows, { onConflict: 'id' });
-          const refreshed = await sb.from('schedule_blocks').select('*');
-          if (refreshed.data) schedBlocks = refreshed.data.map(schedRowToBlock);
-          console.log('Migrated', rows.length, 'blocks from localStorage to Supabase');
-        }
-      } catch(e) { console.warn('Migration failed:', e); }
-      localStorage.removeItem(SCHED_KEY);
+    // Paginated. PostgREST caps a single response at 1000 rows and returns no
+    // error when it truncates — an unpaginated select('*') here would silently
+    // start dropping blocks off the grid the moment the table crossed 1000.
+    // schedule_blocks is append-only by design (completed work stays for
+    // historical reference) and grows ~290 rows/year, so we load the whole
+    // table and always will; at that rate it's still only a few thousand rows
+    // a decade out. No date windowing — history has to stay reachable.
+    //
+    // .order('id') is not cosmetic: without a stable sort, Postgres is free to
+    // return rows in any order between pages, which duplicates some rows and
+    // drops others. Every paginated read in this codebase orders for the same
+    // reason.
+    const PAGE = 1000;
+    let rows = [], page = 0;
+    while (true) {
+      const { data, error } = await sb.from('schedule_blocks').select('*')
+        .order('id', { ascending: true })
+        .range(page * PAGE, page * PAGE + PAGE - 1);
+      if (error) { console.error('schedLoad:', error); return; }
+      if (!data || data.length === 0) break;
+      rows = rows.concat(data);
+      if (data.length < PAGE) break;
+      page++;
     }
+    schedBlocks = rows.map(schedRowToBlock);
   } catch(e) { console.error('schedLoad exception:', e); }
 }
 
