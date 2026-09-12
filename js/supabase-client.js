@@ -117,10 +117,14 @@ async function loadAllData() {
         // Only load tasks for open projects (145 open vs 2252 closed)
         let rows = [], page = 0;
         while (true) {
-          const { data } = await sb.from('tasks').select('*')
+          const { data, error } = await sb.from('tasks').select('*')
             .in('project_id', openProjIds)
             .order('id', { ascending: true })
             .range(page * 1000, page * 1000 + 999);
+          // Unchecked, a failure here left `data` undefined and broke the loop
+          // as if the table were exhausted — so an error mid-pagination produced
+          // a PARTIAL task list that looked complete. Match fetchAllPages: throw.
+          if (error) throw new Error('Load failed for tasks: ' + (error.message||'unknown'));
           if (!data || data.length === 0) break;
           rows = rows.concat(data);
           if (data.length < 1000) break;
@@ -138,9 +142,10 @@ async function loadAllData() {
       (async () => {
         let rows = [], page = 0;
         while (true) {
-          const { data } = await sb.from('billed_revenue_monthly').select('*')
+          const { data, error } = await sb.from('billed_revenue_monthly').select('*')
             .order('year_month', { ascending: true })
             .range(page * 1000, page * 1000 + 999);
+          if (error) throw new Error('Load failed for billed_revenue_monthly: ' + (error.message||'unknown'));
           if (!data || data.length === 0) break;
           rows = rows.concat(data);
           if (data.length < 1000) break;
@@ -151,9 +156,10 @@ async function loadAllData() {
       (async () => {
         let rows = [], page = 0;
         while (true) {
-          const { data } = await sb.from('billed_revenue_by_category').select('*')
+          const { data, error } = await sb.from('billed_revenue_by_category').select('*')
             .order('year_month', { ascending: true })
             .range(page * 1000, page * 1000 + 999);
+          if (error) throw new Error('Load failed for billed_revenue_by_category: ' + (error.message||'unknown'));
           if (!data || data.length === 0) break;
           rows = rows.concat(data);
           if (data.length < 1000) break;
@@ -171,11 +177,12 @@ async function loadAllData() {
         const ys = new Date().getFullYear() + '-01-01';
         let rows = [], page = 0;
         while (true) {
-          const { data } = await sb.from('tasks')
+          const { data, error } = await sb.from('tasks')
             .select('id,project_id,status,sales_category,fixed_price,cancelled_date,created_at,name,is_legacy_import')
             .or(`created_at.gte.${ys},cancelled_date.gte.${ys}`)
             .order('id', { ascending: true })
             .range(page * 1000, page * 1000 + 999);
+          if (error) throw new Error('Load failed for tasks (booking slice): ' + (error.message||'unknown'));
           if (!data || data.length === 0) break;
           rows = rows.concat(data);
           if (data.length < 1000) break;
@@ -372,24 +379,41 @@ async function loadAllData() {
     // Timesheet — loaded sequentially AFTER other queries, with count-based pagination
     // to guarantee all rows are fetched regardless of Supabase rate limiting
     const tsRows = await (async () => {
-      // First get the exact count so we know how many pages to fetch
-      const { count } = await sb.from('timesheet_entries')
+      // First get the exact count so we know how many pages to fetch.
+      // The error MUST be checked. Unchecked, a failed count (expired JWT, RLS,
+      // network) left `count` undefined, totalPages 0, and the loop below never
+      // ran — yielding an EMPTY timesheet with no error raised anywhere.
+      const { count, error: countErr } = await sb.from('timesheet_entries')
         .select('*', { count: 'exact', head: true })
         .gte('week_start', tsCutoffStr);
+      if (countErr) throw new Error('Timesheet count failed: ' + (countErr.message||'unknown'));
       const totalPages = Math.ceil((count || 0) / 1000);
       let rows = [];
       for (let page = 0; page < totalPages; page++) {
-        let data = null;
-        // Retry up to 3 times per page
+        let data = null, lastErr = null;
+        // Retry up to 3 times per page. The count above already told us this
+        // page should exist, so BOTH an error and an empty body mean the fetch
+        // failed — retry on either. Previously res.error was never read, which
+        // made a rate-limited response indistinguishable from a real result.
         for (let attempt = 0; attempt < 3; attempt++) {
           const res = await sb.from('timesheet_entries').select('*')
             .gte('week_start', tsCutoffStr)
             .order('id', { ascending: true })
             .range(page * 1000, page * 1000 + 999);
-          if (res.data && res.data.length > 0) { data = res.data; break; }
-          await new Promise(r => setTimeout(r, 300));
+          if (res.error) lastErr = res.error;
+          else if (res.data && res.data.length > 0) { data = res.data; break; }
+          await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
         }
-        if (data) rows = rows.concat(data);
+        // Never skip a page silently. `if (data)` used to drop 1000 entries and
+        // carry on — and because the order is by id, that's an arbitrary slice
+        // of weeks across all employees, not one visible block. Payroll and
+        // billing read this. Fail loudly instead.
+        if (!data) {
+          throw new Error('Timesheet page ' + (page + 1) + ' of ' + totalPages +
+            ' failed after 3 attempts' +
+            (lastErr ? ': ' + (lastErr.message||'unknown') : ' (empty response)'));
+        }
+        rows = rows.concat(data);
       }
       return rows;
     })();
@@ -420,7 +444,21 @@ async function loadAllData() {
       }
     });
 
-  } catch(e) { console.error('loadAllData', e); }
+  } catch(e) {
+    // Rethrow. This catch used to swallow everything and fall through to
+    // bootApp() below, which booted the app with empty stores and no message —
+    // defeating the `throw` in fetchAllPages that exists specifically to
+    // surface expired-JWT/RLS failures, and leaving all three callers'
+    // error handlers unreachable dead code:
+    //   app.js:207   → "Data failed to load: … Reload now?"
+    //   auth.js:1141 → "Signed in, but data load failed."
+    //   admin.js:35  → "Connection failed: …"
+    // Hide the loader first: auth.js and admin.js don't, and their error text
+    // would otherwise sit invisible behind the full-screen overlay.
+    console.error('loadAllData', e);
+    showAppLoader(false);
+    throw e;
+  }
   // project_info for ALL projects (open + closed) is loaded above — no need to reload on Show Closed
   if (typeof closedProjectsLoaded !== 'undefined') closedProjectsLoaded = true;
   showAppLoader(false);
