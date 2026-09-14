@@ -19,13 +19,17 @@ function can(capability) {
   if (currentEmployee.roleId && permissionRoles.length) {
     const role = permissionRoles.find(r => r.id === currentEmployee.roleId);
     if (role) {
-      // Auto-inherit: view_closing_report was added after view_reports existed,
-      // so any role with no explicit value should inherit from view_reports.
-      // Once the new checkbox is toggled in the Permissions panel, that explicit
-      // setting (true OR false) takes precedence over this fallback.
-      if (capability === 'view_closing_report' && role.capabilities[capability] === undefined) {
-        return !!(role.capabilities.view_reports);
-      }
+      // An assigned role is authoritative: a missing key means the capability is
+      // OFF, exactly as its unchecked box in Setup > Permissions shows it.
+      //
+      // There used to be an auto-inherit here that made a missing
+      // view_closing_report fall back to view_reports. It made the Permissions
+      // panel lie — the box rendered unchecked (it reads role.capabilities[key],
+      // which was undefined) while can() answered true — so a role could hold a
+      // capability nobody could see it had. Removed 9/14/2026. Both roles that
+      // were missing the key (Engineer, Viewer) now read false: Viewer already
+      // evaluated false via view_reports:false, and Engineer is written to an
+      // explicit false in the same change.
       return !!(role.capabilities[capability]);
     }
   }
@@ -44,6 +48,10 @@ function can(capability) {
     view_proj_shipping: true, view_clients: mgr, view_quotes: mgr,
     view_surveys: mgr, view_closing_report: mgr,
     supervise_team: false,
+    // Payroll/owner override for the Approvals queue: see and act on EVERY
+    // employee's timesheet and time-off request, not just your own reports.
+    // Roleless users keep the old permission_level behaviour.
+    approve_all_timesheets: mgr,
     view_cash_flow: false,
   };
   return !!(fallbacks[capability]);

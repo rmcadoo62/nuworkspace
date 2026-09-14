@@ -2434,7 +2434,13 @@ async function renderClosingReport() {
         '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Action</th>' +
       '</tr></thead><tbody>' +
       list.map(function(r) {
-        const canGenerate = r.openTasks.length === 0 && (isManager() || can('mark_closing'));
+        // mark_closing alone decides. The old `isManager() ||` let a stale
+        // permission_level override an EXPLICIT mark_closing:false — and since
+        // generateClosingPdf() carries no permission check of its own, drawing
+        // this button was the only gate on the transition. The status dropdown
+        // in project-detail.js already gated the same transition on
+        // can('mark_closing'); the two paths now agree. Changed 9/14/2026.
+        const canGenerate = r.openTasks.length === 0 && can('mark_closing');
         const actionBtn = canGenerate
           ? '<button onclick="event.stopPropagation();generateClosingPdf(\'' + r.p.id + '\')" style="background:rgba(76,175,125,0.15);border:1px solid rgba(76,175,125,0.4);border-radius:8px;padding:6px 12px;font-size:11px;color:#4caf7d;cursor:pointer;font-weight:600;white-space:nowrap">&#x1F4C4; Generate PDF &amp; Mark Closing</button>'
           : (r.openTasks.length > 0

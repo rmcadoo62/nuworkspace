@@ -553,23 +553,36 @@ async function saveTsNow(key) {
 // synchronously without a second DB roundtrip.
 let _cachedPendingVacationCount = 0;
 
+// True when the current user may act on EVERY employee's timesheet and
+// time-off request, not just their own reports. This is the payroll/owner
+// override: it exists so a sheet a supervisor already approved can still be
+// sent back when payroll spots an error.
+//
+// Gated on the approve_all_timesheets capability (Setup > Permissions > Team),
+// NOT on isManager(). isManager() reads employees.permission_level, a column
+// the Edit Employee modal cannot set — saveEmployee() never writes it — so it
+// was silently overriding the Supervisor/Approver field that is supposed to
+// decide this, and handing whole-company queues to anyone whose stale
+// permission_level still said 'manager'. Changed 9/14/2026.
+function _canApproveAllTimesheets() {
+  return (typeof can === 'function') && can('approve_all_timesheets');
+}
+
 // Employee IDs whose timesheets the current user may act on.
 //
-// Managers (payroll, owners) see everyone, so a sheet a supervisor already
-// approved can still be sent back when payroll spots an error. A plain
-// approver sees only the people who list them as approverId, exactly as
-// before. This mirrors the rule _approveeEmployeeIds() already applies to the
-// Vacation tab — until now the two tabs of the SAME panel disagreed about
-// whose requests a manager was allowed to see.
+// Everyone else sees only the people who list them as approverId — the
+// Supervisor/Approver field on the Edit Employee modal, whose own helper text
+// reads "Approves this person's timesheets, time off, and performance
+// reviews."
 //
 // Deliberately different from _approveeEmployeeIds() in one way: this KEEPS
 // the current user in the set. A self-approver's own week has always rendered
 // here with a "(You)" tag, and dropping it would be a silent regression.
 function _timesheetApproveeIds() {
   if (!currentEmployee) return [];
-  const mgr = (typeof isManager === 'function') && isManager();
+  const all = _canApproveAllTimesheets();
   return employees
-    .filter(e => mgr || e.approverId === currentEmployee.id)
+    .filter(e => all || e.approverId === currentEmployee.id)
     .map(e => e.id);
 }
 
@@ -582,13 +595,14 @@ function _pendingTimesheetCountForApprover() {
 }
 
 // Resolves which employee IDs the current user is responsible for approving.
-// Managers see all active employees; plain approvers see only those who have
-// them as approverId. Excludes the current user from the set (people don't
-// approve their own requests in the queue).
+// approve_all_timesheets sees all active employees; everyone else sees only
+// those who have them as approverId. Excludes the current user from the set
+// (people don't approve their own requests in the queue).
 function _approveeEmployeeIds() {
   if (!currentEmployee) return [];
+  const all = _canApproveAllTimesheets();
   return employees
-    .filter(e => e.isActive !== false && e.id !== currentEmployee.id && (e.approverId === currentEmployee.id || isManager()))
+    .filter(e => e.isActive !== false && e.id !== currentEmployee.id && (all || e.approverId === currentEmployee.id))
     .map(e => e.id);
 }
 
