@@ -429,6 +429,20 @@
         && !e.target.closest('.mytime-hrs-hit')) closeEditor();
   });
 
+  // The panel is positioned while it is still empty, so the height it measures
+  // then is far short of the height it ends up with once the day rows are in.
+  // Clamping only at that moment let the footer — Cancel and Save — end up
+  // below the bottom of the window, unreachable. So re-clamp after anything
+  // that changes the panel's size.
+  function clampIntoView(el) {
+    if (!el) return;
+    const h = el.offsetHeight, w = el.offsetWidth;
+    const top  = parseFloat(el.style.top)  || 0;
+    const left = parseFloat(el.style.left) || 0;
+    el.style.top  = Math.max(12, Math.min(top,  window.innerHeight - h - 12)) + 'px';
+    el.style.left = Math.max(8,  Math.min(left, window.innerWidth  - w  - 12)) + 'px';
+  }
+
   // `pos` keeps the panel exactly where it already is when we rebuild it after
   // an edit. Without it we'd re-measure the anchor — but repaintApp() has by
   // then replaced the task row, so the anchor is detached, getBoundingClientRect()
@@ -563,6 +577,7 @@
     if (!staged.length) listEl.innerHTML = '<div class="mytime-empty">No time recorded on this task yet.</div>';
     staged.forEach(addRowEl);
     refresh();
+    clampIntoView(el);
 
     el.querySelector('.mytime-addrow').onclick = () => {
       const s = { key: localDate(new Date()), date: new Date(), orig: 0, hours: 0, isNew: true, removed: false };
@@ -570,6 +585,7 @@
       const empty = listEl.querySelector('.mytime-empty'); if (empty) empty.remove();
       addRowEl(s);
       refresh();
+      clampIntoView(el);
       const rows = listEl.querySelectorAll('.mytime-day');
       const last = rows[rows.length - 1];
       if (last) last.querySelector('.mytime-day-inp').focus();
