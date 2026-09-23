@@ -9,6 +9,10 @@
    stays removed; fflate is back only for the import unzip.
    Everything is in an IIFE; exports are window.openCrrPanel and
    window.refreshCrrBadge.
+   9/23/2026 — multi-unit: Sections III, IV (standards) and VI are
+   per-unit tabs; witness/CUI, V and VII are global. Data contract
+   agreed with NUForce (see "Multi-unit model" below). Finished list
+   sorts by quote # (YY desc, NNN desc, revision desc).
    ============================================================ */
 
 /* ---- embedded fflate (ZIP) — attaches to window.fflate ---- */
@@ -369,6 +373,35 @@ const state = {
   specRows: {},       // { emi461f: [[...], [...]], ... }
 };
 
+// === Multi-unit model ===
+// Sections III, IV (standards) and VI repeat per unit. The form keeps ONE
+// set of DOM inputs for those sections; switching tabs swaps each unit's
+// values in and out. Invariant: state.enabledSpecs / state.specRows are the
+// SAME objects as units[activeUnit].enabledSpecs / .specRows, so all the
+// spec-table code above works on the active unit without knowing about units.
+// Save shape (agreed with NUForce, 9/23/2026):
+//   1 unit  → flat v1 shape exactly as before (no units[])
+//   2+ units → v2: units[] + unit 1 mirrored to the top level as a fallback
+const UNIT_FIELD_IDS = ['eqUnitName','eqCables','eqModes','eqReaction',
+                        'eqSizeL','eqSizeW','eqSizeH','eqWeight','eqCurrent','eqVoltage',
+                        'specOtherText'];
+const UNIT_CHECK_KEYS = ['pwrAC','pwrDC','pwr50','pwr60','pwr400','pwr1ph','pwr3ph','pwrY','pwrDelta',
+                         'specMS461','specMS1399','specEMCOther'];
+const GLOBAL_FIELD_IDS = ['quoteNo','quoteDate','custCompany','custAddress','custName','custTitle',
+                          'custEmail','custPhone','custFax','specialReq','quoteReq'];
+// Global checks = every data-key checkbox NOT in UNIT_CHECK_KEYS (reqQuote/reqLit/reqVisit)
+// plus the two id-based boxes below.
+const GLOBAL_ID_CHECKS = ['govWitness','cuiReq'];
+
+function blankUnit() {
+  return { fields: {}, checks: {}, enabledSpecs: {}, specRows: {} };
+}
+let units = [blankUnit()];
+let activeUnit = 0;
+let crrReadOnly = false;   // finished workups: tabs switchable, no add/delete
+state.enabledSpecs = units[0].enabledSpecs;
+state.specRows = units[0].specRows;
+
 // === DOM helpers ===
 const $ = (id) => document.getElementById(id);
 const tablesContainer = $('tablesContainer');
@@ -539,10 +572,11 @@ const QUOTE_REQ_FRAGMENTS = {
   postamble:'Pricing is based on customer supplied information, the assumptions listed here, and acceptance of an approved test procedure. Specify any deviations here if known.',
 };
 function buildSuggestedQuoteReq() {
+  // Section VII is quote-level: suggested text reflects specs on ANY unit.
   const parts = [QUOTE_REQ_FRAGMENTS.preamble];
-  const hasEmi = state.enabledSpecs.emi461f || state.enabledSpecs.emi461g;
-  const hasPq  = state.enabledSpecs.pq300b  || state.enabledSpecs.pq300p1;
-  const hasDc  = state.enabledSpecs.dcmag;
+  const hasEmi = anyUnitSpec('emi461f') || anyUnitSpec('emi461g');
+  const hasPq  = anyUnitSpec('pq300b')  || anyUnitSpec('pq300p1');
+  const hasDc  = anyUnitSpec('dcmag');
   if (hasEmi && QUOTE_REQ_FRAGMENTS.emi)    parts.push(QUOTE_REQ_FRAGMENTS.emi);
   if (hasPq  && QUOTE_REQ_FRAGMENTS.pq)     parts.push(QUOTE_REQ_FRAGMENTS.pq);
   if (hasDc  && QUOTE_REQ_FRAGMENTS.dcmag)  parts.push(QUOTE_REQ_FRAGMENTS.dcmag);
@@ -565,7 +599,7 @@ function refreshQuoteReqHint() {
 }
 $('applySuggestedReq').addEventListener('click', () => {
   // Guard: nothing checked → no suggested text to apply
-  const anySpec = Object.values(state.enabledSpecs).some(v => v);
+  const anySpec = Object.keys(SPECS).some(anyUnitSpec);
   if (!anySpec) {
     setStatus('Select at least one spec table above before applying.', 'warn');
     return;
@@ -658,44 +692,41 @@ document.querySelectorAll('#specOpts input[type=checkbox]').forEach(cb => {
   cb.addEventListener('change', (e) => setSpecEnabled(e.target.dataset.spec, e.target.checked));
 });
 
-// === Form field collection ===
-function collectFormData() {
-  // Simple text/email/tel/date/textarea fields, gathered by id
-  const ids = ['quoteNo','quoteDate','custCompany','custAddress','custName','custTitle',
-               'custEmail','custPhone','custFax','eqUnitName','eqCables','eqModes','eqReaction',
-               'eqSizeL','eqSizeW','eqSizeH','eqWeight','eqCurrent','eqVoltage',
-               'specOtherText','specialReq','quoteReq'];
-  const fields = {};
-  ids.forEach(id => { const el = $(id); if (el) fields[id] = el.value; });
-  // Checkboxes
-  const checks = {};
-  document.querySelectorAll('#crrRoot input[type=checkbox][data-key]').forEach(cb => { checks[cb.dataset.key] = cb.checked; });
-  checks.govWitness = $('govWitness').checked;
-  checks.cuiReq = $('cuiReq').checked;
-  // Specs + their rows (only enabled ones; preserve disabled rows in state too)
-  return {
-    version: 1,
-    fields, checks,
-    enabledSpecs: { ...state.enabledSpecs },
-    specRows: { ...state.specRows },
-  };
+// === Unit helpers ===
+function anyUnitSpec(specKey) {
+  return units.some(u => u.enabledSpecs && u.enabledSpecs[specKey]);
+}
+function keyCheckbox(key) {
+  return document.querySelector(`#crrRoot input[type=checkbox][data-key="${key}"]`);
+}
+function unitLabel(u, i) {
+  const n = u && u.fields && String(u.fields.eqUnitName || '').trim();
+  return n || ('Unit ' + (i + 1));
 }
 
-function applyFormData(d) {
-  if (!d || typeof d !== 'object') return;
-  // Fields
-  Object.entries(d.fields || {}).forEach(([id, val]) => { const el = $(id); if (el) el.value = val; });
-  // Checkboxes
-  Object.entries(d.checks || {}).forEach(([key, val]) => {
-    const cb = document.querySelector(`#crrRoot input[type=checkbox][data-key="${key}"]`);
-    if (cb) cb.checked = !!val;
-  });
-  if (d.checks && 'govWitness' in d.checks) $('govWitness').checked = !!d.checks.govWitness;
-  if (d.checks && 'cuiReq' in d.checks) $('cuiReq').checked = !!d.checks.cuiReq;
-  // Specs
-  state.enabledSpecs = { ...(d.enabledSpecs || {}) };
-  state.specRows = { ...(d.specRows || {}) };
-  // Sync spec selector pills + checkboxes
+// Copy the DOM's per-unit inputs into units[activeUnit]. Spec state is
+// already shared by reference, so only fields + checks need reading.
+function captureActiveUnit() {
+  const u = units[activeUnit];
+  if (!u) return;
+  u.fields = {};
+  UNIT_FIELD_IDS.forEach(id => { const el = $(id); if (el) u.fields[id] = el.value; });
+  u.checks = {};
+  UNIT_CHECK_KEYS.forEach(k => { const cb = keyCheckbox(k); if (cb) u.checks[k] = cb.checked; });
+  u.enabledSpecs = state.enabledSpecs;
+  u.specRows = state.specRows;
+}
+
+// Push units[i] into the DOM and make it the active unit.
+function loadUnitIntoDom(i) {
+  activeUnit = Math.max(0, Math.min(i, units.length - 1));
+  const u = units[activeUnit];
+  UNIT_FIELD_IDS.forEach(id => { const el = $(id); if (el) el.value = (u.fields && u.fields[id] != null) ? u.fields[id] : ''; });
+  UNIT_CHECK_KEYS.forEach(k => { const cb = keyCheckbox(k); if (cb) cb.checked = !!(u.checks && u.checks[k]); });
+  if (!u.enabledSpecs) u.enabledSpecs = {};
+  if (!u.specRows) u.specRows = {};
+  state.enabledSpecs = u.enabledSpecs;
+  state.specRows = u.specRows;
   document.querySelectorAll('#specOpts input[type=checkbox]').forEach(cb => {
     const enabled = !!state.enabledSpecs[cb.dataset.spec];
     cb.checked = enabled;
@@ -703,13 +734,163 @@ function applyFormData(d) {
     if (lbl) lbl.classList.toggle('on', enabled);
   });
   renderAllTables();
-  // Refresh derived UI elements that depend on loaded values
   updateSizeCm();
   refreshQuoteReqHint();
+  renderUnitTabs();
+}
+
+// Normalize a stored unit object (tolerates missing pieces).
+function unitFromStored(s) {
+  s = (s && typeof s === 'object') ? s : {};
+  const u = blankUnit();
+  UNIT_FIELD_IDS.forEach(id => { if (s.fields && s.fields[id] != null) u.fields[id] = s.fields[id]; });
+  UNIT_CHECK_KEYS.forEach(k => { if (s.checks && k in s.checks) u.checks[k] = !!s.checks[k]; });
+  u.enabledSpecs = { ...(s.enabledSpecs || {}) };
+  u.specRows = { ...(s.specRows || {}) };
+  return u;
+}
+
+// === Unit tab strip ===
+function renderUnitTabs() {
+  const strip = $('crrUnitTabs');
+  if (!strip) return;
+  strip.innerHTML = '';
+  units.forEach((u, i) => {
+    const tab = document.createElement('div');
+    tab.className = 'crr-unit-tab' + (i === activeUnit ? ' active' : '');
+    const lbl = document.createElement('span');
+    lbl.className = 'crr-unit-tab-label';
+    lbl.textContent = unitLabel(i === activeUnit ? { fields: { eqUnitName: $('eqUnitName').value } } : u, i);
+    tab.appendChild(lbl);
+    if (units.length > 1 && !crrReadOnly) {
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'crr-unit-tab-del';
+      x.title = 'Remove this unit';
+      x.textContent = '×';
+      x.addEventListener('click', (e) => { e.stopPropagation(); deleteUnit(i); });
+      tab.appendChild(x);
+    }
+    tab.addEventListener('click', () => switchUnit(i));
+    strip.appendChild(tab);
+  });
+  if (!crrReadOnly) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'crr-unit-tab-add';
+    add.title = 'Add another unit to this quote';
+    add.textContent = '+ Add unit';
+    add.addEventListener('click', addUnit);
+    strip.appendChild(add);
+  }
+}
+function switchUnit(i) {
+  if (i === activeUnit) return;
+  captureActiveUnit();
+  loadUnitIntoDom(i);
+}
+function addUnit() {
+  captureActiveUnit();
+  units.push(blankUnit());
+  crrMarkDirty();
+  loadUnitIntoDom(units.length - 1);
+  const n = $('eqUnitName'); if (n) n.focus();
+}
+function deleteUnit(i) {
+  if (units.length <= 1) return;
+  captureActiveUnit();
+  const name = unitLabel(units[i], i);
+  if (!confirm('Remove "' + name + '" and its spec tables from this workup?')) return;
+  units.splice(i, 1);
+  crrMarkDirty();
+  let next = activeUnit;
+  if (i < activeUnit || next >= units.length) next = Math.max(0, next - 1);
+  loadUnitIntoDom(next);
+}
+// Live tab label while typing the unit name
+$('eqUnitName').addEventListener('input', renderUnitTabs);
+
+// === Form field collection ===
+function collectFormData() {
+  captureActiveUnit();
+  const gFields = {};
+  GLOBAL_FIELD_IDS.forEach(id => { const el = $(id); if (el) gFields[id] = el.value; });
+  const gChecks = {};
+  document.querySelectorAll('#crrRoot input[type=checkbox][data-key]').forEach(cb => {
+    if (!UNIT_CHECK_KEYS.includes(cb.dataset.key)) gChecks[cb.dataset.key] = cb.checked;
+  });
+  GLOBAL_ID_CHECKS.forEach(id => { const el = $(id); if (el) gChecks[id] = el.checked; });
+
+  const clone = (o) => JSON.parse(JSON.stringify(o || {}));
+  const u0 = units[0];
+  // Top level always carries unit 1 — for one unit this IS the v1 shape;
+  // for 2+ it's the transition fallback NUForce ignores when units[] exists.
+  const out = {
+    version: units.length > 1 ? 2 : 1,
+    fields: { ...gFields, ...clone(u0.fields) },
+    checks: { ...gChecks, ...clone(u0.checks) },
+    enabledSpecs: clone(u0.enabledSpecs),
+    specRows: clone(u0.specRows),
+  };
+  if (units.length > 1) {
+    out.units = units.map(u => ({
+      fields: clone(u.fields),
+      checks: clone(u.checks),
+      enabledSpecs: clone(u.enabledSpecs),
+      specRows: clone(u.specRows),
+    }));
+  }
+  return out;
+}
+
+function applyFormData(d) {
+  if (!d || typeof d !== 'object') return;
+  // Global fields + checks (every one set, so nothing stale survives from a
+  // previously opened workup)
+  GLOBAL_FIELD_IDS.forEach(id => {
+    const el = $(id);
+    if (el) el.value = (d.fields && d.fields[id] != null) ? d.fields[id] : '';
+  });
+  document.querySelectorAll('#crrRoot input[type=checkbox][data-key]').forEach(cb => {
+    if (!UNIT_CHECK_KEYS.includes(cb.dataset.key)) cb.checked = !!(d.checks && d.checks[cb.dataset.key]);
+  });
+  GLOBAL_ID_CHECKS.forEach(id => { const el = $(id); if (el) el.checked = !!(d.checks && d.checks[id]); });
+  // Units: units[] wins when present; otherwise the flat v1 shape is one unit
+  units = (Array.isArray(d.units) && d.units.length)
+    ? d.units.map(unitFromStored)
+    : [unitFromStored(d)];
+  loadUnitIntoDom(0);
   if ($('quoteReq')) { autosize($('quoteReq')); }
   if ($('specialReq')) { autosize($('specialReq')); }
 }
 
+// Word import → active unit. Unit fields/checks/specs from the document go
+// into the tab you're on; global fields fill only where currently empty so
+// importing a second unit's CRR doesn't overwrite the customer or quote #.
+function applyImportToActiveUnit(out) {
+  captureActiveUnit();
+  const u = units[activeUnit];
+  Object.entries(out.fields || {}).forEach(([id, val]) => {
+    if (UNIT_FIELD_IDS.includes(id)) { u.fields[id] = val; return; }
+    if (GLOBAL_FIELD_IDS.includes(id)) {
+      const el = $(id);
+      if (el && !String(el.value || '').trim()) el.value = val;
+    }
+  });
+  Object.entries(out.checks || {}).forEach(([key, val]) => {
+    if (!val) return;
+    if (UNIT_CHECK_KEYS.includes(key)) { u.checks[key] = true; return; }
+    const el = GLOBAL_ID_CHECKS.includes(key) ? $(key) : keyCheckbox(key);
+    if (el) el.checked = true;
+  });
+  // Spec tables: replace the active unit's set (same as the pre-multi-unit
+  // importer, which replaced the whole form's specs)
+  u.enabledSpecs = { ...(out.enabledSpecs || {}) };
+  u.specRows = { ...(out.specRows || {}) };
+  loadUnitIntoDom(activeUnit);
+  if ($('quoteReq')) { autosize($('quoteReq')); }
+  if ($('specialReq')) { autosize($('specialReq')); }
+}
 
 // === Default the date to today ===
 (function defaultDate() {
@@ -718,8 +899,9 @@ function applyFormData(d) {
   $('quoteDate').value = iso;
 })();
 
-// Set initial Section VII hint
+// Set initial Section VII hint + unit tab strip
 refreshQuoteReqHint();
+renderUnitTabs();
 
 
 /* ============================================================
@@ -734,6 +916,26 @@ refreshQuoteReqHint();
 let crrCurrentQuote = null;   // quote_number open in the form (null = list view)
 let crrDirty       = false;   // unsaved edits in the open form
 let crrList        = [];      // cached crr_workups rows for the list
+
+function crrMarkDirty() { crrDirty = true; }
+
+// Finished-list sort key for YY-NNN[rev]. Returns null for non-conforming numbers.
+function crrQuoteKey(q) {
+  const m = String(q || '').trim().match(/^(\d{2})-(\d+)([A-Za-z]*)$/);
+  if (!m) return null;
+  return { yy: parseInt(m[1], 10), nnn: parseInt(m[2], 10), rev: m[3].toUpperCase() };
+}
+// Newest first: YY desc → NNN desc → revision desc (no letter below A;
+// A..Z then AA..). Non-conforming numbers sink to the bottom, keeping
+// their existing updated_at order (Array.sort is stable).
+function crrCompareQuoteDesc(a, b) {
+  const ka = crrQuoteKey(a.quote_number), kb = crrQuoteKey(b.quote_number);
+  if (!ka || !kb) return (ka ? -1 : 0) - (kb ? -1 : 0);
+  if (ka.yy !== kb.yy) return kb.yy - ka.yy;
+  if (ka.nnn !== kb.nnn) return kb.nnn - ka.nnn;
+  if (ka.rev.length !== kb.rev.length) return kb.rev.length - ka.rev.length;
+  return ka.rev < kb.rev ? 1 : ka.rev > kb.rev ? -1 : 0;
+}
 
 function crrEmpId() {
   return (typeof currentEmployee !== 'undefined' && currentEmployee) ? currentEmployee.id : null;
@@ -802,7 +1004,7 @@ function crrRenderList() {
   const wrap = document.getElementById('crrListBody');
   if (!wrap) return;
   const open   = crrList.filter(r => r.status !== 'finished');
-  const closed = crrList.filter(r => r.status === 'finished');
+  const closed = crrList.filter(r => r.status === 'finished').sort(crrCompareQuoteDesc);
   const head = '<thead><tr><th>Quote #</th><th>Company</th><th>Status</th><th>Last edited by</th><th>Updated</th></tr></thead>';
 
   let html = '';
@@ -913,6 +1115,7 @@ async function crrOpenWorkup(quoteNo) {
   const { data, error } = await sb.from('crr_workups').select('*').eq('quote_number', quoteNo).single();
   if (error || !data) { console.error('crr open:', error); setStatus('Could not open workup', 'warn'); return; }
 
+  crrReadOnly = (data.status === 'finished');  // before apply so the tab strip renders without +/×
   if (data.data) { applyFormData(data.data); } else { crrClearForm(); }
 
   // Quote # can be edited while the workup is a draft (e.g. consolidating
@@ -965,12 +1168,10 @@ function crrClearForm() {
   // fields not in the fixed id list above.
   document.querySelectorAll('#crrRoot input[type=text],#crrRoot input[type=email],#crrRoot input[type=tel],#crrRoot input[type=date],#crrRoot input[type=number],#crrRoot textarea').forEach(el => { el.value = ''; });
   document.querySelectorAll('#crrRoot input[type=checkbox]').forEach(cb => { cb.checked = false; });
-  state.enabledSpecs = {};
-  state.specRows = {};
-  document.querySelectorAll('#specOpts label').forEach(l => l.classList.remove('on'));
-  renderAllTables();
-  updateSizeCm();
-  refreshQuoteReqHint();
+  // Back to a single blank unit (loadUnitIntoDom re-points state at it and
+  // re-renders the spec pills, tables, size, Section VII hint and tab strip)
+  units = [blankUnit()];
+  loadUnitIntoDom(0);
 }
 
 async function crrSave(finish) {
@@ -1553,8 +1754,8 @@ async function importFromWord(file) {
     }
   }
 
-  // ── Apply to form ──
-  applyFormData(out);
+  // ── Apply to form (active unit tab; globals fill only where empty) ──
+  applyImportToActiveUnit(out);
 
   return { success: true, fieldCount, checkCount, specCount, rowCount };
 }

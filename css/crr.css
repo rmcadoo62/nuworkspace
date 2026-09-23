@@ -112,3 +112,18 @@
 
 /* form view fills the panel; its own scroll lives under the sticky bar */
 .crr-root .crr-form-scroll{flex:1;overflow-y:auto}
+
+/* ============================================================
+   Multi-unit band (9/23/2026) — tab strip + per-unit sections
+   ============================================================ */
+.crr-root .crr-unit-band{border:1px solid var(--line-strong);border-left:4px solid var(--accent);border-radius:var(--radius);background:#f3f7f7;padding:0 14px 2px;margin-bottom:16px}
+.crr-root .crr-unit-tabs{display:flex;flex-wrap:wrap;align-items:flex-end;gap:4px;padding:10px 0 0;margin:0 0 14px;border-bottom:1px solid var(--line-strong)}
+.crr-root .crr-unit-tab{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;margin-bottom:-1px;background:#e6ecef;border:1px solid var(--line-strong);border-bottom-color:var(--line-strong);border-radius:6px 6px 0 0;font-size:12.5px;font-weight:600;color:var(--muted);cursor:pointer;max-width:260px}
+.crr-root .crr-unit-tab:hover{color:var(--ink)}
+.crr-root .crr-unit-tab.active{background:#fff;color:var(--accent);border-bottom-color:#fff}
+.crr-root .crr-unit-tab-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.crr-root .crr-unit-tab-del{background:none;border:0;padding:0 2px;font-size:14px;line-height:1;color:var(--muted);cursor:pointer}
+.crr-root .crr-unit-tab-del:hover{color:var(--red)}
+.crr-root .crr-unit-tab-add{margin:0 0 4px 6px;background:#fff;border:1px dashed var(--line-strong);border-radius:6px;padding:5px 11px;font-size:12px;font-weight:600;color:var(--accent);cursor:pointer;font-family:var(--sans)}
+.crr-root .crr-unit-tab-add:hover{border-color:var(--accent);border-style:solid}
+.crr-root .card h2 .crr-scope-note{font-size:10.5px;color:var(--muted);text-transform:none;letter-spacing:0;font-weight:500}

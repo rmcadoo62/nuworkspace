@@ -298,6 +298,10 @@
               </div>
             </div>
 
+            <!-- ===== Per-unit band: one tab per unit (Sections III, IV standards, VI) ===== -->
+            <div class="crr-unit-band">
+              <div class="crr-unit-tabs" id="crrUnitTabs"></div>
+
             <!-- Section III: Equipment -->
             <div class="card">
               <h2>III. Equipment to be Tested</h2>
@@ -340,25 +344,15 @@
               </div>
             </div>
 
-            <!-- Section IV: Test specifications & misc -->
+            <!-- Section IV (per-unit part): test standards -->
             <div class="card">
-              <h2>IV. Test Specifications & Witness Requirements</h2>
+              <h2>IV. Test Specifications</h2>
               <div class="checkrow" id="testSpecs">
                 <label><input type="checkbox" data-key="specMS461"/>MIL-STD-461</label>
                 <label><input type="checkbox" data-key="specMS1399"/>MIL-STD-1399</label>
                 <label><input type="checkbox" data-key="specEMCOther"/>EMC other</label>
               </div>
               <div class="field" style="margin-top:6px"><label>If "EMC other", specify</label><input type="text" id="specOtherText"/></div>
-              <div class="checkrow" style="margin-top:10px">
-                <label><input type="checkbox" id="govWitness"/>Government witness requirement</label>
-                <label><input type="checkbox" id="cuiReq"/>CUI requirement</label>
-              </div>
-            </div>
-
-            <!-- Section V: Special test requirements -->
-            <div class="card">
-              <h2>V. Special Test Requirements</h2>
-              <div class="field"><label>Rentals, complex setup, etc.</label><textarea id="specialReq" rows="3"></textarea></div>
             </div>
 
             <!-- Spec selector -->
@@ -375,6 +369,23 @@
 
             <!-- Test tables container — populated dynamically -->
             <div id="tablesContainer"></div>
+            </div>
+            <!-- ===== end per-unit band ===== -->
+
+            <!-- Section IV (quote-level part): witness + CUI apply to every unit -->
+            <div class="card">
+              <h2>IV. Witness &amp; CUI Requirements <span class="crr-scope-note">(all units)</span></h2>
+              <div class="checkrow">
+                <label><input type="checkbox" id="govWitness"/>Government witness requirement</label>
+                <label><input type="checkbox" id="cuiReq"/>CUI requirement</label>
+              </div>
+            </div>
+
+            <!-- Section V: Special test requirements (quote-level) -->
+            <div class="card">
+              <h2>V. Special Test Requirements <span class="crr-scope-note">(all units)</span></h2>
+              <div class="field"><label>Rentals, complex setup, etc.</label><textarea id="specialReq" rows="3"></textarea></div>
+            </div>
 
             <!-- Section VII: Special requirements for quote — placed below the spec
                  tables so the user picks specs first, then assembles the quote-level
