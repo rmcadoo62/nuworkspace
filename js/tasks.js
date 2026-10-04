@@ -974,6 +974,16 @@ async function inlineSave(taskId, projId, field, value) {
         extraUpdates.completed_date = today;
       }
     }
+    // Completed without ever getting a start date (e.g. New -> Complete in
+    // one step, or via a hold status) — backfill Start to match Completed.
+    // Uses the completed date rather than today so a backdated completion
+    // entered in the Completed cell doesn't end up with Start after it.
+    // Never overwrites an existing start date. (Per Scott's bug report.)
+    if (['complete','done','billed'].includes(value) && !t.taskStartDate) {
+      const startStamp = t.completedDate || today;
+      t.taskStartDate = startStamp;
+      extraUpdates.task_start_date = startStamp;
+    }
     if (value === 'cancelled' && !t.cancelledDate) {
       t.cancelledDate = today;
       extraUpdates.cancelled_date = today;
