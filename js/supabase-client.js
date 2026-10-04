@@ -704,7 +704,19 @@ function refreshCurrentView() {
       }
     }
   }
-  else if (id === 'panel-timesheet') renderTimesheet();
+  else if (id === 'panel-timesheet') {
+    // Never repaint the grid out from under someone mid-entry. Every realtime
+    // event on projects/project_info/tasks (company-wide — including the
+    // project_info.actual_hours echo from this user's own autosave) lands
+    // here, and renderTimesheet() rebuilds innerHTML, destroying the focused
+    // hour box or note and dropping the user's typing (Robert's bug report,
+    // 9/18). Same guard pattern as the rt-task-checklist channel. Skipped
+    // repaints catch up on the next normal render (week nav, add row, etc.).
+    const ae = document.activeElement;
+    if (ae && ae.closest && ae.closest('#panel-timesheet') &&
+        (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+    renderTimesheet();
+  }
 }
 
 let _resyncInFlight = false;
