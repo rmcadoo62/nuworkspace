@@ -161,8 +161,9 @@ function refreshScheduleStatus(projId) {
 //       -> inprogress                          (highest priority, checked first —
 //                                                 active testing/procedure work wins)
 //   else if ALL testing tasks (not 41/43) are Complete, Billed, or Cancelled
-//   (and at least one such task exists — an empty job can't be "testing
-//   complete")
+//   AND at least one NON-PROCEDURE testing task exists (i.e. real lab work
+//   was actually quoted — a procedures-only job has had no testing scoped
+//   yet, and an empty job can't be "testing complete" either)
 //       -> testcomplete                                    (checked next)
 //   else if any procedure task (sales cat 42/44, not cancelled) is still open
 //     (open = fixed-price not yet billed, OR no-charge not yet complete —
@@ -247,7 +248,15 @@ async function computeAndApplyJobStatus(projId) {
     newStatus = 'inprogress';
   } else {
     // ── Testing Complete check (checked next) ───────────────────────────
-    const allTestingResolved = testingTasks.length > 0 && testingTasks.every(t =>
+    // Procedures-only jobs can't be "testing complete" — a job whose only
+    // testing tasks are procedures (42/44) has had no actual lab work scoped
+    // yet, so resolving those procedures means the paperwork is done, not the
+    // testing. Require at least one NON-procedure testing task to exist before
+    // testcomplete is reachable. (The .every() below still spans ALL testing
+    // tasks, procedures included — once real lab work exists, those must be
+    // resolved too.)
+    const labTestingTasks = testingTasks.filter(t => t.salesCat !== '42' && t.salesCat !== '44');
+    const allTestingResolved = labTestingTasks.length > 0 && testingTasks.every(t =>
       t.status === 'complete' || t.status === 'billed' || t.status === 'cancelled'
     );
 
