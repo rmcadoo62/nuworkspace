@@ -2043,6 +2043,7 @@ window.openSchedModal = function(blockId, preselCat, clickedDate, prefilledEnd) 
     schedBlockTypeChanged();
   }
   renderSchedCatList();
+  _schedDateSnap = null; // fresh baseline for this modal — never compare against the previous block
   schedDateChanged();
   // Initialize DCAS override dropdown
   const dcasOvEl = document.getElementById('schedDcasOverride');
@@ -2496,9 +2497,31 @@ window.applySchedDur = function(days) {
   schedDateChanged();
 };
 
+// Last-seen modal dates. Lets schedDateChanged() tell a Start edit apart from
+// an End edit (both inputs call it via oninput in index.html).
+let _schedDateSnap = null;
+
 window.schedDateChanged = function() {
   const s = document.getElementById('schedStartDate').value;
-  const e = document.getElementById('schedEndDate').value;
+  let e = document.getElementById('schedEndDate').value;
+
+  // Moving Start keeps the current duration: if only Start changed, shift End
+  // by the same number of calendar days (matches the Duration preview and
+  // bar-drag behavior). Editing End directly still changes the duration.
+  // (Scott's feature request, 7/22.)
+  if (_schedDateSnap && s && e && _schedDateSnap.s &&
+      s !== _schedDateSnap.s && e === _schedDateSnap.e) {
+    const delta = diffDays(_schedDateSnap.s, s);
+    e = toDateStr(addDays(parseDate(e), delta));
+    document.getElementById('schedEndDate').value = e;
+  }
+  // Only remember valid values, so clearing a field mid-edit and retyping it
+  // still measures the shift from the last real date.
+  _schedDateSnap = {
+    s: s || (_schedDateSnap && _schedDateSnap.s) || '',
+    e: e || (_schedDateSnap && _schedDateSnap.e) || '',
+  };
+
   const preview = document.getElementById('schedDurationPreview');
   if (s && e && e >= s) {
     const d = diffDays(s, e) + 1;
