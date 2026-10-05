@@ -1695,7 +1695,7 @@ async function _loadLifecycleTab(empId, emp) {
                   }
                 </td>
                 <td style="text-align:center;padding:12px 16px">
-                  <button onclick="showLifecycleInstructions('${key}')" 
+                  <button onclick="showLifecycleInstructions('${key}','${track}')" 
                     style="background:var(--amber-dim);border:1px solid var(--amber);border-radius:4px;padding:4px 8px;font-size:11px;color:var(--text);cursor:pointer">
                     💡 How-to
                   </button>
@@ -2098,9 +2098,12 @@ async function applyBulkLifecycle() {
 
 // ── Show tabbed how-to modal ─────────────────────────────────────────────
 
-function showLifecycleInstructions(templateKey) {
-  const onboardingTemplate = templates.find(t => t.key === templateKey && t.type === 'onboarding');
-  const offboardingTemplate = templates.find(t => t.key === templateKey && t.type === 'offboarding');
+function showLifecycleInstructions(templateKey, track) {
+  // Match the same track rule the checklist row uses (_loadLifecycleTab), so the
+  // modal shows the employee's company template, not whichever track comes first.
+  const _trackOk = t => !track || t.track === track || t.track === 'both';
+  const onboardingTemplate = templates.find(t => t.key === templateKey && t.type === 'onboarding' && _trackOk(t));
+  const offboardingTemplate = templates.find(t => t.key === templateKey && t.type === 'offboarding' && _trackOk(t));
   
   if (!onboardingTemplate && !offboardingTemplate) {
     alert('Template instructions not found');
