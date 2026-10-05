@@ -203,7 +203,13 @@ async function autoApproveProxyTimesheet() {
   const projHours = rows.reduce((s,r) => s + Object.values(r.hours).reduce((a,b)=>a+b,0), 0);
   const ohHours2 = OVERHEAD_CATS.reduce((s,cat) => s + Object.values(ohData2[cat]||{}).reduce((a,b)=>a+b,0), 0);
   const totalHours = projHours + ohHours2;
-  if (totalHours === 0) { toast('No hours to save'); return; }
+  // Part-timers can legitimately work 0 hours in a week, and they don't
+  // track sick/vacation/PTO, so there's nothing to enter. Let the approver
+  // record a 0-hour week so it lands as Approved 0.0h in Reports and shows
+  // as a column of dashes on Print Payroll — i.e. "handled, not missed."
+  // Full-timers keep the block: a 0 there almost always means missing PTO.
+  const isZeroWeek = totalHours === 0;
+  if (isZeroWeek && emp.empType !== 'parttime') { toast('No hours to save'); return; }
 
   const weekDateAA = key.includes('|') ? key.split('|')[1] : key;
 
@@ -291,7 +297,9 @@ async function autoApproveProxyTimesheet() {
   for (const pid of affectedIds) {
     if (typeof syncProjActualHours === 'function') await syncProjActualHours(pid);
   }
-  toast('✓ Timesheet saved & approved for ' + emp.name);
+  toast(isZeroWeek
+    ? '✓ 0-hour week recorded & approved for ' + emp.name
+    : '✓ Timesheet saved & approved for ' + emp.name);
   await loadTsStatuses();
 
   // Re-fetch this employee's entries from DB into tsData so any
