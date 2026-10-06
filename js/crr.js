@@ -9,6 +9,8 @@
    stays removed; fflate is back only for the import unzip.
    Everything is in an IIFE; exports are window.openCrrPanel and
    window.refreshCrrBadge.
+   10/6/2026 — added MIL-STD-461H spec table (emi461h), per unit
+   like 461F/G; importer recognizes 461H documents.
    9/23/2026 — multi-unit: Sections III, IV (standards) and VI are
    per-unit tabs; witness/CUI, V and VII are global. Data contract
    agreed with NUForce (see "Multi-unit model" below). Finished list
@@ -156,6 +158,73 @@ const EMI_461G_ROWS = [
     "Radiated Susceptibility, Electric Field",
     "",
     "Tested to MIL-STD-461G Table XI for Ships metallic below deck from 2 MHz 18 GHz at 10 V/m.\nAntenna positions:\n2 MHz to 30 MHz 3 positions\n30 MHz to 200 MHz 1 position\n200 MHz to 1 GHz 2 positions\n1 GHz to 15 GHz 1 position\n15 GHz to 18 GHz 2 positions"
+  ]
+];
+
+// === EMI 461H test rows (9 tests + setup row) ===
+// 10/6/2026 — from Jordan's 461H starting table. Times blank for CS114,
+// CS116, RE101, RE102, RS101, RS103; antenna/sensor position counts left
+// blank in RE102, RS101 and RS103 for the tech to fill per quote.
+const EMI_461H_ROWS = [
+  [
+    "CE101",
+    "Conducted Emissions, Audio Frequency Currents, Power Leads",
+    "10",
+    "Tested on each AC power input lead for a total of three (3) tests. Tested to MIL-STD-461H Figure CE101-2 from 120 Hz to 20 kHz for equipment ≥ 1 kVA."
+  ],
+  [
+    "CE102",
+    "Conducted Emissions, Radio Frequency Potentials, Power Leads",
+    "12",
+    "Tested on each AC power input lead for a total of three (3) tests. Tested to MIL-STD-461H Figure CE102-1 from 10 kHz to 10 MHz with the limit relaxed by 12 dB."
+  ],
+  [
+    "CS101",
+    "Conducted Susceptibility, Power Leads",
+    "10",
+    "Tested on each AC high side for a total of three (3) tests. Tested to MIL-STD-461H Figure CS101-1 from 120 Hz to 150 kHz curve 1."
+  ],
+  [
+    "CS114",
+    "Conducted Susceptibility, Bulk Cable Injection",
+    "",
+    "Bulk injection on the AC power input and on each AC input lead. Common mode test on the input leads for a total of five (5) tests for the power leads. One (1) test on the signal lead for a total of six (6) tests. Tested to MIL-STD-461H Figure CS114-1 curve 2 from 10 kHz to 200 MHz and from 4 kHz to 1 MHz at 77 dB µA."
+  ],
+  [
+    "CS116",
+    "Conducted Susceptibility, Damped Sinusoidal Transients, Cables and Power Leads",
+    "",
+    "Bulk injection on the AC power input and on each AC input lead for a total of four (4) tests for the power leads. One (1) test on the signal lead for a total of five (5) tests. Tested at the required discrete frequencies of 10 kHz, 100 kHz, 1 MHz, 10 MHz, 30 MHz and 100 MHz only."
+  ],
+  [
+    "RE101",
+    "Radiated Emissions, Magnetic Field",
+    "",
+    "Applicable to all enclosures including each electrical cable interface.\nTested to MIL-STD-461H Figure RE101-2 from 30 Hz to 100 kHz"
+  ],
+  [
+    "RE102",
+    "Radiated Emissions, Electric Field",
+    "",
+    "Tested to MIL-STD-461H Figure RE102-1 for Metallic Ships below deck applications\nAntenna positions:\n10 kHz to 30 MHz - \n30 MHz to 200 MHz - \n200 MHz to 1 GHz - \n1 GHz to 15 GHz - \n15 GHz to 18 GHz - "
+  ],
+  [
+    "RS101",
+    "Radiated susceptibility, magnetic field",
+    "",
+    "Applicable to all equipment enclosures including electrical cable interfaces. Tested to MIL-STD-461H Figure RS101-1 at approximately  positions."
+  ],
+  [
+    "RS103",
+    "Radiated Susceptibility, Electric Field",
+    "",
+    "Tested to MIL-STD-461H Ships metallic below deck from 2 MHz to 18 GHz at 10 V/m.\nAntenna positions:\n2 MHz to 30 MHz - \n30 MHz to 200 MHz - \n200 MHz to 1 GHz - \n1 GHz to 15 GHz - \n15 GHz to 18 GHz - "
+  ],
+  [
+    "",
+    "Setup, shipping and handling",
+    "",
+    ""
   ]
 ];
 
@@ -344,6 +413,12 @@ const SPECS = {
     columns: ["Test", "Description", "Time", "Comments"],
     columnClasses: ["col-key", "", "col-time", ""],
     initialRows: () => EMI_461G_ROWS.map(r => r.slice()),
+  },
+  emi461h: {
+    label: "MIL-STD-461H",
+    columns: ["Test", "Description", "Time", "Comments"],
+    columnClasses: ["col-key", "", "col-time", ""],
+    initialRows: () => EMI_461H_ROWS.map(r => r.slice()),
   },
   pq300b: {
     label: "MIL-STD-1399 Section 300B",
@@ -574,7 +649,7 @@ const QUOTE_REQ_FRAGMENTS = {
 function buildSuggestedQuoteReq() {
   // Section VII is quote-level: suggested text reflects specs on ANY unit.
   const parts = [QUOTE_REQ_FRAGMENTS.preamble];
-  const hasEmi = anyUnitSpec('emi461f') || anyUnitSpec('emi461g');
+  const hasEmi = anyUnitSpec('emi461f') || anyUnitSpec('emi461g') || anyUnitSpec('emi461h');
   const hasPq  = anyUnitSpec('pq300b')  || anyUnitSpec('pq300p1');
   const hasDc  = anyUnitSpec('dcmag');
   if (hasEmi && QUOTE_REQ_FRAGMENTS.emi)    parts.push(QUOTE_REQ_FRAGMENTS.emi);
@@ -1551,6 +1626,7 @@ async function importFromWord(file) {
   // so "300B_DC" wouldn't match /300\s*b\b/. We need to allow boundaries on _ too.
   const hint461F = /461\s*f(?![a-z])/i.test(fname) || /461\s*f(?![a-z])/i.test(docTextLower);
   const hint461G = /461\s*g(?![a-z])/i.test(fname) || /461\s*g(?![a-z])/i.test(docTextLower);
+  const hint461H = /461\s*h(?![a-z])/i.test(fname) || /461\s*h(?![a-z])/i.test(docTextLower);
   const hint300B = /300\s*b(?![a-z])/i.test(fname) || /1399[^\n]{0,40}300\s*b(?![a-z])/i.test(docTextLower);
   const hint300P1 = /300[^\n]{0,5}part\s*1/i.test(fname) || /300[^\n]{0,5}part\s*1/i.test(docTextLower);
   const hintDCMag = /dc[\s_-]*mag/i.test(fname) || /dc magnetics/i.test(docTextLower);
@@ -1614,7 +1690,11 @@ async function importFromWord(file) {
       // Emit EMI spec if any EMI rows
       if (emiRows.length > 0) {
         let specKey;
-        if (hint461G && !hint461F) specKey = 'emi461g';
+        // 461H wins when mentioned anywhere (newest revision; H documents
+        // can still carry a stale "461G" heading from the template they
+        // were built from)
+        if (hint461H) specKey = 'emi461h';
+        else if (hint461G && !hint461F) specKey = 'emi461g';
         else if (hint461F && !hint461G) specKey = 'emi461f';
         else if (hint461G) specKey = 'emi461g';
         else if (hint461F) specKey = 'emi461f';
