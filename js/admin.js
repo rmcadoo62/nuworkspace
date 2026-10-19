@@ -2591,6 +2591,12 @@ const CAPABILITY_DEFS = [
   { key: 'nuforce_approve_quotes', label: 'Approve Quotes (NUForce)', group: 'Apps' },
   { key: 'nuforce_send_quotes',    label: 'Send Approved Quotes (NUForce)', group: 'Apps' },
   { key: 'view_cash_flow',     label: 'View Cash Flow Tracker', group: 'Financials' },
+  { key: 'view_loa',           label: 'View LOA',              group: 'LOA' },
+  { key: 'edit_loa',           label: 'Add/Edit LOA Items',    group: 'LOA' },
+  { key: 'delete_loa',         label: 'Delete LOA Items',      group: 'LOA' },
+  { key: 'view_vendors',       label: 'View Vendors',          group: 'Vendors' },
+  { key: 'edit_vendors',       label: 'Add/Edit Vendors',      group: 'Vendors' },
+  { key: 'delete_vendors',     label: 'Delete Vendors',        group: 'Vendors' },
 ];
 
 function openPermissionsPanel() {

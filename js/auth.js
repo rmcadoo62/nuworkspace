@@ -53,6 +53,8 @@ function can(capability) {
     // Roleless users keep the old permission_level behaviour.
     approve_all_timesheets: mgr,
     view_cash_flow: false,
+    view_loa: true, edit_loa: true, delete_loa: true,
+    view_vendors: true, edit_vendors: true, delete_vendors: true,
   };
   return !!(fallbacks[capability]);
 }
@@ -1249,6 +1251,14 @@ function applyPermissions() {
   // Quote Workup (Customer Request Review) — gated by the access_crr capability
   const navCrr = document.getElementById('navCrr');
   if (navCrr) navCrr.style.display = can('access_crr') ? 'flex' : 'none';
+
+  // LOA (List of Apparatus) — gated by the view_loa capability
+  const navLoa = document.getElementById('navLoa');
+  if (navLoa) navLoa.style.display = can('view_loa') ? 'flex' : 'none';
+
+  // Vendors — gated by the view_vendors capability
+  const navVendors = document.getElementById('navVendors');
+  if (navVendors) navVendors.style.display = can('view_vendors') ? 'flex' : 'none';
 
   applySchedAccessToNav();
 

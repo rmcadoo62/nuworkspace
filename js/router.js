@@ -31,6 +31,8 @@ function routerNavigate(hash) {
       case 'employees':   if (typeof openEmployeesPanel  === 'function') openEmployeesPanel();  break;
       case 'timesheet':   if (typeof openTimesheetPanel  === 'function') openTimesheetPanel();  break;
       case 'scheduler':   if (typeof openSchedulerPanel  === 'function') openSchedulerPanel();  break;
+      case 'loa':         if (typeof openLoaPanel        === 'function') openLoaPanel();        break;
+      case 'vendors':     if (typeof openVendorsPanel    === 'function') openVendorsPanel();    break;
       case 'reports': {
         if (typeof openReportsPanel === 'function') openReportsPanel();
         const rTab = parts[1];
@@ -107,6 +109,8 @@ function routerHookFunctions() {
     ['openEmployeesPanel',      'employees'],
     ['openTimesheetPanel',      'timesheet'],
     ['openSchedulerPanel',      'scheduler'],
+    ['openLoaPanel',            'loa'],
+    ['openVendorsPanel',        'vendors'],
     ['openReportsPanel',        'reports'],
     ['openSetupPanel',          'setup'],
     ['openMyInfoPanel',         'myinfo'],
