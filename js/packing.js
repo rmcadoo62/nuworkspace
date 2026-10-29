@@ -324,6 +324,8 @@ function plRenderEditor(h) {
   const edit = draft && plCanCreate();
   const dis = edit ? '' : 'disabled';
   const proj = plProject(h.project_id);
+  const kind = h.ship_to_type || 'other';   // vendor = cal send-out · client = returning goods · other = typed in
+  const contacts = plContactNames(h);
   const st = `<span class="pl-status ${h.status}">${PL_STATUS[h.status]}</span>`;
   document.getElementById('plDrawerTitle').innerHTML = plEsc(h.pl_number) + ' ' + st;
 
@@ -338,7 +340,6 @@ function plRenderEditor(h) {
       : l.test_article_id ? '<span class="pl-tag">test article</span>' : '';
     return `<tr>
       <td><input type="number" min="0" step="1" class="pl-qty" value="${plNum(l.qty_ordered)}" ${dis} onchange="_plEditLines[${i}].qty_ordered=this.value" /></td>
-      <td><input type="number" min="0" step="1" class="pl-qty" value="${plNum(l.qty_backordered)}" ${dis} onchange="_plEditLines[${i}].qty_backordered=this.value" /></td>
       <td><input type="number" min="0" step="1" class="pl-qty" value="${plNum(l.qty_shipped)}" ${dis} onchange="_plEditLines[${i}].qty_shipped=this.value" /></td>
       <td><input type="text" class="pl-desc" value="${plEsc(l.description)}" ${dis} onchange="_plEditLines[${i}].description=this.value" />${tag}</td>
       <td>${edit ? `<button class="client-action-btn" title="Remove line" onclick="plRemoveLine(${i})">&#x2715;</button>` : ''}</td>
@@ -351,26 +352,31 @@ function plRenderEditor(h) {
 
     <div class="client-detail-section">
       <div class="client-detail-section-title">Ship To</div>
-      ${edit ? `<div class="client-field-row">
-        <div class="client-field"><label>Vendor</label><select id="plVendor" class="pl-select" onchange="plPickShipTo('vendor',this.value)">
-          <option value="">—</option>${vendOpts.map(v => `<option value="${v.id}" ${h.vendor_id === v.id ? 'selected' : ''}>${plEsc(v.name)}</option>`).join('')}</select></div>
-        <div class="client-field"><label>or Client</label><select id="plClient" class="pl-select" onchange="plPickShipTo('client',this.value)">
-          <option value="">—</option>${cliOpts.map(c => `<option value="${c.id}" ${h.client_id === c.id ? 'selected' : ''}>${plEsc(c.name)}</option>`).join('')}</select></div>
-      </div>` : ''}
+      ${edit && kind !== 'client' ? `<div class="client-field" style="margin-bottom:10px"><label>${kind === 'vendor' ? 'Vendor' : 'Vendor (sending out)'}</label>
+        <select id="plVendor" class="pl-select" onchange="plPickShipTo('vendor',this.value)">
+          <option value="">—</option>${vendOpts.map(v => `<option value="${v.id}" ${h.vendor_id === v.id ? 'selected' : ''}>${plEsc(v.name)}</option>`).join('')}</select></div>` : ''}
+      ${edit && kind !== 'vendor' ? `<div class="client-field" style="margin-bottom:10px"><label>${kind === 'client' ? 'Client' : 'or Client (returning goods)'}</label>
+        <select id="plClient" class="pl-select" onchange="plPickShipTo('client',this.value)">
+          <option value="">—</option>${cliOpts.map(c => `<option value="${c.id}" ${h.client_id === c.id ? 'selected' : ''}>${plEsc(c.name)}</option>`).join('')}</select></div>` : ''}
       <input type="hidden" id="plShipType" value="${plEsc(h.ship_to_type)}" />
       ${f('Name *', 'plShipName', h.ship_to_name)}
-      <div class="client-field-row" style="margin-top:10px">
+      ${kind !== 'vendor' ? `<div class="client-field-row" style="margin-top:10px">
         <div class="client-field"><label>Our Job</label><input type="text" value="${plEsc(proj ? proj.name : '')}" placeholder="—" disabled /></div>
-        ${f('Cust. Order No.', 'plCustOrder', h.cust_order_no || (draft ? plJobPo(h.project_id) : ''))}</div>
-      ${f('Attn', 'plAttn', h.ship_to_attn)}
-      <div class="client-field"><label>Address</label><textarea id="plShipAddr" class="full" rows="3" ${dis}>${plEsc(h.ship_to_address || '')}</textarea></div>
+        ${f('Cust. Order No.', 'plCustOrder', h.cust_order_no || (draft ? plJobPo(h.project_id) : ''))}</div>` : ''}
+      <div class="client-field" style="margin-top:10px"><label>Attn</label>
+        <input id="plAttn" type="text" list="plAttnList" value="${plEsc(h.ship_to_attn || '')}" placeholder="${contacts.length ? 'Pick a contact or type a name' : ''}" ${dis} />
+        <datalist id="plAttnList">${contacts.map(n => `<option value="${plEsc(n)}">`).join('')}</datalist></div>
+      <div class="client-field" style="margin-top:10px"><label>Address
+        ${edit && (h.vendor_id || h.client_id) ? `<a class="pl-inline-link" onclick="plRefreshAddress()">&#x21bb; Use ${h.vendor_id ? 'vendor' : 'client'} address</a>` : ''}</label>
+        <textarea id="plShipAddr" class="full" rows="3" ${dis}>${plEsc(h.ship_to_address || '')}</textarea>
+        ${edit && !h.ship_to_address && (h.vendor_id || h.client_id) ? `<span class="pl-hint">No address on the ${h.vendor_id ? 'vendor' : 'client'} record yet — add it under ${h.vendor_id ? 'Vendors' : 'Clients'} and it fills in for every future list, or type it here.</span>` : ''}</div>
     </div>
 
     <div class="client-detail-section">
       <div class="client-detail-section-title">Items</div>
       <table class="pl-lines">
-        <thead><tr><th>Qty Ord.</th><th>Qty B/O</th><th>Qty Ship.</th><th>Description</th><th></th></tr></thead>
-        <tbody>${linesHtml || '<tr><td colspan="5" class="pl-empty">No items yet.</td></tr>'}</tbody>
+        <thead><tr><th>Qty Ord.</th><th>Qty Ship.</th><th>Description</th><th></th></tr></thead>
+        <tbody>${linesHtml || '<tr><td colspan="4" class="pl-empty">No items yet.</td></tr>'}</tbody>
       </table>
       ${edit ? `<button class="loa-link-btn pl-addline" onclick="plAddBlankLine()">+ Add a line</button>` : ''}
 
@@ -413,6 +419,37 @@ function plRenderEditor(h) {
   document.getElementById('plSaveBar').innerHTML = bar.join('');
 }
 
+// Contact names for the Attn pick-list.
+function plContactNames(h) {
+  if (h.vendor_id && typeof vendorContactStore !== 'undefined') {
+    return vendorContactStore.filter(c => c.vendor_id === h.vendor_id)
+      .map(c => [c.first_name, c.last_name].filter(Boolean).join(' ')).filter(Boolean);
+  }
+  if (h.client_id && typeof contactStore !== 'undefined') {
+    return contactStore.filter(c => c.clientId === h.client_id)
+      .map(c => [c.firstName, c.lastName].filter(Boolean).join(' ')).filter(Boolean);
+  }
+  return [];
+}
+
+// Re-pull the address from the vendor / client record (e.g. after filling it in under Vendors).
+async function plRefreshAddress() {
+  const h = plStore.find(p => p.id === _plEditId);
+  if (!h) return;
+  let rec = null;
+  if (h.vendor_id) {
+    if (typeof loadVendorData === 'function') await loadVendorData();
+    rec = (typeof vendorStore !== 'undefined') ? vendorStore.find(v => v.id === h.vendor_id) : null;
+  } else if (h.client_id) {
+    rec = (typeof clientStore !== 'undefined') ? clientStore.find(c => c.id === h.client_id) : null;
+  }
+  const addr = plAddress(rec);
+  if (!addr) { plToast('No address on the ' + (h.vendor_id ? 'vendor' : 'client') + ' record yet'); return; }
+  const el = document.getElementById('plShipAddr');
+  if (el) el.value = addr;
+  plToast('Address filled in — click Save to keep it');
+}
+
 function plPickShipTo(kind, id) {
   const rec = kind === 'vendor'
     ? (typeof vendorStore !== 'undefined' ? vendorStore.find(v => v.id === id) : null)
@@ -430,8 +467,8 @@ function plCaptureLines() {
   document.querySelectorAll('.pl-lines tbody tr').forEach((tr, i) => {
     const l = _plEditLines[i]; if (!l) return;
     const ins = tr.querySelectorAll('input');
-    if (ins.length >= 4) {
-      l.qty_ordered = ins[0].value; l.qty_backordered = ins[1].value; l.qty_shipped = ins[2].value; l.description = ins[3].value;
+    if (ins.length >= 3) {
+      l.qty_ordered = ins[0].value; l.qty_shipped = ins[1].value; l.description = ins[2].value;
     }
   });
 }
@@ -573,10 +610,9 @@ async function plPrint(id) {
   const h = one.header, lines = one.lines;
   const proj = plProject(h.project_id);
   const MIN_ROWS = 14;
-  const rows = lines.map(l => `<tr><td class="c">${plNum(l.qty_ordered)}</td><td class="c">${plNum(l.qty_backordered) === '0' ? '' : plNum(l.qty_backordered)}</td>
+  const rows = lines.map(l => `<tr><td class="c">${plNum(l.qty_ordered)}</td>
     <td class="c">${plNum(l.qty_shipped)}</td><td>${plEsc(l.description)}</td></tr>`).join('') +
-    Array(Math.max(0, MIN_ROWS - lines.length)).fill('<tr><td></td><td></td><td></td><td></td></tr>').join('');
-  const complete = lines.length && lines.every(l => Number(l.qty_backordered) === 0);
+    Array(Math.max(0, MIN_ROWS - lines.length)).fill('<tr><td></td><td></td><td></td></tr>').join('');
   const box = on => on ? '&#9746;' : '&#9744;';
   const shipBlock = [h.ship_to_name, h.ship_to_attn ? 'Attn: ' + h.ship_to_attn : '', h.ship_to_address || '']
     .filter(Boolean).map(plEsc).join('<br>').replace(/\n/g, '<br>');
@@ -604,8 +640,8 @@ async function plPrint(id) {
     <div class="title"><div class="t">PACKING LIST</div><div class="n">${plEsc(h.pl_number)}</div></div>
   </div>
   <table><tr class="shipto"><td class="side">SHIP TO</td><td style="font-size:12px;line-height:1.4">${shipBlock}</td>
-    <td style="width:210px"><span class="lbl">Our Job No.</span><div style="font-size:12px;margin-bottom:8px">${plEsc(proj ? proj.name : '')}</div>
-      <span class="lbl">Cust. Order No.</span><div style="font-size:12px">${plEsc(h.cust_order_no || '')}</div></td></tr></table>
+    ${h.ship_to_type !== 'vendor' ? `<td style="width:210px"><span class="lbl">Our Job No.</span><div style="font-size:12px;margin-bottom:8px">${plEsc(proj ? proj.name : '')}</div>
+      <span class="lbl">Cust. Order No.</span><div style="font-size:12px">${plEsc(h.cust_order_no || '')}</div></td>` : ''}</tr></table>
   <table style="margin-top:-1px"><tr>
     <td><span class="lbl">Date Shipped</span>${plFmt(h.date_shipped)}</td>
     <td><span class="lbl">Shipped Via</span>${plEsc(h.shipped_via || '')}
@@ -614,14 +650,13 @@ async function plPrint(id) {
     <td><span class="lbl">PO / PR No.</span>${plEsc(h.po_pr_number || '')}</td>
   </tr></table>
   <table class="items" style="margin-top:-1px">
-    <thead><tr><th class="c">Qty Ordered</th><th class="c">Qty B/O</th><th class="c">Qty Shipped</th><th style="text-align:center">Description</th></tr></thead>
+    <thead><tr><th class="c">Qty Ordered</th><th class="c">Qty Shipped</th><th style="text-align:center">Description</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
   <table style="margin-top:-1px"><tr>
     <td><span class="lbl">No. of Cartons</span>${h.cartons ?? ''}</td>
     <td><span class="lbl">Total Weight</span>${plEsc(h.total_weight || '')}</td>
     <td><span class="lbl">Container No.</span>${plEsc(h.container_no || '')}</td>
-    <td style="font-size:9px">${box(complete)} Order Complete<br>${box(lines.length && !complete)} Balance to Follow</td>
     <td><span class="lbl">Packed By</span>${plEsc(h.packed_by || '')}</td>
     <td><span class="lbl">Checked By</span>${plEsc(h.checked_by || '')}</td>
   </tr></table>

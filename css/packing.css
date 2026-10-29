@@ -66,3 +66,7 @@
   .pl-drawer{width:100%;}
   .pl-row3{grid-template-columns:1fr;}
 }
+
+.pl-inline-link{float:right;text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;color:var(--blue);cursor:pointer;}
+.pl-inline-link:hover{text-decoration:underline;}
+.pl-hint{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4;}
