@@ -45,6 +45,11 @@ function openShippingPanel(el) {
 function renderShippingGlobal() {
   const el = document.getElementById('shippingGlobalBody');
   if (!el) return;
+  // Packing Lists tab (packing.js) shares this panel.
+  if (typeof _plTab !== 'undefined' && _plTab === 'lists' && typeof renderPackingListsTab === 'function') {
+    renderPackingListsTab();
+    return;
+  }
   const fmt = d => d ? new Date(d+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : '—';
 
   // Determine archive cutoff: shipped 30+ days ago.
@@ -115,6 +120,7 @@ function renderShippingGlobal() {
   statsParts.push(`${archivedCount} archived`);
 
   el.innerHTML = `
+    ${typeof plTabBar === 'function' ? plTabBar() : ''}
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:24px;flex-wrap:wrap;gap:12px">
       <div>
         <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text)">📦 Shipping & Receiving</div>
@@ -217,6 +223,10 @@ function openArticleModal(articleId, projId) {
   const a = articleId ? articleStore.find(x => x._id === articleId) : null;
   document.getElementById('articleModalTitle').textContent = a ? 'Edit Test Article' : 'Receive Test Article';
   document.getElementById('articleDeleteBtn').style.display = a ? 'inline-flex' : 'none';
+  // Packing List: for saved articles that haven't shipped yet (packing.js).
+  const packBtn = document.getElementById('articlePackBtn');
+  if (packBtn) packBtn.style.display = (a && a.status !== 'shipped' && typeof plFromArticle === 'function'
+    && typeof can === 'function' && can('create_packing_lists')) ? 'inline-flex' : 'none';
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('articleDesc').value = a ? a.desc : '';
   document.getElementById('articleReceivedDate').value = a ? a.receivedDate : today;

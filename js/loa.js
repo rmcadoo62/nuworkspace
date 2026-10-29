@@ -357,6 +357,7 @@ function renderLoaPanel() {
     ${edit && _loaSelected.size ? `<div class="loa-bulkbar">
       <strong>${_loaSelected.size}</strong> selected
       <button class="emp-add-btn" onclick="openLoaSendModal()">Send out for cal</button>
+      ${typeof plFromLoaSelection === 'function' && can('create_packing_lists') ? `<button class="emp-add-btn loa-secondary" onclick="plFromLoaSelection()">&#x1F4C4; Packing list</button>` : ''}
       <button class="loa-link-btn" onclick="_loaSelected.clear();renderLoaPanel()">Clear</button>
     </div>` : ''}
 
@@ -898,7 +899,9 @@ function openLoaSendModal(ids) {
       <div class="field"><label class="field-label">Date Sent *</label><input class="f-input" type="date" id="lsDate" value="${lToday()}" /></div>
       <div class="field"><label class="field-label">Quoted Cost (each)</label><input class="f-input" type="number" step="0.01" min="0" id="lsCost" /></div>
     </div>
-    <div class="field"><label class="field-label">Notes</label><input class="f-input" type="text" id="lsNotes" placeholder="PO #, shipping, etc." /></div>`,
+    <div class="field"><label class="field-label">Notes</label><input class="f-input" type="text" id="lsNotes" placeholder="PO #, shipping, etc." /></div>
+    ${typeof plCreateForSendOut === 'function' && can('create_packing_lists') ? `<label class="loa-check"><input type="checkbox" id="lsMakePl" checked />
+      Create a packing list${vends.length > 1 ? ' (one per vendor)' : ''}</label>` : ''}`,
     `<button class="btn btn-ghost" onclick="closeLoaModal()">Cancel</button>
      <button class="btn btn-primary" style="margin-left:auto" onclick="sendLoaOut()">Send Out</button>`);
 }
@@ -914,14 +917,29 @@ async function sendLoaOut() {
     return { asset_id: id, vendor_id: vend || a?.cal_vendor_id || null, sent_date: date,
       cost: cost === '' || cost == null ? null : Number(cost), notes, created_by: lActor() };
   });
-  const { error } = await sb.from('loa_cal_records').insert(rows);
+  const makePl = !!document.getElementById('lsMakePl')?.checked;
+  const { data: inserted, error } = await sb.from('loa_cal_records').insert(rows).select('id,asset_id,vendor_id');
   if (error) { lErr('Could not send out', error); return; }
   closeLoaModal();
-  await Promise.all(_loaSendIds.map(id => refreshLoaAsset(id)));
+  const sentIds = [..._loaSendIds];
+  await Promise.all(sentIds.map(id => refreshLoaAsset(id)));
   _loaSelected.clear();
   if (document.getElementById('loaDrawer')?.classList.contains('open')) renderLoaDrawer();
   renderLoaPanel();
   lToast('✓ ' + rows.length + (rows.length === 1 ? ' item' : ' items') + ' marked out for cal');
+
+  // Packing list(s): one per vendor, each line tied to its new cal record.
+  if (makePl && typeof plCreateForSendOut === 'function') {
+    const byVendor = {};
+    (inserted || []).forEach(r => {
+      const k = r.vendor_id || 'none';
+      (byVendor[k] = byVendor[k] || { vendor: (typeof vendorStore !== 'undefined' ? vendorStore.find(v => v.id === r.vendor_id) : null) || null, assets: [], calIds: {} });
+      const a = loaAssets.find(x => x.asset_id === r.asset_id);
+      if (a) { byVendor[k].assets.push(a); byVendor[k].calIds[a.asset_id] = r.id; }
+    });
+    if (document.getElementById('loaDrawer')?.classList.contains('open')) closeLoaDrawer();
+    await plCreateForSendOut(Object.values(byVendor));
+  }
 }
 
 // ---------- repairs tab ----------

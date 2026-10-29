@@ -55,6 +55,7 @@ function can(capability) {
     view_cash_flow: false,
     view_loa: true, edit_loa: true, delete_loa: true,
     view_vendors: true, edit_vendors: true, delete_vendors: true,
+    create_packing_lists: true, void_packing_lists: true,
   };
   return !!(fallbacks[capability]);
 }
