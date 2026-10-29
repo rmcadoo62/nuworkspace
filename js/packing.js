@@ -324,7 +324,9 @@ function plRenderEditor(h) {
   const edit = draft && plCanCreate();
   const dis = edit ? '' : 'disabled';
   const proj = plProject(h.project_id);
-  const kind = h.ship_to_type || 'other';   // vendor = cal send-out · client = returning goods · other = typed in
+  // vendor = cal send-out (from LOA) · client = returning goods (from Shipping) · other = typed in
+  const kind = (h.ship_to_type === 'vendor' || h.source === 'loa') ? 'vendor'
+             : (h.ship_to_type === 'client' || h.source === 'articles') ? 'client' : 'other';
   const contacts = plContactNames(h);
   const st = `<span class="pl-status ${h.status}">${PL_STATUS[h.status]}</span>`;
   document.getElementById('plDrawerTitle').innerHTML = plEsc(h.pl_number) + ' ' + st;
@@ -460,6 +462,16 @@ function plPickShipTo(kind, id) {
   if (rec) {
     document.getElementById('plShipName').value = rec.name;
     document.getElementById('plShipAddr').value = plAddress(rec);
+  }
+  // Redraw so the form matches (vendor vs client fields, contacts for Attn). Unsaved edits are kept.
+  const h = plStore.find(p => p.id === _plEditId);
+  if (h) {
+    plCaptureLines();
+    const cur = plHeaderFromForm(h);
+    Object.keys(cur).forEach(k => cur[k] === undefined && delete cur[k]);
+    if (kind === 'vendor') cur.vendor_id = rec ? rec.id : null;
+    if (kind === 'client') cur.client_id = rec ? rec.id : null;
+    plRenderEditor({ ...h, ...cur });
   }
 }
 
