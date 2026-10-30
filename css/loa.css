@@ -110,6 +110,19 @@
 .loa-order .client-action-btn:disabled{opacity:.25;cursor:default;}
 .loa-loc-add{display:grid;grid-template-columns:1fr auto;gap:10px;padding-top:14px;border-top:1px solid var(--border);}
 
+/* check in from cal */
+.loa-checkin-btn{background:var(--blue);color:#fff;}
+.loa-checkin-btn:hover{background:#2f6bb8;}
+.loa-print-btn{padding:6px 12px;font-size:12px;}
+.loa-print-btn:disabled{opacity:.45;cursor:not-allowed;}
+.loa-ci-wrap{max-height:340px;overflow:auto;border:1px solid var(--border);border-radius:8px;}
+.loa-ci-table{width:100%;border-collapse:collapse;font-size:12.5px;}
+.loa-ci-table th{position:sticky;top:0;background:var(--surface2);font-size:10px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);text-align:left;padding:7px 8px;border-bottom:1px solid var(--border);}
+.loa-ci-table td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:middle;}
+.loa-ci-table .f-input{height:34px;padding:6px 8px;font-size:12.5px;}
+.loa-ci-table td:nth-child(3){width:150px;} .loa-ci-table td:nth-child(4){width:130px;} .loa-ci-table td:nth-child(5){width:100px;}
+.loa-ci-desc{font-size:11px;color:var(--muted);margin-top:1px;}
+
 /* placeholder (no-access message) */
 .loa-placeholder{border:1.5px dashed var(--border);border-radius:var(--radius);padding:48px 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px;background:var(--surface);}
 .loa-ph-title{font-size:16px;font-weight:600;color:var(--text);}

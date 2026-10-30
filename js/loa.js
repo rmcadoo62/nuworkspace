@@ -237,6 +237,14 @@ function _loaSortVal(a, key) {
   }
 }
 
+// The list exactly as shown: current filters, search and sort (used by the page and Print list).
+function _loaSortedList() {
+  return _loaFiltered().sort((a, b) => {
+    const x = _loaSortVal(a, _loaSort.key), y = _loaSortVal(b, _loaSort.key);
+    return (x < y ? -1 : x > y ? 1 : 0) * _loaSort.dir || a.asset_id.localeCompare(b.asset_id);
+  });
+}
+
 function renderLoaPanel() {
   const wrap = document.getElementById('loaWrap');
   if (!wrap) return;
@@ -252,15 +260,15 @@ function renderLoaPanel() {
     notype: inService.filter(a => !a.cal_type).length,
   };
 
-  const list = _loaFiltered().sort((a, b) => {
-    const x = _loaSortVal(a, _loaSort.key), y = _loaSortVal(b, _loaSort.key);
-    return (x < y ? -1 : x > y ? 1 : 0) * _loaSort.dir || a.asset_id.localeCompare(b.asset_id);
-  });
+  const list = _loaSortedList();
   const shown = list.slice(0, _loaShowLimit);
 
   // Keep only selections that are still visible and sendable.
   const visibleIds = new Set(list.map(a => a.asset_id));
   [..._loaSelected].forEach(id => { if (!visibleIds.has(id)) _loaSelected.delete(id); });
+
+  const selIn = [..._loaSelected].filter(id => loaStatus[id]?.out_for_cal).length;
+  const selSend = _loaSelected.size - selIn;
 
   const searchEl = wrap.querySelector('.loa-search');
   const wasFocused = searchEl && document.activeElement === searchEl;
@@ -284,7 +292,8 @@ function renderLoaPanel() {
     const s = loaStatus[a.asset_id] || {};
     const due = lDueState(a);
     const sel = _loaSelected.has(a.asset_id);
-    const canSend = a.status === 'in_service' && !s.out_for_cal;
+    // Tickable: in service (to send out) or out for cal (to check back in).
+    const canSend = (a.status === 'in_service' && !s.out_for_cal) || !!s.out_for_cal;
     let dueCell = '';
     if (s.out_for_cal) dueCell = `<span class="loa-due out" title="Sent ${lFmt(s.out_for_cal_since)}">Out for cal</span>`;
     else if (s.next_due) dueCell = `<span class="loa-due ${due}">${lFmt(s.next_due)}</span>`;
@@ -352,11 +361,13 @@ function renderLoaPanel() {
       </select>
       <button class="loa-link-btn" onclick="_loaResetFilters()">Reset</button>
       <span class="loa-result-n">${list.length} shown</span>
+      <button class="emp-add-btn loa-secondary loa-print-btn" onclick="printLoaList()" ${list.length ? '' : 'disabled'}>&#x1F5A8; Print list</button>
     </div>
 
     ${edit && _loaSelected.size ? `<div class="loa-bulkbar">
       <strong>${_loaSelected.size}</strong> selected
-      <button class="emp-add-btn" onclick="openLoaSendModal()">Send out for cal</button>
+      ${selSend ? `<button class="emp-add-btn" onclick="openLoaSendModal()">Send out for cal${selIn ? ' (' + selSend + ')' : ''}</button>` : ''}
+      ${selIn ? `<button class="emp-add-btn loa-checkin-btn" onclick="openLoaCheckInModal()">Check in from cal${selSend ? ' (' + selIn + ')' : ''}</button>` : ''}
       ${typeof plFromLoaSelection === 'function' && can('create_packing_lists') ? `<button class="emp-add-btn loa-secondary" onclick="plFromLoaSelection()">&#x1F4C4; Packing list</button>` : ''}
       <button class="loa-link-btn" onclick="_loaSelected.clear();renderLoaPanel()">Clear</button>
     </div>` : ''}
@@ -880,6 +891,140 @@ function _openLoaModal(title, body, footer, width) {
   document.getElementById('loaModal').classList.add('open');
 }
 function closeLoaModal() { document.getElementById('loaModal')?.classList.remove('open'); }
+
+// ---------- check in from cal (one or many) ----------
+let _loaCheckInIds = [];
+function openLoaCheckInModal(ids) {
+  if (!loaCanEdit()) return;
+  _loaCheckInIds = (ids && ids.length ? ids : [..._loaSelected]).filter(id => loaStatus[id]?.out_for_cal);
+  if (!_loaCheckInIds.length) { lToast('None of the selected items are out for cal'); return; }
+  const today = lToday();
+  const rows = _loaCheckInIds.map((id, i) => {
+    const a = loaAssets.find(x => x.asset_id === id) || { asset_id: id };
+    const s = loaStatus[id] || {};
+    const due = a.cal_type === 'interval' ? lAddMonths(today, a.cal_interval_months) : '';
+    return `<tr data-id="${lEsc(id)}">
+      <td><span class="loa-mono">${lEsc(id)}</span><div class="loa-ci-desc">${lEsc(a.description || '')}</div></td>
+      <td class="loa-dim">${lEsc(lVendorName(s.out_for_cal_vendor_id) || '—')}<div class="loa-ci-desc">sent ${lFmt(s.out_for_cal_since)}</div></td>
+      <td><input type="date" class="f-input ciDue" value="${due}" data-auto="1" ${a.cal_type === 'interval' ? '' : 'title="Not an interval item — no due date needed"'} onchange="this.dataset.auto=''" /></td>
+      <td><input type="text" class="f-input ciCert" placeholder="Cert #" /></td>
+      <td><input type="number" step="0.01" min="0" class="f-input ciCost" placeholder="0.00" /></td>
+    </tr>`;
+  }).join('');
+  _openLoaModal(_loaCheckInIds.length === 1 ? 'Check in from calibration' : `Check in ${_loaCheckInIds.length} items from calibration`, `
+    <div class="field-row">
+      <div class="field"><label class="field-label">Returned *</label><input class="f-input" type="date" id="ciReturned" value="${today}" /></div>
+      <div class="field"><label class="field-label">Cal Date (on certs) *</label><input class="f-input" type="date" id="ciCalDate" value="${today}" onchange="_loaCiAutoDue(this.value)" /></div>
+      <div class="field"><label class="field-label">Result</label><select class="f-select" id="ciResult">
+        ${Object.entries(LOA_RESULTS).map(([k, l]) => `<option value="${k}" ${k === 'pass' ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    </div>
+    <div class="loa-meta">Due dates fill in as cal date + each item's interval. Change any that differ on the cert.</div>
+    <div class="loa-ci-wrap"><table class="loa-ci-table">
+      <thead><tr><th>Asset</th><th>Vendor</th><th>Due Date</th><th>Cert #</th><th>Cost</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`,
+    `<button class="btn btn-ghost" onclick="closeLoaModal()">Cancel</button>
+     <button class="btn btn-primary" style="margin-left:auto" onclick="checkInLoaBatch()">Check In${_loaCheckInIds.length > 1 ? ' ' + _loaCheckInIds.length + ' items' : ''}</button>`, 820);
+}
+
+function _loaCiAutoDue(calDate) {
+  document.querySelectorAll('.loa-ci-table tbody tr').forEach(tr => {
+    const a = loaAssets.find(x => x.asset_id === tr.dataset.id);
+    const inp = tr.querySelector('.ciDue');
+    if (a && inp && inp.dataset.auto && a.cal_type === 'interval' && calDate) inp.value = lAddMonths(calDate, a.cal_interval_months);
+  });
+}
+
+async function checkInLoaBatch() {
+  const returned = document.getElementById('ciReturned')?.value;
+  const calDate = document.getElementById('ciCalDate')?.value;
+  const result = document.getElementById('ciResult')?.value || null;
+  if (!returned || !calDate) { lToast('Returned and cal date are required'); return; }
+  const updates = [];
+  for (const tr of document.querySelectorAll('.loa-ci-table tbody tr')) {
+    const id = tr.dataset.id, s = loaStatus[id] || {};
+    if (!s.open_cal_id) continue;
+    if (s.out_for_cal_since && returned < s.out_for_cal_since) { lToast('⚠ ' + id + ': returned date is before it was sent (' + lFmt(s.out_for_cal_since) + ')'); return; }
+    const cost = tr.querySelector('.ciCost')?.value;
+    updates.push({ id, recId: s.open_cal_id, row: {
+      returned_date: returned, cal_date: calDate, result,
+      due_date: tr.querySelector('.ciDue')?.value || null,
+      cert_number: (tr.querySelector('.ciCert')?.value || '').trim() || null,
+      cost: cost === '' || cost == null ? null : Number(cost),
+    } });
+  }
+  const failed = [];
+  for (const u of updates) {
+    const { error } = await sb.from('loa_cal_records').update(u.row).eq('id', u.recId);
+    if (error) { console.error('[loa] check-in', u.id, error); failed.push(u.id); }
+  }
+  closeLoaModal();
+  await Promise.all(updates.map(u => refreshLoaAsset(u.id)));
+  updates.forEach(u => { if (!failed.includes(u.id)) _loaSelected.delete(u.id); });
+  if (document.getElementById('loaDrawer')?.classList.contains('open')) renderLoaDrawer();
+  renderLoaPanel();
+  if (failed.length) lToast('⚠ Could not check in: ' + failed.join(', ') + ' — the rest were checked in');
+  else lToast('✓ ' + updates.length + (updates.length === 1 ? ' item' : ' items') + ' checked in');
+}
+
+// ---------- print the current list ----------
+function _loaFilterSummary() {
+  const f = _loaFilter, bits = [];
+  bits.push(f.status === 'all' ? 'All statuses' : LOA_STATUS[f.status]);
+  const dueLbl = { due: 'Overdue or due soon', overdue: 'Overdue', soon: 'Due in ' + LOA_DUE_SOON_DAYS + ' days', out: 'Out for cal' };
+  if (f.due !== 'all') bits.push(dueLbl[f.due]);
+  if (f.calType !== 'all') bits.push(f.calType === 'none' ? 'No cal type' : LOA_CAL_TYPES[f.calType]);
+  if (f.location !== 'all') bits.push(f.location === 'none' ? 'No location' : 'Location ' + lLocName(f.location));
+  if (f.vendor !== 'all') bits.push(f.vendor === 'in_house' ? 'NU Labs (in-house)' : lVendorName(f.vendor));
+  if (_loaSearch.trim()) bits.push('Search “' + _loaSearch.trim() + '”');
+  return bits.join(' · ');
+}
+
+function printLoaList() {
+  const list = _loaSortedList();
+  if (!list.length) return;
+  const title = _loaFilter.due === 'out' ? 'Out for Calibration' : _loaFilter.due === 'overdue' ? 'Overdue Calibrations'
+    : _loaFilter.due === 'soon' || _loaFilter.due === 'due' ? 'Calibrations Due' : 'List of Apparatus';
+  const now = new Date();
+  const rows = list.map(a => {
+    const s = loaStatus[a.asset_id] || {};
+    const due = s.out_for_cal ? 'Out since ' + lFmt(s.out_for_cal_since) : lFmt(s.next_due);
+    const st = lDueState(a);
+    const vend = s.out_for_cal ? lVendorName(s.out_for_cal_vendor_id) : (s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorName(a.cal_vendor_id));
+    return `<tr class="${st === 'overdue' && _loaFilter.due !== 'overdue' ? 'od' : ''}">
+      <td class="m">${lEsc(a.asset_id)}</td><td>${lEsc(a.description)}</td><td>${lEsc(a.manufacturer)}</td>
+      <td>${lEsc(a.model_no)}</td><td class="m">${lEsc(a.serial_no)}</td><td>${lEsc(lLocName(a.location_id))}</td>
+      <td>${lEsc(lCalTypeLabel(a))}</td><td class="m">${lFmt(s.last_cal_date)}</td><td class="m">${due}</td>
+      <td>${lEsc(vend)}</td><td class="n">${a.status === 'out_of_service' ? 'Out of svc' : 'In service'}</td></tr>`;
+  }).join('');
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>${lEsc(title)}</title><style>
+    @page{size:letter landscape;margin:0.4in}
+    *{box-sizing:border-box} body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:0;font-size:9.5px}
+    .hd{display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111;padding-bottom:6px;margin-bottom:8px}
+    .hd h1{font-size:16px;margin:0} .hd .f{font-size:10px;color:#333;margin-top:3px} .hd .r{text-align:right;font-size:10px;line-height:1.4}
+    table{width:100%;border-collapse:collapse} thead{display:table-header-group}
+    th{background:#e6e6e6;font-size:8px;text-transform:uppercase;letter-spacing:.3px;text-align:left;padding:4px 5px;border:1px solid #999}
+    td{padding:3px 5px;border:1px solid #bbb;vertical-align:top} tr{page-break-inside:avoid}
+    tbody tr:nth-child(even) td{background:#f6f6f6} td.m{font-family:'Courier New',monospace;white-space:nowrap}
+    tr.od td{font-weight:bold} td.n{white-space:nowrap}
+    .key{font-size:9px;color:#333;margin-top:6px}
+  </style></head><body>
+    <div class="hd"><div><h1>NU Laboratories — ${lEsc(title)}</h1><div class="f">${lEsc(_loaFilterSummary())}</div></div>
+      <div class="r">${list.length} item${list.length !== 1 ? 's' : ''}<br>Printed ${lFmt(lToday())} ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div></div>
+    <table><thead><tr><th>Asset ID</th><th>Description</th><th>Make</th><th>Model</th><th>Serial</th><th>Location</th>
+      <th>Cal Type</th><th>Last Cal</th><th>Next Due</th><th>Cal Source</th><th>Status</th></tr></thead>
+    <tbody>${rows}</tbody></table>
+    ${_loaFilter.due !== 'overdue' && list.some(a => lDueState(a) === 'overdue') ? '<div class="key"><b>Bold</b> = overdue</div>' : ''}
+  </body></html>`;
+  let frame = document.getElementById('loaPrintFrame');
+  if (frame) frame.remove();
+  frame = document.createElement('iframe');
+  frame.id = 'loaPrintFrame';
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+  document.body.appendChild(frame);
+  const doc = frame.contentWindow.document;
+  doc.open(); doc.write(html); doc.close();
+  setTimeout(() => { frame.contentWindow.focus(); frame.contentWindow.print(); }, 250);
+}
 
 let _loaSendIds = [];
 function openLoaSendModal(ids) {
