@@ -237,6 +237,18 @@ function _loaSortVal(a, key) {
   }
 }
 
+// Can this asset be ticked? In service (to send out) or out for cal (to check back in).
+function _loaTickable(a) {
+  const out = !!loaStatus[a.asset_id]?.out_for_cal;
+  return out || a.status === 'in_service';
+}
+
+// Header box: tick / untick every tickable item in the current view (all matches, not just the first 300 shown).
+function _loaSelectAll(on) {
+  _loaSortedList().filter(_loaTickable).forEach(a => { if (on) _loaSelected.add(a.asset_id); else _loaSelected.delete(a.asset_id); });
+  renderLoaPanel();
+}
+
 // The list exactly as shown: current filters, search and sort (used by the page and Print list).
 function _loaSortedList() {
   return _loaFiltered().sort((a, b) => {
@@ -267,6 +279,8 @@ function renderLoaPanel() {
   const visibleIds = new Set(list.map(a => a.asset_id));
   [..._loaSelected].forEach(id => { if (!visibleIds.has(id)) _loaSelected.delete(id); });
 
+  const tickables = list.filter(_loaTickable);
+  const tickTotal = tickables.length, tickSel = tickables.filter(a => _loaSelected.has(a.asset_id)).length;
   const selIn = [..._loaSelected].filter(id => loaStatus[id]?.out_for_cal).length;
   const selSend = _loaSelected.size - selIn;
 
@@ -293,7 +307,7 @@ function renderLoaPanel() {
     const due = lDueState(a);
     const sel = _loaSelected.has(a.asset_id);
     // Tickable: in service (to send out) or out for cal (to check back in).
-    const canSend = (a.status === 'in_service' && !s.out_for_cal) || !!s.out_for_cal;
+    const canSend = _loaTickable(a);
     let dueCell = '';
     if (s.out_for_cal) dueCell = `<span class="loa-due out" title="Sent ${lFmt(s.out_for_cal_since)}">Out for cal</span>`;
     else if (s.next_due) dueCell = `<span class="loa-due ${due}">${lFmt(s.next_due)}</span>`;
@@ -361,7 +375,8 @@ function renderLoaPanel() {
       </select>
       <button class="loa-link-btn" onclick="_loaResetFilters()">Reset</button>
       <span class="loa-result-n">${list.length} shown</span>
-      <button class="emp-add-btn loa-secondary loa-print-btn" onclick="printLoaList()" ${list.length ? '' : 'disabled'}>&#x1F5A8; Print list</button>
+      <button class="emp-add-btn loa-secondary loa-print-btn" onclick="printLoaList()" ${list.length ? '' : 'disabled'}
+        title="Prints and copies to the clipboard (paste into Excel)">&#x1F5A8; Print ${_loaSelected.size ? 'selected (' + _loaSelected.size + ')' : 'list'}</button>
     </div>
 
     ${edit && _loaSelected.size ? `<div class="loa-bulkbar">
@@ -375,7 +390,8 @@ function renderLoaPanel() {
     <div class="loa-table-wrap">
       <table class="loa-table">
         <thead><tr>
-          ${edit ? `<th class="loa-td-check"></th>` : ''}
+          ${edit ? `<th class="loa-td-check"><input type="checkbox" id="loaSelAll" title="Select / deselect all in this view"
+            ${tickTotal && tickSel === tickTotal ? 'checked' : ''} ${tickTotal ? '' : 'disabled'} onchange="_loaSelectAll(this.checked)" /></th>` : ''}
           ${th('asset_id', 'Asset ID')}${th('description', 'Description')}${th('manufacturer', 'Make')}${th('model_no', 'Model')}
           ${th('serial_no', 'Serial')}${th('location', 'Location')}${th('cal_type', 'Cal Type')}${th('last_cal', 'Last Cal')}
           ${th('next_due', 'Next Due')}${th('vendor', 'Cal Source')}<th></th>
@@ -384,6 +400,9 @@ function renderLoaPanel() {
       </table>
       ${list.length > shown.length ? `<div class="loa-more"><button class="loa-link-btn" onclick="_loaShowLimit+=500;renderLoaPanel()">Show more (${list.length - shown.length} remaining)</button></div>` : ''}
     </div>`;
+
+  const selAll = document.getElementById('loaSelAll');
+  if (selAll) selAll.indeterminate = tickSel > 0 && tickSel < tickTotal;
 
   if (wasFocused) {
     const s2 = wrap.querySelector('.loa-search');
@@ -980,8 +999,11 @@ function _loaFilterSummary() {
 }
 
 function printLoaList() {
-  const list = _loaSortedList();
+  // Some ticked → print just those (in the on-screen order). Nothing ticked → the whole view.
+  const all = _loaSortedList();
+  const list = _loaSelected.size ? all.filter(a => _loaSelected.has(a.asset_id)) : all;
   if (!list.length) return;
+  _loaCopyList(list);   // clipboard first, while we're still inside the click
   const title = _loaFilter.due === 'out' ? 'Out for Calibration' : _loaFilter.due === 'overdue' ? 'Overdue Calibrations'
     : _loaFilter.due === 'soon' || _loaFilter.due === 'due' ? 'Calibrations Due' : 'List of Apparatus';
   const now = new Date();
@@ -1008,7 +1030,7 @@ function printLoaList() {
     tr.od td{font-weight:bold} td.n{white-space:nowrap}
     .key{font-size:9px;color:#333;margin-top:6px}
   </style></head><body>
-    <div class="hd"><div><h1>NU Laboratories — ${lEsc(title)}</h1><div class="f">${lEsc(_loaFilterSummary())}</div></div>
+    <div class="hd"><div><h1>NU Laboratories — ${lEsc(title)}</h1><div class="f">${lEsc(_loaSelected.size ? 'Selected items only · ' + _loaFilterSummary() : _loaFilterSummary())}</div></div>
       <div class="r">${list.length} item${list.length !== 1 ? 's' : ''}<br>Printed ${lFmt(lToday())} ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div></div>
     <table><thead><tr><th>Asset ID</th><th>Description</th><th>Make</th><th>Model</th><th>Serial</th><th>Location</th>
       <th>Cal Type</th><th>Last Cal</th><th>Next Due</th><th>Cal Source</th><th>Status</th></tr></thead>
@@ -1024,6 +1046,40 @@ function printLoaList() {
   const doc = frame.contentWindow.document;
   doc.open(); doc.write(html); doc.close();
   setTimeout(() => { frame.contentWindow.focus(); frame.contentWindow.print(); }, 250);
+}
+
+// The printed columns as rows of text — shared by the clipboard copy.
+function _loaReportRows(list) {
+  const head = ['Asset ID', 'Description', 'Make', 'Model', 'Serial', 'Location', 'Cal Type', 'Last Cal', 'Next Due', 'Cal Source', 'Status'];
+  const body = list.map(a => {
+    const s = loaStatus[a.asset_id] || {};
+    const vend = s.out_for_cal ? lVendorName(s.out_for_cal_vendor_id) : (s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorName(a.cal_vendor_id));
+    return [a.asset_id, a.description, a.manufacturer, a.model_no, a.serial_no, lLocName(a.location_id), lCalTypeLabel(a),
+      lFmt(s.last_cal_date), s.out_for_cal ? 'Out since ' + lFmt(s.out_for_cal_since) : lFmt(s.next_due), vend,
+      a.status === 'out_of_service' ? 'Out of service' : 'In service'].map(v => v == null ? '' : String(v));
+  });
+  return { head, body };
+}
+
+// Copy the report to the clipboard: tab-separated text (Excel) plus an HTML table (Word / Outlook).
+function _loaCopyList(list) {
+  const { head, body } = _loaReportRows(list);
+  const clean = v => v.replace(/[\t\r\n]+/g, ' ');
+  const tsv = [head, ...body].map(r => r.map(clean).join('\t')).join('\r\n');
+  const html = '<table border="1" cellspacing="0" cellpadding="3"><tr>' + head.map(h => '<th>' + lEsc(h) + '</th>').join('') + '</tr>' +
+    body.map(r => '<tr>' + r.map(v => '<td>' + lEsc(v) + '</td>').join('') + '</tr>').join('') + '</table>';
+  const done = () => lToast('📋 ' + body.length + ' row' + (body.length !== 1 ? 's' : '') + ' copied — paste into Excel');
+  const fail = () => lToast('Printed — the clipboard copy was blocked by the browser');
+  try {
+    if (navigator.clipboard && window.ClipboardItem) {
+      navigator.clipboard.write([new ClipboardItem({
+        'text/plain': new Blob([tsv], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' }),
+      })]).then(done).catch(() => navigator.clipboard.writeText(tsv).then(done).catch(fail));
+    } else if (navigator.clipboard) {
+      navigator.clipboard.writeText(tsv).then(done).catch(fail);
+    } else fail();
+  } catch (e) { fail(); }
 }
 
 let _loaSendIds = [];

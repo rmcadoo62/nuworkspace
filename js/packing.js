@@ -227,10 +227,39 @@ function plFromLoaSelection(ids) {
     .map(id => loaAssets.find(a => a.asset_id === id)).filter(Boolean);
   if (!list.length) { plToast('Select assets first'); return; }
   const status = typeof loaStatus !== 'undefined' ? loaStatus : {};
-  const lines = list.map(a => plAssetLine(a, status[a.asset_id]?.open_cal_id || null));
-  const vendIds = [...new Set(list.map(a => status[a.asset_id]?.out_for_cal_vendor_id || a.cal_vendor_id).filter(Boolean))];
-  const v = vendIds.length === 1 && typeof vendorStore !== 'undefined' ? vendorStore.find(x => x.id === vendIds[0]) : null;
-  plStartFrom(lines, plShipToFromVendor(v), { source: 'loa' });
+  // Vendor per item: where it actually went if it's out for cal, else its usual cal vendor.
+  const vendOf = a => status[a.asset_id]?.out_for_cal_vendor_id || a.cal_vendor_id || null;
+  const groups = {};
+  list.forEach(a => { const k = vendOf(a) || 'none'; (groups[k] = groups[k] || []).push(a); });
+  const keys = Object.keys(groups);
+  const vend = id => (id !== 'none' && typeof vendorStore !== 'undefined') ? vendorStore.find(x => x.id === id) : null;
+
+  // One vendor → the usual flow (new list or add to that vendor's draft), vendor filled in.
+  if (keys.length === 1) {
+    const lines = list.map(a => plAssetLine(a, status[a.asset_id]?.open_cal_id || null));
+    plStartFrom(lines, plShipToFromVendor(vend(keys[0])), { source: 'loa' });
+    return;
+  }
+  // Several vendors → one packing list per vendor, after one confirm.
+  _plVendorGroups = keys.map(k => ({
+    vendor: vend(k), assets: groups[k],
+    calIds: Object.fromEntries(groups[k].map(a => [a.asset_id, status[a.asset_id]?.open_cal_id || null])),
+  }));
+  plModal('Packing lists', `
+    <div style="font-size:13.5px;color:var(--text)">These items go to ${keys.length} different places. Create one packing list for each?</div>
+    <div class="pl-art-list">${_plVendorGroups.map(g => `<div class="pl-choice" style="cursor:default">
+      <span><strong>${plEsc(g.vendor ? g.vendor.name : 'Vendor not set')}</strong>
+      <span class="pl-dim">· ${g.assets.length} item${g.assets.length !== 1 ? 's' : ''}</span></span></div>`).join('')}</div>
+    <div class="pl-meta">Each list gets the next PL number.${groups.none ? ' Items with no vendor go on a list where you pick the vendor.' : ''}</div>`,
+    `<button class="btn btn-ghost" onclick="plCloseModal()">Cancel</button>
+     <button class="btn btn-primary" style="margin-left:auto" onclick="plConfirmVendorGroups()">Create ${keys.length} packing lists</button>`);
+}
+
+let _plVendorGroups = null;
+async function plConfirmVendorGroups() {
+  const groups = _plVendorGroups; _plVendorGroups = null;
+  plCloseModal();
+  if (groups && groups.length) await plCreateForSendOut(groups);
 }
 
 // Called by LOA's Send-out after cal records are created. One list per vendor.
