@@ -47,6 +47,10 @@ function can(capability) {
     view_hours: true, view_expenses: mgr, view_invoicing: mgr,
     view_proj_shipping: true, view_clients: mgr, view_quotes: mgr,
     view_surveys: mgr, view_closing_report: mgr,
+    // Report pages (replaced the single view_reports); billing-gated ones
+    // follow view_billing as their tabs did.
+    view_rpt_inprogress: mgr, view_rpt_stale: mgr, view_rpt_revenue: mgr,
+    view_rpt_closedjobs: mgr, view_rpt_emphours: mgr, view_rpt_timesheets: mgr,
     supervise_team: false,
     // Payroll/owner override for the Approvals queue: see and act on EVERY
     // employee's timesheet and time-off request, not just your own reports.
@@ -1169,9 +1173,20 @@ function applyPermissions() {
   const navDash = document.getElementById('navDashboard');
   if (navDash) navDash.style.display = can('view_dashboard') ? 'flex' : 'none';
 
-  // Reports nav
-  const navRep = document.getElementById('navReports');
-  if (navRep) navRep.style.display = can('view_reports') ? 'flex' : 'none';
+  // Report pages — each has its own capability (see CAPABILITY_DEFS in admin.js)
+  const rptCaps = {
+    navRptInProgress: 'view_rpt_inprogress', navRptStale: 'view_rpt_stale',
+    navRptRevenue: 'view_rpt_revenue', navRptBilling: 'view_billing',
+    navRptEmpHours: 'view_rpt_emphours', navRptTimesheets: 'view_rpt_timesheets',
+    navRptClosedJobs: 'view_rpt_closedjobs',
+  };
+  Object.entries(rptCaps).forEach(([id, cap]) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = can(cap) ? 'flex' : 'none';
+  });
+  // Employees (HR) — same gate as the Setup tile it replaced
+  const navEmps = document.getElementById('navEmployees');
+  if (navEmps) navEmps.style.display = can('manage_employees') ? 'flex' : 'none';
   const navClosing = document.getElementById('navClosingReport');
   if (navClosing) navClosing.style.display = can('view_closing_report') ? 'flex' : 'none';
   const navSurveys = document.getElementById('navCustomerSurveys');

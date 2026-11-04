@@ -157,15 +157,12 @@ function openSetupPanel(el) {
     </div>`;
 
   const tiles = [];
-  // Line 1: Employees, Permissions
-  if (can('manage_employees')) tiles.push(tile('&#x1F465;','Employees','Manage team members, roles, and access.',"openEmployeesPanel(document.getElementById('navSetup'))"));
+  // Employees moved to the HR section of the sidebar; Approvals is under My Workspace.
   if (can('manage_permissions')) tiles.push(tile('&#x1F510;','Permissions','Configure role-based access and user permissions.',"openPermissionsPanel()"));
   // Line 2: Scheduler Settings, Templates  
   if (can('manage_permissions')) tiles.push(tile('&#x1F4C5;','Scheduler Settings','Configure block colors and employee scheduler access.',"openSchedSettingsPanel()"));
   if (can('manage_templates')) tiles.push(tile('&#x1F4CB;','Templates','Manage onboarding checklists, compliance evidence, and content templates.',"openTemplatesPanel(document.getElementById('navSetup'))"));
-  // Line 3: Audit Log, Approvals
   if (can('view_audit_log')) tiles.push(tile('&#x1F4DD;','Audit Log','View recent changes and configure tracked fields.',"openAuditLogPanel(document.getElementById('navSetup'))"));
-  if (can('view_setup') || isManager()) tiles.push(tile('&#x2705;','Approvals','Review and approve pending timesheets and vacation requests.',"openApprovalsPanel(document.getElementById('navSetup'))"));
   // Line 4: Merge Duplicate Clients
   // (Customer Surveys moved to its own sidebar nav item under Closing Report)
   if (can('manage_employees') || isManager()) tiles.push(tile('&#x1F9F9;','Merge Duplicate Clients','Find and merge client records with similar names.',"openMergeClientsPanel(document.getElementById('navSetup'))"));
@@ -2567,15 +2564,22 @@ const CAPABILITY_DEFS = [
   { key: 'add_contacts',       label: 'Add Contacts',          group: 'Clients' },
   { key: 'delete_contacts',    label: 'Delete Contacts',       group: 'Clients' },
   { key: 'view_clients',       label: 'View Clients',          group: 'Clients' },
-  { key: 'view_dashboard',     label: 'View Dashboard',        group: 'Reports' },
-  { key: 'view_reports',       label: 'View Reports',          group: 'Reports' },
-  { key: 'view_closing_report',label: 'View Closing Report',   group: 'Reports' },
-  { key: 'view_billing',       label: 'View Billing Queue',    group: 'Reports' },
-  { key: 'view_quotes',        label: 'View Quotes (Vibrato)', group: 'Reports' },
-  { key: 'view_surveys',       label: 'View Customer Surveys', group: 'Reports' },
+  { key: 'view_surveys',       label: 'View Customer Surveys', group: 'Clients' },
+  // Groups below follow the sidebar departments. Each report page has its own
+  // key (they used to share view_reports); view_reports and view_quotes are
+  // retired — their pages are gone.
+  { key: 'view_dashboard',     label: 'View Dashboard',        group: 'My Workspace' },
+  { key: 'view_rpt_inprogress',label: 'View In Progress',      group: 'Production' },
+  { key: 'view_rpt_stale',     label: 'View Stale Projects',   group: 'Production' },
+  { key: 'view_rpt_revenue',   label: 'View Revenue Projection', group: 'Production' },
+  { key: 'view_billing',       label: 'View Billing Queue',    group: 'Billing' },
+  { key: 'manage_employees',   label: 'Manage Employees',      group: 'HR' },
+  { key: 'view_rpt_emphours',  label: 'View Employee Hours',   group: 'HR' },
+  { key: 'view_rpt_timesheets',label: 'View Timesheets Report',group: 'HR' },
+  { key: 'view_closing_report',label: 'View Closing Report',   group: 'Admin' },
+  { key: 'view_rpt_closedjobs',label: 'View Closed Jobs',      group: 'Admin' },
   { key: 'view_audit_log',     label: 'View Audit Log',        group: 'Admin' },
   { key: 'view_setup',         label: 'View Setup',            group: 'Admin' },
-  { key: 'manage_employees',   label: 'Manage Employees',      group: 'Admin' },
   { key: 'manage_permissions', label: 'Manage Permissions',    group: 'Admin' },
   { key: 'manage_templates',   label: 'Manage Templates',      group: 'Admin' },
   { key: 'supervise_team',     label: 'Supervise Team (Reviews & Discipline)', group: 'Team' },

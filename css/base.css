@@ -168,3 +168,44 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .nav-tip{position:fixed;background:var(--text);color:#fff;font-size:12px;font-weight:500;font-family:'DM Sans',sans-serif;padding:6px 10px;border-radius:5px;white-space:nowrap;z-index:9999;pointer-events:none;opacity:0;transform:translateY(-50%);transition:opacity .12s ease;box-shadow:0 2px 10px rgba(0,0,0,0.18);}
 .nav-tip::before{content:'';position:absolute;right:100%;top:50%;margin-top:-5px;border:5px solid transparent;border-right-color:var(--text);}
 .nav-tip.show{opacity:1;}
+
+/* ===== DARK TOP BAR + DEPARTMENT TABS ===== */
+/* Tabs are built by nav.js from the sidebar's .nav-section[data-section] groups. */
+.topbar{background:#141416;border-bottom:3px solid #d9a441;}
+.topbar .sb-toggle{color:#e6e6ea;}
+.topbar .sb-toggle:hover{background:rgba(255,255,255,.10);color:#fff;}
+.topbar-logo{background:#fff;border-radius:6px;padding:3px 10px;height:auto;}
+/* Page title in the top bar duplicates each page's own heading. Hidden, not
+   removed: many scripts still write to #topbarName and expect it to exist. */
+.topbar .project-name{display:none;}
+.dept-tabs{display:flex;align-items:stretch;align-self:stretch;gap:2px;min-width:0;overflow-x:auto;scrollbar-width:none;}
+.dept-tabs::-webkit-scrollbar{display:none;}
+.dept-tabs:empty{display:none;}
+.dept-tab{background:transparent;border:0;border-bottom:3px solid transparent;color:#c9c9cf;font-family:'DM Sans',sans-serif;font-size:14px;font-weight:500;padding:0 14px;cursor:pointer;white-space:nowrap;transition:all var(--transition);}
+.dept-tab:hover{color:#fff;background:rgba(255,255,255,.06);}
+.dept-tab.active{color:#fff;font-weight:600;border-bottom-color:#d9a441;background:rgba(255,255,255,.08);}
+.dept-tab:focus-visible{outline:2px solid #d9a441;outline-offset:-2px;}
+.topbar .global-search-wrap{margin-left:auto;}
+.topbar .global-search-input{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.25);color:#fff;}
+.topbar .global-search-input::placeholder{color:#b5b5bd;}
+.topbar .global-search-input:focus{border-color:#d9a441;box-shadow:0 0 0 3px rgba(217,164,65,.25);}
+.sidebar .nav-section.dept-off,.sidebar .brand-block.dept-off{display:none !important;}
+
+/* ===== ACCOUNT MENU (top bar, replaces the sidebar-footer badge) ===== */
+.user-menu-wrap{position:relative;flex-shrink:0;}
+.user-menu-btn{background:transparent;border:0;padding:3px;border-radius:50%;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.user-menu-btn:hover,.user-menu-btn[aria-expanded="true"]{background:rgba(255,255,255,.12);}
+.user-menu-btn:focus-visible{outline:2px solid #d9a441;outline-offset:1px;}
+.user-menu-av{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;color:#fff;font-size:12px;font-weight:700;font-family:'DM Sans',sans-serif;}
+.user-menu{position:absolute;right:0;top:calc(100% + 10px);min-width:190px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.18);z-index:9500;padding:6px;}
+.user-menu[hidden]{display:none;}
+.user-menu-who{padding:8px 10px 10px;border-bottom:1px solid var(--border);margin-bottom:6px;}
+.user-menu-name{font-size:14px;font-weight:600;color:var(--text);}
+.user-menu-role{font-size:12px;color:var(--muted);margin-top:2px;}
+.user-menu-item{display:block;width:100%;text-align:left;background:transparent;border:0;border-radius:6px;padding:8px 10px;font-family:'DM Sans',sans-serif;font-size:13px;color:var(--text);cursor:pointer;}
+.user-menu-item:hover{background:var(--surface2);}
+
+/* ===== SINGLE REPORT PAGES ===== */
+/* openReportPage() (reports.js) shows one report as its own page: hide the tab strip. */
+#panel-reports.report-single .reports-tabs{display:none;}
+.user-menu-ver{font-size:11px;color:var(--muted);padding:8px 10px 4px;margin-top:4px;border-top:1px solid var(--border);font-family:'JetBrains Mono',monospace;}

@@ -34,14 +34,10 @@ function routerNavigate(hash) {
       case 'loa':         if (typeof openLoaPanel        === 'function') openLoaPanel();        break;
       case 'vendors':     if (typeof openVendorsPanel    === 'function') openVendorsPanel();    break;
       case 'reports': {
-        if (typeof openReportsPanel === 'function') openReportsPanel();
+        // Each report is its own page now (#reports/billing, #reports/stale…).
         const rTab = parts[1];
-        if (rTab) {
-          setTimeout(() => {
-            const tabEl = document.querySelector('.reports-tab[data-tab="tab-' + rTab + '"]');
-            if (tabEl && typeof switchReportsTab === 'function') switchReportsTab(tabEl);
-          }, 120);
-        }
+        if (rTab && typeof openReportPage === 'function') openReportPage(rTab);
+        else if (typeof openReportsPanel === 'function') openReportsPanel();
         break;
       }
       case 'project': {

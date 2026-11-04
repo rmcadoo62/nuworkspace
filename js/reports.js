@@ -270,10 +270,46 @@ async function bulkMarkBilled() {
   renderDashboard();
 }
 
+// Each report is also its own page in the sidebar (Billing Queue under Billing,
+// In Progress under Production, and so on). openReportPage() shows the shared
+// Reports panel on one tab with the tab strip hidden, so it reads as a
+// standalone page. Keys match the tab ids without "tab-" and the router's
+// #reports/<key> hashes, so deep links and back/forward land on the same page.
+const REPORT_PAGES = {
+  overview:   { title: 'In Progress',        nav: 'navRptInProgress' },
+  stale:      { title: 'Stale Projects',     nav: 'navRptStale' },
+  revenue:    { title: 'Revenue Projection', nav: 'navRptRevenue' },
+  billing:    { title: 'Billing Queue',      nav: 'navRptBilling' },
+  employees:  { title: 'Employee Hours',     nav: 'navRptEmpHours' },
+  timesheets: { title: 'Timesheets',         nav: 'navRptTimesheets' },
+  closedjobs: { title: 'Closed Jobs',        nav: 'navRptClosedJobs' },
+};
+
+function openReportPage(key, navEl) {
+  const page = REPORT_PAGES[key];
+  const tabEl = document.querySelector('.reports-tab[data-tab="tab-' + key + '"]');
+  if (!page || !tabEl) { openReportsPanel(navEl); return; }
+  document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const panel = document.getElementById('panel-reports');
+  panel.classList.add('active', 'report-single');
+  const nav = navEl || document.getElementById(page.nav);
+  if (nav) nav.classList.add('active');
+  const title = document.getElementById('reportsTitle');
+  if (title) title.textContent = page.title;
+  const tb = document.getElementById('topbarName');
+  if (tb) tb.textContent = page.title;
+  if (typeof activeProjectId !== 'undefined') activeProjectId = null;
+  switchReportsTab(tabEl);   // renders the report; router.js pushes #reports/<key>
+}
+
 function openReportsPanel(navEl) {
   document.querySelectorAll('.view-panel').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('panel-reports').classList.add('active');
+  // Full tabbed view (only reached by an old #reports link now).
+  document.getElementById('panel-reports').classList.remove('report-single');
+  const _rt = document.getElementById('reportsTitle'); if (_rt) _rt.textContent = 'Reports';
   if (navEl) navEl.classList.add('active');
   document.querySelectorAll('.reports-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.reports-tab-panel').forEach(t => t.classList.remove('active'));

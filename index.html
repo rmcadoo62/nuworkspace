@@ -114,6 +114,7 @@
     <img src="https://images.squarespace-cdn.com/content/v1/4ffd78c424accf259206d1dc/1473195765839-Z06GZYUXTVC8DBAGVE1V/logo-shadowed.png" alt="NU Labs" />
   </div>
   <div class="project-name" id="topbarName">Platform v3</div>
+  <nav class="dept-tabs" id="deptTabs" aria-label="Departments"></nav>
   <div class="global-search-wrap">
     <span class="global-search-icon">&#x1F50D;</span>
     <input class="global-search-input" id="globalSearchInput" placeholder="Search projects, tasks, clients…" autocomplete="off"
@@ -122,7 +123,7 @@
   </div>
 
   <!-- Bug Report -->
-  <div class="notif-bell-wrap" style="margin-left:auto;position:relative">
+  <div class="notif-bell-wrap" style="position:relative">
     <button class="notif-bell-btn" id="bugReportBtn" onclick="openBugReportModal()" title="Report Bug or Request Feature">
       🐛
     </button>
@@ -139,72 +140,86 @@
       <div class="notif-list" id="notifList"></div>
     </div>
   </div>
+
+  <!-- Account menu (ids kept: auth.js fills userBadgeAv/Name/Role and shows #sidebarUserBadge after login) -->
+  <div class="user-menu-wrap" id="sidebarUserBadge" style="display:none">
+    <button class="user-menu-btn" id="userMenuBtn" type="button" onclick="toggleUserMenu(event)" aria-haspopup="true" aria-expanded="false" aria-label="Account menu" title="Account">
+      <span class="user-menu-av" id="userBadgeAv" style="background:#888"></span>
+    </button>
+    <div class="user-menu" id="userMenu" hidden>
+      <div class="user-menu-who">
+        <div class="user-menu-name" id="userBadgeName">&mdash;</div>
+        <div class="user-menu-role" id="userBadgeRole">&mdash;</div>
+      </div>
+      <button class="user-menu-item" type="button" onclick="doLogout()">&#x23FB;&nbsp; Sign out</button>
+      <!-- Bump on each push (YYYY.MM.DD, add .2, .3 for a second push the same day) -->
+      <div class="user-menu-ver">NUWorkspace 2026.11.04</div>
+    </div>
+  </div>
 </div>
 
 <div class="app-body">
 <aside class="sidebar">
   <div class="sidebar-nav-scroll">
   <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
-    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Workspace</div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">My Workspace</div>
   </div>
-  <div class="nav-section">
+  <div class="nav-section" data-section="me" data-label="My Workspace">
     <div class="nav-item active" id="navHome" onclick="openHomePanel(this)"><span class="icon">&#x1F3E1;</span> Home</div>
     <div class="nav-item" id="navMyTasks" style="display:none" onclick="openMyTasksPanel(this)"><span class="icon survey-count" id="myTasksBadge">0</span> My Tasks</div>
-    <div class="nav-item" id="navMyTeam" style="display:none" onclick="openMyTeamPanel(this)"><span class="icon">&#x1F465;</span> My Team</div>
     <div class="nav-item" id="navDashboard" onclick="openDashboardPanel(this)"><span class="icon">&#x1F4C8;</span> Dashboard</div>
     <div class="nav-item" id="navProjects" onclick="openProjectsTable(this)"><span class="icon">&#x1F4C1;</span> Projects</div>
     <div class="nav-item" onclick="openTimesheetPanel(this)"><span class="icon">&#x23F1;</span> Timesheet</div>
     <div class="nav-item" id="navScheduler" onclick="openSchedulerPanel(this)"><span class="icon">&#x1F4C6;</span> Scheduler</div>
     <div class="nav-item" id="navLoa" onclick="openLoaPanel(this)" style="display:none"><span class="icon">&#x1F527;</span> LOA</div>
-    <div class="nav-item" id="navClients" onclick="openClientsPanel(this)"><span class="icon">&#x1F3E2;</span> Clients</div>
-    <div class="nav-item" id="navVendors" onclick="openVendorsPanel(this)" style="display:none"><span class="icon">&#x1F3ED;</span> Vendors</div>
     <div class="nav-item" id="navShipping" onclick="openShippingPanel(this)"><span class="icon">&#x1F4E6;</span> Shipping</div>
+    <div class="nav-item" id="navMyTeam" style="display:none" onclick="openMyTeamPanel(this)"><span class="icon">&#x1F465;</span> My Team</div>
     <div class="nav-item" id="navMyInfo" onclick="openMyInfoPanel(this)"><span class="icon">&#x1F464;</span> My Info</div>
     <div class="nav-item" id="navApprovals" style="display:none" onclick="openApprovalsPanel(this)"><span class="icon">&#x2705;</span> Approvals <span class="nav-badge" id="approvalsBadge" style="display:none">0</span></div>
   </div>
-  <div class="brand-block" id="vibratoBrand" style="padding:16px 12px 4px;text-align:left;">
-    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">NUForce</div>
+  <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Production</div>
   </div>
-  <div class="nav-section">
-    <div class="nav-item" id="navQuotes" onclick="openQuotesPanel(this)"><span class="icon">&#x1F4CB;</span> Quotes</div>
-    <div class="nav-item" id="navCrr" onclick="openCrrPanel(this)" style="display:none"><span class="icon survey-count" id="crrBadge">0</span> EMI Quote WU</div>
-    <div class="nav-item" id="navNuforce" onclick="openNuforce()" style="display:none"><span class="icon">&#x1F680;</span> Open NUForce <span style="font-size:11px;opacity:.55;margin-left:1px">&#x2197;</span></div>
+  <div class="nav-section" data-section="production" data-label="Production">
+    <div class="nav-item" id="navRptInProgress" style="display:none" onclick="openReportPage('overview',this)"><span class="icon">&#x23F3;</span> In Progress</div>
+    <div class="nav-item" id="navRptStale" style="display:none" onclick="openReportPage('stale',this)"><span class="icon">&#x1F4A4;</span> Stale Projects</div>
+    <div class="nav-item" id="navRptRevenue" style="display:none" onclick="openReportPage('revenue',this)"><span class="icon">&#x1F4C8;</span> Revenue Projection</div>
+    <div class="nav-item" id="navVendors" onclick="openVendorsPanel(this)" style="display:none"><span class="icon">&#x1F3ED;</span> Vendors</div>
   </div>
   <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
-    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Reports</div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Billing</div>
   </div>
-  <div class="nav-section">
-    <div class="nav-item" id="navReports" onclick="openReportsPanel(this)"><span class="icon">&#x1F4CA;</span> Reports</div>
-    <div class="nav-item" id="navClosingReport" onclick="openClosingReport(this)"><span class="icon">&#x1F4CB;</span> Closing Report <span class="nav-badge" id="closingBadge" style="display:none">0</span></div>
+  <div class="nav-section" data-section="billing" data-label="Billing">
+    <div class="nav-item" id="navRptBilling" style="display:none" onclick="openReportPage('billing',this)"><span class="icon">&#x1F4B3;</span> Billing Queue</div>
+  </div>
+  <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Quotes</div>
+  </div>
+  <div class="nav-section" data-section="quotes" data-label="Quotes">
+    <div class="nav-item" id="navClients" onclick="openClientsPanel(this)"><span class="icon">&#x1F3E2;</span> Clients</div>
+    <div class="nav-item" id="navCrr" onclick="openCrrPanel(this)" style="display:none"><span class="icon survey-count" id="crrBadge">0</span> EMI Quote WU</div>
+    <div class="nav-item" id="navNuforce" onclick="openNuforce()" style="display:none"><span class="icon">&#x1F680;</span> Open NUForce <span style="font-size:11px;opacity:.55;margin-left:1px">&#x2197;</span></div>
     <div class="nav-item" id="navCustomerSurveys" onclick="openSurveyQueuePanel(this)"><span class="icon survey-count" id="surveysBadge">0</span> Surveys</div>
   </div>
   <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
-    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Compliance</div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">HR</div>
   </div>
-  <div class="nav-section">
-    <div class="nav-item" id="navCompliance" onclick="openCompliancePanel(this)"><span class="icon">&#x1F6E1;</span> CMMC 2.0</div>
+  <div class="nav-section" data-section="hr" data-label="HR">
+    <div class="nav-item" id="navEmployees" style="display:none" onclick="openEmployeesPanel(this)"><span class="icon">&#x1F465;</span> Employees</div>
+    <div class="nav-item" id="navRptEmpHours" style="display:none" onclick="openReportPage('employees',this)"><span class="icon">&#x1F4C6;</span> Employee Hours</div>
+    <div class="nav-item" id="navRptTimesheets" style="display:none" onclick="openReportPage('timesheets',this)"><span class="icon">&#x1F4C5;</span> Timesheets</div>
   </div>
   <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
-    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Setup</div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Admin</div>
   </div>
-  <div class="nav-section">
+  <div class="nav-section" data-section="admin" data-label="Admin">
+    <div class="nav-item" id="navClosingReport" onclick="openClosingReport(this)"><span class="icon">&#x1F4CB;</span> Closing Report <span class="nav-badge" id="closingBadge" style="display:none">0</span></div>
+    <div class="nav-item" id="navRptClosedJobs" style="display:none" onclick="openReportPage('closedjobs',this)"><span class="icon">&#x1F4CA;</span> Closed Jobs</div>
     <div class="nav-item" id="navSetup" onclick="openSetupPanel(this)"><span class="icon">&#x2699;</span> Setup</div>
     <div class="nav-item" id="navIssueTracker" style="display:none" onclick="openIssueTrackerPanel(this)"><span class="icon">&#x1F41B;</span> Issue Tracker <span class="nav-badge" id="issuesBadge" style="display:none">0</span></div>
   </div>
 
   </div><!-- /sidebar-nav-scroll -->
-  <div class="sidebar-footer">
-    <div id="sidebarUserBadge" style="display:none;margin-top:8px;border-top:1px solid var(--border);padding-top:10px;">
-      <div class="user-badge">
-        <div class="user-av" id="userBadgeAv" style="background:#888;font-size:12px"></div>
-        <div style="flex:1;min-width:0;overflow:hidden">
-          <div class="user-name" id="userBadgeName" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">—</div>
-          <div class="user-role" id="userBadgeRole" style="white-space:nowrap">—</div>
-        </div>
-        <button class="user-logout" onclick="doLogout()" title="Sign out" style="flex-shrink:0">⏻</button>
-      </div>
-    </div>
-  </div>
 </aside>
 
 <div class="main">
@@ -766,7 +781,7 @@
     <!-- REPORTS PANEL -->
     <div class="view-panel" id="panel-reports" style="flex-direction:column;overflow:hidden">
       <div style="padding:20px 28px 0;border-bottom:1px solid var(--border);background:var(--surface);flex-shrink:0">
-        <div style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);margin-bottom:14px">Reports</div>
+        <div id="reportsTitle" style="font-family:'DM Serif Display',serif;font-size:26px;color:var(--text);margin-bottom:14px">Reports</div>
         <div class="reports-tabs" id="reportsTabs">
           <div class="reports-tab active" data-tab="tab-billing" onclick="switchReportsTab(this)">&#x1F4B3; Billing Queue</div>
           <div class="reports-tab" data-tab="tab-overview" onclick="switchReportsTab(this)">&#x23F3; In Progress</div>
@@ -775,7 +790,6 @@
           <div class="reports-tab" data-tab="tab-stale" onclick="switchReportsTab(this)">&#x1F4A4; Stale Projects</div>
           <div class="reports-tab" data-tab="tab-closedjobs" onclick="switchReportsTab(this)">&#x1F4CA; Closed Jobs</div>
           <div class="reports-tab" data-tab="tab-revenue" onclick="switchReportsTab(this)">&#x1F4C8; Revenue Projection</div>
-          <div class="reports-tab" data-tab="tab-ai" onclick="switchReportsTab(this)">&#x2728; AI Analysis</div>
         </div>
       </div>
       <div style="flex:1;overflow-y:auto;padding:24px 28px" id="reportsBody">

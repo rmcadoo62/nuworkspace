@@ -222,6 +222,7 @@ document.addEventListener('DOMContentLoaded', function () {
     { name: 'openEmployeesPanel',     label: 'Employees'           },
     { name: 'openTimesheetPanel',     label: 'Timesheet'           },
     { name: 'openReportsPanel',       label: 'Reports'             },
+    { name: 'openReportPage',         label: 'Report'              },
     { name: 'openSchedulerPanel',     label: 'Scheduler'           },
     { name: 'openLoaPanel',           label: 'LOA'                 },
     { name: 'openVendorsPanel',       label: 'Vendors'             },
@@ -348,3 +349,154 @@ document.addEventListener('DOMContentLoaded', () => {
   const scroll = sidebar.querySelector('.sidebar-nav-scroll');
   if (scroll) scroll.addEventListener('scroll', _hideNavTip);
 });
+
+// ===== DEPARTMENT TABS =====
+// The sidebar is grouped into departments (.nav-section[data-section] in
+// index.html). Whether each page shows is still decided only by
+// applyPermissions() / _applyIdentityNav() in auth.js; this reads the result.
+//   - A department with no visible page is not offered.
+//   - 2+ departments: the top bar gets one tab per department, and the sidebar
+//     shows "Me" plus the selected department.
+//   - 0-1 departments: no tabs; the sidebar shows everything, as before.
+// The selected tab follows the page you're on (clicks, deep links, back/forward)
+// and is remembered per browser.
+(function () {
+  const STORE_KEY = 'nuworkspace_dept';
+  const ALWAYS = 'me';
+  // Hash -> department. My Workspace pages (Home, Dashboard, Projects,
+  // Scheduler, LOA, Shipping, Timesheet...) leave the current tab alone.
+  const HASH_DEPT = {
+    vendors: 'production',
+    'reports/overview': 'production', 'reports/stale': 'production', 'reports/revenue': 'production',
+    'reports/billing': 'billing',
+    clients: 'quotes', surveys: 'quotes',
+    employees: 'hr', 'reports/employees': 'hr', 'reports/timesheets': 'hr',
+    closingreport: 'admin', 'reports/closedjobs': 'admin',
+    setup: 'admin', auditlog: 'admin', permissions: 'admin',
+  };
+
+  let current = null;
+  try { current = localStorage.getItem(STORE_KEY); } catch (_) {}
+
+  const sections = () => Array.from(document.querySelectorAll('.sidebar .nav-section[data-section]'));
+  const isShown = el => el.style.display !== 'none';
+  const pagesOf = sec => Array.from(sec.querySelectorAll('.nav-item')).filter(isShown);
+
+  function render() {
+    const all = sections();
+    const depts = all.filter(s => s.dataset.section !== ALWAYS && pagesOf(s).length > 0);
+    const tabbed = depts.length > 1;
+    if (tabbed && !depts.some(s => s.dataset.section === current)) current = depts[0].dataset.section;
+
+    all.forEach(s => {
+      const off = tabbed && s.dataset.section !== ALWAYS && s.dataset.section !== current;
+      s.classList.toggle('dept-off', off);
+      const label = s.previousElementSibling;
+      if (label && label.classList.contains('brand-block')) label.classList.toggle('dept-off', off);
+    });
+
+    const bar = document.getElementById('deptTabs');
+    if (!bar) return;
+    bar.textContent = '';
+    if (!tabbed) return;
+    depts.forEach(s => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'dept-tab' + (s.dataset.section === current ? ' active' : '');
+      b.dataset.dept = s.dataset.section;
+      b.textContent = s.dataset.label || s.dataset.section;
+      if (s.dataset.section === current) b.setAttribute('aria-current', 'true');
+      bar.appendChild(b);
+    });
+  }
+
+  function select(dept, openFirstPage) {
+    if (!dept || dept === ALWAYS) return;
+    current = dept;
+    try { localStorage.setItem(STORE_KEY, dept); } catch (_) {}
+    render();
+    if (!openFirstPage) return;
+    const sec = document.querySelector('.sidebar .nav-section[data-section="' + dept + '"]');
+    // Skip the NUForce launcher: it opens another site in a new tab.
+    const first = sec && pagesOf(sec).find(i => i.id !== 'navNuforce');
+    if (first) first.click();
+  }
+
+  function followHash(hash) {
+    const parts = String(hash || '').replace(/^#\/?/, '').split('/');
+    // Reports are keyed by their page (reports/billing), everything else by
+    // the first segment.
+    const key = parts[0] === 'reports' && parts[1] ? 'reports/' + parts[1] : parts[0];
+    const dept = HASH_DEPT[key];
+    if (dept && dept !== current) select(dept, false);
+  }
+
+  // Re-render whenever auth.js finishes a visibility pass. Both
+  // applyPermissions() and _applyIdentityNav() (login, View-As enter/exit)
+  // end by calling this function, so wrapping it catches every change.
+  const origCollapse = window._autoCollapseNavSections;
+  if (typeof origCollapse === 'function') {
+    window._autoCollapseNavSections = function () {
+      const r = origCollapse.apply(this, arguments);
+      render();
+      return r;
+    };
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    const bar = document.getElementById('deptTabs');
+    if (bar) bar.addEventListener('click', e => {
+      const b = e.target.closest('.dept-tab');
+      if (b && b.dataset.dept !== current) select(b.dataset.dept, true);
+    });
+
+    // A page opened from its sidebar item gets class "active"; follow it.
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) new MutationObserver(muts => {
+      for (const m of muts) {
+        const el = m.target;
+        if (!el.classList || !el.classList.contains('nav-item') || !el.classList.contains('active')) continue;
+        const sec = el.closest('.nav-section[data-section]');
+        if (sec && sec.dataset.section !== ALWAYS && sec.dataset.section !== current) select(sec.dataset.section, false);
+      }
+    }).observe(sidebar, { subtree: true, attributes: true, attributeFilter: ['class'] });
+
+    // Pages opened any other way (deep link, back/forward, a link inside a
+    // page) go through router.js's routerPush; follow the hash.
+    const origPush = window.routerPush;
+    if (typeof origPush === 'function') {
+      window.routerPush = function (hash) {
+        followHash(hash);
+        return origPush.apply(this, arguments);
+      };
+    }
+
+    render();
+  });
+})();
+
+// ===== ACCOUNT MENU (top-right avatar) =====
+// Opens a small menu with the signed-in name, role and Sign out. auth.js fills
+// the avatar, name and role (#userBadgeAv/Name/Role) exactly as it did when the
+// badge lived at the bottom of the sidebar.
+function toggleUserMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('userMenu');
+  const btn = document.getElementById('userMenuBtn');
+  if (!menu) return;
+  const open = menu.hidden;
+  menu.hidden = !open;
+  if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+function _closeUserMenu() {
+  const menu = document.getElementById('userMenu');
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  const btn = document.getElementById('userMenuBtn');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest || !e.target.closest('#sidebarUserBadge')) _closeUserMenu();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeUserMenu(); });
+window.toggleUserMenu = toggleUserMenu;
