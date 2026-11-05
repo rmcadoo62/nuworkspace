@@ -350,19 +350,25 @@ document.addEventListener('DOMContentLoaded', () => {
   if (scroll) scroll.addEventListener('scroll', _hideNavTip);
 });
 
-// ===== DEPARTMENT TABS =====
-// The sidebar is grouped into departments (.nav-section[data-section] in
-// index.html). Whether each page shows is still decided only by
-// applyPermissions() / _applyIdentityNav() in auth.js; this reads the result.
-//   - A department with no visible page is not offered.
-//   - 2+ departments: the top bar gets one tab per department, and the sidebar
-//     shows "Me" plus the selected department.
-//   - 0-1 departments: no tabs; the sidebar shows everything, as before.
-// The selected tab follows the page you're on (clicks, deep links, back/forward)
-// and is remembered per browser.
+// ===== DEPARTMENT TABS (split tabs with dropdowns) =====
+// The sidebar markup still holds every department page
+// (.nav-section[data-section] in index.html). Whether each page shows is still
+// decided only by applyPermissions() / _applyIdentityNav() in auth.js; this
+// reads the result. The department sections themselves are kept hidden: their
+// pages are reached from the top bar.
+//   - Each department with at least one visible page gets a split tab:
+//     the label opens that department's default page, the caret opens a
+//     dropdown of its pages.
+//   - The star in a dropdown picks the default page, remembered per browser.
+//     With no star (or a starred page this user can't see) the first visible
+//     page is the default.
+//   - A user with no department pages gets no tabs: My Workspace only.
+// The highlighted tab follows the page you're on (clicks, deep links,
+// back/forward); a My Workspace page clears it.
 (function () {
-  const STORE_KEY = 'nuworkspace_dept';
+  const DEFAULTS_KEY = 'nuworkspace_dept_defaults';
   const ALWAYS = 'me';
+  const LAUNCHER = 'navNuforce'; // opens another site in a new tab: never a default
   // Hash -> department. My Workspace pages (Home, Dashboard, Projects,
   // Scheduler, LOA, Shipping, Timesheet...) leave the current tab alone.
   const HASH_DEPT = {
@@ -375,21 +381,50 @@ document.addEventListener('DOMContentLoaded', () => {
     'reports/closedjobs': 'admin', cashflow: 'admin',
   };
 
-  let current = null;
-  try { current = localStorage.getItem(STORE_KEY); } catch (_) {}
+  let current = null;   // department of the page on screen, or null
+  let openDept = null;  // department whose dropdown is open, or null
+  let menuEl = null;
+
+  try { localStorage.removeItem('nuworkspace_dept'); } catch (_) {} // old tab memory, no longer used
+
+  function loadDefaults() {
+    try { return JSON.parse(localStorage.getItem(DEFAULTS_KEY) || '{}') || {}; } catch (_) { return {}; }
+  }
+  function saveDefault(dept, id) {
+    const d = loadDefaults();
+    d[dept] = id;
+    try { localStorage.setItem(DEFAULTS_KEY, JSON.stringify(d)); } catch (_) {}
+  }
 
   const sections = () => Array.from(document.querySelectorAll('.sidebar .nav-section[data-section]'));
+  const sectionOf = dept => document.querySelector('.sidebar .nav-section[data-section="' + dept + '"]');
   const isShown = el => el.style.display !== 'none';
   const pagesOf = sec => Array.from(sec.querySelectorAll('.nav-item')).filter(isShown);
+
+  function defaultPage(dept) {
+    const sec = sectionOf(dept);
+    if (!sec) return null;
+    const pages = pagesOf(sec).filter(i => i.id !== LAUNCHER);
+    const want = loadDefaults()[dept];
+    return pages.find(i => i.id && i.id === want) || pages[0] || null;
+  }
+
+  function labelText(item) {
+    const clone = item.cloneNode(true);
+    clone.querySelectorAll('.icon, .nav-badge').forEach(el => el.remove());
+    return clone.textContent.replace(/\s+/g, ' ').trim();
+  }
 
   function render() {
     const all = sections();
     const depts = all.filter(s => s.dataset.section !== ALWAYS && pagesOf(s).length > 0);
-    const tabbed = depts.length > 1;
-    if (tabbed && !depts.some(s => s.dataset.section === current)) current = depts[0].dataset.section;
+    const tabbed = depts.length > 0;
+    if (current && !depts.some(s => s.dataset.section === current)) current = null;
+    if (openDept && !depts.some(s => s.dataset.section === openDept)) closeMenu();
 
+    // Department sections never show in the sidebar while tabs carry them.
     all.forEach(s => {
-      const off = tabbed && s.dataset.section !== ALWAYS && s.dataset.section !== current;
+      const off = tabbed && s.dataset.section !== ALWAYS;
       s.classList.toggle('dept-off', off);
       const label = s.previousElementSibling;
       if (label && label.classList.contains('brand-block')) label.classList.toggle('dept-off', off);
@@ -412,26 +447,149 @@ document.addEventListener('DOMContentLoaded', () => {
     bar.textContent = '';
     if (!tabbed) return;
     depts.forEach(s => {
+      const dept = s.dataset.section;
+      const name = s.dataset.label || dept;
+      const wrap = document.createElement('div');
+      wrap.className = 'dept-tab-wrap' + (dept === current ? ' active' : '') + (dept === openDept ? ' open' : '');
+      wrap.dataset.dept = dept;
+
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'dept-tab' + (s.dataset.section === current ? ' active' : '');
-      b.dataset.dept = s.dataset.section;
-      b.textContent = s.dataset.label || s.dataset.section;
-      if (s.dataset.section === current) b.setAttribute('aria-current', 'true');
-      bar.appendChild(b);
+      b.className = 'dept-tab';
+      b.dataset.role = 'go';
+      b.textContent = name;
+      const dflt = defaultPage(dept);
+      if (dflt) b.title = 'Open ' + labelText(dflt);
+      if (dept === current) b.setAttribute('aria-current', 'true');
+
+      const c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'dept-caret';
+      c.dataset.role = 'caret';
+      c.setAttribute('aria-label', name + ' menu');
+      c.setAttribute('aria-haspopup', 'true');
+      c.setAttribute('aria-expanded', dept === openDept ? 'true' : 'false');
+      c.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+
+      wrap.appendChild(b);
+      wrap.appendChild(c);
+      bar.appendChild(wrap);
     });
   }
 
-  function select(dept, openFirstPage) {
-    if (!dept || dept === ALWAYS) return;
-    current = dept;
-    try { localStorage.setItem(STORE_KEY, dept); } catch (_) {}
+  // ----- dropdown -----
+  function ensureMenu() {
+    if (menuEl) return menuEl;
+    menuEl = document.createElement('div');
+    menuEl.className = 'dept-menu';
+    menuEl.id = 'deptMenu';
+    menuEl.setAttribute('role', 'menu');
+    menuEl.hidden = true;
+    document.body.appendChild(menuEl);
+    menuEl.addEventListener('click', e => {
+      e.stopPropagation();
+      const star = e.target.closest('.dept-menu-star');
+      if (star) {
+        saveDefault(star.dataset.dept, star.dataset.target);
+        fillMenu(star.dataset.dept); // stay open so the change is visible
+        render();
+        return;
+      }
+      const it = e.target.closest('.dept-menu-item');
+      if (it) {
+        const src = document.getElementById(it.dataset.target);
+        closeMenu();
+        if (src) src.click();
+      }
+    });
+    return menuEl;
+  }
+
+  function fillMenu(dept) {
+    const sec = sectionOf(dept);
+    if (!sec || !menuEl) return;
+    const dflt = defaultPage(dept);
+    const activeItem = sec.querySelector('.nav-item.active');
+    menuEl.textContent = '';
+    pagesOf(sec).forEach(src => {
+      if (!src.id) return;
+      const row = document.createElement('div');
+      row.className = 'dept-menu-row';
+
+      const it = document.createElement('button');
+      it.type = 'button';
+      it.className = 'dept-menu-item' + (src === activeItem ? ' current' : '');
+      it.setAttribute('role', 'menuitem');
+      it.dataset.target = src.id;
+      // Copy icon, label and live badge counts; drop ids so nothing is duplicated.
+      const clone = src.cloneNode(true);
+      clone.querySelectorAll('[id]').forEach(el => el.removeAttribute('id'));
+      while (clone.firstChild) it.appendChild(clone.firstChild);
+      row.appendChild(it);
+
+      if (src.id !== LAUNCHER) {
+        const isDef = dflt === src;
+        const name = labelText(src);
+        const star = document.createElement('button');
+        star.type = 'button';
+        star.className = 'dept-menu-star' + (isDef ? ' is-default' : '');
+        star.dataset.dept = dept;
+        star.dataset.target = src.id;
+        star.title = isDef ? name + ' opens when you click the tab' : 'Open ' + name + ' when you click the tab';
+        star.setAttribute('aria-label', star.title);
+        star.setAttribute('aria-pressed', isDef ? 'true' : 'false');
+        star.innerHTML = '<svg width="15" height="15" viewBox="0 0 24 24" fill="' + (isDef ? 'currentColor' : 'none') + '" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>';
+        row.appendChild(star);
+      }
+      menuEl.appendChild(row);
+    });
+    const foot = document.createElement('div');
+    foot.className = 'dept-menu-foot';
+    foot.textContent = '★ = page that opens when you click ' + (sec.dataset.label || dept);
+    menuEl.appendChild(foot);
+  }
+
+  function positionMenu(dept) {
+    const wrap = document.querySelector('#deptTabs .dept-tab-wrap[data-dept="' + dept + '"]');
+    if (!wrap || !menuEl) return;
+    const r = wrap.getBoundingClientRect();
+    const w = menuEl.offsetWidth;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    menuEl.style.left = left + 'px';
+    menuEl.style.top = (r.bottom + 3) + 'px'; // just below the gold rule
+  }
+
+  function openMenu(dept) {
+    ensureMenu();
+    if (typeof _closeSetupMenu === 'function') _closeSetupMenu();
+    if (typeof _closeUserMenu === 'function') _closeUserMenu();
+    openDept = dept;
+    fillMenu(dept);
+    menuEl.hidden = false;
     render();
-    if (!openFirstPage) return;
-    const sec = document.querySelector('.sidebar .nav-section[data-section="' + dept + '"]');
-    // Skip the NUForce launcher: it opens another site in a new tab.
-    const first = sec && pagesOf(sec).find(i => i.id !== 'navNuforce');
-    if (first) first.click();
+    positionMenu(dept);
+  }
+
+  function closeMenu() {
+    if (!openDept) return;
+    openDept = null;
+    if (menuEl) menuEl.hidden = true;
+    render();
+  }
+
+  function goDefault(dept) {
+    closeMenu();
+    if (typeof _closeSetupMenu === 'function') _closeSetupMenu();
+    if (typeof _closeUserMenu === 'function') _closeUserMenu();
+    const page = defaultPage(dept);
+    if (page) page.click();
+  }
+
+  function setCurrent(dept) {
+    if (dept === ALWAYS) dept = null;
+    if (dept === current) return;
+    current = dept;
+    render();
   }
 
   function followHash(hash) {
@@ -440,7 +598,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // the first segment.
     const key = parts[0] === 'reports' && parts[1] ? 'reports/' + parts[1] : parts[0];
     const dept = HASH_DEPT[key];
-    if (dept && dept !== current) select(dept, false);
+    if (dept) setCurrent(dept);
   }
 
   // Re-render whenever auth.js finishes a visibility pass. Both
@@ -458,18 +616,36 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('DOMContentLoaded', () => {
     const bar = document.getElementById('deptTabs');
     if (bar) bar.addEventListener('click', e => {
-      const b = e.target.closest('.dept-tab');
-      if (b && b.dataset.dept !== current) select(b.dataset.dept, true);
+      const btn = e.target.closest('button[data-role]');
+      const wrap = btn && btn.closest('.dept-tab-wrap');
+      if (!wrap) return;
+      e.stopPropagation();
+      const dept = wrap.dataset.dept;
+      if (btn.dataset.role === 'caret') {
+        if (openDept === dept) closeMenu(); else openMenu(dept);
+      } else {
+        goDefault(dept);
+      }
     });
+    // Tabs scroll sideways on narrow screens; a scrolled tab would leave the menu behind.
+    if (bar) bar.addEventListener('scroll', closeMenu);
 
-    // A page opened from its sidebar item gets class "active"; follow it.
+    document.addEventListener('click', e => {
+      if (!openDept) return;
+      if (e.target.closest && (e.target.closest('#deptMenu') || e.target.closest('#deptTabs'))) return;
+      closeMenu();
+    });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenu(); });
+    window.addEventListener('resize', closeMenu);
+
+    // A page opened from its (hidden) sidebar item gets class "active"; follow it.
     const sidebar = document.querySelector('.sidebar');
     if (sidebar) new MutationObserver(muts => {
       for (const m of muts) {
         const el = m.target;
         if (!el.classList || !el.classList.contains('nav-item') || !el.classList.contains('active')) continue;
         const sec = el.closest('.nav-section[data-section]');
-        if (sec && sec.dataset.section !== ALWAYS && sec.dataset.section !== current) select(sec.dataset.section, false);
+        if (sec) setCurrent(sec.dataset.section);
       }
     }).observe(sidebar, { subtree: true, attributes: true, attributeFilter: ['class'] });
 
@@ -483,8 +659,11 @@ document.addEventListener('DOMContentLoaded', () => {
       };
     }
 
+    followHash(window.location.hash);
     render();
   });
+
+  window._closeDeptMenu = closeMenu;
 })();
 
 // ===== ACCOUNT MENU (top-right avatar) =====
@@ -499,6 +678,7 @@ function toggleUserMenu(e) {
   const open = menu.hidden;
   menu.hidden = !open;
   if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open && typeof window._closeDeptMenu === 'function') window._closeDeptMenu();
 }
 function _closeUserMenu() {
   const menu = document.getElementById('userMenu');
@@ -525,6 +705,7 @@ function toggleSetupMenu(e) {
   menu.hidden = !open;
   if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
   if (open && typeof _closeUserMenu === 'function') _closeUserMenu();
+  if (open && typeof window._closeDeptMenu === 'function') window._closeDeptMenu();
 }
 function _closeSetupMenu() {
   const menu = document.getElementById('setupMenu');

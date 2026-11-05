@@ -170,7 +170,7 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .nav-tip.show{opacity:1;}
 
 /* ===== DARK TOP BAR + DEPARTMENT TABS ===== */
-/* Tabs are built by nav.js from the sidebar's .nav-section[data-section] groups. */
+/* Tabs and their dropdowns are built by nav.js from the sidebar's (hidden) .nav-section[data-section] groups. */
 .topbar{background:#141416;border-bottom:3px solid #d9a441;}
 .topbar .sb-toggle{color:#e6e6ea;}
 .topbar .sb-toggle:hover{background:rgba(255,255,255,.10);color:#fff;}
@@ -190,6 +190,36 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .topbar .global-search-input::placeholder{color:#b5b5bd;}
 .topbar .global-search-input:focus{border-color:#d9a441;box-shadow:0 0 0 3px rgba(217,164,65,.25);}
 .sidebar .nav-section.dept-off,.sidebar .brand-block.dept-off{display:none !important;}
+/* Split tabs: label opens the department's default page, caret opens its dropdown (nav.js). */
+.dept-tab-wrap{display:flex;align-items:stretch;flex-shrink:0;border-bottom:3px solid transparent;transition:background var(--transition);}
+.dept-tab-wrap .dept-tab{border-bottom:0;padding:0 6px 0 14px;}
+.dept-tab-wrap .dept-tab:hover{background:transparent;}
+.dept-tab-wrap:hover{background:rgba(255,255,255,.06);}
+.dept-tab-wrap.active{border-bottom-color:#d9a441;background:rgba(255,255,255,.08);}
+.dept-tab-wrap.active .dept-tab{color:#fff;font-weight:600;}
+.dept-tab-wrap.open{background:rgba(255,255,255,.14);}
+.dept-tab-wrap.open .dept-tab{color:#fff;}
+.dept-caret{background:transparent;border:0;border-left:1px solid rgba(255,255,255,.14);color:#9a9aa2;width:26px;margin:8px 4px 8px 0;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:0 4px 4px 0;transition:color var(--transition),background var(--transition);}
+.dept-caret:hover{color:#fff;background:rgba(255,255,255,.10);}
+.dept-tab-wrap.open .dept-caret{color:#d9a441;}
+.dept-tab-wrap.open .dept-caret svg{transform:rotate(180deg);}
+.dept-caret svg{transition:transform var(--transition);}
+.dept-caret:focus-visible{outline:2px solid #d9a441;outline-offset:-2px;}
+.dept-menu{position:fixed;min-width:240px;max-width:calc(100vw - 16px);background:var(--surface);border:1px solid var(--border);border-top:0;border-radius:0 0 10px 10px;box-shadow:0 12px 30px rgba(0,0,0,.18);z-index:9500;padding:6px;}
+.dept-menu[hidden]{display:none;}
+.dept-menu-row{display:flex;align-items:center;gap:2px;}
+.dept-menu-item{flex:1;min-width:0;display:flex;align-items:center;gap:10px;text-align:left;background:transparent;border:0;border-radius:6px;padding:9px 10px;font-family:'DM Sans',sans-serif;font-size:13.5px;color:var(--text);cursor:pointer;white-space:nowrap;}
+.dept-menu-item:hover{background:var(--surface2);}
+.dept-menu-item.current{background:var(--amber-glow);color:var(--amber);font-weight:600;}
+.dept-menu-item .icon{font-size:14px;width:18px;text-align:center;flex-shrink:0;}
+.dept-menu-item .icon.survey-count{font-weight:500;}
+.dept-menu-item .icon.survey-count.has-items{color:var(--amber);}
+.dept-menu-item .nav-badge{margin-left:auto;}
+.dept-menu-star{flex-shrink:0;width:34px;height:34px;background:transparent;border:0;border-radius:6px;color:#b9b2a3;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+.dept-menu-star:hover{background:var(--surface2);color:#d9a441;}
+.dept-menu-star.is-default{color:#d9a441;}
+.dept-menu-star:focus-visible,.dept-menu-item:focus-visible{outline:2px solid #d9a441;outline-offset:-2px;}
+.dept-menu-foot{border-top:1px solid var(--border);margin-top:4px;padding:8px 10px 4px;font-size:11.5px;color:var(--muted);}
 
 /* ===== ACCOUNT MENU (top bar, replaces the sidebar-footer badge) ===== */
 .user-menu-wrap{position:relative;flex-shrink:0;}
