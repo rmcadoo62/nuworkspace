@@ -209,3 +209,12 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 /* openReportPage() (reports.js) shows one report as its own page: hide the tab strip. */
 #panel-reports.report-single .reports-tabs{display:none;}
 .user-menu-ver{font-size:11px;color:var(--muted);padding:8px 10px 4px;margin-top:4px;border-top:1px solid var(--border);font-family:'JetBrains Mono',monospace;}
+
+/* ===== SETUP GEAR (top bar) ===== */
+.setup-menu-wrap{position:relative;flex-shrink:0;}
+.setup-gear-btn{background:transparent;border:0;border-radius:6px;width:34px;height:34px;display:flex;align-items:center;justify-content:center;color:#e6e6ea;font-size:19px;line-height:1;cursor:pointer;}
+.setup-gear-btn:hover,.setup-gear-btn[aria-expanded="true"]{background:rgba(255,255,255,.12);color:#fff;}
+.setup-gear-btn:focus-visible{outline:2px solid #d9a441;outline-offset:1px;}
+.setup-menu .nav-item{color:var(--text);}
+.setup-menu{min-width:230px;}
+.setup-menu-sep{height:1px;background:var(--border);margin:6px 4px;}

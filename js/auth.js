@@ -1178,11 +1178,24 @@ function applyPermissions() {
     navRptInProgress: 'view_rpt_inprogress', navRptStale: 'view_rpt_stale',
     navRptRevenue: 'view_rpt_revenue', navRptBilling: 'view_billing',
     navRptEmpHours: 'view_rpt_emphours', navRptTimesheets: 'view_rpt_timesheets',
-    navRptClosedJobs: 'view_rpt_closedjobs',
+    navRptClosedJobs: 'view_rpt_closedjobs', navCashFlow: 'view_cash_flow',
   };
   Object.entries(rptCaps).forEach(([id, cap]) => {
     const el = document.getElementById(id);
     if (el) el.style.display = can(cap) ? 'flex' : 'none';
+  });
+  // Setup gear menu — same gates as the tiles on the Setup page (admin.js)
+  const gearCaps = {
+    navGearPermissions:   can('manage_permissions'),
+    navGearSchedSettings: can('manage_permissions'),
+    navGearTemplates:     can('manage_templates'),
+    navGearAuditLog:      can('view_audit_log'),
+    navGearMergeClients:  can('manage_employees') || isManager(),
+    navGearCompanyDocs:   isManager(),
+  };
+  Object.entries(gearCaps).forEach(([id, ok]) => {
+    const el = document.getElementById(id);
+    if (el) el.style.display = ok ? 'flex' : 'none';
   });
   // Employees (HR) — same gate as the Setup tile it replaced
   const navEmps = document.getElementById('navEmployees');

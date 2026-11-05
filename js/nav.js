@@ -371,8 +371,8 @@ document.addEventListener('DOMContentLoaded', () => {
     'reports/billing': 'billing',
     clients: 'quotes', surveys: 'quotes',
     employees: 'hr', 'reports/employees': 'hr', 'reports/timesheets': 'hr',
-    closingreport: 'admin', 'reports/closedjobs': 'admin',
-    setup: 'admin', auditlog: 'admin', permissions: 'admin',
+    closingreport: 'production',
+    'reports/closedjobs': 'admin', cashflow: 'admin',
   };
 
   let current = null;
@@ -394,6 +394,18 @@ document.addEventListener('DOMContentLoaded', () => {
       const label = s.previousElementSibling;
       if (label && label.classList.contains('brand-block')) label.classList.toggle('dept-off', off);
     });
+
+    // Setup gear in the top bar: show it when any of its items is visible.
+    const gear = document.getElementById('setupMenuWrap');
+    if (gear) {
+      const items = Array.from(gear.querySelectorAll('.nav-item'));
+      gear.style.display = items.some(isShown) ? '' : 'none';
+      // Divider above Issue Tracker only when there is something on both sides.
+      const sep = gear.querySelector('.setup-menu-sep');
+      const issues = document.getElementById('navIssueTracker');
+      if (sep) sep.style.display = (issues && isShown(issues) &&
+        items.some(i => i !== issues && isShown(i))) ? '' : 'none';
+    }
 
     const bar = document.getElementById('deptTabs');
     if (!bar) return;
@@ -500,3 +512,30 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeUserMenu(); });
 window.toggleUserMenu = toggleUserMenu;
+
+// ===== SETUP GEAR MENU (top bar) =====
+// Holds Setup and Issue Tracker (system configuration, not daily work). The
+// items keep their ids, so auth.js still decides who sees each one.
+function toggleSetupMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('setupMenu');
+  const btn = document.getElementById('setupGearBtn');
+  if (!menu) return;
+  const open = menu.hidden;
+  menu.hidden = !open;
+  if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open && typeof _closeUserMenu === 'function') _closeUserMenu();
+}
+function _closeSetupMenu() {
+  const menu = document.getElementById('setupMenu');
+  if (!menu || menu.hidden) return;
+  menu.hidden = true;
+  const btn = document.getElementById('setupGearBtn');
+  if (btn) btn.setAttribute('aria-expanded', 'false');
+}
+document.addEventListener('click', e => {
+  if (!e.target.closest || !e.target.closest('#setupMenuWrap')) _closeSetupMenu();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeSetupMenu(); });
+window.toggleSetupMenu = toggleSetupMenu;
+window._closeSetupMenu = _closeSetupMenu;

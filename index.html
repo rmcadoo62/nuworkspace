@@ -122,6 +122,23 @@
     <div class="global-search-results" id="globalSearchResults"></div>
   </div>
 
+  <!-- Setup gear: shown by nav.js when Setup or Issue Tracker is visible to this user -->
+  <!-- Hidden anchor: admin.js and the "← Setup" back buttons still reference #navSetup. -->
+  <div style="display:none" aria-hidden="true"><span id="navSetup"></span></div>
+  <div class="setup-menu-wrap" id="setupMenuWrap" style="display:none">
+    <button class="setup-gear-btn" id="setupGearBtn" type="button" onclick="toggleSetupMenu(event)" title="Setup" aria-label="Setup" aria-haspopup="true" aria-expanded="false">&#x2699;</button>
+    <div class="user-menu setup-menu" id="setupMenu" hidden>
+      <div class="nav-item" id="navGearPermissions" style="display:none" onclick="openPermissionsPanel();_closeSetupMenu()"><span class="icon">&#x1F510;</span> Permissions</div>
+      <div class="nav-item" id="navGearSchedSettings" style="display:none" onclick="openSchedSettingsPanel();_closeSetupMenu()"><span class="icon">&#x1F4C5;</span> Scheduler Settings</div>
+      <div class="nav-item" id="navGearTemplates" style="display:none" onclick="openTemplatesPanel(this);_closeSetupMenu()"><span class="icon">&#x1F4CB;</span> Templates</div>
+      <div class="nav-item" id="navGearAuditLog" style="display:none" onclick="openAuditLogPanel(this);_closeSetupMenu()"><span class="icon">&#x1F4DD;</span> Audit Log</div>
+      <div class="nav-item" id="navGearMergeClients" style="display:none" onclick="openMergeClientsPanel(this);_closeSetupMenu()"><span class="icon">&#x1F9F9;</span> Merge Duplicate Clients</div>
+      <div class="nav-item" id="navGearCompanyDocs" style="display:none" onclick="openCompanyDocsPanel(this);_closeSetupMenu()"><span class="icon">&#x1F4D6;</span> Company Documents</div>
+      <div class="setup-menu-sep" aria-hidden="true"></div>
+      <div class="nav-item" id="navIssueTracker" style="display:none" onclick="openIssueTrackerPanel(this);_closeSetupMenu()"><span class="icon">&#x1F41B;</span> Issue Tracker <span class="nav-badge" id="issuesBadge" style="display:none">0</span></div>
+    </div>
+  </div>
+
   <!-- Bug Report -->
   <div class="notif-bell-wrap" style="position:relative">
     <button class="notif-bell-btn" id="bugReportBtn" onclick="openBugReportModal()" title="Report Bug or Request Feature">
@@ -153,7 +170,7 @@
       </div>
       <button class="user-menu-item" type="button" onclick="doLogout()">&#x23FB;&nbsp; Sign out</button>
       <!-- Bump on each push (YYYY.MM.DD, add .2, .3 for a second push the same day) -->
-      <div class="user-menu-ver">NUWorkspace 2026.11.04</div>
+      <div class="user-menu-ver">NUWorkspace 2026.11.04.2</div>
     </div>
   </div>
 </div>
@@ -183,6 +200,7 @@
   <div class="nav-section" data-section="production" data-label="Production">
     <div class="nav-item" id="navRptInProgress" style="display:none" onclick="openReportPage('overview',this)"><span class="icon">&#x23F3;</span> In Progress</div>
     <div class="nav-item" id="navRptStale" style="display:none" onclick="openReportPage('stale',this)"><span class="icon">&#x1F4A4;</span> Stale Projects</div>
+    <div class="nav-item" id="navClosingReport" onclick="openClosingReport(this)"><span class="icon">&#x1F4CB;</span> Closing Report <span class="nav-badge" id="closingBadge" style="display:none">0</span></div>
     <div class="nav-item" id="navRptRevenue" style="display:none" onclick="openReportPage('revenue',this)"><span class="icon">&#x1F4C8;</span> Revenue Projection</div>
     <div class="nav-item" id="navVendors" onclick="openVendorsPanel(this)" style="display:none"><span class="icon">&#x1F3ED;</span> Vendors</div>
   </div>
@@ -213,10 +231,8 @@
     <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Admin</div>
   </div>
   <div class="nav-section" data-section="admin" data-label="Admin">
-    <div class="nav-item" id="navClosingReport" onclick="openClosingReport(this)"><span class="icon">&#x1F4CB;</span> Closing Report <span class="nav-badge" id="closingBadge" style="display:none">0</span></div>
     <div class="nav-item" id="navRptClosedJobs" style="display:none" onclick="openReportPage('closedjobs',this)"><span class="icon">&#x1F4CA;</span> Closed Jobs</div>
-    <div class="nav-item" id="navSetup" onclick="openSetupPanel(this)"><span class="icon">&#x2699;</span> Setup</div>
-    <div class="nav-item" id="navIssueTracker" style="display:none" onclick="openIssueTrackerPanel(this)"><span class="icon">&#x1F41B;</span> Issue Tracker <span class="nav-badge" id="issuesBadge" style="display:none">0</span></div>
+    <div class="nav-item" id="navCashFlow" style="display:none" onclick="openCashFlowPanel(this)"><span class="icon">&#x1F4B5;</span> Cash Flow Tracker</div>
   </div>
 
   </div><!-- /sidebar-nav-scroll -->

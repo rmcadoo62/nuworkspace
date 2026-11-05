@@ -1,13 +1,11 @@
 // ===== CASH FLOW TRACKER =====
 // ===== CASH FLOW TRACKER =====
-// New, self-contained feature file — does not modify dashboard.js, auth.js's
-// applyPermissions body, or any other existing file's logic. Instead it wraps
-// renderDashboard() (to inject a gated button at the top of the Dashboard)
-// and applyPermissions() (to keep that button's visibility in sync with the
-// current user's capabilities), following the same wrapping convention used
-// by nav.js and router.js elsewhere in this codebase.
+// Self-contained feature file. Opened from its own sidebar item (Admin →
+// Cash Flow Tracker, #navCashFlow in index.html), whose visibility auth.js's
+// applyPermissions() sets. It used to be a button injected at the top of the
+// Dashboard; that injection was removed Nov 4, 2026 with the nav reorg.
 //
-// Gated by the 'view_cash_flow' capability (Setup → Permissions → Financials).
+// Gated by the 'view_cash_flow' capability (Setup → Permissions → Admin).
 // Real security is enforced by Postgres RLS on cash_flow_entries — see
 // cash_flow_migration.sql. The client-side gating here is UI convenience only.
 
@@ -448,15 +446,9 @@ function _cfApplyButtonVisibility() {
   bar.style.display = allowed ? '' : 'none';
 }
 
-(function _cfWrapRenderDashboard() {
-  const orig = window.renderDashboard;
-  if (typeof orig !== 'function') return; // dashboard.js not loaded — nothing to wrap
-  window.renderDashboard = function (...args) {
-    const r = orig.apply(this, args);
-    _cfEnsureDashboardButton();
-    return r;
-  };
-})();
+// (Dashboard button injection removed: Cash Flow now has its own sidebar item.
+// _cfEnsureDashboardButton / _cfApplyButtonVisibility are left in place but
+// inert — no button is created, so there is nothing to show or hide.)
 
 (function _cfWrapApplyPermissions() {
   const orig = window.applyPermissions;
@@ -475,6 +467,8 @@ async function openCashFlowPanel(el) {
     return;
   }
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const _cfNav = el || document.getElementById('navCashFlow');
+  if (_cfNav) _cfNav.classList.add('active');
   if (typeof activeProjectId !== 'undefined') activeProjectId = null;
   const topbar = document.getElementById('topbarName');
   if (topbar) topbar.textContent = 'Cash Flow Tracker';
