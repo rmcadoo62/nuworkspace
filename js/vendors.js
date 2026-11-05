@@ -26,8 +26,9 @@ let vendorContactStore = [];   // vendor_contacts rows
 let _vendorsLoaded     = false;
 
 let _vendorSearch       = '';
-let _vendorStatusFilter = 'current';   // current | approved | proposed | rejected | inactive | all
-let _vendorTypeFilter   = 'all';       // 'all' or a service type id
+// Quick filters are multi-select: a set of ticked values; an empty set means "all".
+let _vendorStatusFilter = new Set(['approved', 'proposed']);   // "Current" = approved + proposed
+let _vendorTypeFilter   = new Set();                           // service type ids
 let _vendorFlagFilter   = false;       // show only vendors with 17025 flags
 
 let _vendorDrawerId  = null;           // null = new vendor
@@ -187,13 +188,10 @@ function renderVendorsPanel() {
     });
   }
 
-  const statusOk = v => {
-    if (_vendorStatusFilter === 'all')     return true;
-    if (_vendorStatusFilter === 'current') return v.status === 'approved' || v.status === 'proposed';
-    return v.status === _vendorStatusFilter;
-  };
-  const typeOk = v => _vendorTypeFilter === 'all' || vTypeIdsFor(v.id).includes(_vendorTypeFilter);
-  const searchOk = v => !q || v.name.toLowerCase().includes(q) || !!contactHits[v.id];
+  const statusOk = v => !_vendorStatusFilter.size || _vendorStatusFilter.has(v.status);
+  const typeOk = v => !_vendorTypeFilter.size || vTypeIdsFor(v.id).some(t => _vendorTypeFilter.has(t));
+  const nameHit = v => v.name.toLowerCase().includes(q) || (v.nickname || '').toLowerCase().includes(q);
+  const searchOk = v => !q || nameHit(v) || !!contactHits[v.id];
   const flagOk = v => !_vendorFlagFilter || vVendorFlags(v).length > 0;
 
   const list = vendorStore.filter(v => statusOk(v) && typeOk(v) && searchOk(v) && flagOk(v))
@@ -208,14 +206,17 @@ function renderVendorsPanel() {
     `<button class="vnd-chip ${active ? 'active' : ''} ${extraCls || ''}" onclick="${onclick}">${label}` +
     (n != null ? ` <span class="vnd-chip-n">${n}</span>` : '') + `</button>`;
 
-  const statusChips = [
-    ['current', 'Current'], ['approved', 'Approved'], ['proposed', 'Proposed'],
-    ['rejected', 'Rejected'], ['inactive', 'Inactive'], ['all', 'All'],
-  ].map(([k, l]) => chip(_vendorStatusFilter === k, `_vendorStatusFilter='${k}';renderVendorsPanel()`, l, count(k))).join('');
+  // Status chips: Current and All are presets; the others toggle on and off together.
+  const isCurrent = _vendorStatusFilter.size === 2 && _vendorStatusFilter.has('approved') && _vendorStatusFilter.has('proposed');
+  const statusChips =
+    chip(isCurrent, `_vendorSetStatus('current')`, 'Current', count('current')) +
+    ['approved', 'proposed', 'rejected', 'inactive'].map(k =>
+      chip(!isCurrent && _vendorStatusFilter.has(k), `_vendorSetStatus('${k}')`, VENDOR_STATUS[k].label, count(k))).join('') +
+    chip(!_vendorStatusFilter.size, `_vendorSetStatus('all')`, 'All', count('all'));
 
-  const typeChips = chip(_vendorTypeFilter === 'all', `_vendorTypeFilter='all';renderVendorsPanel()`, 'All services') +
+  const typeChips = chip(!_vendorTypeFilter.size, `_vendorTypeFilter.clear();renderVendorsPanel()`, 'All services') +
     vendorTypeStore.filter(t => t.active).map(t =>
-      chip(_vendorTypeFilter === t.id, `_vendorTypeFilter='${t.id}';renderVendorsPanel()`, vEsc(t.name),
+      chip(_vendorTypeFilter.has(t.id), `_vendorToggleType('${t.id}')`, vEsc(t.name),
         vendorServiceStore.filter(s => s.service_type_id === t.id).length)
     ).join('');
 
@@ -233,7 +234,7 @@ function renderVendorsPanel() {
     const contacts = vendorContactStore.filter(ct => ct.vendor_id === v.id);
     const flags = vVendorFlags(v);
     const st = VENDOR_STATUS[v.status] || VENDOR_STATUS.approved;
-    const hits = (q && !v.name.toLowerCase().includes(q)) ? (contactHits[v.id] || []) : [];
+    const hits = (q && !nameHit(v)) ? (contactHits[v.id] || []) : [];
     return `<div class="client-card vnd-card ${v.status !== 'approved' ? 'vnd-dim-' + v.status : ''}" onclick="openVendorDrawer('${v.id}')">
       <div class="client-actions">
         <button class="client-action-btn" onclick="event.stopPropagation();openVendorDrawer('${v.id}')" title="${vCanEdit() ? 'Edit' : 'View'}">&#x270E;</button>
@@ -243,6 +244,7 @@ function renderVendorsPanel() {
         <div class="client-name">${vEsc(v.name)}</div>
         ${v.status !== 'approved' ? `<span class="vnd-status ${st.cls}">${st.label}</span>` : ''}
       </div>
+      ${v.nickname ? `<div class="vnd-nick">“${vEsc(v.nickname)}”</div>` : ''}
       ${v.city || v.state ? `<div class="vnd-sub">${vEsc([v.city, v.state].filter(Boolean).join(', '))}</div>` : ''}
       ${v.phone ? `<div class="vnd-sub">📞 ${vEsc(v.phone)}</div>` : ''}
       <div class="vnd-type-row">
@@ -258,7 +260,7 @@ function renderVendorsPanel() {
   body.innerHTML = `
     <div class="emp-panel-header">
       <div class="emp-panel-title">Vendors <span class="vnd-count">(${vendorStore.length})</span></div>
-      <input class="emp-search" placeholder="Search vendors & contacts…" value="${vEsc(_vendorSearch)}"
+      <input class="emp-search" placeholder="Search vendors, nicknames & contacts…" value="${vEsc(_vendorSearch)}"
         oninput="_vendorSearch=this.value;renderVendorsPanel()" />
       ${vCanEdit() ? `<button class="emp-add-btn vnd-secondary-btn" onclick="openVendorTypesModal()" title="Add or edit service types">⚙ Service Types</button>` : ''}
       ${vCanEdit() ? `<button class="emp-add-btn" onclick="openNewVendorDrawer()">+ Add Vendor</button>` : ''}
@@ -279,27 +281,46 @@ function renderVendorsPanel() {
   }
 }
 
+// Quick-filter clicks. Current / All are presets; a plain status chip toggles
+// (clicking one while Current is showing starts a fresh selection with just that one).
+function _vendorSetStatus(k) {
+  if (k === 'all') _vendorStatusFilter = new Set();
+  else if (k === 'current') _vendorStatusFilter = new Set(['approved', 'proposed']);
+  else {
+    const cur = _vendorStatusFilter;
+    const isCurrent = cur.size === 2 && cur.has('approved') && cur.has('proposed');
+    if (isCurrent || !cur.size) _vendorStatusFilter = new Set([k]);
+    else if (cur.has(k)) cur.delete(k);
+    else cur.add(k);
+  }
+  renderVendorsPanel();
+}
+function _vendorToggleType(id) {
+  if (_vendorTypeFilter.has(id)) _vendorTypeFilter.delete(id); else _vendorTypeFilter.add(id);
+  renderVendorsPanel();
+}
+
 // ---------- drawer ----------
 function ensureVendorDrawer() {
   if (document.getElementById('vendorDrawer')) return;
   const bd = document.createElement('div');
   bd.className = 'client-drawer-backdrop';
   bd.id = 'vendorDrawerBackdrop';
-  bd.onclick = closeVendorDrawer;
+  bd.onclick = () => closeVendorDrawer();
   const dr = document.createElement('div');
   dr.className = 'client-drawer vnd-drawer';
   dr.id = 'vendorDrawer';
   dr.innerHTML = `
     <div class="client-drawer-header">
       <div class="client-drawer-title" id="vendorDrawerTitle">Vendor</div>
-      <button class="client-drawer-close" onclick="closeVendorDrawer()">&#x2715;</button>
+      <button class="client-drawer-close" onclick="closeVendorDrawer()" title="Close">&#x2715;</button>
     </div>
     <div class="client-drawer-tabs" id="vendorDrawerTabs"></div>
     <div class="client-drawer-body" id="vendorDrawerBody"></div>
     <div class="client-save-bar" id="vendorSaveBar">
       <button class="btn btn-ghost" id="vendorDeleteBtn" onclick="deleteVendorFromDrawer()" style="margin-right:auto;color:var(--red)">&#x1F5D1; Delete Vendor</button>
       <button class="btn btn-primary" id="vendorSaveBtn" onclick="saveVendorDrawer()">Save Changes</button>
-      <button class="btn btn-ghost" onclick="closeVendorDrawer()">Cancel</button>
+      <button class="btn btn-ghost" onclick="closeVendorDrawer()">Close</button>
     </div>`;
   document.body.appendChild(bd);
   document.body.appendChild(dr);
@@ -333,10 +354,41 @@ function _showVendorDrawer() {
   document.getElementById('vendorDrawerBackdrop').classList.add('open');
 }
 
-function closeVendorDrawer() {
+// Close the drawer. Unless forced (after a save or delete), ask first when the
+// Details form has edits that haven't been saved.
+function closeVendorDrawer(force) {
+  if (!document.getElementById('vendorDrawer')?.classList.contains('open')) return;
+  if (!force && _vendorDrawerDirty() && !confirm('Discard unsaved changes to this vendor?')) return;
   document.getElementById('vendorDrawer')?.classList.remove('open');
   document.getElementById('vendorDrawerBackdrop')?.classList.remove('open');
   _vendorDraft = null;
+}
+
+// The Details values as stored (or blank, for a new vendor).
+function _vendorBaseline(v) {
+  return {
+    name: v?.name || '', nickname: v?.nickname || '', phone: v?.phone || '', website: v?.website || '',
+    account_number: v?.account_number || '', payment_terms: v?.payment_terms || '',
+    address: v?.address || '', city: v?.city || '', state: v?.state || '', zip: v?.zip || '',
+    notes: v?.notes || '', status: v?.status || 'approved',
+    accreditation_body: v?.accreditation_body || '', accreditation_cert: v?.accreditation_cert || '',
+    accreditation_scope_url: v?.accreditation_scope_url || '', accreditation_expires: v?.accreditation_expires || '',
+    approval_basis: v?.approval_basis || '', reeval_due: v?.reeval_due || '',
+    typeIds: v ? vTypeIdsFor(v.id) : [],
+  };
+}
+
+// Has anything on the Details form changed since it was opened or saved?
+function _vendorDrawerDirty() {
+  if (!vCanEdit()) return false;
+  if (_vendorDrawerTab === 'vtab-info') _captureVendorForm();
+  if (!_vendorDraft) return false;
+  const v = _vendorDrawerId ? vendorStore.find(x => x.id === _vendorDrawerId) : null;
+  const base = _vendorBaseline(v);
+  const norm = x => String(x == null ? '' : x).trim();
+  return Object.keys(base).some(k => k === 'typeIds'
+    ? [...base.typeIds].sort().join() !== [...(_vendorDraft.typeIds || [])].sort().join()
+    : norm(base[k]) !== norm(_vendorDraft[k]));
 }
 
 function switchVendorDrawerTab(tab) {
@@ -377,16 +429,7 @@ function renderVendorDrawer() {
 }
 
 function _vendorInfoHtml(v, editable) {
-  const d = _vendorDraft || {
-    name: v?.name || '', phone: v?.phone || '', website: v?.website || '',
-    account_number: v?.account_number || '', payment_terms: v?.payment_terms || '',
-    address: v?.address || '', city: v?.city || '', state: v?.state || '', zip: v?.zip || '',
-    notes: v?.notes || '', status: v?.status || 'approved',
-    accreditation_body: v?.accreditation_body || '', accreditation_cert: v?.accreditation_cert || '',
-    accreditation_scope_url: v?.accreditation_scope_url || '', accreditation_expires: v?.accreditation_expires || '',
-    approval_basis: v?.approval_basis || '', reeval_due: v?.reeval_due || '',
-    typeIds: v ? vTypeIdsFor(v.id) : [],
-  };
+  const d = _vendorDraft || _vendorBaseline(v);
   const dis = editable ? '' : 'disabled';
   const inp = (id, val, ph, type) =>
     `<input id="${id}" type="${type || 'text'}" value="${vEsc(val)}" placeholder="${vEsc(ph || '')}" ${dis} />`;
@@ -408,7 +451,10 @@ function _vendorInfoHtml(v, editable) {
   return `
     <div class="client-detail-section">
       <div class="client-detail-section-title">Company</div>
-      <div class="client-field" style="margin-bottom:10px"><label>Vendor Name *</label>${inp('vdName', d.name, 'Company name').replace('<input ', '<input class="full" ')}</div>
+      <div class="client-field-row">
+        <div class="client-field" style="flex:2"><label>Vendor Name *</label>${inp('vdName', d.name, 'Company name').replace('<input ', '<input class="full" ')}</div>
+        <div class="client-field" style="flex:1"><label>Nickname</label>${inp('vdNick', d.nickname, 'e.g. IPM').replace('<input ', '<input class="full" ')}</div>
+      </div>
       <div class="client-field-row">${field('Phone', 'vdPhone', d.phone, '+1 (555) 000-0000')}${field('Website', 'vdWebsite', d.website, 'www.example.com')}</div>
       <div class="client-field-row">${field('Our Account #', 'vdAccount', d.account_number, '')}${field('Payment Terms', 'vdTerms', d.payment_terms, 'Net 30')}</div>
     </div>
@@ -467,7 +513,7 @@ function _captureVendorForm() {
   const prev = _vendorDraft || {};
   const keep = (id, key) => { const x = val(id); return x === undefined ? (prev[key] || '') : x; };
   _vendorDraft = {
-    name: val('vdName'), phone: val('vdPhone'), website: val('vdWebsite'),
+    name: val('vdName'), nickname: val('vdNick'), phone: val('vdPhone'), website: val('vdWebsite'),
     account_number: val('vdAccount'), payment_terms: val('vdTerms'),
     address: val('vdAddress'), city: val('vdCity'), state: val('vdState'), zip: val('vdZip'),
     notes: val('vdNotes'), status: val('vdStatus'),
@@ -502,6 +548,7 @@ async function saveVendorDrawer() {
 
   const fields = {
     name,
+    nickname: nz(d.nickname),
     phone: nz(d.phone), website: nz(d.website),
     account_number: nz(d.account_number), payment_terms: nz(d.payment_terms),
     address: nz(d.address), city: nz(d.city), state: nz(d.state), zip: nz(d.zip),
@@ -550,10 +597,18 @@ async function saveVendorDrawer() {
     await loadVendorData();
     _vendorDrawerId = vendorId;
     _vendorDraft = null;
-    document.getElementById('vendorDrawerTitle').textContent = name;
-    renderVendorDrawer();
     renderVendorsPanel();
-    vToast(existing ? '✓ Vendor saved' : '✓ Vendor added');
+    if (existing) {
+      // Saved: done with this vendor.
+      closeVendorDrawer(true);
+      vToast('✓ Vendor saved');
+    } else {
+      // New vendor: stay open on Contacts, which only exists once the vendor is saved.
+      document.getElementById('vendorDrawerTitle').textContent = name;
+      _vendorDrawerTab = 'vtab-contacts';
+      renderVendorDrawer();
+      vToast('✓ Vendor added — add contacts, or close when done');
+    }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Save Changes'; }
   }
@@ -575,7 +630,7 @@ async function deleteVendor(id) {
   if (!confirm(`Delete "${v.name}" with its contacts and evaluation history? This cannot be undone.\n\nTo stop using a vendor but keep its history, set its status to Inactive instead.`)) return;
   const { error } = await sb.from('vendors').delete().eq('id', id);
   if (error) { vErr('Could not delete vendor', error); return; }
-  if (_vendorDrawerId === id) closeVendorDrawer();
+  if (_vendorDrawerId === id) closeVendorDrawer(true);
   await loadVendorData();
   renderVendorsPanel();
   vToast('Vendor deleted');

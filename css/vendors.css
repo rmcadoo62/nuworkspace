@@ -24,6 +24,7 @@
 /* cards */
 .vnd-card{cursor:pointer;}
 .vnd-card-top{display:flex;align-items:center;gap:8px;padding-right:48px;}
+.vnd-nick{font-size:12px;color:var(--muted);font-style:italic;margin-top:-2px;}
 .vnd-card-foot{font-size:11px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
 .vnd-card-foot strong{color:var(--text);}
 .vnd-dim-rejected,.vnd-dim-inactive{opacity:.6;}

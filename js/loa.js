@@ -23,7 +23,12 @@ let _loaLoaded  = false;
 let _loaLoading = null;
 
 let _loaSearch  = '';
-let _loaFilter  = { status: 'in_service', calType: 'all', location: 'all', vendor: 'all', due: 'all' };
+// Filters are multi-select: each is a Set of ticked values, and an empty Set means "all".
+function _loaDefaultFilter() {
+  return { status: new Set(['in_service']), calType: new Set(), location: new Set(), vendor: new Set(), due: new Set() };
+}
+let _loaFilter  = _loaDefaultFilter();
+let _loaMsOpen  = null;     // which filter dropdown is open (key) or null
 let _loaSort    = { key: 'asset_id', dir: 1 };
 let _loaSelected = new Set();
 let _loaShowLimit = 300;
@@ -92,6 +97,12 @@ function lVendorName(id) {
   if (!id || typeof vendorStore === 'undefined') return '';
   const v = vendorStore.find(x => x.id === id);
   return v ? v.name : '';
+}
+// Nickname when there is one (for tight columns); full name otherwise.
+function lVendorShort(id) {
+  if (!id || typeof vendorStore === 'undefined') return '';
+  const v = vendorStore.find(x => x.id === id);
+  return v ? (v.nickname || v.name) : '';
 }
 function lLocName(id) { const l = loaLocations.find(x => x.id === id); return l ? l.name : ''; }
 function lCalTypeLabel(a) {
@@ -198,24 +209,14 @@ function _loaFiltered() {
   const q = _loaSearch.toLowerCase().trim();
   const f = _loaFilter;
   return loaAssets.filter(a => {
-    if (f.status !== 'all' && a.status !== f.status) return false;
-    if (f.calType !== 'all') {
-      if (f.calType === 'none' ? !!a.cal_type : a.cal_type !== f.calType) return false;
+    if (f.status.size && !f.status.has(a.status)) return false;
+    if (f.calType.size && !(a.cal_type ? f.calType.has(a.cal_type) : f.calType.has('none'))) return false;
+    if (f.location.size && !(a.location_id ? f.location.has(a.location_id) : f.location.has('none'))) return false;
+    if (f.vendor.size) {
+      const inHouse = f.vendor.has('in_house') && !!loaStatus[a.asset_id]?.last_cal_in_house;
+      if (!inHouse && !(a.cal_vendor_id && f.vendor.has(a.cal_vendor_id))) return false;
     }
-    if (f.location !== 'all') {
-      if (f.location === 'none' ? !!a.location_id : a.location_id !== f.location) return false;
-    }
-    if (f.vendor !== 'all') {
-      if (f.vendor === 'in_house') { if (!loaStatus[a.asset_id]?.last_cal_in_house) return false; }
-      else if (a.cal_vendor_id !== f.vendor) return false;
-    }
-    if (f.due !== 'all') {
-      const st = lDueState(a);
-      if (f.due === 'overdue' && st !== 'overdue') return false;
-      if (f.due === 'soon' && st !== 'soon') return false;
-      if (f.due === 'due' && st !== 'overdue' && st !== 'soon') return false;
-      if (f.due === 'out' && st !== 'out') return false;
-    }
+    if (f.due.size && !f.due.has(lDueState(a))) return false;
     if (q) {
       const hay = [a.asset_id, a.description, a.manufacturer, a.model_no, a.serial_no, a.test_category, a.notes]
         .join(' ').toLowerCase();
@@ -232,7 +233,7 @@ function _loaSortVal(a, key) {
     case 'cal_type': return lCalTypeLabel(a).toLowerCase();
     case 'last_cal': return s.last_cal_date || '';
     case 'next_due': return s.next_due || (s.out_for_cal ? '0000' : '9999');
-    case 'vendor':   return (s.last_cal_in_house ? 'nu labs' : lVendorName(a.cal_vendor_id)).toLowerCase();
+    case 'vendor':   return (s.last_cal_in_house ? 'nu labs' : lVendorShort(a.cal_vendor_id)).toLowerCase();
     default:         return String(a[key] == null ? '' : a[key]).toLowerCase();
   }
 }
@@ -289,15 +290,14 @@ function renderLoaPanel() {
   const selStart = wasFocused ? searchEl.selectionStart : null;
 
   const tile = (key, label, n, cls) => {
-    const active = (key === 'overdue' || key === 'soon' || key === 'out') ? _loaFilter.due === key
-                 : key === 'notype' ? _loaFilter.calType === 'none' : false;
+    const active = (key === 'overdue' || key === 'soon' || key === 'out') ? _loaFilter.due.has(key)
+                 : key === 'notype' ? _loaFilter.calType.has('none') : false;
     return `<button class="loa-tile ${cls || ''} ${active ? 'active' : ''}" onclick="_loaTile('${key}')">
       <span class="loa-tile-n">${n}</span><span class="loa-tile-l">${label}</span></button>`;
   };
 
-  const opt = (val, label, cur) => `<option value="${lEsc(val)}" ${cur === val ? 'selected' : ''}>${lEsc(label)}</option>`;
   const vendorIds = [...new Set(loaAssets.map(a => a.cal_vendor_id).filter(Boolean))]
-    .map(id => ({ id, name: lVendorName(id) })).sort((a, b) => a.name.localeCompare(b.name));
+    .map(id => ({ id, name: lVendorShort(id) })).sort((a, b) => a.name.localeCompare(b.name));
 
   const th = (key, label) => `<th class="loa-th ${_loaSort.key === key ? 'sorted' : ''}" onclick="_loaSortBy('${key}')">${label}${
     _loaSort.key === key ? (_loaSort.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
@@ -311,7 +311,7 @@ function renderLoaPanel() {
     let dueCell = '';
     if (s.out_for_cal) dueCell = `<span class="loa-due out" title="Sent ${lFmt(s.out_for_cal_since)}">Out for cal</span>`;
     else if (s.next_due) dueCell = `<span class="loa-due ${due}">${lFmt(s.next_due)}</span>`;
-    const vend = s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorName(a.cal_vendor_id);
+    const vend = s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorShort(a.cal_vendor_id);
     return `<tr class="loa-row ${a.status === 'out_of_service' ? 'oos' : ''} ${sel ? 'selected' : ''}" onclick="openLoaDrawer('${lJs(a.asset_id)}')">
       ${edit ? `<td class="loa-td-check" onclick="event.stopPropagation()">${canSend
         ? `<input type="checkbox" ${sel ? 'checked' : ''} onchange="_loaToggleSel('${lJs(a.asset_id)}',this.checked)" />` : ''}</td>` : ''}
@@ -352,27 +352,11 @@ function renderLoaPanel() {
     </div>
 
     <div class="loa-filters">
-      <select class="loa-select" onchange="_loaFilter.status=this.value;_loaShowLimit=300;renderLoaPanel()">
-        ${opt('in_service', 'In service', _loaFilter.status)}${opt('out_of_service', 'Out of service', _loaFilter.status)}${opt('all', 'All statuses', _loaFilter.status)}
-      </select>
-      <select class="loa-select" onchange="_loaFilter.due=this.value;_loaShowLimit=300;renderLoaPanel()">
-        ${opt('all', 'Any due date', _loaFilter.due)}${opt('due', 'Overdue or due soon', _loaFilter.due)}
-        ${opt('overdue', 'Overdue', _loaFilter.due)}${opt('soon', 'Due in ' + LOA_DUE_SOON_DAYS + ' days', _loaFilter.due)}${opt('out', 'Out for cal', _loaFilter.due)}
-      </select>
-      <select class="loa-select" onchange="_loaFilter.calType=this.value;_loaShowLimit=300;renderLoaPanel()">
-        ${opt('all', 'All cal types', _loaFilter.calType)}
-        ${Object.entries(LOA_CAL_TYPES).map(([k, l]) => opt(k, l, _loaFilter.calType)).join('')}
-        ${opt('none', '— No cal type —', _loaFilter.calType)}
-      </select>
-      <select class="loa-select" onchange="_loaFilter.location=this.value;_loaShowLimit=300;renderLoaPanel()">
-        ${opt('all', 'All locations', _loaFilter.location)}
-        ${loaLocations.map(l => opt(l.id, l.name + (l.active ? '' : ' (retired)'), _loaFilter.location)).join('')}
-        ${opt('none', '— No location —', _loaFilter.location)}
-      </select>
-      <select class="loa-select" onchange="_loaFilter.vendor=this.value;_loaShowLimit=300;renderLoaPanel()">
-        ${opt('all', 'All cal sources', _loaFilter.vendor)}${opt('in_house', 'NU Labs (in-house)', _loaFilter.vendor)}
-        ${vendorIds.map(v => opt(v.id, v.name, _loaFilter.vendor)).join('')}
-      </select>
+      ${_loaMultiSelect('status', 'All statuses', _loaFilterOptions('status'))}
+      ${_loaMultiSelect('due', 'Any due date', _loaFilterOptions('due'))}
+      ${_loaMultiSelect('calType', 'All cal types', _loaFilterOptions('calType'))}
+      ${_loaMultiSelect('location', 'All locations', _loaFilterOptions('location'))}
+      ${_loaMultiSelect('vendor', 'All cal sources', _loaFilterOptions('vendor', vendorIds))}
       <button class="loa-link-btn" onclick="_loaResetFilters()">Reset</button>
       <span class="loa-result-n">${list.length} shown</span>
       <button class="emp-add-btn loa-secondary loa-print-btn" onclick="printLoaList()" ${list.length ? '' : 'disabled'}
@@ -410,21 +394,73 @@ function renderLoaPanel() {
   }
 }
 
+// ---------- multi-select filter dropdowns ----------
+// Options for one filter: [[value, label], ...]
+function _loaFilterOptions(key, vendorIds) {
+  switch (key) {
+    case 'status':   return Object.entries(LOA_STATUS);
+    case 'due':      return [['overdue', 'Overdue'], ['soon', 'Due in ' + LOA_DUE_SOON_DAYS + ' days'], ['out', 'Out for cal']];
+    case 'calType':  return [...Object.entries(LOA_CAL_TYPES), ['none', '— No cal type —']];
+    case 'location': return [...loaLocations.map(l => [l.id, l.name + (l.active ? '' : ' (retired)')]), ['none', '— No location —']];
+    case 'vendor':   return [['in_house', 'NU Labs (in-house)'], ...(vendorIds || []).map(v => [v.id, v.name])];
+  }
+  return [];
+}
+
+// Button label: "All …" when nothing is ticked, the one label, two joined with +, or "N locations".
+function _loaMsLabel(key, allLabel, opts) {
+  const sel = _loaFilter[key];
+  if (!sel.size) return allLabel;
+  const labels = opts.filter(([v]) => sel.has(v)).map(([, l]) => l);
+  if (labels.length <= 2) return labels.join(' + ');
+  const noun = { status: 'statuses', due: 'due states', calType: 'cal types', location: 'locations', vendor: 'cal sources' }[key];
+  return labels.length + ' ' + noun;
+}
+
+function _loaMultiSelect(key, allLabel, opts) {
+  const sel = _loaFilter[key], open = _loaMsOpen === key;
+  return `<div class="loa-ms ${open ? 'open' : ''} ${sel.size ? 'on' : ''}" data-ms="${key}">
+    <button type="button" class="loa-select loa-ms-btn" onclick="_loaMsToggle('${key}')">${lEsc(_loaMsLabel(key, allLabel, opts))} <span class="loa-ms-caret">▾</span></button>
+    ${open ? `<div class="loa-ms-pop">
+      <label class="loa-ms-opt loa-ms-all"><input type="checkbox" ${sel.size ? '' : 'checked'} onchange="_loaMsClear('${key}')" /> ${lEsc(allLabel)}</label>
+      ${opts.map(([v, l]) => `<label class="loa-ms-opt"><input type="checkbox" ${sel.has(v) ? 'checked' : ''}
+        onchange="_loaMsPick('${key}','${lJs(v)}',this.checked)" /> ${lEsc(l)}</label>`).join('')}
+    </div>` : ''}
+  </div>`;
+}
+function _loaMsToggle(key) { _loaMsOpen = _loaMsOpen === key ? null : key; renderLoaPanel(); }
+function _loaMsClear(key)  { _loaFilter[key].clear(); _loaShowLimit = 300; renderLoaPanel(); }
+function _loaMsPick(key, val, on) {
+  if (on) _loaFilter[key].add(val); else _loaFilter[key].delete(val);
+  if (key === 'due' && _loaFilter.due.size) _loaSort = { key: 'next_due', dir: 1 };
+  _loaShowLimit = 300;
+  renderLoaPanel();
+}
+// Clicking anywhere outside an open filter dropdown closes it.
+document.addEventListener('click', e => {
+  if (!_loaMsOpen || e.target.closest?.('.loa-ms')) return;
+  _loaMsOpen = null;
+  renderLoaPanel();
+});
+
+// Tiles toggle their value in or out of the filter, so they combine (e.g. Overdue + Out for cal).
 function _loaTile(key) {
   if (key === 'in_service') { _loaResetFilters(); return; }
   if (key === 'notype') {
-    _loaFilter.calType = _loaFilter.calType === 'none' ? 'all' : 'none';
-    _loaFilter.status = 'in_service';
+    if (_loaFilter.calType.has('none')) _loaFilter.calType.delete('none'); else _loaFilter.calType.add('none');
+    _loaFilter.status = new Set(['in_service']);
   } else {
-    _loaFilter.due = _loaFilter.due === key ? 'all' : key;
-    _loaFilter.status = key === 'out' ? 'all' : 'in_service';
-    if (_loaFilter.due !== 'all') _loaSort = { key: 'next_due', dir: 1 };
+    if (_loaFilter.due.has(key)) _loaFilter.due.delete(key); else _loaFilter.due.add(key);
+    // Out-for-cal items can be any status; due dates only matter for in-service items.
+    _loaFilter.status = _loaFilter.due.has('out') ? new Set() : new Set(['in_service']);
+    if (_loaFilter.due.size) _loaSort = { key: 'next_due', dir: 1 };
   }
   _loaShowLimit = 300;
   renderLoaPanel();
 }
 function _loaResetFilters() {
-  _loaFilter = { status: 'in_service', calType: 'all', location: 'all', vendor: 'all', due: 'all' };
+  _loaFilter = _loaDefaultFilter();
+  _loaMsOpen = null;
   _loaSearch = '';
   _loaSort = { key: 'asset_id', dir: 1 };
   _loaShowLimit = 300;
@@ -785,13 +821,13 @@ function _loaCheckInForm(a, open) {
     <div class="client-field-row">
       <div class="client-field"><label>Due Date</label><input type="date" id="lcDue" value="${due}" />
         ${a.cal_type === 'interval' ? `<span class="loa-hint">Cal date + ${a.cal_interval_months} months. Change if the cert says otherwise.</span>` : ''}</div>
-      <div class="client-field"><label>Result</label><select id="lcResult" class="loa-select"><option value="">—</option>
+      <div class="client-field"><label>Result *</label><select id="lcResult" class="loa-select"
+        onchange="document.getElementById('lcFailWrap').style.display=this.value==='fail'?'':'none'"><option value="">— choose —</option>
         ${Object.entries(LOA_RESULTS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
     </div>
-    <div class="client-field-row">
-      <div class="client-field"><label>Cost</label><input type="number" step="0.01" min="0" id="lcCost" value="${open.cost ?? ''}" /></div>
-      <div class="client-field"><label>Cert #</label><input type="text" id="lcCert" /></div>
-    </div>
+    <div class="client-field loa-fail-field" id="lcFailWrap" style="display:none;margin-bottom:10px">
+      <label>Reason for failure *</label><input type="text" class="full" id="lcFailReason" placeholder="What failed — the asset will be set Out of Service" /></div>
+    <div class="client-field" style="margin-bottom:10px;max-width:50%"><label>Cert #</label><input type="text" id="lcCert" /></div>
     <div class="client-field" style="margin-bottom:10px"><label>Notes</label><textarea class="full" id="lcNotes">${lEsc(open.notes || '')}</textarea></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="_loaEditCalId='${open.id}';renderLoaDrawer()">Edit record instead</button>
@@ -808,18 +844,35 @@ function _loaAutoDue(calDate) {
 
 async function checkInLoaCal(recId) {
   const g = id => (document.getElementById(id)?.value ?? '').trim();
-  const returned = g('lcReturned'), calDate = g('lcCalDate');
+  const returned = g('lcReturned'), calDate = g('lcCalDate'), result = g('lcResult');
   if (!returned || !calDate) { lToast('Returned and cal date are required'); return; }
-  const cost = g('lcCost');
+  if (!result) { lToast('Choose a result'); document.getElementById('lcResult')?.focus(); return; }
+  const reason = g('lcFailReason');
+  if (result === 'fail' && !reason) { lToast('Enter the reason for failure'); document.getElementById('lcFailReason')?.focus(); return; }
+  const assetId = _loaDrawerId;
   const { error } = await sb.from('loa_cal_records').update({
-    returned_date: returned, cal_date: calDate, due_date: g('lcDue') || null,
-    result: g('lcResult') || null, cost: cost === '' ? null : Number(cost),
-    cert_number: g('lcCert') || null, notes: g('lcNotes') || null,
+    returned_date: returned, cal_date: calDate, due_date: g('lcDue') || null, result,
+    cert_number: g('lcCert') || null, notes: _loaFailNotes(g('lcNotes'), result === 'fail' ? reason : ''),
   }).eq('id', recId);
   if (error) { lErr('Could not check in', error); return; }
-  await refreshLoaAsset(_loaDrawerId);
+  let oos = false;
+  if (result === 'fail') oos = await _loaSetOutOfService(assetId);
+  await refreshLoaAsset(assetId);
   renderLoaDrawer(); renderLoaPanel();
-  lToast('✓ Checked in');
+  lToast(oos ? '✓ Checked in — failed, set Out of Service' : '✓ Checked in');
+}
+
+// Cal record notes with the failure reason added on its own line.
+function _loaFailNotes(notes, reason) {
+  const parts = [(notes || '').trim(), reason ? 'Failed calibration: ' + reason.trim() : ''].filter(Boolean);
+  return parts.length ? parts.join('\n') : null;
+}
+
+// A failed cal takes the asset out of service. Returns true when it was set.
+async function _loaSetOutOfService(assetId) {
+  const { error } = await sb.from('loa_assets').update({ status: 'out_of_service' }).eq('asset_id', assetId);
+  if (error) { lErr('Checked in, but could not set ' + assetId + ' Out of Service', error); return false; }
+  return true;
 }
 
 function _loaCalForm(a, r) {
@@ -912,88 +965,179 @@ function _openLoaModal(title, body, footer, width) {
 function closeLoaModal() { document.getElementById('loaModal')?.classList.remove('open'); }
 
 // ---------- check in from cal (one or many) ----------
+// Grouped into one section per vendor: each has its own Returned date and a
+// "set all" Cal Date and Result. Cal date, result, due date and cert # are per item.
 let _loaCheckInIds = [];
+const _loaResultOpts = sel => '<option value="">—</option>' +
+  Object.entries(LOA_RESULTS).map(([k, l]) => `<option value="${k}" ${sel === k ? 'selected' : ''}>${l}</option>`).join('');
+
 function openLoaCheckInModal(ids) {
   if (!loaCanEdit()) return;
   _loaCheckInIds = (ids && ids.length ? ids : [..._loaSelected]).filter(id => loaStatus[id]?.out_for_cal);
   if (!_loaCheckInIds.length) { lToast('None of the selected items are out for cal'); return; }
   const today = lToday();
-  const rows = _loaCheckInIds.map((id, i) => {
+
+  // Group by the vendor each item went to; "vendor not set" last.
+  const groups = {};
+  _loaCheckInIds.forEach(id => {
+    const k = loaStatus[id]?.out_for_cal_vendor_id || 'none';
+    (groups[k] = groups[k] || { vendorId: k === 'none' ? null : k, ids: [] }).ids.push(id);
+  });
+  const ordered = Object.values(groups).sort((x, y) =>
+    (x.vendorId ? 0 : 1) - (y.vendorId ? 0 : 1) || lVendorName(x.vendorId).localeCompare(lVendorName(y.vendorId)));
+
+  const rowHtml = id => {
     const a = loaAssets.find(x => x.asset_id === id) || { asset_id: id };
     const s = loaStatus[id] || {};
     const due = a.cal_type === 'interval' ? lAddMonths(today, a.cal_interval_months) : '';
-    return `<tr data-id="${lEsc(id)}">
-      <td><span class="loa-mono">${lEsc(id)}</span><div class="loa-ci-desc">${lEsc(a.description || '')}</div></td>
-      <td class="loa-dim">${lEsc(lVendorName(s.out_for_cal_vendor_id) || '—')}<div class="loa-ci-desc">sent ${lFmt(s.out_for_cal_since)}</div></td>
+    return `<tr class="loa-ci-row" data-id="${lEsc(id)}">
+      <td><span class="loa-mono">${lEsc(id)}</span><div class="loa-ci-desc">${lEsc(a.description || '')}</div>
+        <div class="loa-ci-desc">sent ${lFmt(s.out_for_cal_since)}</div></td>
+      <td><input type="date" class="f-input ciCal" value="${today}" onchange="_loaCiRowCal(this)" /></td>
+      <td><select class="f-select ciResult" onchange="_loaCiRowResult(this)">${_loaResultOpts('')}</select></td>
       <td><input type="date" class="f-input ciDue" value="${due}" data-auto="1" ${a.cal_type === 'interval' ? '' : 'title="Not an interval item — no due date needed"'} onchange="this.dataset.auto=''" /></td>
       <td><input type="text" class="f-input ciCert" placeholder="Cert #" /></td>
-      <td><input type="number" step="0.01" min="0" class="f-input ciCost" placeholder="0.00" /></td>
-    </tr>`;
-  }).join('');
-  _openLoaModal(_loaCheckInIds.length === 1 ? 'Check in from calibration' : `Check in ${_loaCheckInIds.length} items from calibration`, `
-    <div class="field-row">
-      <div class="field"><label class="field-label">Returned *</label><input class="f-input" type="date" id="ciReturned" value="${today}" /></div>
-      <div class="field"><label class="field-label">Cal Date (on certs) *</label><input class="f-input" type="date" id="ciCalDate" value="${today}" onchange="_loaCiAutoDue(this.value)" /></div>
-      <div class="field"><label class="field-label">Result</label><select class="f-select" id="ciResult">
-        ${Object.entries(LOA_RESULTS).map(([k, l]) => `<option value="${k}" ${k === 'pass' ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    </div>
-    <div class="loa-meta">Due dates fill in as cal date + each item's interval. Change any that differ on the cert.</div>
-    <div class="loa-ci-wrap"><table class="loa-ci-table">
-      <thead><tr><th>Asset</th><th>Vendor</th><th>Due Date</th><th>Cert #</th><th>Cost</th></tr></thead>
-      <tbody>${rows}</tbody></table></div>`,
-    `<button class="btn btn-ghost" onclick="closeLoaModal()">Cancel</button>
-     <button class="btn btn-primary" style="margin-left:auto" onclick="checkInLoaBatch()">Check In${_loaCheckInIds.length > 1 ? ' ' + _loaCheckInIds.length + ' items' : ''}</button>`, 820);
+    </tr>
+    <tr class="loa-ci-fail" data-for="${lEsc(id)}" style="display:none"><td colspan="5">
+      <input type="text" class="f-input ciReason" placeholder="Reason for failure (required) — ${lEsc(id)} will be set Out of Service" /></td></tr>`;
+  };
+
+  const sections = ordered.map((g, gi) => `
+    <div class="loa-ci-group" data-g="${gi}">
+      <div class="loa-ci-ghead">
+        <div class="loa-ci-gname">${lEsc(g.vendorId ? lVendorName(g.vendorId) : 'Vendor not set')}
+          <span class="loa-dim">· ${g.ids.length} item${g.ids.length !== 1 ? 's' : ''}</span></div>
+        <div class="loa-ci-gfields">
+          <label>Returned *<input type="date" class="f-input ciReturned" value="${today}" /></label>
+          <span class="loa-ci-setall">Set all:</span>
+          <label>Cal date<input type="date" class="f-input ciAllCal" value="${today}" onchange="_loaCiSetAll(this,'cal')" /></label>
+          <label>Result<select class="f-select ciAllResult" onchange="_loaCiSetAll(this,'result')">${_loaResultOpts('')}</select></label>
+        </div>
+      </div>
+      <table class="loa-ci-table">
+        <thead><tr><th>Asset</th><th>Cal Date *</th><th>Result *</th><th>Due Date</th><th>Cert #</th></tr></thead>
+        <tbody>${g.ids.map(rowHtml).join('')}</tbody>
+      </table>
+    </div>`).join('');
+
+  const n = _loaCheckInIds.length;
+  _openLoaModal(n === 1 ? 'Check in from calibration' : `Check in ${n} items from calibration`, `
+    <div id="loaCiForm" oninput="_loaCiValidate()" onchange="_loaCiValidate()">
+      <div class="loa-meta">Due dates fill in as each item's cal date + its interval. Change any that differ on the cert.
+        A <b>Fail</b> sets the asset Out of Service.</div>
+      <div class="loa-ci-wrap">${sections}</div>
+    </div>`,
+    `<span class="loa-ci-need" id="ciNeed"></span>
+     <button class="btn btn-ghost" onclick="closeLoaModal()">Cancel</button>
+     <button class="btn btn-primary" id="ciSubmit" style="margin-left:auto" onclick="checkInLoaBatch()" disabled>Check In${n > 1 ? ' ' + n + ' items' : ''}</button>`, 860);
+  _loaCiValidate();
 }
 
-function _loaCiAutoDue(calDate) {
-  document.querySelectorAll('.loa-ci-table tbody tr').forEach(tr => {
-    const a = loaAssets.find(x => x.asset_id === tr.dataset.id);
-    const inp = tr.querySelector('.ciDue');
-    if (a && inp && inp.dataset.auto && a.cal_type === 'interval' && calDate) inp.value = lAddMonths(calDate, a.cal_interval_months);
+// "Set all" in a vendor section fills every row in that section.
+function _loaCiSetAll(el, what) {
+  const group = el.closest('.loa-ci-group');
+  group.querySelectorAll('tr.loa-ci-row').forEach(tr => {
+    if (what === 'cal') { const c = tr.querySelector('.ciCal'); c.value = el.value; _loaCiRowCal(c); }
+    else { const r = tr.querySelector('.ciResult'); r.value = el.value; _loaCiRowResult(r); }
   });
+  _loaCiValidate();
+}
+
+// A row's cal date moves its due date (unless the due date was typed over).
+function _loaCiRowCal(inp) {
+  const tr = inp.closest('tr');
+  const a = loaAssets.find(x => x.asset_id === tr.dataset.id);
+  const due = tr.querySelector('.ciDue');
+  if (a && due && due.dataset.auto && a.cal_type === 'interval' && inp.value) due.value = lAddMonths(inp.value, a.cal_interval_months);
+}
+
+// Fail opens the reason line under the row.
+function _loaCiRowResult(sel) {
+  const tr = sel.closest('tr');
+  const fail = tr.parentElement.querySelector(`tr.loa-ci-fail[data-for="${CSS.escape(tr.dataset.id)}"]`);
+  if (fail) fail.style.display = sel.value === 'fail' ? '' : 'none';
+  tr.classList.toggle('failed', sel.value === 'fail');
+}
+
+// Check In stays disabled until every section has a returned date and every
+// row has a cal date and a result (plus a reason when it failed).
+function _loaCiValidate() {
+  let missing = 0;
+  document.querySelectorAll('.loa-ci-group').forEach(g => {
+    if (!g.querySelector('.ciReturned')?.value) missing++;
+    g.querySelectorAll('tr.loa-ci-row').forEach(tr => {
+      const res = tr.querySelector('.ciResult')?.value;
+      if (!tr.querySelector('.ciCal')?.value || !res) missing++;
+      else if (res === 'fail') {
+        const r = tr.parentElement.querySelector(`tr.loa-ci-fail[data-for="${CSS.escape(tr.dataset.id)}"] .ciReason`);
+        if (!(r?.value || '').trim()) missing++;
+      }
+    });
+  });
+  const btn = document.getElementById('ciSubmit');
+  if (btn) btn.disabled = missing > 0;
+  const need = document.getElementById('ciNeed');
+  if (need) need.textContent = missing ? missing + ' still to fill in' : '';
 }
 
 async function checkInLoaBatch() {
-  const returned = document.getElementById('ciReturned')?.value;
-  const calDate = document.getElementById('ciCalDate')?.value;
-  const result = document.getElementById('ciResult')?.value || null;
-  if (!returned || !calDate) { lToast('Returned and cal date are required'); return; }
+  _loaCiValidate();
+  if (document.getElementById('ciSubmit')?.disabled) { lToast('Every item needs a cal date and a result'); return; }
   const updates = [];
-  for (const tr of document.querySelectorAll('.loa-ci-table tbody tr')) {
-    const id = tr.dataset.id, s = loaStatus[id] || {};
-    if (!s.open_cal_id) continue;
-    if (s.out_for_cal_since && returned < s.out_for_cal_since) { lToast('⚠ ' + id + ': returned date is before it was sent (' + lFmt(s.out_for_cal_since) + ')'); return; }
-    const cost = tr.querySelector('.ciCost')?.value;
-    updates.push({ id, recId: s.open_cal_id, row: {
-      returned_date: returned, cal_date: calDate, result,
-      due_date: tr.querySelector('.ciDue')?.value || null,
-      cert_number: (tr.querySelector('.ciCert')?.value || '').trim() || null,
-      cost: cost === '' || cost == null ? null : Number(cost),
-    } });
+  for (const g of document.querySelectorAll('.loa-ci-group')) {
+    const returned = g.querySelector('.ciReturned')?.value;
+    for (const tr of g.querySelectorAll('tr.loa-ci-row')) {
+      const id = tr.dataset.id, s = loaStatus[id] || {};
+      if (!s.open_cal_id) continue;
+      if (s.out_for_cal_since && returned < s.out_for_cal_since) { lToast('⚠ ' + id + ': returned date is before it was sent (' + lFmt(s.out_for_cal_since) + ')'); return; }
+      const result = tr.querySelector('.ciResult').value;
+      const reason = result === 'fail'
+        ? (tr.parentElement.querySelector(`tr.loa-ci-fail[data-for="${CSS.escape(id)}"] .ciReason`)?.value || '').trim() : '';
+      updates.push({ id, recId: s.open_cal_id, fail: result === 'fail', reason, row: {
+        returned_date: returned, cal_date: tr.querySelector('.ciCal').value, result,
+        due_date: tr.querySelector('.ciDue')?.value || null,
+        cert_number: (tr.querySelector('.ciCert')?.value || '').trim() || null,
+      } });
+    }
   }
-  const failed = [];
+  const btn = document.getElementById('ciSubmit');
+  if (btn) { btn.disabled = true; btn.textContent = 'Checking in…'; }
+
+  // Failures add their reason to the record's existing notes, so read those first.
+  const failing = updates.filter(u => u.fail);
+  if (failing.length) {
+    const { data } = await sb.from('loa_cal_records').select('id,notes').in('id', failing.map(u => u.recId));
+    const notesBy = {}; (data || []).forEach(r => { notesBy[r.id] = r.notes; });
+    failing.forEach(u => { u.row.notes = _loaFailNotes(notesBy[u.recId], u.reason); });
+  }
+
+  const failed = [], oos = [];
   for (const u of updates) {
     const { error } = await sb.from('loa_cal_records').update(u.row).eq('id', u.recId);
-    if (error) { console.error('[loa] check-in', u.id, error); failed.push(u.id); }
+    if (error) { console.error('[loa] check-in', u.id, error); failed.push(u.id); continue; }
+    if (u.fail && await _loaSetOutOfService(u.id)) oos.push(u.id);
   }
   closeLoaModal();
   await Promise.all(updates.map(u => refreshLoaAsset(u.id)));
   updates.forEach(u => { if (!failed.includes(u.id)) _loaSelected.delete(u.id); });
   if (document.getElementById('loaDrawer')?.classList.contains('open')) renderLoaDrawer();
   renderLoaPanel();
-  if (failed.length) lToast('⚠ Could not check in: ' + failed.join(', ') + ' — the rest were checked in');
-  else lToast('✓ ' + updates.length + (updates.length === 1 ? ' item' : ' items') + ' checked in');
+  const done = updates.length - failed.length;
+  const oosNote = oos.length ? ' — ' + oos.join(', ') + ' failed and set Out of Service' : '';
+  if (failed.length) lToast('⚠ Could not check in: ' + failed.join(', ') + ' — the rest were checked in' + oosNote);
+  else lToast('✓ ' + done + (done === 1 ? ' item' : ' items') + ' checked in' + oosNote);
 }
 
 // ---------- print the current list ----------
 function _loaFilterSummary() {
-  const f = _loaFilter, bits = [];
-  bits.push(f.status === 'all' ? 'All statuses' : LOA_STATUS[f.status]);
-  const dueLbl = { due: 'Overdue or due soon', overdue: 'Overdue', soon: 'Due in ' + LOA_DUE_SOON_DAYS + ' days', out: 'Out for cal' };
-  if (f.due !== 'all') bits.push(dueLbl[f.due]);
-  if (f.calType !== 'all') bits.push(f.calType === 'none' ? 'No cal type' : LOA_CAL_TYPES[f.calType]);
-  if (f.location !== 'all') bits.push(f.location === 'none' ? 'No location' : 'Location ' + lLocName(f.location));
-  if (f.vendor !== 'all') bits.push(f.vendor === 'in_house' ? 'NU Labs (in-house)' : lVendorName(f.vendor));
+  const vendorIds = [...new Set(loaAssets.map(a => a.cal_vendor_id).filter(Boolean))].map(id => ({ id, name: lVendorName(id) }));
+  const part = (key, allLabel) => {
+    const sel = _loaFilter[key];
+    if (!sel.size) return allLabel;
+    return _loaFilterOptions(key, vendorIds).filter(([v]) => sel.has(v)).map(([, l]) => l).join(' + ');
+  };
+  const bits = [part('status', 'All statuses')];
+  ['due', 'calType', 'location', 'vendor'].forEach(k => { if (_loaFilter[k].size) bits.push(part(k)); });
   if (_loaSearch.trim()) bits.push('Search “' + _loaSearch.trim() + '”');
   return bits.join(' · ');
 }
@@ -1004,15 +1148,17 @@ function printLoaList() {
   const list = _loaSelected.size ? all.filter(a => _loaSelected.has(a.asset_id)) : all;
   if (!list.length) return;
   _loaCopyList(list);   // clipboard first, while we're still inside the click
-  const title = _loaFilter.due === 'out' ? 'Out for Calibration' : _loaFilter.due === 'overdue' ? 'Overdue Calibrations'
-    : _loaFilter.due === 'soon' || _loaFilter.due === 'due' ? 'Calibrations Due' : 'List of Apparatus';
+  const dueF = _loaFilter.due;
+  const only = k => dueF.size === 1 && dueF.has(k);
+  const title = only('out') ? 'Out for Calibration' : only('overdue') ? 'Overdue Calibrations'
+    : dueF.size && !dueF.has('out') ? 'Calibrations Due' : 'List of Apparatus';
   const now = new Date();
   const rows = list.map(a => {
     const s = loaStatus[a.asset_id] || {};
     const due = s.out_for_cal ? 'Out since ' + lFmt(s.out_for_cal_since) : lFmt(s.next_due);
     const st = lDueState(a);
     const vend = s.out_for_cal ? lVendorName(s.out_for_cal_vendor_id) : (s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorName(a.cal_vendor_id));
-    return `<tr class="${st === 'overdue' && _loaFilter.due !== 'overdue' ? 'od' : ''}">
+    return `<tr class="${st === 'overdue' && !only('overdue') ? 'od' : ''}">
       <td class="m">${lEsc(a.asset_id)}</td><td>${lEsc(a.description)}</td><td>${lEsc(a.manufacturer)}</td>
       <td>${lEsc(a.model_no)}</td><td class="m">${lEsc(a.serial_no)}</td><td>${lEsc(lLocName(a.location_id))}</td>
       <td>${lEsc(lCalTypeLabel(a))}</td><td class="m">${lFmt(s.last_cal_date)}</td><td class="m">${due}</td>
@@ -1035,7 +1181,7 @@ function printLoaList() {
     <table><thead><tr><th>Asset ID</th><th>Description</th><th>Make</th><th>Model</th><th>Serial</th><th>Location</th>
       <th>Cal Type</th><th>Last Cal</th><th>Next Due</th><th>Cal Source</th><th>Status</th></tr></thead>
     <tbody>${rows}</tbody></table>
-    ${_loaFilter.due !== 'overdue' && list.some(a => lDueState(a) === 'overdue') ? '<div class="key"><b>Bold</b> = overdue</div>' : ''}
+    ${!only('overdue') && list.some(a => lDueState(a) === 'overdue') ? '<div class="key"><b>Bold</b> = overdue</div>' : ''}
   </body></html>`;
   let frame = document.getElementById('loaPrintFrame');
   if (frame) frame.remove();
@@ -1288,6 +1434,7 @@ async function moveLoaLocation(id, dir) {
 // Escape: modal first, then drawer.
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
+  if (_loaMsOpen) { _loaMsOpen = null; renderLoaPanel(); return; }
   if (document.getElementById('loaModal')?.classList.contains('open')) { closeLoaModal(); return; }
   if (document.getElementById('loaDrawer')?.classList.contains('open')) closeLoaDrawer();
 });
