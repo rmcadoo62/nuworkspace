@@ -21,7 +21,8 @@
         '#reports': 'Reports',
         '#quotes': 'Quotes',
         '#setup': 'Setup',
-        '#compliance': 'CMMC Compliance'
+        '#compliance': 'CMMC Compliance',
+        '#bookings': 'Booking Report'
       };
       pageInput.value = pageMap[hash] || hash.replace('#', '').replace('-', ' ');
     }
@@ -241,6 +242,7 @@ document.addEventListener('DOMContentLoaded', function () {
     { name: 'openCompliancePanel',    label: 'CMMC Compliance'     },
     { name: 'openIssueTrackerPanel', label: 'Issue Tracker'       },
     { name: 'openSurveyQueuePanel',  label: 'Customer Surveys'    },
+    { name: 'openBookingReportPanel', label: 'Booking Report'     },
   ];
 
   NAV_FNS.forEach(({ name, label }) => {
@@ -378,7 +380,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clients: 'quotes', surveys: 'quotes',
     employees: 'hr', 'reports/employees': 'hr', 'reports/timesheets': 'hr',
     closingreport: 'production',
-    'reports/closedjobs': 'admin', cashflow: 'admin',
+    'reports/closedjobs': 'admin', cashflow: 'admin', bookings: 'admin',
   };
 
   let current = null;   // department of the page on screen, or null

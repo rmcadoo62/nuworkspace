@@ -57,6 +57,7 @@ function can(capability) {
     // Roleless users keep the old permission_level behaviour.
     approve_all_timesheets: mgr,
     view_cash_flow: false,
+    view_rpt_bookings: false,
     view_loa: true, edit_loa: true, delete_loa: true,
     view_vendors: true, edit_vendors: true, delete_vendors: true,
     create_packing_lists: true, void_packing_lists: true,
@@ -1179,6 +1180,7 @@ function applyPermissions() {
     navRptRevenue: 'view_rpt_revenue', navRptBilling: 'view_billing',
     navRptEmpHours: 'view_rpt_emphours', navRptTimesheets: 'view_rpt_timesheets',
     navRptClosedJobs: 'view_rpt_closedjobs', navCashFlow: 'view_cash_flow',
+    navBookings: 'view_rpt_bookings',
   };
   Object.entries(rptCaps).forEach(([id, cap]) => {
     const el = document.getElementById(id);

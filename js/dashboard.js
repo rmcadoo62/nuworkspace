@@ -142,356 +142,6 @@ function renderDashboard() {
   // Preserve view choice across full re-renders.
   const _savedBilledView = window._billedView || 'monthly';
 
-  // ── Booking Report — yearly grid with cross-month reversal tracking ────────
-  const _now = new Date();
-  const _curYear  = _now.getFullYear();
-  const _curMonth = _now.getMonth(); // 0-based
-  const _thisMonthKey   = _curYear + '-' + String(_curMonth+1).padStart(2,'0');
-  const _thisYearStr    = String(_curYear);
-  const _thisMonthLabel = _now.toLocaleDateString('en-US', {month:'long', year:'numeric'});
-  const _monthNames     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-  // ── Preserve booking-report view state across full re-renders ─────────────
-  const _savedBkView  = window._bkCurrentView  || 'year';
-  const _savedBkMonth = (window._bkCurrentMonth != null) ? window._bkCurrentMonth : _curMonth;
-  // _savedBkSort is NOT captured here — build fns read window._bkMonthSort directly
-  //   so that setBkMonthSort() toggling works without a full re-render
-
-  // Build yearly booking data per month per category
-  const _yearBookings  = {}; // { mo: { cat: amount } }
-  const _yearReversals = {}; // { mo: { cat: amount } }
-  for (let m = 0; m <= _curMonth; m++) { _yearBookings[m] = {}; _yearReversals[m] = {}; }
-
-  // Booking data spans open projects (live taskStore) + a current-year snapshot of
-  // closed-project tasks (window._bookingClosedTasks). Without the latter, closing a
-  // job mid-year silently erases its bookings AND its cancellation reversals here.
-  const _internalProjIds = new Set(projects.filter(p => p.is_internal).map(p => p.id));
-  // Legacy-import tasks (is_legacy_import flag) carry a placeholder created_at with no
-  // real booking date, so any cancellation on them would show as a reversal with no
-  // corresponding booking anywhere in the report. Excluded entirely, both sides.
-  const _bkTasks = taskStore.concat(window._bookingClosedTasks || [])
-    .filter(t => !_internalProjIds.has(t.proj))
-    .filter(t => !t.isLegacyImport);
-
-  _bkTasks.forEach(t => {
-    const cat = t.salesCat || 'Uncategorized';
-    // Positive booking — created this year, not currently cancelled
-    const createdMo = (t.createdAt||'').slice(0,7);
-    if (createdMo.slice(0,4) === _thisYearStr && t.status !== 'cancelled') {
-      const mo = parseInt(createdMo.slice(5,7)) - 1;
-      if (mo >= 0 && mo <= _curMonth) {
-        _yearBookings[mo][cat] = (_yearBookings[mo][cat]||0) + (t.fixedPrice||0);
-      }
-    }
-    // Negative reversal — cancelled this year (any booked month)
-    const cancelledMo = (t.cancelledDate||'').slice(0,7);
-    if (cancelledMo && cancelledMo.slice(0,4) === _thisYearStr) {
-      const mo = parseInt(cancelledMo.slice(5,7)) - 1;
-      if (mo >= 0 && mo <= _curMonth) {
-        _yearReversals[mo][cat] = (_yearReversals[mo][cat]||0) + (t.fixedPrice||0);
-      }
-    }
-  });
-
-  // All cats that appear anywhere this year
-  const _allCats = [...new Set([
-    ...Object.values(_yearBookings).flatMap(m => Object.keys(m)),
-    ...Object.values(_yearReversals).flatMap(m => Object.keys(m)),
-  ])].sort();
-
-  // ── Booking chart data — 12 months current year, net per month + 3-mo moving avg ──
-  // Bars = net (bookings − reversals) per month; future months stay at 0.
-  // Moving avg only spans months up to and including the current month (so it
-  // doesn't get dragged down by empty future months).
-  const _bkChartLabels = _monthNames.map((m,i) => m + ' ' + String(_curYear).slice(2));
-  const _bkChartKeys   = _monthNames.map((_,i) => _curYear + '-' + String(i+1).padStart(2,'0'));
-  const _bkChartData   = _monthNames.map((_,mi) => {
-    if (mi > _curMonth) return 0;
-    const book = Object.values(_yearBookings[mi]||{}).reduce((a,b)=>a+b,0);
-    const rev  = Object.values(_yearReversals[mi]||{}).reduce((a,b)=>a+b,0);
-    return book - rev;
-  });
-  const _bkChartMovingAvg = _bkChartData.map((_, i) => {
-    if (i > _curMonth) return null; // don't draw line past current month
-    const start = Math.max(0, i - 2);
-    const slice = _bkChartData.slice(start, i + 1);
-    return slice.reduce((s, v) => s + v, 0) / slice.length;
-  });
-  window._bookingChartData = {
-    labels: _bkChartLabels,
-    data:   _bkChartData,
-    keys:   _bkChartKeys,
-    movingAvg: _bkChartMovingAvg,
-    curMonth: _curMonth,
-  };
-
-  // YTD summary numbers
-  const _ytdBookings  = Object.values(_yearBookings).reduce((s,m)  => s + Object.values(m).reduce((a,b)=>a+b,0), 0);
-  const _ytdReversals = Object.values(_yearReversals).reduce((s,m) => s + Object.values(m).reduce((a,b)=>a+b,0), 0);
-  const _ytdNet       = _ytdBookings - _ytdReversals;
-  const _thisMonthNet = Object.values(_yearBookings[_curMonth]||{}).reduce((a,b)=>a+b,0)
-                      - Object.values(_yearReversals[_curMonth]||{}).reduce((a,b)=>a+b,0);
-
-  // Stat card helpers
-  const fmtStatPos = v => '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
-  const fmtStatNeg = v => '($' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) + ')';
-
-  // Cell display helpers
-  const fmtBook    = v => {
-    if (v > 0) return '<span style="color:var(--green);font-family:monospace">$'+v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+'</span>';
-    if (v < 0) return '<span style="color:var(--red);font-family:monospace">($'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+')</span> <span style="color:var(--red);font-size:9px;font-weight:700;letter-spacing:.3px">CR</span>';
-    return '<span style="color:var(--border)">—</span>';
-  };
-  const fmtRev     = v => v > 0 ? '<span style="color:var(--red);font-family:monospace">($'+v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+')</span>' : '<span style="color:var(--border)">—</span>';
-  const fmtNetCell = v => {
-    if (v === 0) return '<span style="color:var(--border)">—</span>';
-    const abs = v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
-    return v < 0
-      ? '<span style="color:var(--red);font-family:monospace;font-weight:600">($'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+')</span>'
-      : '<span style="font-family:monospace;font-weight:600">$'+abs+'</span>';
-  };
-
-  // Build year-grid HTML
-  function buildYearGrid() {
-    if (!_allCats.length) return '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No bookings this year yet.</div>';
-    const moHeaders = _monthNames.slice(0,_curMonth+1).map((m,i) => {
-      const isCur = i === _curMonth;
-      return `<th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:${isCur?'var(--amber)':'var(--muted)'};white-space:nowrap;${isCur?'border-bottom:2px solid var(--amber)':''}">${m}</th>`;
-    }).join('');
-    const header = `<thead><tr>
-      <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat</th>
-      ${moHeaders}
-      <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text);white-space:nowrap">YTD net</th>
-    </tr></thead>`;
-    const colNetTotals = new Array(_curMonth+1).fill(0);
-    let ytdGrand = 0;
-    const bodyRows = _allCats.map((cat,ci) => {
-      let ytdCat = 0;
-      const cells = _monthNames.slice(0,_curMonth+1).map((m,mi) => {
-        const net = (_yearBookings[mi]?.[cat]||0) - (_yearReversals[mi]?.[cat]||0);
-        colNetTotals[mi] += net;
-        ytdCat += net;
-        const isCur = mi === _curMonth;
-        const bg = isCur ? 'background:rgba(232,162,52,0.06);' : ci%2===1 ? 'background:var(--surface2);' : '';
-        return `<td style="text-align:right;padding:5px 10px;${bg}">${fmtNetCell(net)}</td>`;
-      }).join('');
-      ytdGrand += ytdCat;
-      return `<tr style="border-bottom:0.5px solid var(--border);${ci%2===1?'background:var(--surface2)':''}">
-        <td style="padding:5px 10px;font-weight:600;color:var(--amber)">Cat ${cat}</td>
-        ${cells}
-        <td style="text-align:right;padding:5px 10px">${fmtNetCell(ytdCat)}</td>
-      </tr>`;
-    }).join('');
-    const totalCells = colNetTotals.map((v,mi) => {
-      const isCur = mi === _curMonth;
-      return `<td style="text-align:right;padding:7px 10px;font-weight:700;${isCur?'background:rgba(232,162,52,0.10);':'background:var(--surface2);'}">${fmtNetCell(v)}</td>`;
-    }).join('');
-    return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
-      ${header}<tbody>${bodyRows}
-      <tr style="border-top:2px solid var(--border)">
-        <td style="padding:7px 10px;font-weight:700;color:var(--text);background:var(--surface2)">Total</td>
-        ${totalCells}
-        <td style="text-align:right;padding:7px 10px;font-weight:700;background:var(--surface2)">${fmtNetCell(ytdGrand)}</td>
-      </tr></tbody>
-    </table></div>`;
-  }
-
-  // Build month summary (bookings / reversals / net) — By Category or By Job
-  function buildMonthDetail(mo) {
-    const sort = window._bkMonthSort || 'category';
-
-    // ── By Category (default) ────────────────────────────────────────────
-    if (sort === 'category') {
-      const cats = [...new Set([...Object.keys(_yearBookings[mo]||{}), ...Object.keys(_yearReversals[mo]||{})])].sort();
-      if (!cats.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No bookings in ${_monthNames[mo]} ${_curYear}.</div>`;
-      let totBook = 0, totRev = 0;
-      const rows = cats.map((cat,ci) => {
-        const book = _yearBookings[mo]?.[cat]  || 0;
-        const rev  = _yearReversals[mo]?.[cat] || 0;
-        const net  = book - rev;
-        totBook += book; totRev += rev;
-        return `<tr style="border-bottom:0.5px solid var(--border);${ci%2===1?'background:var(--surface2)':''}">
-          <td style="padding:6px 10px;font-weight:600;color:var(--amber)">Cat ${cat}</td>
-          <td style="text-align:right;padding:6px 10px">${fmtBook(book)}</td>
-          <td style="text-align:right;padding:6px 10px">${fmtRev(rev)}</td>
-          <td style="text-align:right;padding:6px 10px">${fmtNetCell(net)}</td>
-        </tr>`;
-      }).join('');
-      return `<table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="border-bottom:2px solid var(--border)">
-          <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat</th>
-          <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--green)">Bookings</th>
-          <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--red)">Reversals</th>
-          <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text)">Net</th>
-        </tr></thead><tbody>${rows}
-        <tr style="border-top:2px solid var(--border)">
-          <td style="padding:7px 10px;font-weight:700;background:var(--surface2)">Total</td>
-          <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtBook(totBook)}</td>
-          <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtRev(totRev)}</td>
-          <td style="text-align:right;padding:7px 10px;font-weight:700;background:var(--surface2)">${fmtNetCell(totBook-totRev)}</td>
-        </tr></tbody>
-      </table>`;
-    }
-
-    // ── By Job ────────────────────────────────────────────────────────────
-    const moKey = _curYear + '-' + String(mo+1).padStart(2,'0');
-    const cancelledInMo = new Set(_bkTasks.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
-    const bookedTasks = _bkTasks.filter(t =>
-      ((t.createdAt||'').slice(0,7) === moKey && t.status !== 'cancelled') || cancelledInMo.has(t._id)
-    );
-    if (!bookedTasks.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No bookings in ${_monthNames[mo]} ${_curYear}.</div>`;
-    const byProj = {};
-    bookedTasks.forEach(t => {
-      if (!byProj[t.proj]) byProj[t.proj] = { proj: projects.find(x => x.id === t.proj), book: 0, rev: 0 };
-      if (cancelledInMo.has(t._id)) byProj[t.proj].rev += (t.fixedPrice||0);
-      else                           byProj[t.proj].book += (t.fixedPrice||0);
-    });
-    const projRows = Object.values(byProj).sort((a,b) =>
-      ((a.proj?.name||'').localeCompare(b.proj?.name||'', undefined, {numeric:true}))
-    );
-    let totBook2 = 0, totRev2 = 0;
-    const rows2 = projRows.map((r,ci) => {
-      const net = r.book - r.rev;
-      totBook2 += r.book; totRev2 += r.rev;
-      return `<tr style="border-bottom:0.5px solid var(--border);${ci%2===1?'background:var(--surface2)':''}">
-        <td style="padding:6px 10px;font-weight:600;color:var(--text)">${r.proj ? (r.proj.emoji ? r.proj.emoji+' ' : '')+r.proj.name : 'Unknown'}</td>
-        <td style="text-align:right;padding:6px 10px">${fmtBook(r.book)}</td>
-        <td style="text-align:right;padding:6px 10px">${fmtRev(r.rev)}</td>
-        <td style="text-align:right;padding:6px 10px">${fmtNetCell(net)}</td>
-      </tr>`;
-    }).join('');
-    return `<table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead><tr style="border-bottom:2px solid var(--border)">
-        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Job</th>
-        <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--green)">Bookings</th>
-        <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--red)">Reversals</th>
-        <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text)">Net</th>
-      </tr></thead><tbody>${rows2}
-      <tr style="border-top:2px solid var(--border)">
-        <td style="padding:7px 10px;font-weight:700;background:var(--surface2)">Total</td>
-        <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtBook(totBook2)}</td>
-        <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtRev(totRev2)}</td>
-        <td style="text-align:right;padding:7px 10px;font-weight:700;background:var(--surface2)">${fmtNetCell(totBook2-totRev2)}</td>
-      </tr></tbody>
-    </table>`;
-  }
-
-  // Build month task detail drill-down — By Category or By Job
-  function buildMonthTaskDetail(mo) {
-    const sort = window._bkMonthSort || 'category';
-    const moKey = _curYear + '-' + String(mo+1).padStart(2,'0');
-    const cancelledMo = new Set(_bkTasks.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
-    const tasks = [
-      ..._bkTasks.filter(t => (t.createdAt||'').slice(0,7) === moKey && t.status !== 'cancelled'),
-      ..._bkTasks.filter(t => cancelledMo.has(t._id)),
-    ].sort((a,b) => {
-      if (sort === 'job') {
-        const pA = (projects.find(p=>p.id===a.proj)||{}).name||'';
-        const pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
-        return pA.localeCompare(pB, undefined, {numeric:true});
-      }
-      const catA = a.salesCat||'Uncategorized', catB = b.salesCat||'Uncategorized';
-      if (catA !== catB) return catA.localeCompare(catB);
-      return ((projects.find(p=>p.id===a.proj)||{}).name||'').localeCompare((projects.find(p=>p.id===b.proj)||{}).name||'');
-    });
-    if (!tasks.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No tasks for ${_monthNames[mo]} ${_curYear}.</div>`;
-    const statusColors = {new:'var(--muted)',inprogress:'var(--green)',complete:'var(--blue)',billed:'#c084fc',cancelled:'var(--red)',prohold:'var(--amber)',accthold:'var(--red)'};
-
-    // ── By Category ───────────────────────────────────────────────────────
-    if (sort === 'category') {
-      const byCat = {};
-      tasks.forEach(t => { const cat=t.salesCat||'Uncategorized'; if(!byCat[cat])byCat[cat]=[]; byCat[cat].push(t); });
-      return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">'+
-        '<thead><tr style="border-bottom:2px solid var(--border)">'+
-        '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat / Task</th>'+
-        '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Project</th>'+
-        '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Status</th>'+
-        '<th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Price</th>'+
-        '</tr></thead><tbody>'+
-        Object.keys(byCat).sort().map(cat => {
-          const catTasks = byCat[cat];
-          const catNet = catTasks.reduce((s,t) => s + (cancelledMo.has(t._id) ? -(t.fixedPrice||0) : (t.fixedPrice||0)), 0);
-          const catColor = catNet < 0 ? 'var(--red)' : 'var(--amber)';
-          const catDisplay = catNet < 0
-            ? '($'+Math.abs(catNet).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
-            : '$'+catNet.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-          return '<tr style="background:var(--surface2);border-bottom:0.5px solid var(--border)">'+
-            '<td colspan="3" style="padding:7px 10px;font-weight:700;color:var(--amber)">Cat '+cat+'</td>'+
-            '<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+catColor+'">'+catDisplay+'</td></tr>'+
-            catTasks.map(t => {
-              const p = projects.find(x=>x.id===t.proj);
-              const isRev = cancelledMo.has(t._id);
-              const isCredit = !isRev && t.fixedPrice < 0;
-              const pColor = (isRev || isCredit) ? 'var(--red)' : 'var(--green)';
-              const pDisplay = t.fixedPrice > 0
-                ? (isRev ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))
-                : isCredit ? '($'+Math.abs(t.fixedPrice).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')<span style="font-size:9px;font-weight:700;margin-left:3px">CR</span>'
-                : '—';
-              return '<tr style="border-bottom:0.5px solid var(--border)">'+
-                '<td style="padding:5px 10px 5px 22px;color:'+(isRev?'var(--muted)':'var(--text)')+';font-size:11px">'+
-                  (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+
-                  (isCredit?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">CR CREDIT</span>':'')+t.name+
-                '</td>'+
-                '<td style="padding:5px 10px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
-                '<td style="padding:5px 10px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
-                '<td style="padding:5px 10px;text-align:right;font-family:monospace;color:'+pColor+';font-size:11px">'+pDisplay+'</td>'+
-              '</tr>';
-            }).join('');
-        }).join('')+
-        '</tbody></table>';
-    }
-
-    // ── By Job ────────────────────────────────────────────────────────────
-    const byProj = {};
-    tasks.forEach(t => {
-      if (!byProj[t.proj]) byProj[t.proj] = { proj: projects.find(x=>x.id===t.proj), tasks: [] };
-      byProj[t.proj].tasks.push(t);
-    });
-    const projList = Object.values(byProj).sort((a,b) =>
-      ((a.proj?.name||'').localeCompare(b.proj?.name||'', undefined, {numeric:true}))
-    );
-    return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">'+
-      '<thead><tr style="border-bottom:2px solid var(--border)">'+
-      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Job / Task</th>'+
-      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat</th>'+
-      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Status</th>'+
-      '<th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Price</th>'+
-      '</tr></thead><tbody>'+
-      projList.map(({proj, tasks: ptasks}) => {
-        const projNet = ptasks.reduce((s,t) => s + (cancelledMo.has(t._id) ? -(t.fixedPrice||0) : (t.fixedPrice||0)), 0);
-        const projColor = projNet < 0 ? 'var(--red)' : 'var(--green)';
-        const projDisplay = projNet < 0
-          ? '($'+Math.abs(projNet).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
-          : '$'+projNet.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
-        const projLabel = proj ? (proj.emoji ? proj.emoji+' ' : '')+proj.name : 'Unknown';
-        return '<tr style="background:var(--surface2);border-bottom:0.5px solid var(--border)">'+
-          '<td colspan="3" style="padding:7px 10px;font-weight:700;color:var(--text)">'+projLabel+'</td>'+
-          '<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+projColor+'">'+projDisplay+'</td></tr>'+
-          ptasks.map(t => {
-            const isRev = cancelledMo.has(t._id);
-            const isCredit = !isRev && t.fixedPrice < 0;
-            const pColor = (isRev || isCredit) ? 'var(--red)' : 'var(--green)';
-            const pDisplay = t.fixedPrice > 0
-              ? (isRev ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))
-              : isCredit ? '($'+Math.abs(t.fixedPrice).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')<span style="font-size:9px;font-weight:700;margin-left:3px">CR</span>'
-              : '—';
-            return '<tr style="border-bottom:0.5px solid var(--border)">'+
-              '<td style="padding:5px 10px 5px 22px;color:'+(isRev?'var(--muted)':'var(--text)')+';font-size:11px">'+
-                (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+
-                (isCredit?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">CR CREDIT</span>':'')+t.name+
-              '</td>'+
-              '<td style="padding:5px 10px;color:var(--amber);font-weight:600;font-size:11px">'+(t.salesCat||'—')+'</td>'+
-              '<td style="padding:5px 10px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
-              '<td style="padding:5px 10px;text-align:right;font-family:monospace;color:'+pColor+';font-size:11px">'+pDisplay+'</td>'+
-            '</tr>';
-          }).join('');
-      }).join('')+
-      '</tbody></table>';
-  }
-
-  // Expose builders for setBkMonth (so clicking month tabs doesn't need full re-render)
-  window._bkBuildMonthDetail     = buildMonthDetail;
-  window._bkBuildMonthTaskDetail = buildMonthTaskDetail;
 
   // Sales by Category detail — billed tasks this year by category and project
   const curYearStr = new Date().getFullYear().toString();
@@ -744,58 +394,6 @@ function renderDashboard() {
         </div>
       </div>
     </div>
-    <div class="dash-charts-row" style="margin-top:20px">
-      <div class="dash-chart-card">
-        <div class="dash-chart-title">
-          <span>📋</span> Booking Report — ${_curYear}
-          <div style="display:flex;gap:4px;margin-left:auto">
-            <button id="bkBtnYear"  onclick="setBkView('year')"  style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Full Year</button>
-            <button id="bkBtnMonth" onclick="setBkView('month')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Month</button>
-            <button id="bkBtnChart" onclick="setBkView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px">
-          <div style="background:var(--surface2);border-radius:8px;padding:12px 14px">
-            <div style="font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">YTD Bookings</div>
-            <div style="font-size:18px;font-weight:700;color:var(--green)">${fmtStatPos(_ytdBookings)}</div>
-          </div>
-          <div style="background:var(--surface2);border-radius:8px;padding:12px 14px">
-            <div style="font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">YTD Reversals</div>
-            <div style="font-size:18px;font-weight:700;color:var(--red)">${_ytdReversals>0?fmtStatNeg(_ytdReversals):'—'}</div>
-          </div>
-          <div style="background:var(--surface2);border-radius:8px;padding:12px 14px">
-            <div style="font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">YTD Net</div>
-            <div style="font-size:18px;font-weight:700;color:${_ytdNet<0?'var(--red)':'var(--text)'}">${_ytdNet<0?fmtStatNeg(Math.abs(_ytdNet)):fmtStatPos(_ytdNet)}</div>
-          </div>
-          <div style="background:var(--surface2);border-radius:8px;padding:12px 14px">
-            <div style="font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">${_thisMonthLabel}</div>
-            <div style="font-size:18px;font-weight:700;color:var(--amber)">${_thisMonthNet<0?fmtStatNeg(Math.abs(_thisMonthNet)):fmtStatPos(_thisMonthNet)}</div>
-          </div>
-        </div>
-        <div id="bkYearWrap">${buildYearGrid()}</div>
-        <div id="bkMonthWrap" style="display:none">
-          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-            <div style="display:flex;gap:6px;flex-wrap:wrap" id="bkMonthTabs">
-              ${_monthNames.slice(0,_curMonth+1).map((m,mi)=>`<button id="bkTab_${mi}" onclick="setBkMonth(${mi})" style="font-size:11px;padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:${mi===_curMonth?'var(--surface2)':'transparent'};color:${mi===_curMonth?'var(--text)':'var(--muted)'};cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:${mi===_curMonth?'600':'400'}">${m}</button>`).join('')}
-            </div>
-            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
-              <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Sort:</span>
-              <button id="bkSortBtn_category" onclick="setBkMonthSort('category')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Category</button>
-              <button id="bkSortBtn_job"      onclick="setBkMonthSort('job')"      style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Job</button>
-            </div>
-          </div>
-          <div id="bkMonthSummary">${buildMonthDetail(_curMonth)}</div>
-          <div id="bkMonthDetail" style="display:none">${buildMonthTaskDetail(_curMonth)}</div>
-          <div style="display:flex;gap:6px;margin-top:10px">
-            <button id="bkDtlBtnSummary" onclick="setBkMonthSubview('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
-            <button id="bkDtlBtnDetail"  onclick="setBkMonthSubview('detail')"  style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
-          </div>
-        </div>
-        <div id="bkChartWrap" style="display:none">
-          <canvas id="bookingByMonthChart" height="110"></canvas>
-        </div>
-      </div>
-    </div>
 
   `;
   // Draw chart after DOM renders
@@ -803,18 +401,6 @@ function renderDashboard() {
     const canv = document.getElementById('billedByMonthChart');
     if (!canv || typeof Chart === 'undefined') return;
 
-    // ── Restore booking-report view / month / sort state ─────────────────
-    setBkView(_savedBkView);
-    if (_savedBkView === 'month') {
-      setBkMonth(_savedBkMonth);
-    }
-    const _restoredSort = window._bkMonthSort || 'category';
-    document.querySelectorAll('[id^="bkSortBtn_"]').forEach(btn => {
-      const active = btn.id === 'bkSortBtn_' + _restoredSort;
-      btn.style.background  = active ? 'var(--amber-glow)' : 'transparent';
-      btn.style.color       = active ? 'var(--amber)' : 'var(--muted)';
-      btn.style.borderColor = active ? 'var(--amber-dim)' : 'var(--border)';
-    });
 
     // Destroy existing chart instance if any
     const existing = Chart.getChart(canv);
@@ -1259,6 +845,453 @@ window._openProjectFromDash = function(id) {
   if (n) n.click();
   setTimeout(() => { if (typeof selectProject === 'function') selectProject(id); }, 50);
 };
+
+
+// ===== BOOKING REPORT (Admin page) =====
+// Moved off the Dashboard 11/5/2026: now its own Admin page (#bookings), gated by
+// view_rpt_bookings. Same data as before: open-project tasks (taskStore) plus the
+// current-year snapshot of closed-project tasks (window._bookingClosedTasks).
+function renderBookingReport() {
+  const wrap = document.getElementById('bookingWrap');
+  if (!wrap) return;
+
+  // ── Booking Report — yearly grid with cross-month reversal tracking ────────
+  const _now = new Date();
+  const _curYear  = _now.getFullYear();
+  const _curMonth = _now.getMonth(); // 0-based
+  const _thisMonthKey   = _curYear + '-' + String(_curMonth+1).padStart(2,'0');
+  const _thisYearStr    = String(_curYear);
+  const _thisMonthLabel = _now.toLocaleDateString('en-US', {month:'long', year:'numeric'});
+  const _monthNames     = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  // ── Preserve booking-report view state across full re-renders ─────────────
+  const _savedBkView  = window._bkCurrentView  || 'year';
+  const _savedBkMonth = (window._bkCurrentMonth != null) ? window._bkCurrentMonth : _curMonth;
+  // _savedBkSort is NOT captured here — build fns read window._bkMonthSort directly
+  //   so that setBkMonthSort() toggling works without a full re-render
+
+  // Build yearly booking data per month per category
+  const _yearBookings  = {}; // { mo: { cat: amount } }
+  const _yearReversals = {}; // { mo: { cat: amount } }
+  for (let m = 0; m <= _curMonth; m++) { _yearBookings[m] = {}; _yearReversals[m] = {}; }
+
+  // Booking data spans open projects (live taskStore) + a current-year snapshot of
+  // closed-project tasks (window._bookingClosedTasks). Without the latter, closing a
+  // job mid-year silently erases its bookings AND its cancellation reversals here.
+  const _internalProjIds = new Set(projects.filter(p => p.is_internal).map(p => p.id));
+  // Legacy-import tasks (is_legacy_import flag) carry a placeholder created_at with no
+  // real booking date, so any cancellation on them would show as a reversal with no
+  // corresponding booking anywhere in the report. Excluded entirely, both sides.
+  const _bkTasks = taskStore.concat(window._bookingClosedTasks || [])
+    .filter(t => !_internalProjIds.has(t.proj))
+    .filter(t => !t.isLegacyImport);
+
+  _bkTasks.forEach(t => {
+    const cat = t.salesCat || 'Uncategorized';
+    // Positive booking — created this year, not currently cancelled
+    const createdMo = (t.createdAt||'').slice(0,7);
+    if (createdMo.slice(0,4) === _thisYearStr && t.status !== 'cancelled') {
+      const mo = parseInt(createdMo.slice(5,7)) - 1;
+      if (mo >= 0 && mo <= _curMonth) {
+        _yearBookings[mo][cat] = (_yearBookings[mo][cat]||0) + (t.fixedPrice||0);
+      }
+    }
+    // Negative reversal — cancelled this year (any booked month)
+    const cancelledMo = (t.cancelledDate||'').slice(0,7);
+    if (cancelledMo && cancelledMo.slice(0,4) === _thisYearStr) {
+      const mo = parseInt(cancelledMo.slice(5,7)) - 1;
+      if (mo >= 0 && mo <= _curMonth) {
+        _yearReversals[mo][cat] = (_yearReversals[mo][cat]||0) + (t.fixedPrice||0);
+      }
+    }
+  });
+
+  // All cats that appear anywhere this year
+  const _allCats = [...new Set([
+    ...Object.values(_yearBookings).flatMap(m => Object.keys(m)),
+    ...Object.values(_yearReversals).flatMap(m => Object.keys(m)),
+  ])].sort();
+
+  // ── Booking chart data — 12 months current year, net per month + 3-mo moving avg ──
+  // Bars = net (bookings − reversals) per month; future months stay at 0.
+  // Moving avg only spans months up to and including the current month (so it
+  // doesn't get dragged down by empty future months).
+  const _bkChartLabels = _monthNames.map((m,i) => m + ' ' + String(_curYear).slice(2));
+  const _bkChartKeys   = _monthNames.map((_,i) => _curYear + '-' + String(i+1).padStart(2,'0'));
+  const _bkChartData   = _monthNames.map((_,mi) => {
+    if (mi > _curMonth) return 0;
+    const book = Object.values(_yearBookings[mi]||{}).reduce((a,b)=>a+b,0);
+    const rev  = Object.values(_yearReversals[mi]||{}).reduce((a,b)=>a+b,0);
+    return book - rev;
+  });
+  const _bkChartMovingAvg = _bkChartData.map((_, i) => {
+    if (i > _curMonth) return null; // don't draw line past current month
+    const start = Math.max(0, i - 2);
+    const slice = _bkChartData.slice(start, i + 1);
+    return slice.reduce((s, v) => s + v, 0) / slice.length;
+  });
+  window._bookingChartData = {
+    labels: _bkChartLabels,
+    data:   _bkChartData,
+    keys:   _bkChartKeys,
+    movingAvg: _bkChartMovingAvg,
+    curMonth: _curMonth,
+  };
+
+  // YTD summary numbers
+  const _ytdBookings  = Object.values(_yearBookings).reduce((s,m)  => s + Object.values(m).reduce((a,b)=>a+b,0), 0);
+  const _ytdReversals = Object.values(_yearReversals).reduce((s,m) => s + Object.values(m).reduce((a,b)=>a+b,0), 0);
+  const _ytdNet       = _ytdBookings - _ytdReversals;
+  const _thisMonthNet = Object.values(_yearBookings[_curMonth]||{}).reduce((a,b)=>a+b,0)
+                      - Object.values(_yearReversals[_curMonth]||{}).reduce((a,b)=>a+b,0);
+
+  // Stat card helpers
+  const fmtStatPos = v => '$' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+  const fmtStatNeg = v => '($' + v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}) + ')';
+
+  // Cell display helpers
+  const fmtBook    = v => {
+    if (v > 0) return '<span style="color:var(--green);font-family:monospace">$'+v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+'</span>';
+    if (v < 0) return '<span style="color:var(--red);font-family:monospace">($'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+')</span> <span style="color:var(--red);font-size:9px;font-weight:700;letter-spacing:.3px">CR</span>';
+    return '<span style="color:var(--border)">—</span>';
+  };
+  const fmtRev     = v => v > 0 ? '<span style="color:var(--red);font-family:monospace">($'+v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+')</span>' : '<span style="color:var(--border)">—</span>';
+  const fmtNetCell = v => {
+    if (v === 0) return '<span style="color:var(--border)">—</span>';
+    const abs = v.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+    return v < 0
+      ? '<span style="color:var(--red);font-family:monospace;font-weight:600">($'+Math.abs(v).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})+')</span>'
+      : '<span style="font-family:monospace;font-weight:600">$'+abs+'</span>';
+  };
+
+  // Build year-grid HTML
+  function buildYearGrid() {
+    if (!_allCats.length) return '<div style="text-align:center;padding:32px;color:var(--muted);font-size:13px">No bookings this year yet.</div>';
+    const moHeaders = _monthNames.slice(0,_curMonth+1).map((m,i) => {
+      const isCur = i === _curMonth;
+      return `<th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:${isCur?'var(--amber)':'var(--muted)'};white-space:nowrap;${isCur?'border-bottom:2px solid var(--amber)':''}">${m}</th>`;
+    }).join('');
+    const header = `<thead><tr>
+      <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat</th>
+      ${moHeaders}
+      <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text);white-space:nowrap">YTD net</th>
+    </tr></thead>`;
+    const colNetTotals = new Array(_curMonth+1).fill(0);
+    let ytdGrand = 0;
+    const bodyRows = _allCats.map((cat,ci) => {
+      let ytdCat = 0;
+      const cells = _monthNames.slice(0,_curMonth+1).map((m,mi) => {
+        const net = (_yearBookings[mi]?.[cat]||0) - (_yearReversals[mi]?.[cat]||0);
+        colNetTotals[mi] += net;
+        ytdCat += net;
+        const isCur = mi === _curMonth;
+        const bg = isCur ? 'background:rgba(232,162,52,0.06);' : ci%2===1 ? 'background:var(--surface2);' : '';
+        return `<td style="text-align:right;padding:5px 10px;${bg}">${fmtNetCell(net)}</td>`;
+      }).join('');
+      ytdGrand += ytdCat;
+      return `<tr style="border-bottom:0.5px solid var(--border);${ci%2===1?'background:var(--surface2)':''}">
+        <td style="padding:5px 10px;font-weight:600;color:var(--amber)">Cat ${cat}</td>
+        ${cells}
+        <td style="text-align:right;padding:5px 10px">${fmtNetCell(ytdCat)}</td>
+      </tr>`;
+    }).join('');
+    const totalCells = colNetTotals.map((v,mi) => {
+      const isCur = mi === _curMonth;
+      return `<td style="text-align:right;padding:7px 10px;font-weight:700;${isCur?'background:rgba(232,162,52,0.10);':'background:var(--surface2);'}">${fmtNetCell(v)}</td>`;
+    }).join('');
+    return `<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">
+      ${header}<tbody>${bodyRows}
+      <tr style="border-top:2px solid var(--border)">
+        <td style="padding:7px 10px;font-weight:700;color:var(--text);background:var(--surface2)">Total</td>
+        ${totalCells}
+        <td style="text-align:right;padding:7px 10px;font-weight:700;background:var(--surface2)">${fmtNetCell(ytdGrand)}</td>
+      </tr></tbody>
+    </table></div>`;
+  }
+
+  // Build month summary (bookings / reversals / net) — By Category or By Job
+  function buildMonthDetail(mo) {
+    const sort = window._bkMonthSort || 'category';
+
+    // ── By Category (default) ────────────────────────────────────────────
+    if (sort === 'category') {
+      const cats = [...new Set([...Object.keys(_yearBookings[mo]||{}), ...Object.keys(_yearReversals[mo]||{})])].sort();
+      if (!cats.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No bookings in ${_monthNames[mo]} ${_curYear}.</div>`;
+      let totBook = 0, totRev = 0;
+      const rows = cats.map((cat,ci) => {
+        const book = _yearBookings[mo]?.[cat]  || 0;
+        const rev  = _yearReversals[mo]?.[cat] || 0;
+        const net  = book - rev;
+        totBook += book; totRev += rev;
+        return `<tr style="border-bottom:0.5px solid var(--border);${ci%2===1?'background:var(--surface2)':''}">
+          <td style="padding:6px 10px;font-weight:600;color:var(--amber)">Cat ${cat}</td>
+          <td style="text-align:right;padding:6px 10px">${fmtBook(book)}</td>
+          <td style="text-align:right;padding:6px 10px">${fmtRev(rev)}</td>
+          <td style="text-align:right;padding:6px 10px">${fmtNetCell(net)}</td>
+        </tr>`;
+      }).join('');
+      return `<table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="border-bottom:2px solid var(--border)">
+          <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat</th>
+          <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--green)">Bookings</th>
+          <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--red)">Reversals</th>
+          <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text)">Net</th>
+        </tr></thead><tbody>${rows}
+        <tr style="border-top:2px solid var(--border)">
+          <td style="padding:7px 10px;font-weight:700;background:var(--surface2)">Total</td>
+          <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtBook(totBook)}</td>
+          <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtRev(totRev)}</td>
+          <td style="text-align:right;padding:7px 10px;font-weight:700;background:var(--surface2)">${fmtNetCell(totBook-totRev)}</td>
+        </tr></tbody>
+      </table>`;
+    }
+
+    // ── By Job ────────────────────────────────────────────────────────────
+    const moKey = _curYear + '-' + String(mo+1).padStart(2,'0');
+    const cancelledInMo = new Set(_bkTasks.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
+    const bookedTasks = _bkTasks.filter(t =>
+      ((t.createdAt||'').slice(0,7) === moKey && t.status !== 'cancelled') || cancelledInMo.has(t._id)
+    );
+    if (!bookedTasks.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No bookings in ${_monthNames[mo]} ${_curYear}.</div>`;
+    const byProj = {};
+    bookedTasks.forEach(t => {
+      if (!byProj[t.proj]) byProj[t.proj] = { proj: projects.find(x => x.id === t.proj), book: 0, rev: 0 };
+      if (cancelledInMo.has(t._id)) byProj[t.proj].rev += (t.fixedPrice||0);
+      else                           byProj[t.proj].book += (t.fixedPrice||0);
+    });
+    const projRows = Object.values(byProj).sort((a,b) =>
+      ((a.proj?.name||'').localeCompare(b.proj?.name||'', undefined, {numeric:true}))
+    );
+    let totBook2 = 0, totRev2 = 0;
+    const rows2 = projRows.map((r,ci) => {
+      const net = r.book - r.rev;
+      totBook2 += r.book; totRev2 += r.rev;
+      return `<tr style="border-bottom:0.5px solid var(--border);${ci%2===1?'background:var(--surface2)':''}">
+        <td style="padding:6px 10px;font-weight:600;color:var(--text)">${r.proj ? (r.proj.emoji ? r.proj.emoji+' ' : '')+r.proj.name : 'Unknown'}</td>
+        <td style="text-align:right;padding:6px 10px">${fmtBook(r.book)}</td>
+        <td style="text-align:right;padding:6px 10px">${fmtRev(r.rev)}</td>
+        <td style="text-align:right;padding:6px 10px">${fmtNetCell(net)}</td>
+      </tr>`;
+    }).join('');
+    return `<table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead><tr style="border-bottom:2px solid var(--border)">
+        <th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Job</th>
+        <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--green)">Bookings</th>
+        <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--red)">Reversals</th>
+        <th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--text)">Net</th>
+      </tr></thead><tbody>${rows2}
+      <tr style="border-top:2px solid var(--border)">
+        <td style="padding:7px 10px;font-weight:700;background:var(--surface2)">Total</td>
+        <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtBook(totBook2)}</td>
+        <td style="text-align:right;padding:7px 10px;background:var(--surface2)">${fmtRev(totRev2)}</td>
+        <td style="text-align:right;padding:7px 10px;font-weight:700;background:var(--surface2)">${fmtNetCell(totBook2-totRev2)}</td>
+      </tr></tbody>
+    </table>`;
+  }
+
+  // Build month task detail drill-down — By Category or By Job
+  function buildMonthTaskDetail(mo) {
+    const sort = window._bkMonthSort || 'category';
+    const moKey = _curYear + '-' + String(mo+1).padStart(2,'0');
+    const cancelledMo = new Set(_bkTasks.filter(t => (t.cancelledDate||'').slice(0,7) === moKey).map(t => t._id));
+    const tasks = [
+      ..._bkTasks.filter(t => (t.createdAt||'').slice(0,7) === moKey && t.status !== 'cancelled'),
+      ..._bkTasks.filter(t => cancelledMo.has(t._id)),
+    ].sort((a,b) => {
+      if (sort === 'job') {
+        const pA = (projects.find(p=>p.id===a.proj)||{}).name||'';
+        const pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
+        return pA.localeCompare(pB, undefined, {numeric:true});
+      }
+      const catA = a.salesCat||'Uncategorized', catB = b.salesCat||'Uncategorized';
+      if (catA !== catB) return catA.localeCompare(catB);
+      return ((projects.find(p=>p.id===a.proj)||{}).name||'').localeCompare((projects.find(p=>p.id===b.proj)||{}).name||'');
+    });
+    if (!tasks.length) return `<div style="text-align:center;padding:24px;color:var(--muted);font-size:13px">No tasks for ${_monthNames[mo]} ${_curYear}.</div>`;
+    const statusColors = {new:'var(--muted)',inprogress:'var(--green)',complete:'var(--blue)',billed:'#c084fc',cancelled:'var(--red)',prohold:'var(--amber)',accthold:'var(--red)'};
+
+    // ── By Category ───────────────────────────────────────────────────────
+    if (sort === 'category') {
+      const byCat = {};
+      tasks.forEach(t => { const cat=t.salesCat||'Uncategorized'; if(!byCat[cat])byCat[cat]=[]; byCat[cat].push(t); });
+      return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">'+
+        '<thead><tr style="border-bottom:2px solid var(--border)">'+
+        '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat / Task</th>'+
+        '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Project</th>'+
+        '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Status</th>'+
+        '<th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Price</th>'+
+        '</tr></thead><tbody>'+
+        Object.keys(byCat).sort().map(cat => {
+          const catTasks = byCat[cat];
+          const catNet = catTasks.reduce((s,t) => s + (cancelledMo.has(t._id) ? -(t.fixedPrice||0) : (t.fixedPrice||0)), 0);
+          const catColor = catNet < 0 ? 'var(--red)' : 'var(--amber)';
+          const catDisplay = catNet < 0
+            ? '($'+Math.abs(catNet).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
+            : '$'+catNet.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+          return '<tr style="background:var(--surface2);border-bottom:0.5px solid var(--border)">'+
+            '<td colspan="3" style="padding:7px 10px;font-weight:700;color:var(--amber)">Cat '+cat+'</td>'+
+            '<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+catColor+'">'+catDisplay+'</td></tr>'+
+            catTasks.map(t => {
+              const p = projects.find(x=>x.id===t.proj);
+              const isRev = cancelledMo.has(t._id);
+              const isCredit = !isRev && t.fixedPrice < 0;
+              const pColor = (isRev || isCredit) ? 'var(--red)' : 'var(--green)';
+              const pDisplay = t.fixedPrice > 0
+                ? (isRev ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))
+                : isCredit ? '($'+Math.abs(t.fixedPrice).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')<span style="font-size:9px;font-weight:700;margin-left:3px">CR</span>'
+                : '—';
+              return '<tr style="border-bottom:0.5px solid var(--border)">'+
+                '<td style="padding:5px 10px 5px 22px;color:'+(isRev?'var(--muted)':'var(--text)')+';font-size:11px">'+
+                  (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+
+                  (isCredit?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">CR CREDIT</span>':'')+t.name+
+                '</td>'+
+                '<td style="padding:5px 10px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
+                '<td style="padding:5px 10px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
+                '<td style="padding:5px 10px;text-align:right;font-family:monospace;color:'+pColor+';font-size:11px">'+pDisplay+'</td>'+
+              '</tr>';
+            }).join('');
+        }).join('')+
+        '</tbody></table>';
+    }
+
+    // ── By Job ────────────────────────────────────────────────────────────
+    const byProj = {};
+    tasks.forEach(t => {
+      if (!byProj[t.proj]) byProj[t.proj] = { proj: projects.find(x=>x.id===t.proj), tasks: [] };
+      byProj[t.proj].tasks.push(t);
+    });
+    const projList = Object.values(byProj).sort((a,b) =>
+      ((a.proj?.name||'').localeCompare(b.proj?.name||'', undefined, {numeric:true}))
+    );
+    return '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:12px">'+
+      '<thead><tr style="border-bottom:2px solid var(--border)">'+
+      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Job / Task</th>'+
+      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Cat</th>'+
+      '<th style="text-align:left;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Status</th>'+
+      '<th style="text-align:right;padding:6px 10px;font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted)">Price</th>'+
+      '</tr></thead><tbody>'+
+      projList.map(({proj, tasks: ptasks}) => {
+        const projNet = ptasks.reduce((s,t) => s + (cancelledMo.has(t._id) ? -(t.fixedPrice||0) : (t.fixedPrice||0)), 0);
+        const projColor = projNet < 0 ? 'var(--red)' : 'var(--green)';
+        const projDisplay = projNet < 0
+          ? '($'+Math.abs(projNet).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')'
+          : '$'+projNet.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+        const projLabel = proj ? (proj.emoji ? proj.emoji+' ' : '')+proj.name : 'Unknown';
+        return '<tr style="background:var(--surface2);border-bottom:0.5px solid var(--border)">'+
+          '<td colspan="3" style="padding:7px 10px;font-weight:700;color:var(--text)">'+projLabel+'</td>'+
+          '<td style="padding:7px 10px;text-align:right;font-weight:700;color:'+projColor+'">'+projDisplay+'</td></tr>'+
+          ptasks.map(t => {
+            const isRev = cancelledMo.has(t._id);
+            const isCredit = !isRev && t.fixedPrice < 0;
+            const pColor = (isRev || isCredit) ? 'var(--red)' : 'var(--green)';
+            const pDisplay = t.fixedPrice > 0
+              ? (isRev ? '($'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')' : '$'+t.fixedPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2}))
+              : isCredit ? '($'+Math.abs(t.fixedPrice).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2})+')<span style="font-size:9px;font-weight:700;margin-left:3px">CR</span>'
+              : '—';
+            return '<tr style="border-bottom:0.5px solid var(--border)">'+
+              '<td style="padding:5px 10px 5px 22px;color:'+(isRev?'var(--muted)':'var(--text)')+';font-size:11px">'+
+                (isRev?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">↩ REVERSAL</span>':'')+
+                (isCredit?'<span style="font-size:9px;font-weight:700;color:var(--red);margin-right:4px">CR CREDIT</span>':'')+t.name+
+              '</td>'+
+              '<td style="padding:5px 10px;color:var(--amber);font-weight:600;font-size:11px">'+(t.salesCat||'—')+'</td>'+
+              '<td style="padding:5px 10px"><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+(statusColors[t.status]||'var(--muted)')+'22;color:'+(statusColors[t.status]||'var(--muted)')+'">'+(t.status||'—')+'</span></td>'+
+              '<td style="padding:5px 10px;text-align:right;font-family:monospace;color:'+pColor+';font-size:11px">'+pDisplay+'</td>'+
+            '</tr>';
+          }).join('');
+      }).join('')+
+      '</tbody></table>';
+  }
+
+  // Expose builders for setBkMonth (so clicking month tabs doesn't need full re-render)
+  window._bkBuildMonthDetail     = buildMonthDetail;
+  window._bkBuildMonthTaskDetail = buildMonthTaskDetail;
+
+  wrap.innerHTML = `
+      <div class="dash-chart-card">
+        <div class="dash-chart-title">
+          <span>📋</span> Booking Report — ${_curYear}
+          <div style="display:flex;gap:4px;margin-left:auto">
+            <button id="bkBtnYear"  onclick="setBkView('year')"  style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Full Year</button>
+            <button id="bkBtnMonth" onclick="setBkView('month')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Month</button>
+            <button id="bkBtnChart" onclick="setBkView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px">
+          <div style="background:var(--surface2);border-radius:8px;padding:12px 14px">
+            <div style="font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">YTD Bookings</div>
+            <div style="font-size:18px;font-weight:700;color:var(--green)">${fmtStatPos(_ytdBookings)}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:8px;padding:12px 14px">
+            <div style="font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">YTD Reversals</div>
+            <div style="font-size:18px;font-weight:700;color:var(--red)">${_ytdReversals>0?fmtStatNeg(_ytdReversals):'—'}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:8px;padding:12px 14px">
+            <div style="font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">YTD Net</div>
+            <div style="font-size:18px;font-weight:700;color:${_ytdNet<0?'var(--red)':'var(--text)'}">${_ytdNet<0?fmtStatNeg(Math.abs(_ytdNet)):fmtStatPos(_ytdNet)}</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:8px;padding:12px 14px">
+            <div style="font-size:10px;font-weight:600;letter-spacing:.6px;text-transform:uppercase;color:var(--muted);margin-bottom:4px">${_thisMonthLabel}</div>
+            <div style="font-size:18px;font-weight:700;color:var(--amber)">${_thisMonthNet<0?fmtStatNeg(Math.abs(_thisMonthNet)):fmtStatPos(_thisMonthNet)}</div>
+          </div>
+        </div>
+        <div id="bkYearWrap">${buildYearGrid()}</div>
+        <div id="bkMonthWrap" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+            <div style="display:flex;gap:6px;flex-wrap:wrap" id="bkMonthTabs">
+              ${_monthNames.slice(0,_curMonth+1).map((m,mi)=>`<button id="bkTab_${mi}" onclick="setBkMonth(${mi})" style="font-size:11px;padding:4px 12px;border-radius:6px;border:1px solid var(--border);background:${mi===_curMonth?'var(--surface2)':'transparent'};color:${mi===_curMonth?'var(--text)':'var(--muted)'};cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:${mi===_curMonth?'600':'400'}">${m}</button>`).join('')}
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+              <span style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Sort:</span>
+              <button id="bkSortBtn_category" onclick="setBkMonthSort('category')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Category</button>
+              <button id="bkSortBtn_job"      onclick="setBkMonthSort('job')"      style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">By Job</button>
+            </div>
+          </div>
+          <div id="bkMonthSummary">${buildMonthDetail(_curMonth)}</div>
+          <div id="bkMonthDetail" style="display:none">${buildMonthTaskDetail(_curMonth)}</div>
+          <div style="display:flex;gap:6px;margin-top:10px">
+            <button id="bkDtlBtnSummary" onclick="setBkMonthSubview('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
+            <button id="bkDtlBtnDetail"  onclick="setBkMonthSubview('detail')"  style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
+          </div>
+        </div>
+        <div id="bkChartWrap" style="display:none">
+          <canvas id="bookingByMonthChart" height="110"></canvas>
+        </div>
+      </div>
+  `;
+
+  // Restore view / month / sort state after the DOM is in place.
+  setTimeout(() => {
+      // ── Restore booking-report view / month / sort state ─────────────────
+      setBkView(_savedBkView);
+      if (_savedBkView === 'month') {
+        setBkMonth(_savedBkMonth);
+      }
+      const _restoredSort = window._bkMonthSort || 'category';
+      document.querySelectorAll('[id^="bkSortBtn_"]').forEach(btn => {
+        const active = btn.id === 'bkSortBtn_' + _restoredSort;
+        btn.style.background  = active ? 'var(--amber-glow)' : 'transparent';
+        btn.style.color       = active ? 'var(--amber)' : 'var(--muted)';
+        btn.style.borderColor = active ? 'var(--amber-dim)' : 'var(--border)';
+      });
+  }, 0);
+}
+
+function openBookingReportPanel(el) {
+  if (!(typeof can === 'function' && can('view_rpt_bookings'))) {
+    if (typeof toast === 'function') toast('⚠ You do not have access to the Booking Report');
+    return;
+  }
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const nav = el || document.getElementById('navBookings');
+  if (nav) nav.classList.add('active');
+  if (typeof activeProjectId !== 'undefined') activeProjectId = null;
+  const topbar = document.getElementById('topbarName');
+  if (topbar) topbar.textContent = 'Booking Report';
+  showProjectView('panel-bookings');
+  renderBookingReport();
+}
+window.renderBookingReport = renderBookingReport;
+window.openBookingReportPanel = openBookingReportPanel;
 
 function setBkView(view) {
   if (view !== 'year' && view !== 'month' && view !== 'chart') view = 'year';

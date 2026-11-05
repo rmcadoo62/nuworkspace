@@ -235,6 +235,7 @@
   <div class="nav-section" data-section="admin" data-label="Admin">
     <div class="nav-item" id="navRptClosedJobs" style="display:none" onclick="openReportPage('closedjobs',this)"><span class="icon">&#x1F4CA;</span> Closed Jobs</div>
     <div class="nav-item" id="navCashFlow" style="display:none" onclick="openCashFlowPanel(this)"><span class="icon">&#x1F4B5;</span> Cash Flow Tracker</div>
+    <div class="nav-item" id="navBookings" style="display:none" onclick="openBookingReportPanel(this)"><span class="icon">&#x1F4CB;</span> Booking Report</div>
   </div>
 
   </div><!-- /sidebar-nav-scroll -->
@@ -487,6 +488,10 @@
 
     <div class="view-panel" id="panel-dashboard">
       <div class="dash-wrap" id="dashWrap"></div>
+    </div>
+    <!-- BOOKING REPORT (Admin) — rendered by renderBookingReport() in js/dashboard.js -->
+    <div class="view-panel" id="panel-bookings">
+      <div class="dash-wrap" id="bookingWrap"></div>
     </div>
     <div class="view-panel" id="panel-cash-flow">
       <div class="cf-wrap" id="cashFlowWrap"></div>

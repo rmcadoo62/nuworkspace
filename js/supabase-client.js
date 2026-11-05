@@ -691,6 +691,7 @@ function refreshCurrentView() {
   if (!active) return;
   const id = active.id;
   if (id === 'panel-dashboard') renderDashboard();
+  else if (id === 'panel-bookings') { if (typeof renderBookingReport === 'function') renderBookingReport(); }
   else if (id === 'panel-projects') { document.querySelector('#navProjects') && openProjectsTable(document.getElementById('navProjects')); }
   else if (id === 'panel-project') {
     if (activeProjectId) {

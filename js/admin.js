@@ -2580,6 +2580,7 @@ const CAPABILITY_DEFS = [
   // Admin = owners' financial pages; Setup = the gear menu in the top bar.
   { key: 'view_rpt_closedjobs',label: 'View Closed Jobs',      group: 'Admin' },
   { key: 'view_cash_flow',     label: 'View Cash Flow Tracker', group: 'Admin' },
+  { key: 'view_rpt_bookings',  label: 'View Booking Report',   group: 'Admin' },
   { key: 'view_audit_log',     label: 'View Audit Log',        group: 'Setup' },
   { key: 'view_setup',         label: 'View Setup',            group: 'Setup' },
   { key: 'manage_permissions', label: 'Manage Permissions',    group: 'Setup' },
