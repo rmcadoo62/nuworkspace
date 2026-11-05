@@ -24,6 +24,8 @@
 /* cards */
 .vnd-card{cursor:pointer;}
 .vnd-card-top{display:flex;align-items:center;gap:8px;padding-right:48px;}
+.vnd-types-link{margin-left:auto;background:none;border:none;color:var(--blue);font-size:11.5px;font-weight:500;letter-spacing:0;text-transform:none;cursor:pointer;padding:0 0 0 10px;font-family:'DM Sans',sans-serif;}
+.vnd-types-link:hover{text-decoration:underline;}
 .vnd-nick{font-size:12px;color:var(--muted);font-style:italic;margin-top:-2px;}
 .vnd-card-foot{font-size:11px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
 .vnd-card-foot strong{color:var(--text);}

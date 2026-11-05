@@ -471,7 +471,8 @@ function _vendorInfoHtml(v, editable) {
     </div>
 
     <div class="client-detail-section">
-      <div class="client-detail-section-title">Services Provided</div>
+      <div class="client-detail-section-title">Services Provided
+        ${editable ? `<button type="button" class="vnd-types-link" onclick="_captureVendorForm();openVendorTypesModal()" title="Add, rename or retire service types">⚙ Edit service types</button>` : ''}</div>
       <div class="vnd-type-checks">
         ${types.map(t => `<label class="vnd-check">
           <input type="checkbox" class="vdType" value="${t.id}" ${d.typeIds.includes(t.id) ? 'checked' : ''} ${dis}
@@ -839,6 +840,14 @@ function _renderVendorTypesModal() {
     `<button class="btn btn-ghost" style="margin-left:auto" onclick="closeVendorModal()">Done</button>`, 600);
 }
 
+// After a service type change: refresh the modal, the list, and an open vendor drawer
+// (so a type added from inside the drawer shows up as a checkbox right away; ticks in progress are kept).
+function _vendorTypesChanged() {
+  _renderVendorTypesModal();
+  renderVendorsPanel();
+  if (document.getElementById('vendorDrawer')?.classList.contains('open') && _vendorDrawerTab === 'vtab-info') renderVendorDrawer();
+}
+
 function _vendorTypeCode(name) {
   let base = name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'type';
   let code = base, n = 2;
@@ -858,8 +867,7 @@ async function addVendorType() {
   });
   if (error) { vErr('Could not add service type', error); return; }
   await loadVendorData();
-  _renderVendorTypesModal();
-  renderVendorsPanel();
+  _vendorTypesChanged();
 }
 
 async function updateVendorType(id, patch) {
@@ -870,8 +878,7 @@ async function updateVendorType(id, patch) {
   const { error } = await sb.from('vendor_service_types').update(patch).eq('id', id);
   if (error) { vErr('Could not update service type', error); }
   await loadVendorData();
-  _renderVendorTypesModal();
-  renderVendorsPanel();
+  _vendorTypesChanged();
 }
 
 async function moveVendorType(id, dir) {
@@ -885,8 +892,7 @@ async function moveVendorType(id, dir) {
   const err = results.find(r => r.error);
   if (err) vErr('Could not reorder service types', err.error);
   await loadVendorData();
-  _renderVendorTypesModal();
-  renderVendorsPanel();
+  _vendorTypesChanged();
 }
 
 // Escape closes the vendor modal first, then the drawer.
