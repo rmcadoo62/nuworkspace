@@ -162,3 +162,12 @@
   .loa-search{min-width:0;width:100%;max-width:none;}
   .loa-drawer{width:100%;}
 }
+
+/* Column layout (js/table-tools.js): fixed widths from the colgroup, resizable headers, filter row */
+.loa-table.tt-fixed{table-layout:fixed;min-width:100%;}
+.loa-table.tt-fixed td{overflow:hidden;text-overflow:ellipsis;}
+.loa-table.tt-fixed td.loa-desc{min-width:0;}
+.loa-table thead tr.tt-filter-row th{position:static;padding:4px 6px;background:var(--surface2);border-bottom:1.5px solid var(--border);}
+.loa-table .tt-filter.on{border-color:var(--amber-dim);background:rgba(192,122,26,0.08);}
+.loa-filters .tt-popwrap{margin-left:4px;}
+.loa-filters .tt-popwrap .pf-btn{height:34px;}

@@ -205,6 +205,35 @@ async function openLoaPanel(el) {
   renderLoaPanel();
 }
 
+// ---------- table columns (js/table-tools.js) ----------
+// Asset ID, the tick box and the status badge stay put; the rest can be hidden, moved and resized.
+// text() is what the 🔍 filter row matches; print() what Print list / copy uses (defaults to text()).
+const LOA_COLS = [
+  { key: 'check', label: '', width: 34, fixed: 'left', resizable: false, filter: false },
+  { key: 'asset_id', label: 'Asset ID', width: 110, min: 70, fixed: 'left', sort: 'asset_id', text: a => a.asset_id },
+  { key: 'description', label: 'Description', width: 280, min: 100, sort: 'description', text: a => a.description },
+  { key: 'manufacturer', label: 'Make', width: 140, min: 60, sort: 'manufacturer', text: a => a.manufacturer },
+  { key: 'model_no', label: 'Model', width: 130, min: 60, sort: 'model_no', text: a => a.model_no },
+  { key: 'serial_no', label: 'Serial', width: 120, min: 60, sort: 'serial_no', text: a => a.serial_no },
+  { key: 'location', label: 'Location', width: 110, min: 60, sort: 'location', text: a => lLocName(a.location_id) },
+  { key: 'cal_type', label: 'Cal Type', width: 130, min: 70, sort: 'cal_type', text: a => lCalTypeLabel(a) },
+  { key: 'last_cal', label: 'Last Cal', width: 105, min: 80, sort: 'last_cal', text: a => lFmt(loaStatus[a.asset_id]?.last_cal_date) },
+  { key: 'next_due', label: 'Next Due', width: 115, min: 80, sort: 'next_due',
+    text: a => { const s = loaStatus[a.asset_id] || {}; return s.out_for_cal ? 'Out for cal' : lFmt(s.next_due); },
+    print: a => { const s = loaStatus[a.asset_id] || {}; return s.out_for_cal ? 'Out since ' + lFmt(s.out_for_cal_since) : lFmt(s.next_due); } },
+  { key: 'vendor', label: 'Cal Source', width: 150, min: 70, sort: 'vendor',
+    // Matches the nickname shown and the full name.
+    text: a => { const s = loaStatus[a.asset_id] || {};
+      return s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorShort(a.cal_vendor_id) + ' ' + lVendorName(a.cal_vendor_id); },
+    print: a => { const s = loaStatus[a.asset_id] || {};
+      return s.out_for_cal ? lVendorName(s.out_for_cal_vendor_id) : (s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorName(a.cal_vendor_id)); } },
+  { key: 'oos', label: '', width: 110, fixed: 'right', resizable: false, filter: false },
+];
+const loaTT = TT.define('loa', LOA_COLS, () => renderLoaPanel());
+
+// The data columns for Print list and copy: Asset ID, then the visible columns in your order.
+function _loaPrintCols() { return TT.cols('loa', ['check', 'oos']); }
+
 function _loaFiltered() {
   const q = _loaSearch.toLowerCase().trim();
   const f = _loaFilter;
@@ -217,6 +246,7 @@ function _loaFiltered() {
       if (!inHouse && !(a.cal_vendor_id && f.vendor.has(a.cal_vendor_id))) return false;
     }
     if (f.due.size && !f.due.has(lDueState(a))) return false;
+    if (!TT.matches('loa', a)) return false;
     if (q) {
       const hay = [a.asset_id, a.description, a.manufacturer, a.model_no, a.serial_no, a.test_category, a.notes]
         .join(' ').toLowerCase();
@@ -287,6 +317,8 @@ function renderLoaPanel() {
 
   const searchEl = wrap.querySelector('.loa-search');
   const wasFocused = searchEl && document.activeElement === searchEl;
+  const filterFocus = TT.captureFocus('loa');
+  const cols = TT.cols('loa', edit ? [] : ['check']);
   const selStart = wasFocused ? searchEl.selectionStart : null;
 
   const tile = (key, label, n, cls) => {
@@ -299,8 +331,13 @@ function renderLoaPanel() {
   const vendorIds = [...new Set(loaAssets.map(a => a.cal_vendor_id).filter(Boolean))]
     .map(id => ({ id, name: lVendorShort(id) })).sort((a, b) => a.name.localeCompare(b.name));
 
-  const th = (key, label) => `<th class="loa-th ${_loaSort.key === key ? 'sorted' : ''}" onclick="_loaSortBy('${key}')">${label}${
-    _loaSort.key === key ? (_loaSort.dir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+  const th = c => {
+    if (c.key === 'check') return `<th class="loa-td-check"><input type="checkbox" id="loaSelAll" title="Select / deselect all in this view"
+      ${tickTotal && tickSel === tickTotal ? 'checked' : ''} ${tickTotal ? '' : 'disabled'} onchange="_loaSelectAll(this.checked)" /></th>`;
+    if (!c.sort) return `<th class="loa-th" style="position:relative">${c.label}${TT.resizer('loa', c)}</th>`;
+    return `<th class="loa-th ${_loaSort.key === c.sort ? 'sorted' : ''}" style="position:relative" onclick="_loaSortBy('${c.sort}')">${c.label}${
+      _loaSort.key === c.sort ? (_loaSort.dir > 0 ? ' ▲' : ' ▼') : ''}${TT.resizer('loa', c)}</th>`;
+  };
 
   const rows = shown.map(a => {
     const s = loaStatus[a.asset_id] || {};
@@ -312,20 +349,26 @@ function renderLoaPanel() {
     if (s.out_for_cal) dueCell = `<span class="loa-due out" title="Sent ${lFmt(s.out_for_cal_since)}">Out for cal</span>`;
     else if (s.next_due) dueCell = `<span class="loa-due ${due}">${lFmt(s.next_due)}</span>`;
     const vend = s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorShort(a.cal_vendor_id);
+    const cell = c => {
+      switch (c.key) {
+        case 'check': return `<td class="loa-td-check" onclick="event.stopPropagation()">${canSend
+          ? `<input type="checkbox" ${sel ? 'checked' : ''} onchange="_loaToggleSel('${lJs(a.asset_id)}',this.checked)" />` : ''}</td>`;
+        case 'asset_id':     return `<td class="loa-mono">${lEsc(a.asset_id)}</td>`;
+        case 'description':  return `<td class="loa-desc">${lEsc(a.description)}</td>`;
+        case 'manufacturer': return `<td>${lEsc(a.manufacturer)}</td>`;
+        case 'model_no':     return `<td>${lEsc(a.model_no)}</td>`;
+        case 'serial_no':    return `<td class="loa-mono loa-dim">${lEsc(a.serial_no)}</td>`;
+        case 'location':     return `<td>${lEsc(lLocName(a.location_id))}</td>`;
+        case 'cal_type':     return `<td>${lEsc(lCalTypeLabel(a))}</td>`;
+        case 'last_cal':     return `<td class="loa-mono">${lFmt(s.last_cal_date)}</td>`;
+        case 'next_due':     return `<td>${dueCell}</td>`;
+        case 'vendor':       return `<td title="${lEsc(lVendorName(a.cal_vendor_id))}">${lEsc(vend)}</td>`;
+        case 'oos':          return `<td>${a.status === 'out_of_service' ? '<span class="loa-oos">Out of service</span>' : ''}</td>`;
+      }
+      return '<td></td>';
+    };
     return `<tr class="loa-row ${a.status === 'out_of_service' ? 'oos' : ''} ${sel ? 'selected' : ''}" onclick="openLoaDrawer('${lJs(a.asset_id)}')">
-      ${edit ? `<td class="loa-td-check" onclick="event.stopPropagation()">${canSend
-        ? `<input type="checkbox" ${sel ? 'checked' : ''} onchange="_loaToggleSel('${lJs(a.asset_id)}',this.checked)" />` : ''}</td>` : ''}
-      <td class="loa-mono">${lEsc(a.asset_id)}</td>
-      <td class="loa-desc">${lEsc(a.description)}</td>
-      <td>${lEsc(a.manufacturer)}</td>
-      <td>${lEsc(a.model_no)}</td>
-      <td class="loa-mono loa-dim">${lEsc(a.serial_no)}</td>
-      <td>${lEsc(lLocName(a.location_id))}</td>
-      <td>${lEsc(lCalTypeLabel(a))}</td>
-      <td class="loa-mono">${lFmt(s.last_cal_date)}</td>
-      <td>${dueCell}</td>
-      <td>${lEsc(vend)}</td>
-      <td>${a.status === 'out_of_service' ? '<span class="loa-oos">Out of service</span>' : ''}</td>
+      ${cols.map(cell).join('')}
     </tr>`;
   }).join('');
 
@@ -359,6 +402,7 @@ function renderLoaPanel() {
       ${_loaMultiSelect('vendor', 'All cal sources', _loaFilterOptions('vendor', vendorIds))}
       <button class="loa-link-btn" onclick="_loaResetFilters()">Reset</button>
       <span class="loa-result-n">${list.length} shown</span>
+      ${TT.columnsButton('loa')}
       <button class="emp-add-btn loa-secondary loa-print-btn" onclick="printLoaList()" ${list.length ? '' : 'disabled'}
         title="Prints and copies to the clipboard (paste into Excel)">&#x1F5A8; Print ${_loaSelected.size ? 'selected (' + _loaSelected.size + ')' : 'list'}</button>
     </div>
@@ -372,21 +416,18 @@ function renderLoaPanel() {
     </div>` : ''}
 
     <div class="loa-table-wrap">
-      <table class="loa-table">
-        <thead><tr>
-          ${edit ? `<th class="loa-td-check"><input type="checkbox" id="loaSelAll" title="Select / deselect all in this view"
-            ${tickTotal && tickSel === tickTotal ? 'checked' : ''} ${tickTotal ? '' : 'disabled'} onchange="_loaSelectAll(this.checked)" /></th>` : ''}
-          ${th('asset_id', 'Asset ID')}${th('description', 'Description')}${th('manufacturer', 'Make')}${th('model_no', 'Model')}
-          ${th('serial_no', 'Serial')}${th('location', 'Location')}${th('cal_type', 'Cal Type')}${th('last_cal', 'Last Cal')}
-          ${th('next_due', 'Next Due')}${th('vendor', 'Cal Source')}<th></th>
-        </tr></thead>
-        <tbody>${rows || `<tr><td colspan="12" class="loa-empty">No assets match these filters.</td></tr>`}</tbody>
+      <table class="loa-table tt-fixed" id="loaTable" style="width:${TT.tableWidth('loa', cols)}px">
+        ${TT.colgroup('loa', cols)}
+        <thead><tr>${cols.map(th).join('')}</tr>${TT.filterRow('loa', cols)}</thead>
+        <tbody>${rows || `<tr><td colspan="${cols.length}" class="loa-empty">No assets match these filters.</td></tr>`}</tbody>
       </table>
       ${list.length > shown.length ? `<div class="loa-more"><button class="loa-link-btn" onclick="_loaShowLimit+=500;renderLoaPanel()">Show more (${list.length - shown.length} remaining)</button></div>` : ''}
     </div>`;
 
   const selAll = document.getElementById('loaSelAll');
   if (selAll) selAll.indeterminate = tickSel > 0 && tickSel < tickTotal;
+  TT.initResizers('loa', document.getElementById('loaTable'));
+  TT.restoreFocus('loa', filterFocus);
 
   if (wasFocused) {
     const s2 = wrap.querySelector('.loa-search');
@@ -460,6 +501,7 @@ function _loaTile(key) {
 }
 function _loaResetFilters() {
   _loaFilter = _loaDefaultFilter();
+  TT.clearFilters('loa');
   _loaMsOpen = null;
   _loaSearch = '';
   _loaSort = { key: 'asset_id', dir: 1 };
@@ -1138,6 +1180,10 @@ function _loaFilterSummary() {
   };
   const bits = [part('status', 'All statuses')];
   ['due', 'calType', 'location', 'vendor'].forEach(k => { if (_loaFilter[k].size) bits.push(part(k)); });
+  Object.entries(loaTT.filters).forEach(([k, v]) => {
+    const c = LOA_COLS.find(d => d.key === k);
+    if (c && TT.isVisible('loa', k)) bits.push(c.label + ' contains “' + v + '”');
+  });
   if (_loaSearch.trim()) bits.push('Search “' + _loaSearch.trim() + '”');
   return bits.join(' · ');
 }
@@ -1153,16 +1199,14 @@ function printLoaList() {
   const title = only('out') ? 'Out for Calibration' : only('overdue') ? 'Overdue Calibrations'
     : dueF.size && !dueF.has('out') ? 'Calibrations Due' : 'List of Apparatus';
   const now = new Date();
+  // Same columns, same order as on screen (Asset ID first), plus Status.
+  const pcols = _loaPrintCols();
+  const mono = new Set(['asset_id', 'serial_no', 'last_cal', 'next_due']);
   const rows = list.map(a => {
-    const s = loaStatus[a.asset_id] || {};
-    const due = s.out_for_cal ? 'Out since ' + lFmt(s.out_for_cal_since) : lFmt(s.next_due);
     const st = lDueState(a);
-    const vend = s.out_for_cal ? lVendorName(s.out_for_cal_vendor_id) : (s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorName(a.cal_vendor_id));
-    return `<tr class="${st === 'overdue' && !only('overdue') ? 'od' : ''}">
-      <td class="m">${lEsc(a.asset_id)}</td><td>${lEsc(a.description)}</td><td>${lEsc(a.manufacturer)}</td>
-      <td>${lEsc(a.model_no)}</td><td class="m">${lEsc(a.serial_no)}</td><td>${lEsc(lLocName(a.location_id))}</td>
-      <td>${lEsc(lCalTypeLabel(a))}</td><td class="m">${lFmt(s.last_cal_date)}</td><td class="m">${due}</td>
-      <td>${lEsc(vend)}</td><td class="n">${a.status === 'out_of_service' ? 'Out of svc' : 'In service'}</td></tr>`;
+    return `<tr class="${st === 'overdue' && !only('overdue') ? 'od' : ''}">` +
+      pcols.map(c => `<td${mono.has(c.key) ? ' class="m"' : ''}>${lEsc((c.print || c.text)(a) ?? '')}</td>`).join('') +
+      `<td class="n">${a.status === 'out_of_service' ? 'Out of svc' : 'In service'}</td></tr>`;
   }).join('');
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${lEsc(title)}</title><style>
     @page{size:letter landscape;margin:0.4in}
@@ -1178,8 +1222,7 @@ function printLoaList() {
   </style></head><body>
     <div class="hd"><div><h1>NU Laboratories — ${lEsc(title)}</h1><div class="f">${lEsc(_loaSelected.size ? 'Selected items only · ' + _loaFilterSummary() : _loaFilterSummary())}</div></div>
       <div class="r">${list.length} item${list.length !== 1 ? 's' : ''}<br>Printed ${lFmt(lToday())} ${now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div></div>
-    <table><thead><tr><th>Asset ID</th><th>Description</th><th>Make</th><th>Model</th><th>Serial</th><th>Location</th>
-      <th>Cal Type</th><th>Last Cal</th><th>Next Due</th><th>Cal Source</th><th>Status</th></tr></thead>
+    <table><thead><tr>${pcols.map(c => '<th>' + lEsc(c.label) + '</th>').join('')}<th>Status</th></tr></thead>
     <tbody>${rows}</tbody></table>
     ${!only('overdue') && list.some(a => lDueState(a) === 'overdue') ? '<div class="key"><b>Bold</b> = overdue</div>' : ''}
   </body></html>`;
@@ -1196,14 +1239,10 @@ function printLoaList() {
 
 // The printed columns as rows of text — shared by the clipboard copy.
 function _loaReportRows(list) {
-  const head = ['Asset ID', 'Description', 'Make', 'Model', 'Serial', 'Location', 'Cal Type', 'Last Cal', 'Next Due', 'Cal Source', 'Status'];
-  const body = list.map(a => {
-    const s = loaStatus[a.asset_id] || {};
-    const vend = s.out_for_cal ? lVendorName(s.out_for_cal_vendor_id) : (s.last_cal_in_house && !a.cal_vendor_id ? 'NU Labs (in-house)' : lVendorName(a.cal_vendor_id));
-    return [a.asset_id, a.description, a.manufacturer, a.model_no, a.serial_no, lLocName(a.location_id), lCalTypeLabel(a),
-      lFmt(s.last_cal_date), s.out_for_cal ? 'Out since ' + lFmt(s.out_for_cal_since) : lFmt(s.next_due), vend,
-      a.status === 'out_of_service' ? 'Out of service' : 'In service'].map(v => v == null ? '' : String(v));
-  });
+  const pcols = _loaPrintCols();
+  const head = [...pcols.map(c => c.label), 'Status'];
+  const body = list.map(a => [...pcols.map(c => (c.print || c.text)(a)),
+    a.status === 'out_of_service' ? 'Out of service' : 'In service'].map(v => v == null ? '' : String(v)));
   return { head, body };
 }
 
