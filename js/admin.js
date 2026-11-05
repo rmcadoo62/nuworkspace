@@ -2581,6 +2581,7 @@ const CAPABILITY_DEFS = [
   { key: 'view_rpt_closedjobs',label: 'View Closed Jobs',      group: 'Admin' },
   { key: 'view_cash_flow',     label: 'View Cash Flow Tracker', group: 'Admin' },
   { key: 'view_rpt_bookings',  label: 'View Booking Report',   group: 'Admin' },
+  { key: 'view_rpt_salescat',  label: 'View Sales by Category', group: 'Admin' },
   { key: 'view_audit_log',     label: 'View Audit Log',        group: 'Setup' },
   { key: 'view_setup',         label: 'View Setup',            group: 'Setup' },
   { key: 'manage_permissions', label: 'Manage Permissions',    group: 'Setup' },

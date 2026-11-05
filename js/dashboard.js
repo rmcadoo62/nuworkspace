@@ -143,16 +143,6 @@ function renderDashboard() {
   const _savedBilledView = window._billedView || 'monthly';
 
 
-  // Sales by Category detail — billed tasks this year by category and project
-  const curYearStr = new Date().getFullYear().toString();
-  const salesDetailTasks = taskStore
-    .filter(t => t.status === 'billed' && (t.billedDate||'').slice(0,4) === curYearStr)
-    .sort((a,b) => {
-      const catA = a.salesCat||'?', catB = b.salesCat||'?';
-      if (catA !== catB) return catA.localeCompare(catB);
-      const pA = (projects.find(p=>p.id===a.proj)||{}).name||'', pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
-      return pA.localeCompare(pB);
-    });
 
   // Backlog detail — all non-billed, non-cancelled tasks on open projects
   const backlogDetailTasks = taskStore
@@ -208,101 +198,6 @@ function renderDashboard() {
       </div>
     </div>
 
-    <div class="dash-charts-row" style="margin-top:20px">
-      <div class="dash-chart-card">
-        <div class="dash-chart-title">
-          <span>📊</span> Sales by Category
-          <div style="display:flex;gap:4px;margin-left:auto">
-            <button id="salesBtnChart" onclick="setSalesView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
-            <button id="salesBtnSummary" onclick="setSalesView('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
-            <button id="salesBtnDetail" onclick="setSalesView('detail')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
-          </div>
-        </div>
-        <div id="salesChartWrap"><canvas id="salesByCatChart" height="140"></canvas></div>
-        <div id="salesSummaryWrap" style="display:none;max-height:400px;overflow-y:scroll">
-          ${(() => {
-            const curYearStr2 = new Date().getFullYear().toString();
-            const mnths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            const catRows = {};
-            Object.entries(window.billedCatData||{}).forEach(([ym,cats]) => {
-              if (ym.slice(0,4) !== curYearStr2) return;
-              const mo = parseInt(ym.slice(5,7))-1;
-              Object.entries(cats).forEach(([cat,amt]) => {
-                if (!catRows[cat]) catRows[cat] = {months:{}, total:0};
-                catRows[cat].months[mo] = (catRows[cat].months[mo]||0)+amt;
-                catRows[cat].total += amt;
-              });
-            });
-            const sortedCats2 = Object.entries(catRows).sort((a,b)=>b[1].total-a[1].total);
-            const activeMos = [...new Set(Object.values(catRows).flatMap(r=>Object.keys(r.months).map(Number)))].sort((a,b)=>a-b);
-            if (!sortedCats2.length) return '<div style="padding:24px;text-align:center;color:var(--muted)">No billed data this year.</div>';
-            return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
-              '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
-              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>'+
-              activeMos.map(m=>'<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">'+mnths[m]+'</th>').join('')+
-              '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--amber)">Total</th>'+
-              '</tr></thead><tbody>'+
-              sortedCats2.map(([cat,row],i)=>
-                '<tr style="border-bottom:1px solid var(--border);background:'+(i%2===1?'var(--surface2)':'')+'">'+
-                '<td style="padding:7px 12px;font-weight:600;color:var(--amber)">'+cat+'</td>'+
-                activeMos.map(m=>'<td style="padding:7px 12px;text-align:right;font-family:monospace;color:var(--muted)">'+(row.months[m]?fmt$(row.months[m]):'—')+'</td>').join('')+
-                '<td style="padding:7px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--text)">'+fmt$(row.total)+'</td>'+
-                '</tr>'
-              ).join('')+
-              '</tbody></table>';
-          })()}
-        </div>
-        <div id="salesDetailWrap" style="display:none;max-height:400px;overflow-y:scroll">
-          ${(() => {
-            const mnthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            const byCatMonth = {};
-            salesDetailTasks.forEach(t => {
-              const cat = t.salesCat||'—';
-              const mo = t.billedDate ? mnthNames[parseInt(t.billedDate.slice(5,7))-1]+' '+t.billedDate.slice(0,4) : 'Unknown';
-              if (!byCatMonth[cat]) byCatMonth[cat] = {};
-              if (!byCatMonth[cat][mo]) byCatMonth[cat][mo] = [];
-              byCatMonth[cat][mo].push(t);
-            });
-            const sortedCats3 = Object.keys(byCatMonth).sort();
-            if (!sortedCats3.length) return '<div style="padding:24px;text-align:center;color:var(--muted)">No billed data this year.</div>';
-            return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
-              '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
-              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat / Month / Task</th>'+
-              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>'+
-              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Billed Date</th>'+
-              '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>'+
-              '</tr></thead><tbody>'+
-              sortedCats3.map(cat => {
-                const months = Object.keys(byCatMonth[cat]).sort();
-                const catTotal = months.flatMap(m=>byCatMonth[cat][m]).reduce((s,t)=>s+(t.fixedPrice||0),0);
-                return '<tr style="background:var(--surface2);border-bottom:1px solid var(--border)">'+
-                  '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--amber);font-size:12px">Cat '+cat+'</td>'+
-                  '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--amber)">'+fmt$(catTotal)+'</td>'+
-                  '</tr>'+
-                  months.map(mo => {
-                    const tasks = byCatMonth[cat][mo];
-                    const moTotal = tasks.reduce((s,t)=>s+(t.fixedPrice||0),0);
-                    return '<tr style="background:rgba(128,128,128,0.05);border-bottom:1px solid var(--border)">'+
-                      '<td style="padding:6px 12px 6px 24px;font-weight:600;color:var(--muted);font-size:11px">'+mo+'</td>'+
-                      '<td colspan="2"></td>'+
-                      '<td style="padding:6px 12px;text-align:right;font-family:monospace;color:var(--muted);font-size:11px">'+fmt$(moTotal)+'</td>'+
-                      '</tr>'+
-                      tasks.map(t => {
-                        const p = projects.find(x=>x.id===t.proj);
-                        return '<tr style="border-bottom:1px solid var(--border)">'+
-                          '<td style="padding:5px 12px 5px 36px;color:var(--text);font-size:11px">'+t.name+'</td>'+
-                          '<td style="padding:5px 12px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
-                          '<td style="padding:5px 12px;color:var(--muted);font-size:11px">'+(t.billedDate||'—')+'</td>'+
-                          '<td style="padding:5px 12px;text-align:right;font-family:monospace;color:var(--blue);font-size:11px">'+(t.fixedPrice>0?fmt$(t.fixedPrice):'—')+'</td>'+
-                        '</tr>';
-                      }).join('');
-                  }).join('');
-              }).join('')+
-              '</tbody></table>';
-          })()}
-        </div>
-      </div>
-    </div>
 
     <div class="dash-charts-row" style="margin-top:20px">
       <div class="dash-chart-card" style="display:flex;flex-direction:column;align-items:center;padding-bottom:12px">
@@ -410,111 +305,8 @@ function renderDashboard() {
     // Helper functions defined at module scope below.
     setBilledView(_savedBilledView);
 
-  ////// ── Sales by Category — stacked by month, category on X axis ──
+  ////// ── Backlog gauge (Sales by Category moved to its own Admin page 11/5/2026) ──
   setTimeout(() => {
-    const catCanv = document.getElementById('salesByCatChart');
-    if (!catCanv || typeof Chart === 'undefined') return;
-    const existing2 = Chart.getChart(catCanv);
-    if (existing2) existing2.destroy();
-
-    // Use billedCatData for accurate totals across ALL projects including closed
-    const curYear = new Date().getFullYear();
-    // Build catTotals and per-month per-cat from billedCatData
-    const catTotals = {};
-    const catMonthData = {}; // { cat: { month: amount } }
-    Object.entries(window.billedCatData || {}).forEach(([ym, cats]) => {
-      const yr = parseInt(ym.slice(0,4));
-      const mo = parseInt(ym.slice(5,7)) - 1; // 0-based month
-      if (yr !== curYear) return;
-      Object.entries(cats).forEach(([cat, amt]) => {
-        catTotals[cat] = (catTotals[cat]||0) + amt;
-        if (!catMonthData[cat]) catMonthData[cat] = {};
-        catMonthData[cat][mo] = (catMonthData[cat][mo]||0) + amt;
-      });
-    });
-
-    // Month colors Jan–Dec
-    const monthColors = [
-      'rgba(91,156,246,0.85)',   // Jan — blue
-      'rgba(124,92,191,0.85)',   // Feb — purple
-      'rgba(76,175,125,0.85)',   // Mar — green
-      'rgba(251,146,60,0.85)',   // Apr — orange
-      'rgba(232,162,52,0.85)',   // May — amber
-      'rgba(224,92,92,0.85)',    // Jun — red
-      'rgba(52,211,153,0.85)',   // Jul — teal
-      'rgba(167,139,250,0.85)',  // Aug — lavender
-      'rgba(251,191,36,0.85)',   // Sep — yellow
-      'rgba(156,163,175,0.85)',  // Oct — grey
-      'rgba(249,115,22,0.85)',   // Nov — deep orange
-      'rgba(59,130,246,0.85)',   // Dec — bright blue
-    ];
-    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const _todayMonth = new Date().getMonth(); // 0-based
-
-    const sortedCats = Object.entries(catTotals).sort((a,b) => b[1]-a[1]).map(([k]) => k);
-
-    // Build one dataset per month (only months up to current)
-    const datasets = [];
-    for (let m = 0; m <= _todayMonth; m++) {
-      const data = sortedCats.map(cat => {
-        return (catMonthData[cat]?.[m]) || 0;
-      });
-      datasets.push({
-        label: monthNames[m],
-        data,
-        backgroundColor: monthColors[m],
-        borderColor: monthColors[m].replace('0.85','1'),
-        borderWidth: 1,
-        borderRadius: m === _todayMonth ? 5 : 0,
-        borderSkipped: false,
-        stack: 'cat'
-      });
-    }
-
-    new Chart(catCanv, {
-      type: 'bar',
-      data: { labels: sortedCats, datasets },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: {
-            display: true, position: 'bottom',
-            labels: { color: '#9a9aaa', font: { size: 10 }, boxWidth: 10, padding: 8,
-              filter: item => datasets[item.datasetIndex]?.data.some(v => v > 0)
-            }
-          },
-          tooltip: {
-            callbacks: {
-              label: ctx => ' ' + ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})
-            }
-          }
-        },
-        scales: {
-          x: { stacked: true, ticks: { color: '#9a9aaa', font: { size: 10 } }, grid: { display: false } },
-          y: { stacked: true, beginAtZero: true,
-            ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$'+(v/1000).toFixed(0)+'k' : '$'+v },
-            grid: { color: 'rgba(255,255,255,0.05)' }
-          }
-        }
-      },
-      plugins: [{
-        id: 'catStackTotals',
-        afterDatasetsDraw(chart) {
-          const ctx = chart.ctx;
-          const meta0 = chart.getDatasetMeta(chart.data.datasets.length - 1);
-          meta0.data.forEach((bar, idx) => {
-            const total = chart.data.datasets.reduce((s, ds) => s + (ds.data[idx]||0), 0);
-            if (!total) return;
-            const lbl = total >= 1000 ? '$'+(total/1000).toFixed(1)+'k' : '$'+total.toFixed(0);
-            ctx.save();
-            ctx.fillStyle = '#c8c8d8'; ctx.font = '600 10px DM Sans,sans-serif';
-            ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
-            ctx.fillText(lbl, bar.x, bar.y - 3);
-            ctx.restore();
-          });
-        }
-      }]
-    });
 
 
     // ── Backlog Gauge ──
@@ -666,7 +458,7 @@ function _setView3(prefix, view) {
     }, 50);
   }
 }
-function setSalesView(view)   { _setView3('sales', view); }
+function setSalesView(view)   { window._salesView = view; _setView3('sales', view); }
 
 function setBacklogView(view) {
   const views = ['chart','summary','detail','category'];
@@ -846,6 +638,250 @@ window._openProjectFromDash = function(id) {
   setTimeout(() => { if (typeof selectProject === 'function') selectProject(id); }, 50);
 };
 
+
+
+// ===== SALES BY CATEGORY (Admin page) =====
+// Moved off the Dashboard 11/5/2026: now its own Admin page (#salesbycat), gated by
+// view_rpt_salescat. Chart and Summary read window.billedCatData (all projects,
+// including closed); Detail lists this year's billed tasks from taskStore.
+function renderSalesByCategory() {
+  const wrap = document.getElementById('salesCatWrap');
+  if (!wrap) return;
+  const fmt$ = n => '$' + (n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0});
+
+  // Sales by Category detail — billed tasks this year by category and project
+  const curYearStr = new Date().getFullYear().toString();
+  const salesDetailTasks = taskStore
+    .filter(t => t.status === 'billed' && (t.billedDate||'').slice(0,4) === curYearStr)
+    .sort((a,b) => {
+      const catA = a.salesCat||'?', catB = b.salesCat||'?';
+      if (catA !== catB) return catA.localeCompare(catB);
+      const pA = (projects.find(p=>p.id===a.proj)||{}).name||'', pB = (projects.find(p=>p.id===b.proj)||{}).name||'';
+      return pA.localeCompare(pB);
+    });
+
+  wrap.innerHTML = `
+      <div class="dash-chart-card">
+        <div class="dash-chart-title">
+          <span>📊</span> Sales by Category
+          <div style="display:flex;gap:4px;margin-left:auto">
+            <button id="salesBtnChart" onclick="setSalesView('chart')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--amber-dim);background:var(--amber-glow);color:var(--amber);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Chart</button>
+            <button id="salesBtnSummary" onclick="setSalesView('summary')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Summary</button>
+            <button id="salesBtnDetail" onclick="setSalesView('detail')" style="font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-family:'DM Sans',sans-serif;font-weight:600">Detail</button>
+          </div>
+        </div>
+        <div id="salesChartWrap"><canvas id="salesByCatChart" height="140"></canvas></div>
+        <div id="salesSummaryWrap" style="display:none;max-height:400px;overflow-y:scroll">
+          ${(() => {
+            const curYearStr2 = new Date().getFullYear().toString();
+            const mnths = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const catRows = {};
+            Object.entries(window.billedCatData||{}).forEach(([ym,cats]) => {
+              if (ym.slice(0,4) !== curYearStr2) return;
+              const mo = parseInt(ym.slice(5,7))-1;
+              Object.entries(cats).forEach(([cat,amt]) => {
+                if (!catRows[cat]) catRows[cat] = {months:{}, total:0};
+                catRows[cat].months[mo] = (catRows[cat].months[mo]||0)+amt;
+                catRows[cat].total += amt;
+              });
+            });
+            const sortedCats2 = Object.entries(catRows).sort((a,b)=>b[1].total-a[1].total);
+            const activeMos = [...new Set(Object.values(catRows).flatMap(r=>Object.keys(r.months).map(Number)))].sort((a,b)=>a-b);
+            if (!sortedCats2.length) return '<div style="padding:24px;text-align:center;color:var(--muted)">No billed data this year.</div>';
+            return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+              '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat</th>'+
+              activeMos.map(m=>'<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">'+mnths[m]+'</th>').join('')+
+              '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--amber)">Total</th>'+
+              '</tr></thead><tbody>'+
+              sortedCats2.map(([cat,row],i)=>
+                '<tr style="border-bottom:1px solid var(--border);background:'+(i%2===1?'var(--surface2)':'')+'">'+
+                '<td style="padding:7px 12px;font-weight:600;color:var(--amber)">'+cat+'</td>'+
+                activeMos.map(m=>'<td style="padding:7px 12px;text-align:right;font-family:monospace;color:var(--muted)">'+(row.months[m]?fmt$(row.months[m]):'—')+'</td>').join('')+
+                '<td style="padding:7px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--text)">'+fmt$(row.total)+'</td>'+
+                '</tr>'
+              ).join('')+
+              '</tbody></table>';
+          })()}
+        </div>
+        <div id="salesDetailWrap" style="display:none;max-height:400px;overflow-y:scroll">
+          ${(() => {
+            const mnthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const byCatMonth = {};
+            salesDetailTasks.forEach(t => {
+              const cat = t.salesCat||'—';
+              const mo = t.billedDate ? mnthNames[parseInt(t.billedDate.slice(5,7))-1]+' '+t.billedDate.slice(0,4) : 'Unknown';
+              if (!byCatMonth[cat]) byCatMonth[cat] = {};
+              if (!byCatMonth[cat][mo]) byCatMonth[cat][mo] = [];
+              byCatMonth[cat][mo].push(t);
+            });
+            const sortedCats3 = Object.keys(byCatMonth).sort();
+            if (!sortedCats3.length) return '<div style="padding:24px;text-align:center;color:var(--muted)">No billed data this year.</div>';
+            return '<table style="width:100%;border-collapse:collapse;font-size:12px">'+
+              '<thead><tr style="border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--surface)">'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Cat / Month / Task</th>'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>'+
+              '<th style="text-align:left;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Billed Date</th>'+
+              '<th style="text-align:right;padding:8px 12px;font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Price</th>'+
+              '</tr></thead><tbody>'+
+              sortedCats3.map(cat => {
+                const months = Object.keys(byCatMonth[cat]).sort();
+                const catTotal = months.flatMap(m=>byCatMonth[cat][m]).reduce((s,t)=>s+(t.fixedPrice||0),0);
+                return '<tr style="background:var(--surface2);border-bottom:1px solid var(--border)">'+
+                  '<td colspan="3" style="padding:8px 12px;font-weight:700;color:var(--amber);font-size:12px">Cat '+cat+'</td>'+
+                  '<td style="padding:8px 12px;text-align:right;font-family:monospace;font-weight:700;color:var(--amber)">'+fmt$(catTotal)+'</td>'+
+                  '</tr>'+
+                  months.map(mo => {
+                    const tasks = byCatMonth[cat][mo];
+                    const moTotal = tasks.reduce((s,t)=>s+(t.fixedPrice||0),0);
+                    return '<tr style="background:rgba(128,128,128,0.05);border-bottom:1px solid var(--border)">'+
+                      '<td style="padding:6px 12px 6px 24px;font-weight:600;color:var(--muted);font-size:11px">'+mo+'</td>'+
+                      '<td colspan="2"></td>'+
+                      '<td style="padding:6px 12px;text-align:right;font-family:monospace;color:var(--muted);font-size:11px">'+fmt$(moTotal)+'</td>'+
+                      '</tr>'+
+                      tasks.map(t => {
+                        const p = projects.find(x=>x.id===t.proj);
+                        return '<tr style="border-bottom:1px solid var(--border)">'+
+                          '<td style="padding:5px 12px 5px 36px;color:var(--text);font-size:11px">'+t.name+'</td>'+
+                          '<td style="padding:5px 12px;color:var(--muted);font-size:11px">'+(p?p.emoji+' '+p.name:'—')+'</td>'+
+                          '<td style="padding:5px 12px;color:var(--muted);font-size:11px">'+(t.billedDate||'—')+'</td>'+
+                          '<td style="padding:5px 12px;text-align:right;font-family:monospace;color:var(--blue);font-size:11px">'+(t.fixedPrice>0?fmt$(t.fixedPrice):'—')+'</td>'+
+                        '</tr>';
+                      }).join('');
+                  }).join('');
+              }).join('')+
+              '</tbody></table>';
+          })()}
+        </div>
+      </div>
+  `;
+
+  const _savedSalesView = window._salesView || 'chart';
+  setTimeout(() => {
+    const catCanv = document.getElementById('salesByCatChart');
+    if (catCanv && typeof Chart !== 'undefined') {
+      const existing2 = Chart.getChart(catCanv);
+      if (existing2) existing2.destroy();
+  
+      // Use billedCatData for accurate totals across ALL projects including closed
+      const curYear = new Date().getFullYear();
+      // Build catTotals and per-month per-cat from billedCatData
+      const catTotals = {};
+      const catMonthData = {}; // { cat: { month: amount } }
+      Object.entries(window.billedCatData || {}).forEach(([ym, cats]) => {
+        const yr = parseInt(ym.slice(0,4));
+        const mo = parseInt(ym.slice(5,7)) - 1; // 0-based month
+        if (yr !== curYear) return;
+        Object.entries(cats).forEach(([cat, amt]) => {
+          catTotals[cat] = (catTotals[cat]||0) + amt;
+          if (!catMonthData[cat]) catMonthData[cat] = {};
+          catMonthData[cat][mo] = (catMonthData[cat][mo]||0) + amt;
+        });
+      });
+  
+      // Month colors Jan–Dec
+      const monthColors = [
+        'rgba(91,156,246,0.85)',   // Jan — blue
+        'rgba(124,92,191,0.85)',   // Feb — purple
+        'rgba(76,175,125,0.85)',   // Mar — green
+        'rgba(251,146,60,0.85)',   // Apr — orange
+        'rgba(232,162,52,0.85)',   // May — amber
+        'rgba(224,92,92,0.85)',    // Jun — red
+        'rgba(52,211,153,0.85)',   // Jul — teal
+        'rgba(167,139,250,0.85)',  // Aug — lavender
+        'rgba(251,191,36,0.85)',   // Sep — yellow
+        'rgba(156,163,175,0.85)',  // Oct — grey
+        'rgba(249,115,22,0.85)',   // Nov — deep orange
+        'rgba(59,130,246,0.85)',   // Dec — bright blue
+      ];
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const _todayMonth = new Date().getMonth(); // 0-based
+  
+      const sortedCats = Object.entries(catTotals).sort((a,b) => b[1]-a[1]).map(([k]) => k);
+  
+      // Build one dataset per month (only months up to current)
+      const datasets = [];
+      for (let m = 0; m <= _todayMonth; m++) {
+        const data = sortedCats.map(cat => {
+          return (catMonthData[cat]?.[m]) || 0;
+        });
+        datasets.push({
+          label: monthNames[m],
+          data,
+          backgroundColor: monthColors[m],
+          borderColor: monthColors[m].replace('0.85','1'),
+          borderWidth: 1,
+          borderRadius: m === _todayMonth ? 5 : 0,
+          borderSkipped: false,
+          stack: 'cat'
+        });
+      }
+  
+      new Chart(catCanv, {
+        type: 'bar',
+        data: { labels: sortedCats, datasets },
+        options: {
+          responsive: true,
+          plugins: {
+            legend: {
+              display: true, position: 'bottom',
+              labels: { color: '#9a9aaa', font: { size: 10 }, boxWidth: 10, padding: 8,
+                filter: item => datasets[item.datasetIndex]?.data.some(v => v > 0)
+              }
+            },
+            tooltip: {
+              callbacks: {
+                label: ctx => ' ' + ctx.dataset.label + ': $' + ctx.parsed.y.toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0})
+              }
+            }
+          },
+          scales: {
+            x: { stacked: true, ticks: { color: '#9a9aaa', font: { size: 10 } }, grid: { display: false } },
+            y: { stacked: true, beginAtZero: true,
+              ticks: { color: '#9a9aaa', font: { size: 10 }, callback: v => v >= 1000 ? '$'+(v/1000).toFixed(0)+'k' : '$'+v },
+              grid: { color: 'rgba(255,255,255,0.05)' }
+            }
+          }
+        },
+        plugins: [{
+          id: 'catStackTotals',
+          afterDatasetsDraw(chart) {
+            const ctx = chart.ctx;
+            const meta0 = chart.getDatasetMeta(chart.data.datasets.length - 1);
+            meta0.data.forEach((bar, idx) => {
+              const total = chart.data.datasets.reduce((s, ds) => s + (ds.data[idx]||0), 0);
+              if (!total) return;
+              const lbl = total >= 1000 ? '$'+(total/1000).toFixed(1)+'k' : '$'+total.toFixed(0);
+              ctx.save();
+              ctx.fillStyle = '#c8c8d8'; ctx.font = '600 10px DM Sans,sans-serif';
+              ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+              ctx.fillText(lbl, bar.x, bar.y - 3);
+              ctx.restore();
+            });
+          }
+        }]
+      });
+    }
+    setSalesView(_savedSalesView);
+  }, 50);
+}
+
+function openSalesByCategoryPanel(el) {
+  if (!(typeof can === 'function' && can('view_rpt_salescat'))) {
+    if (typeof toast === 'function') toast('⚠ You do not have access to Sales by Category');
+    return;
+  }
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const nav = el || document.getElementById('navSalesCat');
+  if (nav) nav.classList.add('active');
+  if (typeof activeProjectId !== 'undefined') activeProjectId = null;
+  const topbar = document.getElementById('topbarName');
+  if (topbar) topbar.textContent = 'Sales by Category';
+  showProjectView('panel-salescat');
+  renderSalesByCategory();
+}
+window.renderSalesByCategory = renderSalesByCategory;
+window.openSalesByCategoryPanel = openSalesByCategoryPanel;
 
 // ===== BOOKING REPORT (Admin page) =====
 // Moved off the Dashboard 11/5/2026: now its own Admin page (#bookings), gated by

@@ -69,6 +69,7 @@ function routerNavigate(hash) {
       case 'surveys':       if (typeof openSurveyQueuePanel === 'function') openSurveyQueuePanel();   break;
       case 'cashflow':      if (typeof openCashFlowPanel    === 'function') openCashFlowPanel();      break;
       case 'bookings':      if (typeof openBookingReportPanel === 'function') openBookingReportPanel(); break;
+      case 'salesbycat':    if (typeof openSalesByCategoryPanel === 'function') openSalesByCategoryPanel(); break;
       default:
         if (typeof openHomePanel === 'function') openHomePanel(document.getElementById('navHome'));
     }
@@ -119,6 +120,7 @@ function routerHookFunctions() {
     ['openSurveyQueuePanel',    'surveys'],
     ['openCashFlowPanel',       'cashflow'],
     ['openBookingReportPanel',  'bookings'],
+    ['openSalesByCategoryPanel','salesbycat'],
     ['openMergeClientsPanel',   'clients'],
     ['openSfImportPanel',       'clients'],
     ['openSchedSettingsPanel',  'scheduler'],

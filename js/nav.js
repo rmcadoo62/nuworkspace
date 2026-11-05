@@ -22,7 +22,8 @@
         '#quotes': 'Quotes',
         '#setup': 'Setup',
         '#compliance': 'CMMC Compliance',
-        '#bookings': 'Booking Report'
+        '#bookings': 'Booking Report',
+        '#salesbycat': 'Sales by Category'
       };
       pageInput.value = pageMap[hash] || hash.replace('#', '').replace('-', ' ');
     }
@@ -243,6 +244,7 @@ document.addEventListener('DOMContentLoaded', function () {
     { name: 'openIssueTrackerPanel', label: 'Issue Tracker'       },
     { name: 'openSurveyQueuePanel',  label: 'Customer Surveys'    },
     { name: 'openBookingReportPanel', label: 'Booking Report'     },
+    { name: 'openSalesByCategoryPanel', label: 'Sales by Category' },
   ];
 
   NAV_FNS.forEach(({ name, label }) => {
@@ -380,7 +382,7 @@ document.addEventListener('DOMContentLoaded', () => {
     clients: 'quotes', surveys: 'quotes',
     employees: 'hr', 'reports/employees': 'hr', 'reports/timesheets': 'hr',
     closingreport: 'production',
-    'reports/closedjobs': 'admin', cashflow: 'admin', bookings: 'admin',
+    'reports/closedjobs': 'admin', cashflow: 'admin', bookings: 'admin', salesbycat: 'admin',
   };
 
   let current = null;   // department of the page on screen, or null
