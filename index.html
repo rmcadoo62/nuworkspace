@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Filled in by .github/workflows/deploy.yml on each deploy; "dev" when running locally -->
+<meta name="nuw-build" content="dev">
 <title>NUWorkspace &mdash; Project Management</title>
 <link rel="icon" type="image/png" href="favicon.png">
 <link rel="icon" type="image/x-icon" href="favicon.ico">
@@ -169,8 +171,8 @@
         <div class="user-menu-role" id="userBadgeRole">&mdash;</div>
       </div>
       <button class="user-menu-item" type="button" onclick="doLogout()">&#x23FB;&nbsp; Sign out</button>
-      <!-- Bump on each push (YYYY.MM.DD, add .2, .3 for a second push the same day) -->
-      <div class="user-menu-ver">NUWorkspace 2026.11.04.2</div>
+      <!-- Build number is filled in by js/version.js from the deploy stamp -->
+      <div class="user-menu-ver" id="appVersion">NUWorkspace</div>
     </div>
   </div>
 </div>
@@ -1508,6 +1510,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
   <!-- App modules (order matters) -->
+  <script src="js/version.js"></script>
   <script src="js/nulabs-session-storage.js"></script>
   <script src="js/supabase-client.js"></script> 
   <script src="js/auth.js"></script>

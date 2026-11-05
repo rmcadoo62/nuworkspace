@@ -1,0 +1,62 @@
+# Deploys NUWorkspace to GitHub Pages on every push to main.
+# Replaces GitHub's automatic "pages build and deployment".
+#
+# Each deploy is stamped with a build number (counts up) and the commit ID:
+#   - version.json            -> read by js/version.js to spot newer deploys
+#   - <meta name="nuw-build"> -> what this copy of index.html was built as
+#   - ?v=<commit> on every js/ and css/ link in index.html, so a normal
+#     reload after a deploy picks up the new files (no Ctrl+F5 needed)
+#
+# One-time setup: Settings -> Pages -> Build and deployment -> Source: "GitHub Actions".
+
+name: Deploy Workspace
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:        # "Run workflow" button on the Actions tab, to redeploy by hand
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deploy at a time; a newer push cancels a stuck or older one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stamp build number
+        run: |
+          BUILD=${{ github.run_number }}
+          SHA=$(git rev-parse --short HEAD)
+          BUILT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          printf '{"build":%s,"sha":"%s","built":"%s"}\n' "$BUILD" "$SHA" "$BUILT" > version.json
+          sed -i -E \
+            -e "s#<meta name=\"nuw-build\" content=\"[^\"]*\">#<meta name=\"nuw-build\" content=\"$BUILD|$SHA|$BUILT\">#" \
+            -e "s#(src=\"js/[^\"?]+\.js)\"#\1?v=$SHA\"#g" \
+            -e "s#(href=\"css/[^\"?]+\.css)\"#\1?v=$SHA\"#g" \
+            index.html
+          echo "Build $BUILD ($SHA)"
+          grep -c "?v=$SHA" index.html
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          timeout: 300000     # give up after 5 minutes instead of 10
