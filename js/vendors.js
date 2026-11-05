@@ -472,7 +472,7 @@ function _vendorInfoHtml(v, editable) {
 
     <div class="client-detail-section">
       <div class="client-detail-section-title">Services Provided
-        ${editable ? `<button type="button" class="vnd-types-link" onclick="_captureVendorForm();openVendorTypesModal()" title="Add, rename or retire service types">⚙ Edit service types</button>` : ''}</div>
+        ${editable ? `<button type="button" class="vnd-types-link" onclick="_captureVendorForm();openVendorTypesModal()" title="Rename, reorder or retire service types">⚙ Manage</button>` : ''}</div>
       <div class="vnd-type-checks">
         ${types.map(t => `<label class="vnd-check">
           <input type="checkbox" class="vdType" value="${t.id}" ${d.typeIds.includes(t.id) ? 'checked' : ''} ${dis}
@@ -480,6 +480,15 @@ function _vendorInfoHtml(v, editable) {
           ${vEsc(t.name)}${t.requires_17025_eval ? ' <span class="vnd-iso-tag">17025</span>' : ''}${!t.active ? ' <span class="vnd-sub">(retired)</span>' : ''}
         </label>`).join('') || '<div class="vnd-sub">No service types defined.</div>'}
       </div>
+      ${editable ? `<div class="vnd-newtype">
+        <button type="button" class="vnd-types-link vnd-newtype-btn" id="vdNewTypeBtn"
+          onclick="this.style.display='none';document.getElementById('vdNewTypeRow').style.display='flex';document.getElementById('vdNewType').focus()">+ New service provided</button>
+        <div class="vnd-newtype-row" id="vdNewTypeRow" style="display:none">
+          <input id="vdNewType" placeholder="e.g. Maintenance" onkeydown="if(event.key==='Enter'){event.preventDefault();addVendorTypeFromDrawer()}if(event.key==='Escape'){event.stopPropagation();renderVendorDrawer()}" />
+          <button type="button" class="btn btn-primary" onclick="addVendorTypeFromDrawer()">Add</button>
+          <button type="button" class="btn btn-ghost" onclick="_captureVendorForm();renderVendorDrawer()">Cancel</button>
+        </div>
+      </div>` : ''}
     </div>
 
     ${iso ? `
@@ -846,6 +855,29 @@ function _vendorTypesChanged() {
   _renderVendorTypesModal();
   renderVendorsPanel();
   if (document.getElementById('vendorDrawer')?.classList.contains('open') && _vendorDrawerTab === 'vtab-info') renderVendorDrawer();
+}
+
+// "+ New service provided" in the vendor drawer: creates the service type for
+// everyone and ticks it for this vendor (saved with the vendor's other changes).
+async function addVendorTypeFromDrawer() {
+  const name = (document.getElementById('vdNewType')?.value || '').trim();
+  if (!name) { document.getElementById('vdNewType')?.focus(); return; }
+  _captureVendorForm();
+  const existing = vendorTypeStore.find(t => t.name.trim().toLowerCase() === name.toLowerCase());
+  let typeId = existing?.id;
+  if (existing && !existing.active) { vToast('"' + existing.name + '" is retired — turn it back on under ⚙ Manage'); return; }
+  if (!existing) {
+    const maxSort = vendorTypeStore.reduce((m, t) => Math.max(m, t.sort_order || 0), 0);
+    const { data, error } = await sb.from('vendor_service_types')
+      .insert({ code: _vendorTypeCode(name), name, requires_17025_eval: false, sort_order: maxSort + 10 }).select().single();
+    if (error) { vErr('Could not add service type', error); return; }
+    typeId = data?.id;
+    await loadVendorData();
+    renderVendorsPanel();
+  }
+  if (typeId && _vendorDraft && !_vendorDraft.typeIds.includes(typeId)) _vendorDraft.typeIds.push(typeId);
+  renderVendorDrawer();
+  vToast(existing ? '✓ Ticked ' + existing.name : '✓ Added "' + name + '" — Save Changes to keep it on this vendor');
 }
 
 function _vendorTypeCode(name) {

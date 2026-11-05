@@ -18,18 +18,20 @@
     return build && sha ? { build: Number(build), sha, built } : null;
   }
 
-  function label(v) {
-    if (!v) return 'NUWorkspace \u00b7 local dev build';
+  // Two short lines so it fits the account menu: "Build 12 · 222e7ba" / "Nov 5, 3:10 PM".
+  function lines(v) {
+    if (!v) return ['NUWorkspace', 'Local dev build'];
     const d = v.built ? new Date(v.built) : null;
-    const when = d && !isNaN(d)
-      ? ' \u00b7 ' + d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
-      : '';
-    return 'NUWorkspace build ' + v.build + ' \u00b7 ' + v.sha + when;
+    const when = d && !isNaN(d) ? d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '';
+    return ['Build ' + v.build + ' \u00b7 ' + v.sha, when].filter(Boolean);
   }
 
   function paint() {
     const el = document.getElementById('appVersion');
-    if (el) { el.textContent = label(running); el.title = running ? 'Commit ' + running.sha : 'Not a deployed build'; }
+    if (!el) return;
+    el.textContent = '';
+    lines(running).forEach((t, i) => { if (i) el.appendChild(document.createElement('br')); el.appendChild(document.createTextNode(t)); });
+    el.title = running ? 'NUWorkspace build ' + running.build + ', commit ' + running.sha : 'Not a deployed build';
   }
 
   async function fetchLive() {

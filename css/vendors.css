@@ -26,6 +26,11 @@
 .vnd-card-top{display:flex;align-items:center;gap:8px;padding-right:48px;}
 .vnd-types-link{margin-left:auto;background:none;border:none;color:var(--blue);font-size:11.5px;font-weight:500;letter-spacing:0;text-transform:none;cursor:pointer;padding:0 0 0 10px;font-family:'DM Sans',sans-serif;}
 .vnd-types-link:hover{text-decoration:underline;}
+.vnd-newtype{margin-top:8px;}
+.vnd-newtype-btn{padding:0;margin:0;}
+.vnd-newtype-row{display:flex;gap:8px;align-items:center;}
+.vnd-newtype-row input{flex:1;background:var(--surface2);border:1.5px solid var(--border);border-radius:7px;padding:7px 10px;font-size:13px;color:var(--text);font-family:'DM Sans',sans-serif;outline:none;}
+.vnd-newtype-row input:focus{border-color:var(--amber-dim);box-shadow:0 0 0 3px var(--amber-glow);}
 .vnd-nick{font-size:12px;color:var(--muted);font-style:italic;margin-top:-2px;}
 .vnd-card-foot{font-size:11px;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--border);}
 .vnd-card-foot strong{color:var(--text);}
