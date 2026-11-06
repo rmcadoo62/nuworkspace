@@ -354,15 +354,17 @@ document.addEventListener('DOMContentLoaded', () => {
   if (scroll) scroll.addEventListener('scroll', _hideNavTip);
 });
 
-// ===== DEPARTMENT TABS (split tabs with dropdowns) =====
+// ===== DEPARTMENT TABS (one-click tabs with dropdowns) =====
 // The sidebar markup still holds every department page
 // (.nav-section[data-section] in index.html). Whether each page shows is still
 // decided only by applyPermissions() / _applyIdentityNav() in auth.js; this
 // reads the result. The department sections themselves are kept hidden: their
 // pages are reached from the top bar.
-//   - Each department with at least one visible page gets a split tab:
-//     the label opens that department's default page, the caret opens a
-//     dropdown of its pages.
+//   - Each department with at least one visible page gets a tab. One click
+//     does both: it opens that department's default page (unless you are
+//     already in that department) AND drops down the list of its pages so
+//     you can pick another. Clicking the tab again closes the list.
+//     (Was a split label/caret until 11/6/2026: people didn't find the caret.)
 //   - The star in a dropdown picks the default page, remembered per browser.
 //     With no star (or a starred page this user can't see) the first visible
 //     page is the default.
@@ -460,23 +462,17 @@ document.addEventListener('DOMContentLoaded', () => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = 'dept-tab';
-      b.dataset.role = 'go';
-      b.textContent = name;
+      b.setAttribute('aria-haspopup', 'true');
+      b.setAttribute('aria-expanded', dept === openDept ? 'true' : 'false');
       const dflt = defaultPage(dept);
-      if (dflt) b.title = 'Open ' + labelText(dflt);
+      if (dflt) b.title = 'Open ' + labelText(dflt) + ' and show all ' + name + ' pages';
       if (dept === current) b.setAttribute('aria-current', 'true');
-
-      const c = document.createElement('button');
-      c.type = 'button';
-      c.className = 'dept-caret';
-      c.dataset.role = 'caret';
-      c.setAttribute('aria-label', name + ' menu');
-      c.setAttribute('aria-haspopup', 'true');
-      c.setAttribute('aria-expanded', dept === openDept ? 'true' : 'false');
-      c.innerHTML = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>';
+      const lbl = document.createElement('span');
+      lbl.textContent = name;
+      b.appendChild(lbl);
+      b.insertAdjacentHTML('beforeend', '<svg class="dept-tab-caret" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>');
 
       wrap.appendChild(b);
-      wrap.appendChild(c);
       bar.appendChild(wrap);
     });
   }
@@ -620,16 +616,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('DOMContentLoaded', () => {
     const bar = document.getElementById('deptTabs');
     if (bar) bar.addEventListener('click', e => {
-      const btn = e.target.closest('button[data-role]');
-      const wrap = btn && btn.closest('.dept-tab-wrap');
+      const wrap = e.target.closest('.dept-tab-wrap');
       if (!wrap) return;
       e.stopPropagation();
       const dept = wrap.dataset.dept;
-      if (btn.dataset.role === 'caret') {
-        if (openDept === dept) closeMenu(); else openMenu(dept);
-      } else {
-        goDefault(dept);
-      }
+      if (openDept === dept) { closeMenu(); return; }
+      // Go to the starred page only when coming from somewhere else, so
+      // switching pages within a department doesn't reload the current one.
+      if (dept !== current) goDefault(dept);
+      openMenu(dept);
     });
     // Tabs scroll sideways on narrow screens; a scrolled tab would leave the menu behind.
     if (bar) bar.addEventListener('scroll', closeMenu);

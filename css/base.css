@@ -190,21 +190,18 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);hei
 .topbar .global-search-input::placeholder{color:#b5b5bd;}
 .topbar .global-search-input:focus{border-color:#d9a441;box-shadow:0 0 0 3px rgba(217,164,65,.25);}
 .sidebar .nav-section.dept-off,.sidebar .brand-block.dept-off{display:none !important;}
-/* Split tabs: label opens the department's default page, caret opens its dropdown (nav.js). */
+/* Department tabs: one click opens the starred page and shows the dropdown (nav.js). */
 .dept-tab-wrap{display:flex;align-items:stretch;flex-shrink:0;border-bottom:3px solid transparent;transition:background var(--transition);}
-.dept-tab-wrap .dept-tab{border-bottom:0;padding:0 6px 0 14px;}
+.dept-tab-wrap .dept-tab{border-bottom:0;padding:0 12px 0 14px;display:inline-flex;align-items:center;gap:6px;}
+.dept-tab-caret{color:#9a9aa2;transition:transform var(--transition),color var(--transition);}
+.dept-tab-wrap:hover .dept-tab-caret{color:#fff;}
+.dept-tab-wrap.open .dept-tab-caret{color:#d9a441;transform:rotate(180deg);}
 .dept-tab-wrap .dept-tab:hover{background:transparent;}
 .dept-tab-wrap:hover{background:rgba(255,255,255,.06);}
 .dept-tab-wrap.active{border-bottom-color:#d9a441;background:rgba(255,255,255,.08);}
 .dept-tab-wrap.active .dept-tab{color:#fff;font-weight:600;}
 .dept-tab-wrap.open{background:rgba(255,255,255,.14);}
 .dept-tab-wrap.open .dept-tab{color:#fff;}
-.dept-caret{background:transparent;border:0;border-left:1px solid rgba(255,255,255,.14);color:#9a9aa2;width:26px;margin:8px 4px 8px 0;padding:0;display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:0 4px 4px 0;transition:color var(--transition),background var(--transition);}
-.dept-caret:hover{color:#fff;background:rgba(255,255,255,.10);}
-.dept-tab-wrap.open .dept-caret{color:#d9a441;}
-.dept-tab-wrap.open .dept-caret svg{transform:rotate(180deg);}
-.dept-caret svg{transition:transform var(--transition);}
-.dept-caret:focus-visible{outline:2px solid #d9a441;outline-offset:-2px;}
 .dept-menu{position:fixed;min-width:240px;max-width:calc(100vw - 16px);background:var(--surface);border:1px solid var(--border);border-top:0;border-radius:0 0 10px 10px;box-shadow:0 12px 30px rgba(0,0,0,.18);z-index:9500;padding:6px;}
 .dept-menu[hidden]{display:none;}
 .dept-menu-row{display:flex;align-items:center;gap:2px;}
