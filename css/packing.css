@@ -70,3 +70,13 @@
 .pl-inline-link{float:right;text-transform:none;letter-spacing:0;font-weight:500;font-size:11px;color:var(--blue);cursor:pointer;}
 .pl-inline-link:hover{text-decoration:underline;}
 .pl-hint{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.4;}
+
+/* Direction (Batch 3): incoming / outgoing, return links, on-site */
+.pl-dir{display:inline-block;font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:20px;white-space:nowrap;letter-spacing:.2px;vertical-align:middle;}
+.pl-dir.in{background:rgba(74,144,226,0.12);color:var(--blue);}
+.pl-dir.out{background:var(--surface2);color:var(--muted);}
+.pl-banner.link{background:rgba(74,144,226,0.08);border:1px solid rgba(74,144,226,0.25);color:var(--text);}
+.pl-banner.link a{color:var(--blue);cursor:pointer;font-weight:600;font-family:'JetBrains Mono',monospace;}
+.pl-banner.onsite{background:rgba(192,122,26,0.08);border:1px solid rgba(192,122,26,0.3);color:var(--text);}
+.pl-head-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+#plDrawerTitle .pl-dir{margin:0 4px;}

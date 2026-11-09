@@ -38,6 +38,7 @@
   <link rel="stylesheet" href="css/loa.css">
   <link rel="stylesheet" href="css/vendors.css">
   <link rel="stylesheet" href="css/packing.css">
+  <link rel="stylesheet" href="css/attachments.css">
 </head>
 <body>
 
@@ -1556,6 +1557,7 @@
   <script src="js/loa.js"></script>
   <script src="js/vendors.js"></script>
   <script src="js/packing.js"></script>
+  <script src="js/attachments.js"></script>
   <script src="js/mytime.js?v=21"></script>
 
 </div><!-- /app-body -->
@@ -1913,6 +1915,12 @@
           <label class="field-label">Notes</label>
           <input class="f-input" id="articleReceivedNotes" type="text" placeholder="Optional inbound notes…" autocomplete="off" />
         </div>
+        <!-- New articles only (clients.js): no paperwork → Save starts an incoming packing list (packing.js) -->
+        <label id="articleNoPlRow" style="display:none;align-items:flex-start;gap:8px;margin-top:4px;padding:9px 12px;border:1.5px dashed var(--border);border-radius:8px;font-size:12.5px;color:var(--text);cursor:pointer;background:var(--surface2)">
+          <input type="checkbox" id="articleNoPl" style="accent-color:var(--amber);margin-top:2px;cursor:pointer" />
+          <span><strong>No packing list came with it</strong> — create an incoming packing list when I save
+            <span style="display:block;font-size:11px;color:var(--muted);margin-top:2px">For customer property staying more than a day. You'll pick any other items they left, then print it for signatures.</span></span>
+        </label>
         <div class="modal-div" style="margin:16px 0"></div>
         <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:12px">Outbound (date saves only when a carrier is selected)</div>
         <div class="field-row">
@@ -1937,10 +1945,14 @@
           <label class="field-label">Notes</label>
           <input class="f-input" id="articleNotes" type="text" placeholder="Optional outbound notes…" autocomplete="off" />
         </div>
+        <div class="modal-div" style="margin:16px 0"></div>
+        <div style="font-size:11px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:10px">Attachments <span style="font-weight:400;letter-spacing:0;text-transform:none">· delivery paperwork, box-label photos</span></div>
+        <div id="articleAttachments"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" id="articleDeleteBtn" style="margin-right:auto;display:none;color:var(--red)" onclick="deleteArticle()">&#x1F5D1; Delete</button>
-        <button class="btn btn-ghost" id="articlePackBtn" style="display:none;border:1.5px solid var(--border);color:var(--text)" onclick="plFromArticle()">&#x1F4C4; Packing List</button>
+        <button class="btn btn-ghost" id="articleIncomingBtn" style="display:none;border:1.5px solid var(--border);color:var(--text)" onclick="plFromArticle(null,'incoming')" title="Document a drop-off that came without paperwork">&#x1F4E5; Incoming List</button>
+        <button class="btn btn-ghost" id="articlePackBtn" style="display:none;border:1.5px solid var(--border);color:var(--text)" onclick="plFromArticle(null,'outgoing')">&#x1F4E4; Outgoing List</button>
         <button class="btn btn-ghost" onclick="closeArticleModal()">Cancel</button>
         <button class="btn btn-primary" onclick="saveArticle()">Save</button>
       </div>

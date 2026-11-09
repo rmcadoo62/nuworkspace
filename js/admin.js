@@ -2606,6 +2606,7 @@ const CAPABILITY_DEFS = [
   { key: 'delete_vendors',     label: 'Delete Vendors',        group: 'Vendors' },
   { key: 'create_packing_lists', label: 'Create/Edit Packing Lists', group: 'Packing Lists' },
   { key: 'void_packing_lists',   label: 'Void Packing Lists',        group: 'Packing Lists' },
+  { key: 'delete_attachments',   label: 'Delete Attachments',        group: 'Attachments' },
 ];
 
 function openPermissionsPanel() {

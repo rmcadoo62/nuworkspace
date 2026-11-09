@@ -14,13 +14,20 @@
 // Marking a list Shipped also marks its test articles shipped (date +
 // carrier), so the shipment is recorded once.
 //
+// Direction (Batch 3, migration 2026-11-09): every list is Outgoing or
+// Incoming, sharing one PL-YYYY-NNNN series. Incoming = customer property
+// dropped off without paperwork: the party block is FROM, "shipped" shows as
+// Received, and it never touches test-article status. "Create Return List"
+// makes a linked outgoing list (return_of_id). An incoming list that's been
+// received with no live return is customer property still on site.
+//
 // Capabilities (Setup → Permissions → Packing Lists):
 //   create_packing_lists — create, edit, mark shipped
 //   void_packing_lists   — void
 // Viewing and printing follow Shipping & Receiving (everyone).
 
 const PL_COMPANY = { name: 'NU Laboratories, Inc.', street: '312 Old Allerton Road', city: 'Annandale, NJ 08801' };
-const PL_CARRIERS = ['UPS', 'FedEx', 'USPS', 'Customer Pickup', 'Hand Delivered', 'Vendor Pickup', 'Other'];
+const PL_CARRIERS = ['UPS', 'FedEx', 'USPS', 'Customer Pickup', 'Customer Drop-off', 'Customer Delivered', 'Hand Delivered', 'Vendor Pickup', 'Other'];
 const PL_STATUS = { draft: 'Draft', shipped: 'Shipped', void: 'Void' };
 
 let plStore = [];            // header rows + line_count
@@ -57,6 +64,15 @@ function plFmt(d) {
   return isNaN(dt) ? '' : dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 function plNum(n) { const x = Number(n); return Number.isInteger(x) ? String(x) : String(x); }
+// ---------- direction ----------
+function plIsIn(h) { return !!h && h.direction === 'incoming'; }
+function plStatusLabel(h) { return h.status === 'shipped' && plIsIn(h) ? 'Received' : PL_STATUS[h.status]; }
+function plDirBadge(h) { return plIsIn(h) ? '<span class="pl-dir in">&#x1F4E5; Incoming</span>' : '<span class="pl-dir out">&#x1F4E4; Outgoing</span>'; }
+function plReturnOf(h) { return h && h.return_of_id ? plStore.find(p => p.id === h.return_of_id) : null; }
+function plReturnsFor(h) { return plStore.filter(p => p.return_of_id === h.id && p.status !== 'void'); }
+// Received incoming list with no live return list = that customer property is still here.
+function plOnSite(p) { return plIsIn(p) && p.status === 'shipped' && !plReturnsFor(p).length; }
+
 function plProject(id) { return (typeof projects !== 'undefined') ? projects.find(p => p.id === id) : null; }
 // Customer's PO on the job (project_info.po_number) — the packing list's Cust. Order No.
 function plJobPo(id) { return (id && typeof projectInfo !== 'undefined' && projectInfo[id]) ? (projectInfo[id].po || '') : ''; }
@@ -109,12 +125,16 @@ async function plCreate(shipTo, lines, extra) {
     ship_to_type: shipTo?.ship_to_type || 'other',
     vendor_id: shipTo?.vendor_id || null,
     client_id: shipTo?.client_id || null,
-    ship_to_name: shipTo?.ship_to_name || '(ship to not set)',
+    ship_to_name: shipTo?.ship_to_name || (extra?.direction === 'incoming' ? '(from not set)' : '(ship to not set)'),
     ship_to_address: shipTo?.ship_to_address || null,
+    ship_to_attn: shipTo?.ship_to_attn || null,
+    direction: extra?.direction === 'incoming' ? 'incoming' : 'outgoing',
+    return_of_id: extra?.return_of_id || null,
     source: extra?.source || 'manual',
     project_id: extra?.project_id || null,
     cust_order_no: extra?.cust_order_no || plJobPo(extra?.project_id) || null,
     shipped_via: extra?.shipped_via || null,
+    date_shipped: extra?.date_shipped || null,
     notes: extra?.notes || null,
     packed_by: actor?.name || null,
     created_by: actor?.id || null,
@@ -167,25 +187,27 @@ async function plStartFrom(lines, shipTo, extra) {
   await loadPackingLists();
   // Only drafts that fit: same Ship To, or a draft whose Ship To isn't set yet.
   // Shipped and void lists never appear here.
-  const unset = d => d.ship_to_type === 'other' && (!d.ship_to_name || d.ship_to_name.startsWith('(ship to'));
+  const unset = d => d.ship_to_type === 'other' && (!d.ship_to_name || d.ship_to_name.startsWith('(ship to') || d.ship_to_name.startsWith('(from'));
   const same = d => shipTo && ((shipTo.vendor_id && d.vendor_id === shipTo.vendor_id) ||
                                (shipTo.client_id && d.client_id === shipTo.client_id));
-  const drafts = plStore.filter(p => p.status === 'draft' && (same(p) || unset(p)))
+  const dir = extra?.direction === 'incoming' ? 'incoming' : 'outgoing';
+  const drafts = plStore.filter(p => p.status === 'draft' && (p.direction || 'outgoing') === dir && (same(p) || unset(p)))
     .sort((a, b) => (same(b) ? 1 : 0) - (same(a) ? 1 : 0));
   _plPendingLines = lines; _plPendingShipTo = { shipTo, extra };
-  const what = `${lines.length} item${lines.length !== 1 ? 's' : ''}${shipTo?.ship_to_name ? ' to <strong>' + plEsc(shipTo.ship_to_name) + '</strong>' : ''}`;
+  const what = `${lines.length} item${lines.length !== 1 ? 's' : ''}${shipTo?.ship_to_name ? (dir === 'incoming' ? ' from <strong>' : ' to <strong>') + plEsc(shipTo.ship_to_name) + '</strong>' : ''}`;
+  const kindWord = dir === 'incoming' ? 'an incoming packing list' : 'a packing list';
 
   // Nothing to add to → a single confirm. Nothing is created until Create is clicked.
   if (!drafts.length) {
-    plModal('Packing list', `<div style="font-size:13.5px;color:var(--text)">Create a packing list for ${what}?</div>
+    plModal(dir === 'incoming' ? 'Incoming packing list' : 'Packing list', `<div style="font-size:13.5px;color:var(--text)">Create ${kindWord} for ${what}?</div>
       <div class="pl-meta">It gets the next PL number.</div>`,
       `<button class="btn btn-ghost" onclick="plCloseModal()">Cancel</button>
        <button class="btn btn-primary" style="margin-left:auto" onclick="plConfirmStart()">Create</button>`);
     return;
   }
-  plModal('Packing list', `
+  plModal(dir === 'incoming' ? 'Incoming packing list' : 'Packing list', `
     <div class="pl-meta">${what}.</div>
-    <label class="pl-choice"><input type="radio" name="plDest" value="new" checked /> <span><strong>New packing list</strong>
+    <label class="pl-choice"><input type="radio" name="plDest" value="new" checked /> <span><strong>New ${dir === 'incoming' ? 'incoming ' : ''}packing list</strong>
       <span class="pl-dim">· uses the next number</span></span></label>
     <div class="pl-choice-head">or add to a draft</div>
     ${drafts.map(d => `<label class="pl-choice"><input type="radio" name="plDest" value="${d.id}" />
@@ -278,7 +300,12 @@ async function plCreateForSendOut(groups, shippedVia) {
 }
 
 // ---------- from Shipping & Receiving ----------
-function plFromArticle(articleId) {
+// dir: 'outgoing' (default — returning goods) or 'incoming' (documenting a drop-off).
+// receipt (incoming, optional): { date, via } from the Receive Test Article form.
+let _plPendingReceipt = null;
+function plFromArticle(articleId, dir, receipt) {
+  dir = dir === 'incoming' ? 'incoming' : 'outgoing';
+  _plPendingReceipt = dir === 'incoming' ? (receipt || null) : null;
   const id = articleId || (typeof _editingArticleId !== 'undefined' ? _editingArticleId : null);
   const art = (typeof articleStore !== 'undefined') ? articleStore.find(a => a._id === id) : null;
   if (!art) { plToast('Save the article first'); return; }
@@ -287,17 +314,17 @@ function plFromArticle(articleId) {
   const siblings = articleStore.filter(a => a._id !== art._id && a.status !== 'shipped' &&
     (art.projId ? a.projId === art.projId : (art.clientId && a.clientId === art.clientId)));
   const proj = plProject(art.projId);
-  plModal('Packing list for ' + (proj ? proj.name : (art.clientName || 'this article')), `
-    <div class="pl-meta">Tick everything going in this shipment.</div>
+  plModal((dir === 'incoming' ? 'Incoming packing list for ' : 'Packing list for ') + (proj ? proj.name : (art.clientName || 'this article')), `
+    <div class="pl-meta">${dir === 'incoming' ? 'Tick everything the customer left with us.' : 'Tick everything going in this shipment.'}</div>
     <div class="pl-art-list">
       ${[art, ...siblings].map(a => `<label class="pl-choice"><input type="checkbox" class="plArt" value="${a._id}" ${a._id === art._id ? 'checked' : ''} />
         <span>${plEsc(a.desc)} <span class="pl-dim">· ${a.status === 'in_storage' ? 'in storage' : 'in house'}${a.receivedDate ? ' · received ' + plFmt(a.receivedDate) : ''}</span></span></label>`).join('')}
     </div>`,
     `<button class="btn btn-ghost" onclick="plCloseModal()">Cancel</button>
-     <button class="btn btn-primary" style="margin-left:auto" onclick="plConfirmArticles('${art._id}')">Continue</button>`);
+     <button class="btn btn-primary" style="margin-left:auto" onclick="plConfirmArticles('${art._id}','${dir}')">Continue</button>`);
 }
 
-function plConfirmArticles(firstId) {
+function plConfirmArticles(firstId, dir) {
   const ids = [...document.querySelectorAll('.plArt:checked')].map(cb => cb.value);
   plCloseModal();
   if (!ids.length) return;
@@ -308,7 +335,35 @@ function plConfirmArticles(firstId) {
   let shipTo = plShipToFromClient(client);
   if (!shipTo && first.clientName) shipTo = { ship_to_type: 'other', ship_to_name: first.clientName };
   const lines = arts.map(a => ({ description: a.desc, test_article_id: a._id }));
-  plStartFrom(lines, shipTo, { source: 'articles', project_id: first.projId || null });
+  const rc = dir === 'incoming' ? _plPendingReceipt : null;
+  _plPendingReceipt = null;
+  plStartFrom(lines, shipTo, { source: 'articles', project_id: first.projId || null, direction: dir === 'incoming' ? 'incoming' : 'outgoing',
+    date_shipped: rc?.date || null, shipped_via: rc?.via || null });
+}
+
+// Packing Lists tab → "+ Incoming list": a blank incoming draft.
+async function plNewIncoming() {
+  const pl = await plCreate(null, [], { source: 'manual', direction: 'incoming' });
+  if (pl) { plToast('✓ Created ' + pl.pl_number + ' (incoming)'); openPackingList(pl.id); }
+}
+
+// Received incoming list → a new outgoing draft back to the same customer, same lines, linked.
+async function plCreateReturn() {
+  const h = plStore.find(p => p.id === _plEditId);
+  if (!h || !plIsIn(h) || !plCanCreate()) return;
+  const live = plReturnsFor(h);
+  if (live.length) { openPackingList(live[0].id); return; }
+  const one = await plLoadOne(h.id);
+  if (!one) return;
+  const lines = one.lines.map(l => ({ description: l.description, qty_ordered: l.qty_shipped ?? l.qty_ordered ?? 1,
+    qty_shipped: l.qty_shipped ?? 1, test_article_id: l.test_article_id || null, asset_id: l.asset_id || null }));
+  const shipTo = { ship_to_type: h.ship_to_type, vendor_id: h.vendor_id, client_id: h.client_id,
+    ship_to_name: h.ship_to_name, ship_to_address: h.ship_to_address, ship_to_attn: h.ship_to_attn };
+  const pl = await plCreate(shipTo, lines, {
+    direction: 'outgoing', return_of_id: h.id, project_id: h.project_id, cust_order_no: h.cust_order_no,
+    source: lines.some(l => l.test_article_id) ? 'articles' : 'manual',
+  });
+  if (pl) { plToast('✓ Return list ' + pl.pl_number + ' created'); openPackingList(pl.id); }
 }
 
 // ---------- editor (drawer) ----------
@@ -354,11 +409,14 @@ function plRenderEditor(h) {
   const dis = edit ? '' : 'disabled';
   const proj = plProject(h.project_id);
   // vendor = cal send-out (from LOA) · client = returning goods (from Shipping) · other = typed in
-  const kind = (h.ship_to_type === 'vendor' || h.source === 'loa') ? 'vendor'
+  const inc = plIsIn(h);
+  const kind = inc ? 'client'
+             : (h.ship_to_type === 'vendor' || h.source === 'loa') ? 'vendor'
              : (h.ship_to_type === 'client' || h.source === 'articles') ? 'client' : 'other';
+  const retOf = plReturnOf(h), rets = inc ? plReturnsFor(h) : [];
   const contacts = plContactNames(h);
-  const st = `<span class="pl-status ${h.status}">${PL_STATUS[h.status]}</span>`;
-  document.getElementById('plDrawerTitle').innerHTML = plEsc(h.pl_number) + ' ' + st;
+  const st = `<span class="pl-status ${h.status}">${plStatusLabel(h)}</span>`;
+  document.getElementById('plDrawerTitle').innerHTML = plEsc(h.pl_number) + ' ' + plDirBadge(h) + ' ' + st;
 
   const vendOpts = (typeof vendorStore !== 'undefined' ? vendorStore : []).filter(v => v.status === 'approved' || v.id === h.vendor_id)
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -379,10 +437,13 @@ function plRenderEditor(h) {
 
   document.getElementById('plDrawerBody').innerHTML = `
     ${h.status === 'void' ? `<div class="pl-banner void">Void${h.void_reason ? ': ' + plEsc(h.void_reason) : ''} — ${plFmt(h.voided_at)}</div>` : ''}
-    ${h.status === 'shipped' ? `<div class="pl-banner shipped">Shipped ${plFmt(h.date_shipped)}${h.shipped_via ? ' via ' + plEsc(h.shipped_via) : ''}. Locked — only the tracking number can be added.</div>` : ''}
+    ${h.status === 'shipped' ? `<div class="pl-banner shipped">${inc ? 'Received' : 'Shipped'} ${plFmt(h.date_shipped)}${h.shipped_via ? ' via ' + plEsc(h.shipped_via) : ''}. Locked — only the tracking number can be added.</div>` : ''}
+    ${retOf ? `<div class="pl-banner link">&#x21A9; Return of <a onclick="openPackingList('${retOf.id}')">${plEsc(retOf.pl_number)}</a> (incoming, received ${plFmt(retOf.date_shipped)})</div>` : ''}
+    ${rets.length ? `<div class="pl-banner link">&#x21AA; Returned on ${rets.map(r => `<a onclick="openPackingList('${r.id}')">${plEsc(r.pl_number)}</a> (${plStatusLabel(r).toLowerCase()})`).join(', ')}</div>` : ''}
+    ${inc && h.status === 'shipped' && !rets.length ? `<div class="pl-banner onsite">&#x1F4CD; This customer property is still on site.</div>` : ''}
 
     <div class="client-detail-section">
-      <div class="client-detail-section-title">Ship To</div>
+      <div class="client-detail-section-title">${inc ? 'From (customer)' : 'Ship To'}</div>
       ${edit && kind !== 'client' ? `<div class="client-field" style="margin-bottom:10px"><label>${kind === 'vendor' ? 'Vendor' : 'Vendor (sending out)'}</label>
         <select id="plVendor" class="pl-select" onchange="plPickShipTo('vendor',this.value)">
           <option value="">—</option>${vendOpts.map(v => `<option value="${v.id}" ${h.vendor_id === v.id ? 'selected' : ''}>${plEsc(v.name)}</option>`).join('')}</select></div>` : ''}
@@ -394,7 +455,9 @@ function plRenderEditor(h) {
       ${kind !== 'vendor' ? `<div class="client-field-row" style="margin-top:10px">
         <div class="client-field"><label>Our Job</label><input type="text" value="${plEsc(proj ? proj.name : '')}" placeholder="—" disabled /></div>
         ${f('Cust. Order No.', 'plCustOrder', h.cust_order_no || (draft ? plJobPo(h.project_id) : ''))}</div>` : ''}
-      <div class="client-field" style="margin-top:10px"><label>Attn</label>
+      ${inc ? `<div class="client-field" style="margin-top:10px"><label>Delivered By <span class="pl-dim" style="text-transform:none;letter-spacing:0;font-weight:400">· their person who dropped it off</span></label>
+        <input id="plDeliveredBy" type="text" value="${plEsc(h.delivered_by || '')}" ${dis} /></div>` : ''}
+      <div class="client-field" style="margin-top:10px"><label>${inc ? 'Contact' : 'Attn'}</label>
         <input id="plAttn" type="text" list="plAttnList" value="${plEsc(h.ship_to_attn || '')}" placeholder="${contacts.length ? 'Pick a contact or type a name' : ''}" ${dis} />
         <datalist id="plAttnList">${contacts.map(n => `<option value="${plEsc(n)}">`).join('')}</datalist></div>
       <div class="client-field" style="margin-top:10px"><label>Address
@@ -406,36 +469,42 @@ function plRenderEditor(h) {
     <div class="client-detail-section">
       <div class="client-detail-section-title">Items</div>
       <table class="pl-lines">
-        <thead><tr><th>Qty Ord.</th><th>Qty Ship.</th><th>Description</th><th></th></tr></thead>
+        <thead><tr><th>${inc ? 'Qty Exp.' : 'Qty Ord.'}</th><th>${inc ? 'Qty Rec\'d' : 'Qty Ship.'}</th><th>Description</th><th></th></tr></thead>
         <tbody>${linesHtml || '<tr><td colspan="4" class="pl-empty">No items yet.</td></tr>'}</tbody>
       </table>
       ${edit ? `<button class="loa-link-btn pl-addline" onclick="plAddBlankLine()">+ Add a line</button>` : ''}
 
     <div class="client-detail-section">
-      <div class="client-detail-section-title">Shipment</div>
+      <div class="client-detail-section-title">${inc ? 'Receipt' : 'Shipment'}</div>
       <div class="client-field-row">
-        <div class="client-field"><label>Date Shipped</label><input id="plDate" type="date" value="${h.date_shipped || (draft ? plToday() : '')}" ${dis} /></div>
-        <div class="client-field"><label>Shipped Via</label><input id="plVia" list="plCarrierList" value="${plEsc(h.shipped_via || '')}" ${dis} />
+        <div class="client-field"><label>${inc ? 'Date Received' : 'Date Shipped'}</label><input id="plDate" type="date" value="${h.date_shipped || (draft ? plToday() : '')}" ${dis} /></div>
+        <div class="client-field"><label>${inc ? 'Received Via' : 'Shipped Via'}</label><input id="plVia" list="plCarrierList" value="${plEsc(h.shipped_via || '')}" ${dis} />
           <datalist id="plCarrierList">${PL_CARRIERS.map(c => `<option value="${c}">`).join('')}</datalist></div>
       </div>
       <div class="client-field-row">
-        <div class="client-field"><label>Freight</label><select id="plFreight" class="pl-select" ${dis}>
+        ${inc ? '' : `<div class="client-field"><label>Freight</label><select id="plFreight" class="pl-select" ${dis}>
           <option value="">—</option><option value="prepaid" ${h.freight_terms === 'prepaid' ? 'selected' : ''}>Prepaid</option>
-          <option value="collect" ${h.freight_terms === 'collect' ? 'selected' : ''}>Collect</option></select></div>
+          <option value="collect" ${h.freight_terms === 'collect' ? 'selected' : ''}>Collect</option></select></div>`}
         <div class="client-field"><label>Tracking #</label><input id="plTracking" type="text" value="${plEsc(h.tracking_number || '')}"
           ${h.status === 'void' || !plCanCreate() ? 'disabled' : ''} /></div>
+        ${inc ? '<div></div>' : ''}
       </div>
-      <div class="client-field-row">${f('PO / PR #', 'plPoPr', h.po_pr_number)}<div></div></div>
+      ${inc ? '' : `<div class="client-field-row">${f('PO / PR #', 'plPoPr', h.po_pr_number)}<div></div></div>`}
       <div class="pl-row3">
         <div class="client-field"><label>No. of Cartons</label><input id="plCartons" type="number" min="0" value="${h.cartons ?? ''}" ${dis} /></div>
         ${f('Total Weight', 'plWeight', h.total_weight, 'placeholder="e.g. 42 lb"')}
         ${f('Container No.', 'plContainer', h.container_no)}
       </div>
-      <div class="client-field-row">${f('Packed By', 'plPackedBy', h.packed_by)}${f('Checked By', 'plCheckedBy', h.checked_by)}</div>
+      <div class="client-field-row">${f(inc ? 'Received By (NU Labs)' : 'Packed By', 'plPackedBy', h.packed_by)}${f('Checked By', 'plCheckedBy', h.checked_by)}</div>
       <div class="client-field"><label>Notes</label><textarea id="plNotes" class="full" rows="2" ${dis}>${plEsc(h.notes || '')}</textarea></div>
     </div>
 
+    </div>
+    <div class="client-detail-section">
+      <div class="client-detail-section-title">Attachments</div>
+      <div id="plAttachments"></div>
     </div>`;
+  if (typeof attMount === 'function') attMount('packing_list', h.id, 'plAttachments', { canAdd: h.status !== 'void' });
 
   const bar = [];
   if (h.status !== 'void' && plCanVoid()) bar.push(`<button class="btn btn-ghost" style="margin-right:auto;color:var(--red)" onclick="plVoid()">Void</button>`);
@@ -443,9 +512,10 @@ function plRenderEditor(h) {
   bar.push(`<button class="btn btn-ghost pl-outline" onclick="plPrint('${h.id}')">&#x1F5A8; Print</button>`);
   if (edit) {
     bar.push(`<button class="btn btn-ghost pl-outline" onclick="plSave()">Save</button>`);
-    bar.push(`<button class="btn btn-primary" onclick="plMarkShipped()">Mark Shipped</button>`);
+    bar.push(`<button class="btn btn-primary" onclick="plMarkShipped()">${inc ? 'Mark Received' : 'Mark Shipped'}</button>`);
   } else if (h.status === 'shipped' && plCanCreate()) {
-    bar.push(`<button class="btn btn-primary" onclick="plSaveTracking()">Save Tracking #</button>`);
+    bar.push(`<button class="btn btn-ghost pl-outline" onclick="plSaveTracking()">Save Tracking #</button>`);
+    if (inc && !rets.length) bar.push(`<button class="btn btn-primary" onclick="plCreateReturn()">&#x21A9; Create Return List</button>`);
   }
   document.getElementById('plSaveBar').innerHTML = bar.join('');
 }
@@ -545,6 +615,7 @@ function plHeaderFromForm(h) {
     cartons: cartons === undefined ? undefined : (cartons === '' ? null : parseInt(cartons, 10)),
     total_weight: nz(g('plWeight')), container_no: nz(g('plContainer')),
     packed_by: nz(g('plPackedBy')), checked_by: nz(g('plCheckedBy')), notes: nz(g('plNotes')),
+    delivered_by: nz(g('plDeliveredBy')),
   };
 }
 
@@ -554,7 +625,7 @@ async function plSave(silent) {
   if (!h || h.status !== 'draft') return false;
   plCaptureLines();
   const hdr = plHeaderFromForm(h);
-  if (!hdr.ship_to_name) { plToast('Ship To name is required'); return false; }
+  if (!hdr.ship_to_name) { plToast((plIsIn(h) ? 'From' : 'Ship To') + ' name is required'); return false; }
   const bad = _plEditLines.find(l => !String(l.description || '').trim());
   if (bad) { plToast('Every line needs a description (or remove it)'); return false; }
   Object.keys(hdr).forEach(k => hdr[k] === undefined && delete hdr[k]);
@@ -601,17 +672,21 @@ async function plSaveTracking() {
 async function plMarkShipped() {
   const h = plStore.find(p => p.id === _plEditId);
   if (!h) return;
+  const inc = plIsIn(h);
   const via = (document.getElementById('plVia')?.value || '').trim();
-  if (!via) { plToast('Enter how it shipped (Shipped Via) first'); document.getElementById('plVia')?.focus(); return; }
+  if (!via && !inc) { plToast('Enter how it shipped (Shipped Via) first'); document.getElementById('plVia')?.focus(); return; }
   if (!_plEditLines.length) { plToast('Add at least one item first'); return; }
-  if (!confirm(`Mark ${h.pl_number} as shipped?\n\nThe packing list locks (only the tracking # can be added), and any test articles on it are marked shipped.`)) return;
+  if (!confirm(inc
+    ? `Mark ${h.pl_number} as received?\n\nThe incoming list locks (only the tracking # can be added). Print it for signatures; when the equipment goes back, use Create Return List.`
+    : `Mark ${h.pl_number} as shipped?\n\nThe packing list locks (only the tracking # can be added), and any test articles on it are marked shipped.`)) return;
   if (!(await plSave(true))) return;
   const date = document.getElementById('plDate')?.value || plToday();
   const { error } = await sb.from('packing_lists').update({ status: 'shipped', date_shipped: date }).eq('id', h.id);
   if (error) { plErr('Could not mark shipped', error); return; }
 
-  // Mark linked test articles shipped (same date + carrier).
-  const artIds = _plEditLines.map(l => l.test_article_id).filter(Boolean);
+  // Outgoing only: mark linked test articles shipped (same date + carrier).
+  // Incoming lists document a receipt; the articles were already logged in house.
+  const artIds = inc ? [] : _plEditLines.map(l => l.test_article_id).filter(Boolean);
   if (artIds.length) {
     const { error: e2 } = await sb.from('test_articles')
       .update({ status: 'shipped', shipped_date: date, carrier: via }).in('id', artIds);
@@ -626,7 +701,7 @@ async function plMarkShipped() {
   }
   const one = await plLoadOne(h.id); if (one) plRenderEditor(one.header);
   if (typeof renderShippingGlobal === 'function' && document.getElementById('panel-shipping')?.classList.contains('active')) renderShippingGlobal();
-  plToast('✓ ' + h.pl_number + ' shipped');
+  plToast('✓ ' + h.pl_number + (inc ? ' received' : ' shipped'));
 }
 
 async function plVoid() {
@@ -655,6 +730,7 @@ async function plPrint(id) {
     <td class="c">${plNum(l.qty_shipped)}</td><td>${plEsc(l.description)}</td></tr>`).join('') +
     Array(Math.max(0, MIN_ROWS - lines.length)).fill('<tr><td></td><td></td><td></td></tr>').join('');
   const box = on => on ? '&#9746;' : '&#9744;';
+  const inc = plIsIn(h), retOf = plReturnOf(h);
   const shipBlock = [h.ship_to_name, h.ship_to_attn ? 'Attn: ' + h.ship_to_attn : '', h.ship_to_address || '']
     .filter(Boolean).map(plEsc).join('<br>').replace(/\n/g, '<br>');
 
@@ -665,6 +741,7 @@ async function plPrint(id) {
     .co{font-size:12px;line-height:1.35}.co b{font-size:17px;font-style:italic}
     .title{text-align:right}.title .t{font-size:20px;font-weight:bold;border-bottom:2px solid #111;padding-bottom:2px;letter-spacing:.5px}
     .title .n{font-size:18px;color:#b00;font-family:'Courier New',monospace;margin-top:6px;font-weight:bold}
+    .title .dir{font-size:10px;font-weight:bold;letter-spacing:1.5px;margin-top:4px}
     table{width:100%;border-collapse:collapse} td,th{border:1px solid #333;padding:4px 6px;vertical-align:top}
     th{background:#e6e6e6;font-size:8.5px;font-weight:bold;text-transform:uppercase;letter-spacing:.4px;text-align:left}
     .lbl{font-size:8px;text-transform:uppercase;color:#333;display:block;margin-bottom:2px;letter-spacing:.3px}
@@ -678,31 +755,36 @@ async function plPrint(id) {
   ${h.status === 'void' ? '<div class="void">VOID</div>' : ''}
   <div class="top">
     <div class="co"><b>${PL_COMPANY.name}</b><br>${PL_COMPANY.street}<br>${PL_COMPANY.city}</div>
-    <div class="title"><div class="t">PACKING LIST</div><div class="n">${plEsc(h.pl_number)}</div></div>
+    <div class="title"><div class="t">${inc ? 'PACKING LIST &mdash; RECEIVED' : 'PACKING LIST'}</div>
+      <div class="dir">${inc ? 'INCOMING' : 'OUTGOING'}${retOf ? ' &middot; RETURN OF ' + plEsc(retOf.pl_number) : ''}</div>
+      <div class="n">${plEsc(h.pl_number)}</div></div>
   </div>
-  <table><tr class="shipto"><td class="side">SHIP TO</td><td style="font-size:12px;line-height:1.4">${shipBlock}</td>
+  <table><tr class="shipto"><td class="side">${inc ? 'FROM' : 'SHIP TO'}</td><td style="font-size:12px;line-height:1.4">${shipBlock}</td>
     ${h.ship_to_type !== 'vendor' ? `<td style="width:210px"><span class="lbl">Our Job No.</span><div style="font-size:12px;margin-bottom:8px">${plEsc(proj ? proj.name : '')}</div>
       <span class="lbl">Cust. Order No.</span><div style="font-size:12px">${plEsc(h.cust_order_no || '')}</div></td>` : ''}</tr></table>
   <table style="margin-top:-1px"><tr>
-    <td><span class="lbl">Date Shipped</span>${plFmt(h.date_shipped)}</td>
-    <td><span class="lbl">Shipped Via</span>${plEsc(h.shipped_via || '')}
-      <div style="font-size:9px;margin-top:3px">${box(h.freight_terms === 'prepaid')} Prepaid &nbsp; ${box(h.freight_terms === 'collect')} Collect</div></td>
+    <td><span class="lbl">${inc ? 'Date Received' : 'Date Shipped'}</span>${plFmt(h.date_shipped)}</td>
+    <td><span class="lbl">${inc ? 'Received Via' : 'Shipped Via'}</span>${plEsc(h.shipped_via || '')}
+      ${inc ? '' : `<div style="font-size:9px;margin-top:3px">${box(h.freight_terms === 'prepaid')} Prepaid &nbsp; ${box(h.freight_terms === 'collect')} Collect</div>`}</td>
     <td><span class="lbl">Tracking No.</span>${plEsc(h.tracking_number || '')}</td>
-    <td><span class="lbl">PO / PR No.</span>${plEsc(h.po_pr_number || '')}</td>
+    ${inc ? `<td><span class="lbl">Delivered By</span>${plEsc(h.delivered_by || '')}</td>` : `<td><span class="lbl">PO / PR No.</span>${plEsc(h.po_pr_number || '')}</td>`}
   </tr></table>
   <table class="items" style="margin-top:-1px">
-    <thead><tr><th class="c">Qty Ordered</th><th class="c">Qty Shipped</th><th style="text-align:center">Description</th></tr></thead>
+    <thead><tr><th class="c">${inc ? 'Qty Expected' : 'Qty Ordered'}</th><th class="c">${inc ? 'Qty Received' : 'Qty Shipped'}</th><th style="text-align:center">Description</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
   <table style="margin-top:-1px"><tr>
     <td><span class="lbl">No. of Cartons</span>${h.cartons ?? ''}</td>
     <td><span class="lbl">Total Weight</span>${plEsc(h.total_weight || '')}</td>
     <td><span class="lbl">Container No.</span>${plEsc(h.container_no || '')}</td>
-    <td><span class="lbl">Packed By</span>${plEsc(h.packed_by || '')}</td>
+    <td><span class="lbl">${inc ? 'Received By' : 'Packed By'}</span>${plEsc(h.packed_by || '')}</td>
     <td><span class="lbl">Checked By</span>${plEsc(h.checked_by || '')}</td>
   </tr></table>
   ${h.notes ? `<div class="notes"><b>Notes:</b> ${plEsc(h.notes)}</div>` : ''}
-  <div class="sig">Rec'd By <span></span> Date <span style="width:110px"></span></div>
+  ${inc
+    ? `<div class="sig">Delivered By <span></span> Date <span style="width:110px"></span></div>
+       <div class="sig">Received for NU Labs By <span></span> Date <span style="width:110px"></span></div>`
+    : `<div class="sig">Rec'd By <span></span> Date <span style="width:110px"></span></div>`}
   </body></html>`;
 
   let frame = document.getElementById('plPrintFrame');
@@ -733,12 +815,14 @@ async function renderPackingListsTab() {
   const q = _plSearch.toLowerCase().trim();
   const list = plStore.filter(p => {
     if (_plStatusFilter === 'open' && p.status !== 'draft') return false;
+    if (_plStatusFilter === 'onsite' && !plOnSite(p)) return false;
     if (['shipped', 'void'].includes(_plStatusFilter) && p.status !== _plStatusFilter) return false;
     if (!q) return true;
     const proj = plProject(p.project_id);
-    return [p.pl_number, p.ship_to_name, p.po_pr_number, p.cust_order_no, p.tracking_number, proj?.name].join(' ').toLowerCase().includes(q);
+    return [p.pl_number, p.ship_to_name, p.po_pr_number, p.cust_order_no, p.tracking_number, proj?.name, plIsIn(p) ? 'incoming' : 'outgoing']
+      .join(' ').toLowerCase().includes(q);
   });
-  const count = s => plStore.filter(p => s === 'all' ? true : s === 'open' ? p.status === 'draft' : p.status === s).length;
+  const count = s => plStore.filter(p => s === 'all' ? true : s === 'open' ? p.status === 'draft' : s === 'onsite' ? plOnSite(p) : p.status === s).length;
   const chip = (k, l) => `<button class="vnd-chip ${_plStatusFilter === k ? 'active' : ''}" onclick="_plStatusFilter='${k}';renderPackingListsTab()">${l} <span class="vnd-chip-n">${count(k)}</span></button>`;
 
   const searchEl = el.querySelector('.pl-search');
@@ -750,20 +834,24 @@ async function renderPackingListsTab() {
     <div class="pl-head">
       <div>
         <div class="pl-h1">📄 Packing Lists</div>
-        <div class="pl-meta">Start a packing list from LOA (select assets) or from a test article. Numbers restart each January.</div>
+        <div class="pl-meta">Outgoing: start from LOA (select assets) or a test article. Incoming: from a test article or + Incoming list. One number series; restarts each January.</div>
       </div>
-      <input class="emp-search pl-search" placeholder="Search PL #, ship to, job, PO/PR, tracking…" value="${plEsc(_plSearch)}"
-        oninput="_plSearch=this.value;renderPackingListsTab()" />
+      <div class="pl-head-right">
+        <input class="emp-search pl-search" placeholder="Search PL #, to/from, job, PO/PR, tracking…" value="${plEsc(_plSearch)}"
+          oninput="_plSearch=this.value;renderPackingListsTab()" />
+        ${plCanCreate() ? `<button class="btn btn-ghost pl-outline" onclick="plNewIncoming()" title="Document customer property dropped off without paperwork">&#x1F4E5; + Incoming list</button>` : ''}
+      </div>
     </div>
-    <div class="vnd-filter-bar">${chip('open', 'Drafts')}${chip('shipped', 'Shipped')}${chip('void', 'Void')}${chip('all', 'All')}</div>
+    <div class="vnd-filter-bar">${chip('open', 'Drafts')}${chip('shipped', 'Shipped / Received')}${chip('onsite', '&#x1F4CD; On site')}${chip('void', 'Void')}${chip('all', 'All')}</div>
     <div class="pl-table-wrap"><table class="pl-table">
-      <thead><tr><th>PL #</th><th>Status</th><th>Ship To</th><th>Job</th><th>PO / PR</th><th>Shipped</th><th>Via</th><th>Items</th><th></th></tr></thead>
+      <thead><tr><th>PL #</th><th>Direction</th><th>Status</th><th>To / From</th><th>Job</th><th>PO / PR</th><th>Date</th><th>Via</th><th>Items</th><th></th></tr></thead>
       <tbody>${list.map(p => {
         const proj = plProject(p.project_id);
         return `<tr onclick="openPackingList('${p.id}')">
-          <td class="pl-mono">${plEsc(p.pl_number)}</td>
-          <td><span class="pl-status ${p.status}">${PL_STATUS[p.status]}</span></td>
-          <td>${plEsc(p.ship_to_name)}</td>
+          <td class="pl-mono">${plEsc(p.pl_number)}${p.return_of_id ? ' <span class="pl-dim" title="Return of ' + plEsc(plReturnOf(p)?.pl_number || '') + '">&#x21A9;</span>' : ''}</td>
+          <td>${plDirBadge(p)}</td>
+          <td><span class="pl-status ${p.status}">${plStatusLabel(p)}</span>${plOnSite(p) ? ' <span class="pl-tag">on site</span>' : ''}</td>
+          <td>${plIsIn(p) ? '<span class="pl-dim">from</span> ' : ''}${plEsc(p.ship_to_name)}</td>
           <td>${proj ? plEsc((proj.emoji || '') + ' ' + proj.name) : ''}</td>
           <td>${plEsc(p.po_pr_number || '')}</td>
           <td class="pl-mono">${p.status === 'shipped' ? plFmt(p.date_shipped) : ''}</td>
@@ -771,7 +859,7 @@ async function renderPackingListsTab() {
           <td class="pl-mono">${p.line_count}</td>
           <td onclick="event.stopPropagation()"><button class="client-action-btn" title="Print" onclick="plPrint('${p.id}')">&#x1F5A8;</button></td>
         </tr>`;
-      }).join('') || `<tr><td colspan="9" class="pl-empty">${plStore.length ? 'No packing lists match.' : 'No packing lists yet.'}</td></tr>`}</tbody>
+      }).join('') || `<tr><td colspan="10" class="pl-empty">${plStore.length ? 'No packing lists match.' : 'No packing lists yet.'}</td></tr>`}</tbody>
     </table></div>`;
   if (focused) { const s = el.querySelector('.pl-search'); if (s) { s.focus(); s.setSelectionRange(caret, caret); } }
 }
@@ -804,5 +892,7 @@ document.addEventListener('keydown', e => {
 window.openPackingList = openPackingList;
 window.plFromLoaSelection = plFromLoaSelection;
 window.plFromArticle = plFromArticle;
+window.plNewIncoming = plNewIncoming;
+window.plCreateReturn = plCreateReturn;
 window.plCreateForSendOut = plCreateForSendOut;
 window.renderPackingListsTab = renderPackingListsTab;

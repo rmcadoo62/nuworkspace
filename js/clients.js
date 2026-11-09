@@ -225,8 +225,17 @@ function openArticleModal(articleId, projId) {
   document.getElementById('articleDeleteBtn').style.display = a ? 'inline-flex' : 'none';
   // Packing List: for saved articles that haven't shipped yet (packing.js).
   const packBtn = document.getElementById('articlePackBtn');
-  if (packBtn) packBtn.style.display = (a && a.status !== 'shipped' && typeof plFromArticle === 'function'
-    && typeof can === 'function' && can('create_packing_lists')) ? 'inline-flex' : 'none';
+  const canPl = !!(a && a.status !== 'shipped' && typeof plFromArticle === 'function' && typeof can === 'function' && can('create_packing_lists'));
+  if (packBtn) packBtn.style.display = canPl ? 'inline-flex' : 'none';
+  // Incoming list: document a drop-off that came without paperwork (packing.js).
+  const inBtn = document.getElementById('articleIncomingBtn');
+  if (inBtn) inBtn.style.display = canPl ? 'inline-flex' : 'none';
+  // New article: "No packing list came with it" → Save goes straight into an incoming packing list.
+  const noPlRow = document.getElementById('articleNoPlRow'), noPl = document.getElementById('articleNoPl');
+  if (noPl) noPl.checked = false;
+  if (noPlRow) noPlRow.style.display = (!a && typeof plFromArticle === 'function' && typeof can === 'function' && can('create_packing_lists')) ? 'flex' : 'none';
+  // Attachments: scanned delivery paperwork, box-label photos (attachments.js).
+  if (typeof attMount === 'function') attMount('test_article', a ? a._id : null, 'articleAttachments');
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('articleDesc').value = a ? a.desc : '';
   document.getElementById('articleReceivedDate').value = a ? a.receivedDate : today;
@@ -349,6 +358,8 @@ async function saveArticle() {
   const resolvedClient = clientStore.find(c => c.id === clientId);
 
   const oldArticle = _editingArticleId ? articleStore.find(a => a._id === _editingArticleId) : null;
+  const wantIncomingPl = !_editingArticleId && !!document.getElementById('articleNoPl')?.checked;
+  let newArticleId = null;
 
   // Scott's rule: the shipped date prefills with today, so it only "counts"
   // when a carrier is selected. No carrier → discard the date. Exception:
@@ -408,6 +419,7 @@ async function saveArticle() {
       const { data, error } = await sb.from('test_articles').insert(payload).select().single();
       if (error) { toast('⚠ Save error: ' + error.message); return; }
       if (data) {
+        newArticleId = data.id;
         articleStore.push(mapArticle(data));
         // Log received event for new article
         const projLabel = projects.find(p => p.id === resolvedProjId)?.name || desc;
@@ -425,6 +437,10 @@ async function saveArticle() {
   if (document.getElementById('panel-shipping')?.classList.contains('active')) renderShippingGlobal();
   if (document.getElementById('sub-shipping')?.classList.contains('active') && activeProjId) renderShippingProjTab(activeProjId);
   if (activeProjId) renderInfoSheet(activeProjId);
+  // No paperwork came with it → start the incoming packing list now, carrying the receipt details over.
+  if (wantIncomingPl && newArticleId && typeof plFromArticle === 'function') {
+    plFromArticle(newArticleId, 'incoming', { date: payload.received_date, via: payload.received_carrier });
+  }
 }
 
 async function deleteArticle() {

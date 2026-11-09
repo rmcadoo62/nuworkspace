@@ -171,3 +171,8 @@
 .loa-table .tt-filter.on{border-color:var(--amber-dim);background:rgba(192,122,26,0.08);}
 .loa-filters .tt-popwrap{margin-left:4px;}
 .loa-filters .tt-popwrap .pf-btn{height:34px;}
+
+/* Attachments on calibration records (Batch 3) */
+.loa-att-btn{display:inline-flex;align-items:center;gap:2px;}
+.loa-att-n{font-size:10px;font-weight:700;color:var(--amber);font-family:'JetBrains Mono',monospace;}
+.loa-rec-att{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);}

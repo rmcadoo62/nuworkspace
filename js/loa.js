@@ -826,6 +826,7 @@ async function _renderLoaCalTab(a) {
           ${r.result ? `<span class="loa-result ${r.result}">${LOA_RESULTS[r.result]}</span>` : ''}
           ${r.sent_date && !r.returned_date ? '<span class="loa-due out">Out for cal</span>' : ''}
           <span style="margin-left:auto;display:flex;gap:2px">
+            ${typeof attMount === 'function' ? `<button class="client-action-btn loa-att-btn" title="Attachments — cal cert, etc." onclick="_loaToggleAtt('${r.id}')">&#x1F4CE;<span class="loa-att-n" id="loaAttN-${r.id}"></span></button>` : ''}
             ${edit ? `<button class="client-action-btn" title="Edit" onclick="_loaEditCalId='${r.id}';renderLoaDrawer()">&#x270E;</button>` : ''}
             ${del ? `<button class="client-action-btn" title="Delete" onclick="deleteLoaCal('${r.id}')">&#x2715;</button>` : ''}
           </span>
@@ -838,8 +839,28 @@ async function _renderLoaCalTab(a) {
           ${r.cert_number ? `<span>Cert # <b>${lEsc(r.cert_number)}</b></span>` : ''}
         </div>
         ${r.notes ? `<div class="loa-rec-notes">${lEsc(r.notes)}</div>` : ''}
+        <div class="loa-rec-att" id="loaAtt-${r.id}" style="display:none"></div>
       </div>`).join('')}`;
+  // 📎 counts on each record (files live in js/attachments.js).
+  if (typeof attCounts === 'function' && recs.length) {
+    const n = await attCounts('cal_record', recs.map(r => r.id));
+    Object.entries(n).forEach(([id, c]) => { const b = document.getElementById('loaAttN-' + id); if (b) b.textContent = c; });
+  }
 }
+
+// Show / hide a calibration record's attachments (cal cert, etc.).
+function _loaToggleAtt(recId) {
+  const el = document.getElementById('loaAtt-' + recId);
+  if (!el) return;
+  const open = el.style.display === 'none';
+  el.style.display = open ? '' : 'none';
+  if (open && !el.dataset.mounted) { el.dataset.mounted = '1'; attMount('cal_record', recId, 'loaAtt-' + recId, { canAdd: loaCanEdit() }); }
+}
+document.addEventListener('att:changed', e => {
+  if (e.detail?.type !== 'cal_record') return;
+  const b = document.getElementById('loaAttN-' + e.detail.id);
+  if (b) b.textContent = e.detail.count || '';
+});
 
 function _loaVendorOptions(sel) {
   const list = (typeof getVendorsForService === 'function') ? getVendorsForService('calibration') : [];
