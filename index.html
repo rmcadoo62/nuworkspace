@@ -13,7 +13,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <!-- App stylesheets -->
-  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/base.css?v=20261110">
   <link rel="stylesheet" href="css/auth.css">
   <link rel="stylesheet" href="css/setup.css">
   <link rel="stylesheet" href="css/modals.css">
@@ -1346,6 +1346,14 @@
         <label class="field-label">Full Name <span style="color:var(--red)">*</span></label>
         <input class="f-input" id="empName" type="text" placeholder="e.g. Jordan Smith" maxlength="60" autocomplete="off" oninput="updateEmpPreview()" />
       </div>
+      <div class="field">
+        <label class="field-label">Company <span style="color:var(--red)">*</span></label>
+        <select class="f-input" id="empCompany" style="cursor:pointer">
+          <option value="NU Labs">NU Labs</option>
+          <option value="Ballantine">Ballantine</option>
+        </select>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">Sets time-off accrual rules, onboarding/offboarding checklists, and CMMC tracking.</div>
+      </div>
       <div class="field-row">
         <div class="field">
           <label class="field-label">Role / Title</label>
@@ -1353,7 +1361,7 @@
         </div>
         <div class="field">
           <label class="field-label">Department</label>
-          <input class="f-input" id="empDept" type="text" placeholder="e.g. Engineering" maxlength="60" />
+          <input class="f-input" id="empDept" type="text" placeholder="Optional — e.g. Lab, Office" maxlength="60" />
         </div>
       </div>
       <div class="field-row">
@@ -1396,24 +1404,22 @@
         <label class="field-label">Avatar Color</label>
         <div class="color-swatches" id="empColorSwatches"></div>
       </div>
-      <div class="field-row" style="align-items:center;gap:16px;margin-top:4px">
-        <div class="field" style="flex:1">
-          <label class="field-label">Supervisor / Approver</label>
-          <select class="f-input" id="empApprover" style="cursor:pointer">
-            <option value="">— None —</option>
-          </select>
-          <div style="font-size:11px;color:var(--muted);margin-top:4px">Approves this person's timesheets, time off, and performance reviews.</div>
-        </div>
-        <div class="field" style="flex:0;white-space:nowrap;padding-top:18px;display:flex;flex-direction:column;gap:10px">
-          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:var(--text)">
-            <input type="checkbox" id="empIsApprover" style="width:15px;height:15px;cursor:pointer;accent-color:var(--amber)" />
-            Is Approver
-          </label>
-          <label style="display:flex;align-items:center;gap:7px;cursor:pointer;font-size:13px;color:var(--text)">
-            <input type="checkbox" id="empIsPaperTs" style="width:15px;height:15px;cursor:pointer;accent-color:var(--amber)" />
-            Paper Timesheet
-          </label>
-        </div>
+      <div class="field" style="margin-top:4px">
+        <label class="field-label">Reports To</label>
+        <select class="f-input" id="empApprover" style="cursor:pointer">
+          <option value="">— None —</option>
+        </select>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">This person approves their timesheets, time off, and performance reviews.</div>
+      </div>
+      <div class="field" style="display:flex;flex-direction:column;gap:10px">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;color:var(--text)">
+          <input type="checkbox" id="empIsApprover" style="width:15px;height:15px;margin-top:2px;cursor:pointer;accent-color:var(--amber)" />
+          <span>Can approve other employees<span style="display:block;font-size:11px;color:var(--muted)">Turns on their Approvals page for the people who report to them.</span></span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;color:var(--text)">
+          <input type="checkbox" id="empIsPaperTs" style="width:15px;height:15px;margin-top:2px;cursor:pointer;accent-color:var(--amber)" />
+          <span>Paper Timesheet<span style="display:block;font-size:11px;color:var(--muted)">Their Reports To person enters this employee's time for them.</span></span>
+        </label>
       </div>
     </div>
     <div class="modal-footer">
@@ -1523,15 +1529,15 @@
   <!-- App modules (order matters) -->
   <script src="js/version.js"></script>
   <script src="js/nulabs-session-storage.js"></script>
-  <script src="js/supabase-client.js"></script> 
+  <script src="js/supabase-client.js?v=20261110"></script> 
   <script src="js/auth.js"></script>
   <script src="js/app.js"></script>
   <script src="js/pdf-viewer.js"></script>
   <script src="js/projects.js"></script>
   <script src="js/tasks.js"></script>
   <script src="js/tasklog.js"></script>
-  <script src="js/project-detail.js"></script>
-  <script src="js/employees.js"></script>
+  <script src="js/project-detail.js?v=20261110"></script>
+  <script src="js/employees.js?v=20261110"></script>
   <script src="js/timesheet.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/clients.js"></script>
@@ -1539,7 +1545,7 @@
   <script src="js/mytasks.js"></script>
   <script src="js/myteam.js"></script>
   <script src="js/search.js"></script>
-  <script src="js/chatter.js"></script>
+  <script src="js/chatter.js?v=20261110"></script>
   <script src="js/dm.js"></script>
   <script src="js/admin.js"></script>
   <script src="js/scheduler.js"></script>
@@ -1549,7 +1555,7 @@
   <script src="js/router.js"></script>
   <script src="js/quotes.js"></script>
   <script src="js/crr.js"></script>
-  <script src="js/compliance.js"></script>
+  <script src="js/compliance.js?v=20261110"></script>
   <script src="js/feedback.js"></script>
   <script src="js/surveys.js"></script>
   <script src="js/cash-flow.js"></script>

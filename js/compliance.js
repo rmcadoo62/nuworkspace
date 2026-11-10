@@ -135,9 +135,9 @@ async function _renderTrainingTab() {
   // Load employees for dropdown
   if (!complianceEmployees.length) {
     const { data } = await sb.from('employees')
-      .select('id, name, role, department')
+      .select('id, name, role, department, company')
       .eq('is_active', true)
-      .neq('department', 'Ballantine')
+      .neq('company', 'Ballantine')
       .order('name');
     complianceEmployees = (data || []).filter(e => e.name);
   }
@@ -2576,8 +2576,8 @@ async function _renderPersonnelTab() {
   // Load all employees (active + inactive) for dropdowns
   if (!personnelEmployees.length) {
     const { data } = await sb.from('employees')
-      .select('id, name, role, department, is_active, termination_date')
-      .neq('department', 'Ballantine')
+      .select('id, name, role, department, company, is_active, termination_date')
+      .neq('company', 'Ballantine')
       .order('name');
     personnelEmployees = (data || []).filter(e => e.name);
   }

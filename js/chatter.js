@@ -690,8 +690,8 @@ function chatterRenderNotifyList(q) {
     if (!e.name) return false;
     // Hide inactive / terminated employees
     if (e.isActive === false || e.terminationDate) return false;
-    // Hide Ballantine department (handle null department safely)
-    if ((e.dept || '').toLowerCase() === 'ballantine') return false;
+    // Hide Ballantine employees (Company field)
+    if (isBallantineEmp(e)) return false;
     return !q || e.name.toLowerCase().includes(q);
   });
   if (!matches.length) { list.innerHTML = '<div style="padding:10px 14px;font-size:12px;color:var(--muted)">No employees found</div>'; return; }
@@ -776,13 +776,13 @@ async function chatterLoadGroups() {
 }
 
 // Filter member ids the way the Notify dropdown does — drop inactive,
-// terminated, or Ballantine-department employees. Silent skip.
+// terminated, or Ballantine-company employees. Silent skip.
 function _chatterValidMemberIds(ids) {
   return (ids || []).filter(id => {
     const e = employees.find(x => x.id === id);
     if (!e || !e.name) return false;
     if (e.isActive === false || e.terminationDate) return false;
-    if ((e.dept || '').toLowerCase() === 'ballantine') return false;
+    if (isBallantineEmp(e)) return false;
     return true;
   });
 }
@@ -925,7 +925,7 @@ function chatterRenderGroupModalMembers() {
   const matches = employees.filter(e => {
     if (!e.name) return false;
     if (e.isActive === false || e.terminationDate) return false;
-    if ((e.dept || '').toLowerCase() === 'ballantine') return false;
+    if (isBallantineEmp(e)) return false;
     return !q || e.name.toLowerCase().includes(q);
   });
   // Selected first (alphabetical within each bucket), then the rest

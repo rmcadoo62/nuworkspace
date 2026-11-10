@@ -4486,7 +4486,7 @@ function _getEligibleCcEmployees() {
     .filter(e =>
       e.isActive !== false
       && !e.terminationDate
-      && (e.department || '').toLowerCase() !== 'ballantine'
+      && !isBallantineEmp(e)
       && e.email && e.email.trim()
     )
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));

@@ -8,6 +8,17 @@ const SUPABASE_KEY = localStorage.getItem('nuworkspace_sb_key') || 'eyJhbGciOiJI
 let sb = null; // Supabase client
 let projectContactsStore = []; // [{id, projId, contactId, addedAt}]
 
+// ===== COMPANY HELPER =====
+// Single source of truth for "is this a Ballantine employee?". Reads the
+// employees.company column (NU Labs / Ballantine dropdown on Edit Employee).
+// Falls back to the old Department == 'Ballantine' convention only when the
+// row has no company value (e.g. company column not loaded yet).
+function isBallantineEmp(e) {
+  if (!e) return false;
+  if (e.company) return String(e.company).toLowerCase() === 'ballantine';
+  return String(e.dept || e.department || '').trim().toLowerCase() === 'ballantine';
+}
+
 // ===== DB HELPERS =====
 // ===== DB HELPERS =====
 async function dbFetch(table, query) {
@@ -323,7 +334,7 @@ async function loadAllData() {
     // Employees
     employees = empRows.map(r => ({
       id: r.id, name: r.name, initials: r.initials||getInitials(r.name),
-      role: r.role||'', dept: r.department||'',
+      role: r.role||'', dept: r.department||'', company: r.company||null,
       email: r.email||'', personalEmail: r.personal_email||'', phone: r.phone||'', color: r.color||'#5b9cf6',
       isApprover: r.is_approver||false, isPaperTs: r.is_paper_ts||false, approverId: r.approver_id||null,
       hireDate: r.hire_date||'',

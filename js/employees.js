@@ -13,7 +13,7 @@ let empColor = '#5b4fcf';
 // double-counting. In future anniversary years this has no effect (no drops will
 // fall before April 12, 2026 once new anniversary cycles begin).
 const BALLANTINE_ACCRUAL_START = new Date('2026-04-12T00:00:00');
-const _isBallantineDept = (emp) => (emp && emp.dept && emp.dept.toLowerCase() === 'ballantine');
+const _isBallantineDept = (emp) => isBallantineEmp(emp);
 const _dropIsCreditable = (emp, dropDate) => !_isBallantineDept(emp) || dropDate >= BALLANTINE_ACCRUAL_START;
 
 // ===== SICK ALLOTMENT AS-OF =====
@@ -347,7 +347,7 @@ function getQuarterlyAccrual(hireDateStr, annivStart, emp) {
   // Rule: NO vacation accrues during the first year of employment.
   // On the first anniversary the full allotment drops at once.
   // From year 2 onward, quarterly drops apply.
-  // `emp` optional — if provided and employee is Ballantine dept, drops before
+  // `emp` optional — if provided and employee is Ballantine (company), drops before
   // BALLANTINE_ACCRUAL_START are suppressed (already in their opening balance).
   const today = new Date();
 
@@ -523,8 +523,8 @@ function renderEmployeesPanel(search) {
   const filtered = employees.filter(e => {
     const _empInactive = e.isActive === false || !!e.terminationDate;
     if (!showInactiveEmployees && _empInactive) return false;
-    if (empDeptFilter === 'ballantine' && (e.dept || '').toLowerCase() !== 'ballantine') return false;
-    if (empDeptFilter === 'nulabs' && (e.dept || '').toLowerCase() === 'ballantine') return false;
+    if (empDeptFilter === 'ballantine' && !isBallantineEmp(e)) return false;
+    if (empDeptFilter === 'nulabs' && isBallantineEmp(e)) return false;
     return e.name.toLowerCase().includes(q) ||
       e.role.toLowerCase().includes(q) ||
       (e.dept || '').toLowerCase().includes(q);
@@ -567,7 +567,7 @@ function renderEmployeesPanel(search) {
             const isInactive = e.isActive === false || !!e.terminationDate;
             const termLabel = e.terminationDate ? 'Terminated ' + new Date(e.terminationDate+'T00:00:00').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}) : 'Inactive';
             const hasScreening = cmmcScreenedIds.has(e.id);
-            const isBallantine = (e.dept || '').toLowerCase() === 'ballantine';
+            const isBallantine = isBallantineEmp(e);
             const shieldBadge = isInactive || isBallantine ? '' :
               hasScreening
                 ? `<span title="CMMC screening record on file" style="font-size:13px;line-height:1;flex-shrink:0">🛡️</span>`
@@ -1051,7 +1051,7 @@ function showEmpProfile(empId, annivOffset) {
     </div>
 
     <!-- CMMC Screening status banner (active, non-Ballantine employees only) -->
-    ${!isInactive && (emp.dept||'').toLowerCase() !== 'ballantine' ? (() => {
+    ${!isInactive && !isBallantineEmp(emp) ? (() => {
       const screened = cmmcScreenedIds.has(empId);
       return screened
         ? `<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(46,158,98,0.07);border:1px solid rgba(46,158,98,0.3);border-radius:8px;margin-bottom:18px;font-size:12.5px">
@@ -1551,7 +1551,7 @@ async function _loadLifecycleTab(empId, emp) {
   }
 
   // Determine employee track
-  const isBallantine = (emp.dept||'').toLowerCase() === 'ballantine';
+  const isBallantine = isBallantineEmp(emp);
   const track = isBallantine ? 'ballantine' : 'nulabs';
   
   // Load lifecycle data for this employee
@@ -1886,7 +1886,7 @@ function _bulkActionBtn(act, label) {
 }
 
 function _bulkRowEvaluate(emp) {
-  const empTrack = (emp.dept || '').toLowerCase() === 'ballantine' ? 'ballantine' : 'nulabs';
+  const empTrack = isBallantineEmp(emp) ? 'ballantine' : 'nulabs';
 
   if (!_bulkState.tracks[empTrack]) return { excluded: true };
 
@@ -2276,7 +2276,7 @@ async function _loadOnboardingTab(empId, emp, tabType) {
   }
 
   const rec = onboardingCache[empId];
-  const isBallantine = (emp.dept||'').toLowerCase() === 'ballantine';
+  const isBallantine = isBallantineEmp(emp);
   const track = isBallantine ? 'ballantine' : 'nulabs';
   const items = tabType === 'onboarding'
     ? await _loadOnboardingItems(track, 'onboarding')
@@ -2478,6 +2478,7 @@ function openEmployeeModal(id) {
   document.getElementById('empName').value  = emp ? emp.name  : '';
   document.getElementById('empRole').value  = emp ? emp.role  : '';
   document.getElementById('empDept').value  = emp ? emp.dept  : '';
+  if (document.getElementById('empCompany')) document.getElementById('empCompany').value = emp && isBallantineEmp(emp) ? 'Ballantine' : 'NU Labs';
   document.getElementById('empEmail').value = emp ? emp.email : '';
   if (document.getElementById('empPersonalEmail')) document.getElementById('empPersonalEmail').value = emp ? (emp.personalEmail || '') : '';
   document.getElementById('empPhone').value    = emp ? emp.phone    : '';
@@ -2577,6 +2578,7 @@ async function saveEmployee() {
   const _name      = document.getElementById('empName').value.trim();
   const _role      = document.getElementById('empRole').value.trim();
   const _dept      = document.getElementById('empDept').value.trim();
+  const _company   = (document.getElementById('empCompany') && document.getElementById('empCompany').value === 'Ballantine') ? 'Ballantine' : 'NU Labs';
   const _email         = document.getElementById('empEmail').value.trim();
   const _personalEmail = document.getElementById('empPersonalEmail') ? document.getElementById('empPersonalEmail').value.trim() : '';
   const _phone     = document.getElementById('empPhone').value.trim();
@@ -2610,13 +2612,13 @@ async function saveEmployee() {
 
   const data = {
     name: _name, initials: _finalInitials,
-    role: _role, dept: _dept, email: _email, phone: _phone, personalEmail: _personalEmail,
+    role: _role, dept: _dept, company: _company, email: _email, phone: _phone, personalEmail: _personalEmail,
     hireDate: _hireDate, sickBank: _sickBank, vacBank: _vacBank, color: _color,
   };
 
   const dbPayload = {
     name: data.name, initials: data.initials,
-    role: data.role, department: data.dept,
+    role: data.role, department: data.dept, company: data.company,
     email: data.email, phone: data.phone, personal_email: _personalEmail||null,
     color: data.color,
     hire_date: data.hireDate || null,
@@ -2642,7 +2644,7 @@ async function saveEmployee() {
         const idx2 = employees.findIndex(e => e.id === _editingId);
         if (idx2 > -1) employees[idx2] = { ...employees[idx2],
           name: fresh.name, initials: fresh.initials,
-          role: fresh.role, dept: fresh.department||'',
+          role: fresh.role, dept: fresh.department||'', company: fresh.company||null,
           email: fresh.email||'', phone: fresh.phone||'',
           color: fresh.color, hireDate: fresh.hire_date||'',
           sickBank: parseFloat(fresh.sick_bank)||0,
@@ -2667,7 +2669,7 @@ async function saveEmployee() {
       if (d) {
         employees.push({
           id: d.id, name: d.name, initials: d.initials,
-          role: d.role, dept: d.department||'',
+          role: d.role, dept: d.department||'', company: d.company||null,
           email: d.email||'', phone: d.phone||'',
           color: d.color, hireDate: d.hire_date||'',
           sickBank: parseFloat(d.sick_bank)||0,
@@ -3047,12 +3049,20 @@ async function submitVacationRequest(empId) {
   if (!vacationRequestCache[empId]) vacationRequestCache[empId] = [];
   vacationRequestCache[empId].unshift(saved);
 
-  // Notify: approver + all managers/approvers
-  // Use same logic as auth.js isApprover check to catch all cases
-  const isEmpManager = (e) =>
-    e.isApprover === true || e.isApprover === 1 ||
-    ['manager','Manager','owner','Owner','admin','Admin'].includes(e.permissionLevel) ||
-    e.role === 'approver' || e.role === 'manager';
+  // Notify: this employee's own Supervisor/Approver (approver_id) plus anyone
+  // whose role holds approve_all_timesheets (Linda) — the same people who can
+  // act on the request in Approvals. Previously every Is Approver / manager
+  // employee was pinged for every request company-wide (e.g. Scott got
+  // Ballantine requests).
+  const _empHasCap = (e, cap) => {
+    if (e.roleId && typeof permissionRoles !== 'undefined' && permissionRoles.length) {
+      const r = permissionRoles.find(x => x.id === e.roleId);
+      if (r) return !!((r.capabilities || {})[cap]);
+    }
+    // Roleless fallback mirrors can() in auth.js: approve_all_timesheets follows manager level
+    return cap === 'approve_all_timesheets' && e.permissionLevel === 'manager';
+  };
+  const isEmpManager = (e) => _empHasCap(e, 'approve_all_timesheets');
 
   const fmtD = d => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   const preview = `${emp.name} requested vacation: ${fmtD(startDate)} → ${fmtD(endDate)}||empId:${empId}`;
@@ -3086,7 +3096,7 @@ async function submitVacationRequest(empId) {
       console.error('Vacation notification exception:', e);
     }
   } else if (notifyIds.length === 0) {
-    console.warn('Vacation request: no managers/approvers found to notify. Employees:', employees.map(e => ({name:e.name, isApprover:e.isApprover, permLevel:e.permissionLevel})));
+    console.warn('Vacation request: no approver found to notify — set a Reports To on this employee. Employees:', employees.map(e => ({name:e.name, approverId:e.approverId, roleId:e.roleId})));
   }
 
   cancelVacationForm(empId);
