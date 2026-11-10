@@ -14,3 +14,6 @@
 .att-add .att-hint{font-weight:400;font-size:11px;color:var(--muted);}
 .att-add.busy{opacity:.55;pointer-events:none;}
 .att-add.busy::after{content:' uploading…';font-weight:400;color:var(--muted);}
+
+/* Drag-and-drop target (Batch 3.1) */
+.att-drop{outline:2px dashed var(--amber);outline-offset:4px;border-radius:8px;background:var(--amber-glow);}

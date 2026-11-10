@@ -292,6 +292,24 @@ function renderLoaPanel() {
   const wrap = document.getElementById('loaWrap');
   if (!wrap) return;
   if (!loaCanView()) return;
+  // Redraws replace the whole list; keep the reader where they were (ticking an item
+  // used to jump back to the top — Scott, Nov 10). Outer scrollers survive the redraw;
+  // the table's own scroll box is new, so its position is put back on the new one.
+  const outer = [];
+  for (let el = wrap.parentElement; el && el !== document.body; el = el.parentElement) {
+    if (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth) outer.push([el, el.scrollTop, el.scrollLeft]);
+  }
+  const tw0 = wrap.querySelector('.loa-table-wrap');
+  const inner = tw0 ? [tw0.scrollTop, tw0.scrollLeft] : null;
+  const winX = window.scrollX, winY = window.scrollY;
+  _renderLoaPanel(wrap);
+  outer.forEach(([el, t, l]) => { el.scrollTop = t; el.scrollLeft = l; });
+  const tw1 = wrap.querySelector('.loa-table-wrap');
+  if (inner && tw1) { tw1.scrollTop = inner[0]; tw1.scrollLeft = inner[1]; }
+  if (window.scrollY !== winY || window.scrollX !== winX) window.scrollTo(winX, winY);
+}
+
+function _renderLoaPanel(wrap) {
 
   const edit = loaCanEdit();
   const inService = loaAssets.filter(a => a.status === 'in_service');

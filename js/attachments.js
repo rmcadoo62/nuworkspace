@@ -76,17 +76,33 @@ async function attRefresh(elId) {
     </div>
     ${m.canAdd ? `<label class="att-add">
       <input type="file" multiple accept="${ATT_ACCEPT}" onchange="attUpload(this,'${elId}')" />
-      &#x1F4CE; Attach file <span class="att-hint">PDF or photo · up to 25 MB each</span></label>` : ''}`;
+      &#x1F4CE; Attach file <span class="att-hint">or drag files here · PDF or photo · up to 25 MB each</span></label>` : ''}`;
+  // Drag and drop onto the whole box (wired once per element).
+  if (m.canAdd && !el._attDnd) {
+    el._attDnd = true;
+    const has = e => [...(e.dataTransfer?.types || [])].includes('Files');
+    el.addEventListener('dragover', e => { if (!has(e)) return; e.preventDefault(); el.classList.add('att-drop'); });
+    el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) el.classList.remove('att-drop'); });
+    el.addEventListener('drop', e => {
+      if (!has(e)) return;
+      e.preventDefault(); el.classList.remove('att-drop');
+      if (_attMounts[elId]?.canAdd) attUploadFiles([...e.dataTransfer.files], elId);
+    });
+  }
   el._attRows = rows;
   // Lets lists keep a 📎 count badge current after uploads/deletes.
   document.dispatchEvent(new CustomEvent('att:changed', { detail: { type: m.type, id: m.id, count: rows.length } }));
 }
 
 async function attUpload(input, elId) {
-  const m = _attMounts[elId];
   const files = [...(input.files || [])];
   input.value = '';
-  if (!m || !files.length) return;
+  await attUploadFiles(files, elId);
+}
+
+async function attUploadFiles(files, elId) {
+  const m = _attMounts[elId];
+  if (!m || !files || !files.length) return;
   const emp = (typeof currentEmployee !== 'undefined' && currentEmployee) ? currentEmployee : null;
   const box = document.getElementById(elId);
   const label = box?.querySelector('.att-add');

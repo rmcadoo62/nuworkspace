@@ -21,6 +21,11 @@
 // makes a linked outgoing list (return_of_id). An incoming list that's been
 // received with no live return is customer property still on site.
 //
+// Unsaved drafts (Batch 3.1, Scott): starting a list opens it in memory
+// (_plEditId = PL_NEW). No row and no PL number until Save; Cancel/close
+// discards it, nothing to void. Print saves first. Exception: LOA multi-vendor
+// and Send-out create their lists straight away (one per vendor, confirmed).
+//
 // Capabilities (Setup → Permissions → Packing Lists):
 //   create_packing_lists — create, edit, mark shipped
 //   void_packing_lists   — void
@@ -36,6 +41,10 @@ let _plTab = 'articles';     // Shipping & Receiving tab: 'articles' | 'lists'
 let _plSearch = '';
 let _plStatusFilter = 'open';  // open (draft) | shipped | void | all
 let _plEditId = null;
+const PL_NEW = '__new__';      // _plEditId while an unsaved draft is open
+let _plNewDraft = null;        // that draft's header (not in the database yet)
+// Header of the list open in the drawer — saved or not.
+function plCur() { return _plEditId === PL_NEW ? _plNewDraft : plStore.find(p => p.id === _plEditId); }
 let _plEditLines = [];       // working copy of lines in the editor
 let _plPendingLines = null;  // lines waiting for "new or add to draft"
 let _plPendingShipTo = null;
@@ -64,6 +73,17 @@ function plFmt(d) {
   return isNaN(dt) ? '' : dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 function plNum(n) { const x = Number(n); return Number.isInteger(x) ? String(x) : String(x); }
+// Carrier suggestions: the standard list plus anything typed before (on packing lists or
+// test articles), so a new "Other" carrier becomes part of the list after first use.
+function plCarrierOptions() {
+  const seen = new Map();
+  const add = v => { const t = String(v || '').trim(); if (t && !seen.has(t.toLowerCase())) seen.set(t.toLowerCase(), t); };
+  PL_CARRIERS.filter(c => c !== 'Other').forEach(add);
+  plStore.forEach(p => add(p.shipped_via));
+  if (typeof articleStore !== 'undefined') articleStore.forEach(a => { add(a.carrier); add(a.receivedCarrier); });
+  return [...seen.values()];
+}
+
 // ---------- direction ----------
 function plIsIn(h) { return !!h && h.direction === 'incoming'; }
 function plStatusLabel(h) { return h.status === 'shipped' && plIsIn(h) ? 'Received' : PL_STATUS[h.status]; }
@@ -117,15 +137,29 @@ async function plLoadOne(id) {
 }
 
 // ---------- create / add ----------
+// Open a new list in the drawer WITHOUT saving it. No number until Save; Cancel discards.
+function plOpenNew(shipTo, lines, extra) {
+  if (!plCanCreate()) { plToast('Your role cannot create packing lists'); return; }
+  _plNewDraft = { ...plBuildHeader(shipTo, extra, true), id: PL_NEW, pl_number: 'New', status: 'draft', created_at: new Date().toISOString() };
+  _plEditLines = (lines || []).map(l => ({ id: null, qty_ordered: l.qty_ordered ?? 1, qty_backordered: l.qty_backordered ?? 0,
+    qty_shipped: l.qty_shipped ?? 1, description: l.description, asset_id: l.asset_id || null,
+    cal_record_id: l.cal_record_id || null, test_article_id: l.test_article_id || null }));
+  plEnsureDrawer();
+  _plEditId = PL_NEW;
+  document.getElementById('plDrawer').classList.add('open');
+  document.getElementById('plDrawerBackdrop').classList.add('open');
+  plRenderEditor(_plNewDraft);
+}
+
 // lines: [{description, qty_ordered?, qty_shipped?, qty_backordered?, asset_id?, cal_record_id?, test_article_id?}]
-async function plCreate(shipTo, lines, extra) {
-  if (!plCanCreate()) { plToast('Your role cannot create packing lists'); return null; }
+// The columns a new list starts with. unsaved: leave the name blank for the user to fill in.
+function plBuildHeader(shipTo, extra, unsaved) {
   const actor = plActor();
-  const header = {
+  return {
     ship_to_type: shipTo?.ship_to_type || 'other',
     vendor_id: shipTo?.vendor_id || null,
     client_id: shipTo?.client_id || null,
-    ship_to_name: shipTo?.ship_to_name || (extra?.direction === 'incoming' ? '(from not set)' : '(ship to not set)'),
+    ship_to_name: shipTo?.ship_to_name || (unsaved ? '' : (extra?.direction === 'incoming' ? '(from not set)' : '(ship to not set)')),
     ship_to_address: shipTo?.ship_to_address || null,
     ship_to_attn: shipTo?.ship_to_attn || null,
     direction: extra?.direction === 'incoming' ? 'incoming' : 'outgoing',
@@ -139,6 +173,12 @@ async function plCreate(shipTo, lines, extra) {
     packed_by: actor?.name || null,
     created_by: actor?.id || null,
   };
+}
+
+// Saves immediately (gets a number). Used where lists are made in bulk: LOA multi-vendor / Send-out.
+async function plCreate(shipTo, lines, extra) {
+  if (!plCanCreate()) { plToast('Your role cannot create packing lists'); return null; }
+  const header = plBuildHeader(shipTo, extra, false);
   const { data, error } = await sb.from('packing_lists').insert(header).select().single();
   if (error) { plErr('Could not create packing list', error); return null; }
   if (lines && lines.length) {
@@ -197,18 +237,16 @@ async function plStartFrom(lines, shipTo, extra) {
   const what = `${lines.length} item${lines.length !== 1 ? 's' : ''}${shipTo?.ship_to_name ? (dir === 'incoming' ? ' from <strong>' : ' to <strong>') + plEsc(shipTo.ship_to_name) + '</strong>' : ''}`;
   const kindWord = dir === 'incoming' ? 'an incoming packing list' : 'a packing list';
 
-  // Nothing to add to → a single confirm. Nothing is created until Create is clicked.
+  // Nothing to add to → open a new, unsaved list straight away (no number until Save).
   if (!drafts.length) {
-    plModal(dir === 'incoming' ? 'Incoming packing list' : 'Packing list', `<div style="font-size:13.5px;color:var(--text)">Create ${kindWord} for ${what}?</div>
-      <div class="pl-meta">It gets the next PL number.</div>`,
-      `<button class="btn btn-ghost" onclick="plCloseModal()">Cancel</button>
-       <button class="btn btn-primary" style="margin-left:auto" onclick="plConfirmStart()">Create</button>`);
+    _plPendingLines = null; _plPendingShipTo = null;
+    plOpenNew(shipTo, lines, extra);
     return;
   }
   plModal(dir === 'incoming' ? 'Incoming packing list' : 'Packing list', `
     <div class="pl-meta">${what}.</div>
     <label class="pl-choice"><input type="radio" name="plDest" value="new" checked /> <span><strong>New ${dir === 'incoming' ? 'incoming ' : ''}packing list</strong>
-      <span class="pl-dim">· uses the next number</span></span></label>
+      <span class="pl-dim">· numbered when you save</span></span></label>
     <div class="pl-choice-head">or add to a draft</div>
     ${drafts.map(d => `<label class="pl-choice"><input type="radio" name="plDest" value="${d.id}" />
       <span><span class="pl-mono">${plEsc(d.pl_number)}</span> — ${plEsc(d.ship_to_name)}
@@ -224,8 +262,7 @@ async function plConfirmStart() {
   plCloseModal();
   _plPendingLines = null; _plPendingShipTo = null;
   if (dest === 'new') {
-    const pl = await plCreate(ctx.shipTo, lines, ctx.extra);
-    if (pl) { plToast('✓ Created ' + pl.pl_number); openPackingList(pl.id); }
+    plOpenNew(ctx.shipTo, lines, ctx.extra);
   } else {
     const ok = await plAddToDraft(dest, lines);
     if (ok) { plToast('✓ Added to ' + (plStore.find(p => p.id === dest)?.pl_number || 'packing list')); openPackingList(dest); }
@@ -342,14 +379,13 @@ function plConfirmArticles(firstId, dir) {
 }
 
 // Packing Lists tab → "+ Incoming list": a blank incoming draft.
-async function plNewIncoming() {
-  const pl = await plCreate(null, [], { source: 'manual', direction: 'incoming' });
-  if (pl) { plToast('✓ Created ' + pl.pl_number + ' (incoming)'); openPackingList(pl.id); }
+function plNewIncoming() {
+  plOpenNew(null, [], { source: 'manual', direction: 'incoming' });
 }
 
 // Received incoming list → a new outgoing draft back to the same customer, same lines, linked.
 async function plCreateReturn() {
-  const h = plStore.find(p => p.id === _plEditId);
+  const h = plCur();
   if (!h || !plIsIn(h) || !plCanCreate()) return;
   const live = plReturnsFor(h);
   if (live.length) { openPackingList(live[0].id); return; }
@@ -359,18 +395,17 @@ async function plCreateReturn() {
     qty_shipped: l.qty_shipped ?? 1, test_article_id: l.test_article_id || null, asset_id: l.asset_id || null }));
   const shipTo = { ship_to_type: h.ship_to_type, vendor_id: h.vendor_id, client_id: h.client_id,
     ship_to_name: h.ship_to_name, ship_to_address: h.ship_to_address, ship_to_attn: h.ship_to_attn };
-  const pl = await plCreate(shipTo, lines, {
+  plOpenNew(shipTo, lines, {
     direction: 'outgoing', return_of_id: h.id, project_id: h.project_id, cust_order_no: h.cust_order_no,
     source: lines.some(l => l.test_article_id) ? 'articles' : 'manual',
   });
-  if (pl) { plToast('✓ Return list ' + pl.pl_number + ' created'); openPackingList(pl.id); }
 }
 
 // ---------- editor (drawer) ----------
 function plEnsureDrawer() {
   if (document.getElementById('plDrawer')) return;
   const bd = document.createElement('div');
-  bd.className = 'client-drawer-backdrop'; bd.id = 'plDrawerBackdrop'; bd.onclick = closePackingList;
+  bd.className = 'client-drawer-backdrop'; bd.id = 'plDrawerBackdrop'; bd.onclick = () => closePackingList();
   const dr = document.createElement('div');
   dr.className = 'client-drawer pl-drawer'; dr.id = 'plDrawer';
   dr.innerHTML = `
@@ -396,7 +431,11 @@ async function openPackingList(id) {
   plRenderEditor(one.header);
 }
 
-function closePackingList() {
+// An unsaved new list is discarded on close (asks first). force: skip the question.
+function closePackingList(force) {
+  if (_plEditId === PL_NEW && force !== true &&
+      !confirm('Discard this new packing list?\n\nIt was never saved, so no PL number was used.')) return;
+  if (_plEditId === PL_NEW) _plNewDraft = null;
   document.getElementById('plDrawer')?.classList.remove('open');
   document.getElementById('plDrawerBackdrop')?.classList.remove('open');
   _plEditId = null;
@@ -416,7 +455,9 @@ function plRenderEditor(h) {
   const retOf = plReturnOf(h), rets = inc ? plReturnsFor(h) : [];
   const contacts = plContactNames(h);
   const st = `<span class="pl-status ${h.status}">${plStatusLabel(h)}</span>`;
-  document.getElementById('plDrawerTitle').innerHTML = plEsc(h.pl_number) + ' ' + plDirBadge(h) + ' ' + st;
+  const isNew = h.id === PL_NEW;
+  document.getElementById('plDrawerTitle').innerHTML = (isNew ? 'New packing list' : plEsc(h.pl_number)) + ' ' + plDirBadge(h) + ' ' +
+    (isNew ? '<span class="pl-status draft">Not saved</span>' : st);
 
   const vendOpts = (typeof vendorStore !== 'undefined' ? vendorStore : []).filter(v => v.status === 'approved' || v.id === h.vendor_id)
     .sort((a, b) => a.name.localeCompare(b.name));
@@ -437,6 +478,7 @@ function plRenderEditor(h) {
 
   document.getElementById('plDrawerBody').innerHTML = `
     ${h.status === 'void' ? `<div class="pl-banner void">Void${h.void_reason ? ': ' + plEsc(h.void_reason) : ''} — ${plFmt(h.voided_at)}</div>` : ''}
+    ${isNew ? `<div class="pl-banner link">Not saved yet — the PL number is assigned when you click <b>Save</b>. <b>Cancel</b> throws it away with nothing to void.</div>` : ''}
     ${h.status === 'shipped' ? `<div class="pl-banner shipped">${inc ? 'Received' : 'Shipped'} ${plFmt(h.date_shipped)}${h.shipped_via ? ' via ' + plEsc(h.shipped_via) : ''}. Locked — only the tracking number can be added.</div>` : ''}
     ${retOf ? `<div class="pl-banner link">&#x21A9; Return of <a onclick="openPackingList('${retOf.id}')">${plEsc(retOf.pl_number)}</a> (incoming, received ${plFmt(retOf.date_shipped)})</div>` : ''}
     ${rets.length ? `<div class="pl-banner link">&#x21AA; Returned on ${rets.map(r => `<a onclick="openPackingList('${r.id}')">${plEsc(r.pl_number)}</a> (${plStatusLabel(r).toLowerCase()})`).join(', ')}</div>` : ''}
@@ -478,17 +520,20 @@ function plRenderEditor(h) {
       <div class="client-detail-section-title">${inc ? 'Receipt' : 'Shipment'}</div>
       <div class="client-field-row">
         <div class="client-field"><label>${inc ? 'Date Received' : 'Date Shipped'}</label><input id="plDate" type="date" value="${h.date_shipped || (draft ? plToday() : '')}" ${dis} /></div>
-        <div class="client-field"><label>${inc ? 'Received Via' : 'Shipped Via'}</label><input id="plVia" list="plCarrierList" value="${plEsc(h.shipped_via || '')}" ${dis} />
-          <datalist id="plCarrierList">${PL_CARRIERS.map(c => `<option value="${c}">`).join('')}</datalist></div>
+        <div class="client-field"><label>${inc ? 'Received Via' : 'Shipped Via'}</label><input id="plVia" list="plCarrierList" value="${plEsc(h.shipped_via || '')}" placeholder="Pick or type a carrier" ${dis} />
+          <datalist id="plCarrierList">${plCarrierOptions().map(c => `<option value="${plEsc(c)}">`).join('')}</datalist></div>
       </div>
       <div class="client-field-row">
         ${inc ? '' : `<div class="client-field"><label>Freight</label><select id="plFreight" class="pl-select" ${dis}>
           <option value="">—</option><option value="prepaid" ${h.freight_terms === 'prepaid' ? 'selected' : ''}>Prepaid</option>
-          <option value="collect" ${h.freight_terms === 'collect' ? 'selected' : ''}>Collect</option></select></div>`}
-        <div class="client-field"><label>Tracking #</label><input id="plTracking" type="text" value="${plEsc(h.tracking_number || '')}"
-          ${h.status === 'void' || !plCanCreate() ? 'disabled' : ''} /></div>
-        ${inc ? '<div></div>' : ''}
+          <option value="collect" ${h.freight_terms === 'collect' ? 'selected' : ''}>Collect</option></select></div>
+        <div class="client-field"><label>Billed To <span class="pl-dim" style="text-transform:none;letter-spacing:0;font-weight:400">· who pays the freight</span></label>
+          <input id="plBilledTo" type="text" value="${plEsc(h.freight_billed_to || '')}" placeholder="e.g. Customer — FedEx acct 1234" ${dis} /></div>`}
+        ${inc ? `<div class="client-field"><label>Tracking #</label><input id="plTracking" type="text" value="${plEsc(h.tracking_number || '')}"
+          ${h.status === 'void' || !plCanCreate() ? 'disabled' : ''} /></div><div></div>` : ''}
       </div>
+      ${inc ? '' : `<div class="client-field-row"><div class="client-field"><label>Tracking #</label><input id="plTracking" type="text" value="${plEsc(h.tracking_number || '')}"
+          ${h.status === 'void' || !plCanCreate() ? 'disabled' : ''} /></div><div></div></div>`}
       ${inc ? '' : `<div class="client-field-row">${f('PO / PR #', 'plPoPr', h.po_pr_number)}<div></div></div>`}
       <div class="pl-row3">
         <div class="client-field"><label>No. of Cartons</label><input id="plCartons" type="number" min="0" value="${h.cartons ?? ''}" ${dis} /></div>
@@ -504,10 +549,11 @@ function plRenderEditor(h) {
       <div class="client-detail-section-title">Attachments</div>
       <div id="plAttachments"></div>
     </div>`;
-  if (typeof attMount === 'function') attMount('packing_list', h.id, 'plAttachments', { canAdd: h.status !== 'void' });
+  if (typeof attMount === 'function') attMount('packing_list', isNew ? null : h.id, 'plAttachments', { canAdd: h.status !== 'void' });
 
   const bar = [];
-  if (h.status !== 'void' && plCanVoid()) bar.push(`<button class="btn btn-ghost" style="margin-right:auto;color:var(--red)" onclick="plVoid()">Void</button>`);
+  if (isNew) bar.push(`<button class="btn btn-ghost" style="margin-right:auto" onclick="closePackingList()">Cancel</button>`);
+  else if (h.status !== 'void' && plCanVoid()) bar.push(`<button class="btn btn-ghost" style="margin-right:auto;color:var(--red)" onclick="plVoid()">Void</button>`);
   else bar.push('<span style="margin-right:auto"></span>');
   bar.push(`<button class="btn btn-ghost pl-outline" onclick="plPrint('${h.id}')">&#x1F5A8; Print</button>`);
   if (edit) {
@@ -535,7 +581,7 @@ function plContactNames(h) {
 
 // Re-pull the address from the vendor / client record (e.g. after filling it in under Vendors).
 async function plRefreshAddress() {
-  const h = plStore.find(p => p.id === _plEditId);
+  const h = plCur();
   if (!h) return;
   let rec = null;
   if (h.vendor_id) {
@@ -563,7 +609,7 @@ function plPickShipTo(kind, id) {
     document.getElementById('plShipAddr').value = plAddress(rec);
   }
   // Redraw so the form matches (vendor vs client fields, contacts for Attn). Unsaved edits are kept.
-  const h = plStore.find(p => p.id === _plEditId);
+  const h = plCur();
   if (h) {
     plCaptureLines();
     const cur = plHeaderFromForm(h);
@@ -586,14 +632,14 @@ function plCaptureLines() {
 function plAddBlankLine() {
   plCaptureLines();
   _plEditLines.push({ id: null, qty_ordered: 1, qty_backordered: 0, qty_shipped: 1, description: '' });
-  const h = plStore.find(p => p.id === _plEditId);
+  const h = plCur();
   plRenderEditor({ ...h, ...plHeaderFromForm(h) });
   const inputs = document.querySelectorAll('.pl-desc'); inputs[inputs.length - 1]?.focus();
 }
 function plRemoveLine(i) {
   plCaptureLines();
   _plEditLines.splice(i, 1);
-  const h = plStore.find(p => p.id === _plEditId);
+  const h = plCur();
   plRenderEditor({ ...h, ...plHeaderFromForm(h) });
 }
 
@@ -616,13 +662,15 @@ function plHeaderFromForm(h) {
     total_weight: nz(g('plWeight')), container_no: nz(g('plContainer')),
     packed_by: nz(g('plPackedBy')), checked_by: nz(g('plCheckedBy')), notes: nz(g('plNotes')),
     delivered_by: nz(g('plDeliveredBy')),
+    freight_billed_to: nz(g('plBilledTo')),
   };
 }
 
 // Save header + lines (draft only). Returns true on success.
 async function plSave(silent) {
-  const h = plStore.find(p => p.id === _plEditId);
+  let h = plCur();
   if (!h || h.status !== 'draft') return false;
+  const wasNew = h.id === PL_NEW;
   plCaptureLines();
   const hdr = plHeaderFromForm(h);
   if (!hdr.ship_to_name) { plToast((plIsIn(h) ? 'From' : 'Ship To') + ' name is required'); return false; }
@@ -630,8 +678,19 @@ async function plSave(silent) {
   if (bad) { plToast('Every line needs a description (or remove it)'); return false; }
   Object.keys(hdr).forEach(k => hdr[k] === undefined && delete hdr[k]);
 
-  const { error } = await sb.from('packing_lists').update(hdr).eq('id', h.id);
-  if (error) { plErr('Could not save', error); return false; }
+  if (h.id === PL_NEW) {
+    // First save of a new list: insert it — this is when the PL number is assigned.
+    const { id, pl_number, status, created_at, ...base } = h;
+    const { data, error } = await sb.from('packing_lists').insert({ ...base, ...hdr }).select().single();
+    if (error) { plErr('Could not save', error); return false; }
+    plStore.unshift({ ...data, line_count: 0 });
+    _plNewDraft = null;
+    _plEditId = data.id;
+    h = data;
+  } else {
+    const { error } = await sb.from('packing_lists').update(hdr).eq('id', h.id);
+    if (error) { plErr('Could not save', error); return false; }
+  }
 
   // Lines: delete removed, update existing, insert new — numbered in order.
   const { data: current, error: e1 } = await sb.from('packing_list_lines').select('id').eq('packing_list_id', h.id);
@@ -649,18 +708,20 @@ async function plSave(silent) {
       qty_shipped: num(l.qty_shipped), description: String(l.description).trim() };
     const res = l.id
       ? await sb.from('packing_list_lines').update(row).eq('id', l.id)
-      : await sb.from('packing_list_lines').insert({ ...row, packing_list_id: h.id }).select().single();
+      : await sb.from('packing_list_lines').insert({ ...row, packing_list_id: h.id, asset_id: l.asset_id || null,
+          cal_record_id: l.cal_record_id || null, test_article_id: l.test_article_id || null }).select().single();
     if (res.error) { plErr('Could not save line ' + (i + 1), res.error); return false; }
     if (!l.id && res.data) l.id = res.data.id;
   }
   const one = await plLoadOne(h.id);
   if (one) { _plEditLines = one.lines.map(l => ({ ...l })); plRenderEditor(one.header); }
   if (!silent) plToast('✓ ' + h.pl_number + ' saved');
+  else if (h.pl_number && wasNew) plToast('✓ Saved as ' + h.pl_number);
   return true;
 }
 
 async function plSaveTracking() {
-  const h = plStore.find(p => p.id === _plEditId);
+  const h = plCur();
   if (!h) return;
   const tr = (document.getElementById('plTracking')?.value || '').trim() || null;
   const { error } = await sb.from('packing_lists').update({ tracking_number: tr }).eq('id', h.id);
@@ -670,16 +731,17 @@ async function plSaveTracking() {
 }
 
 async function plMarkShipped() {
-  const h = plStore.find(p => p.id === _plEditId);
+  let h = plCur();
   if (!h) return;
   const inc = plIsIn(h);
   const via = (document.getElementById('plVia')?.value || '').trim();
   if (!via && !inc) { plToast('Enter how it shipped (Shipped Via) first'); document.getElementById('plVia')?.focus(); return; }
   if (!_plEditLines.length) { plToast('Add at least one item first'); return; }
   if (!confirm(inc
-    ? `Mark ${h.pl_number} as received?\n\nThe incoming list locks (only the tracking # can be added). Print it for signatures; when the equipment goes back, use Create Return List.`
-    : `Mark ${h.pl_number} as shipped?\n\nThe packing list locks (only the tracking # can be added), and any test articles on it are marked shipped.`)) return;
+    ? `Mark ${h.id === PL_NEW ? 'this list' : h.pl_number} as received?\n\nThe incoming list locks (only the tracking # can be added). Print it for signatures; when the equipment goes back, use Create Return List.`
+    : `Mark ${h.id === PL_NEW ? 'this list' : h.pl_number} as shipped?\n\nThe packing list locks (only the tracking # can be added), and any test articles on it are marked shipped.`)) return;
   if (!(await plSave(true))) return;
+  h = plCur();      // a new list now has its id and number
   const date = document.getElementById('plDate')?.value || plToday();
   const { error } = await sb.from('packing_lists').update({ status: 'shipped', date_shipped: date }).eq('id', h.id);
   if (error) { plErr('Could not mark shipped', error); return; }
@@ -705,7 +767,7 @@ async function plMarkShipped() {
 }
 
 async function plVoid() {
-  const h = plStore.find(p => p.id === _plEditId);
+  const h = plCur();
   if (!h || !plCanVoid()) return;
   const reason = prompt(`Void ${h.pl_number}?\n\nThe number is kept and prints as VOID. Reason:`);
   if (reason === null) return;
@@ -719,8 +781,11 @@ async function plVoid() {
 // ---------- print ----------
 async function plPrint(id) {
   // Save a draft first so the print matches the screen.
-  const h0 = plStore.find(p => p.id === id);
-  if (h0 && h0.status === 'draft' && _plEditId === id && plCanCreate()) { if (!(await plSave(true))) return; }
+  const h0 = id === PL_NEW ? _plNewDraft : plStore.find(p => p.id === id);
+  if (h0 && h0.status === 'draft' && _plEditId === id && plCanCreate()) {
+    if (!(await plSave(true))) return;
+    id = _plEditId;   // a new list was just saved and numbered
+  }
   const one = await plLoadOne(id);
   if (!one) return;
   const h = one.header, lines = one.lines;
@@ -765,7 +830,8 @@ async function plPrint(id) {
   <table style="margin-top:-1px"><tr>
     <td><span class="lbl">${inc ? 'Date Received' : 'Date Shipped'}</span>${plFmt(h.date_shipped)}</td>
     <td><span class="lbl">${inc ? 'Received Via' : 'Shipped Via'}</span>${plEsc(h.shipped_via || '')}
-      ${inc ? '' : `<div style="font-size:9px;margin-top:3px">${box(h.freight_terms === 'prepaid')} Prepaid &nbsp; ${box(h.freight_terms === 'collect')} Collect</div>`}</td>
+      ${inc ? '' : `<div style="font-size:9px;margin-top:3px">${box(h.freight_terms === 'prepaid')} Prepaid &nbsp; ${box(h.freight_terms === 'collect')} Collect</div>
+        ${h.freight_billed_to ? `<div style="font-size:9px;margin-top:2px"><b>Billed to:</b> ${plEsc(h.freight_billed_to)}</div>` : ''}`}</td>
     <td><span class="lbl">Tracking No.</span>${plEsc(h.tracking_number || '')}</td>
     ${inc ? `<td><span class="lbl">Delivered By</span>${plEsc(h.delivered_by || '')}</td>` : `<td><span class="lbl">PO / PR No.</span>${plEsc(h.po_pr_number || '')}</td>`}
   </tr></table>

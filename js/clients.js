@@ -239,6 +239,13 @@ function openArticleModal(articleId, projId) {
   const today = new Date().toISOString().split('T')[0];
   document.getElementById('articleDesc').value = a ? a.desc : '';
   document.getElementById('articleReceivedDate').value = a ? a.receivedDate : today;
+  // Carrier boxes: standard carriers plus anything typed before (packing.js plCarrierOptions).
+  const cList = document.getElementById('articleCarrierList');
+  if (cList) {
+    const opts = typeof plCarrierOptions === 'function' ? plCarrierOptions()
+      : ['UPS', 'FedEx', 'USPS', 'Customer Delivered', 'Customer Pickup', 'Hand Delivered'];
+    cList.innerHTML = opts.map(c => `<option value="${String(c).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}">`).join('');
+  }
   const rcEl = document.getElementById('articleReceivedCarrier');
   if (rcEl) rcEl.value = a ? (a.receivedCarrier || '') : '';
   const rnEl = document.getElementById('articleReceivedNotes');
@@ -248,7 +255,7 @@ function openArticleModal(articleId, projId) {
   // plain receive entry never gets a false ship date. Existing records keep
   // their saved date; already-shipped legacy rows are never touched.
   document.getElementById('articleShippedDate').value = a ? (a.shippedDate || today) : today;
-  document.getElementById('articleCarrier').value = a ? a.carrier : '';
+  document.getElementById('articleCarrier').value = a ? (a.carrier || '') : '';
   document.getElementById('articleNotes').value = a ? a.notes : '';
   // Received By is auto-stamped: original receiver on existing records, the
   // logged-in user on new ones. Shown read-only in the Inbound header.
@@ -367,7 +374,7 @@ async function saveArticle() {
   // a legacy shipped record (which may have no carrier) for an unrelated edit
   // can never wipe its ship date.
   let shippedDate = document.getElementById('articleShippedDate').value || null;
-  const outCarrier = document.getElementById('articleCarrier').value || null;
+  const outCarrier = document.getElementById('articleCarrier').value.trim() || null;
   const wasShipped = !!(oldArticle && oldArticle.shippedDate);
   let status = document.getElementById('articleStatus')?.value || 'in_house';
   if (shippedDate && !outCarrier && !wasShipped) {
@@ -388,7 +395,7 @@ async function saveArticle() {
     description:      desc,
     received_date:    document.getElementById('articleReceivedDate').value || null,
     received_by:      receivedBy,
-    received_carrier: document.getElementById('articleReceivedCarrier')?.value || null,
+    received_carrier: document.getElementById('articleReceivedCarrier')?.value.trim() || null,
     received_notes:   document.getElementById('articleReceivedNotes')?.value.trim() || null,
     shipped_date:     shippedDate,
     carrier:          outCarrier,

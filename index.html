@@ -1900,15 +1900,8 @@
           </div>
           <div class="field">
             <label class="field-label">Carrier</label>
-            <select class="f-input" id="articleReceivedCarrier" style="cursor:pointer">
-              <option value="">— Select —</option>
-              <option value="UPS">UPS</option>
-              <option value="FedEx">FedEx</option>
-              <option value="USPS">USPS</option>
-              <option value="Customer Delivered">Customer Delivered</option>
-              <option value="Hand Delivered">Hand Delivered</option>
-              <option value="Other">Other</option>
-            </select>
+            <!-- Pick or type; typed carriers are remembered (list filled in clients.js openArticleModal) -->
+            <input class="f-input" id="articleReceivedCarrier" list="articleCarrierList" placeholder="Pick or type…" autocomplete="off" />
           </div>
         </div>
         <div class="field">
@@ -1930,15 +1923,8 @@
           </div>
           <div class="field">
             <label class="field-label">Carrier</label>
-            <select class="f-input" id="articleCarrier" style="cursor:pointer" onchange="articleOutboundChanged()">
-              <option value="">— Select —</option>
-              <option value="UPS">UPS</option>
-              <option value="FedEx">FedEx</option>
-              <option value="USPS">USPS</option>
-              <option value="Customer Pickup">Customer Pickup</option>
-              <option value="Hand Delivered">Hand Delivered</option>
-              <option value="Other">Other</option>
-            </select>
+            <input class="f-input" id="articleCarrier" list="articleCarrierList" placeholder="Pick or type…" autocomplete="off" onchange="articleOutboundChanged()" />
+            <datalist id="articleCarrierList"></datalist>
           </div>
         </div>
         <div class="field">
