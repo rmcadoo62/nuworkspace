@@ -2607,6 +2607,9 @@ const CAPABILITY_DEFS = [
   { key: 'create_packing_lists', label: 'Create/Edit Packing Lists', group: 'Packing Lists' },
   { key: 'void_packing_lists',   label: 'Void Packing Lists',        group: 'Packing Lists' },
   { key: 'delete_attachments',   label: 'Delete Attachments',        group: 'Attachments' },
+  { key: 'approve_purchases',    label: 'Approve PRs',               group: 'Purchasing' },
+  { key: 'view_purchases',       label: 'View All Purchases (Accounting)', group: 'Purchasing' },
+  { key: 'bill_purchases',       label: 'Bill & Close POs',          group: 'Purchasing' },
 ];
 
 function openPermissionsPanel() {

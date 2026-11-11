@@ -23,6 +23,7 @@ let vendorStore        = [];   // vendors rows
 let vendorTypeStore    = [];   // vendor_service_types rows
 let vendorServiceStore = [];   // vendor_services rows
 let vendorContactStore = [];   // vendor_contacts rows
+let vendorGlStore      = [];   // gl_accounts rows (Batch 4) — for line-type G/L defaults
 let _vendorsLoaded     = false;
 
 let _vendorSearch       = '';
@@ -129,6 +130,9 @@ async function loadVendorData() {
   vendorTypeStore    = t.data || [];
   vendorServiceStore = s.data || [];
   vendorContactStore = c.data || [];
+  // G/L accounts (Batch 4). Optional: a load failure just leaves the picker empty.
+  const g = await sb.from('gl_accounts').select('account_id,description,account_type,active').order('account_id');
+  vendorGlStore = g.error ? [] : (g.data || []);
   _vendorsLoaded = true;
 }
 
@@ -369,6 +373,7 @@ function _vendorBaseline(v) {
   return {
     name: v?.name || '', nickname: v?.nickname || '', phone: v?.phone || '', website: v?.website || '',
     account_number: v?.account_number || '', payment_terms: v?.payment_terms || '',
+    peachtree_vendor_id: v?.peachtree_vendor_id || '', pricing: v?.pricing || 'quote_required',
     address: v?.address || '', city: v?.city || '', state: v?.state || '', zip: v?.zip || '',
     notes: v?.notes || '', status: v?.status || 'approved',
     accreditation_body: v?.accreditation_body || '', accreditation_cert: v?.accreditation_cert || '',
@@ -456,7 +461,24 @@ function _vendorInfoHtml(v, editable) {
         <div class="client-field" style="flex:1"><label>Nickname</label>${inp('vdNick', d.nickname, 'e.g. IPM').replace('<input ', '<input class="full" ')}</div>
       </div>
       <div class="client-field-row">${field('Phone', 'vdPhone', d.phone, '+1 (555) 000-0000')}${field('Website', 'vdWebsite', d.website, 'www.example.com')}</div>
-      <div class="client-field-row">${field('Our Account #', 'vdAccount', d.account_number, '')}${field('Payment Terms', 'vdTerms', d.payment_terms, 'Net 30')}</div>
+    </div>
+
+    <div class="client-detail-section">
+      <div class="client-detail-section-title">Accounting</div>
+      <div class="client-field-row">
+        <div class="client-field"><label>Peachtree Vendor ID</label>
+          <div style="display:flex;gap:6px;align-items:center">${inp('vdPtId', d.peachtree_vendor_id, 'e.g. KEYTEC').replace('<input ', '<input style="text-transform:uppercase" maxlength="20" ')}
+          ${editable ? `<button type="button" class="vnd-types-link" onclick="_vendorSuggestPtId()" title="Suggest an ID in Peachtree's style">Suggest</button>` : ''}</div>
+        </div>
+        <div class="client-field"><label>Pricing</label>
+          <select id="vdPricing" class="vnd-select" ${dis}>
+            <option value="quote_required" ${d.pricing !== 'trusted' ? 'selected' : ''}>Quote required</option>
+            <option value="trusted" ${d.pricing === 'trusted' ? 'selected' : ''}>Trusted pricing</option>
+          </select>
+        </div>
+      </div>
+      <div class="client-field-row">${field('Our Account #', 'vdAccount', d.account_number, 'Our customer # with them')}${field('Payment Terms', 'vdTerms', d.payment_terms, 'Net 30')}</div>
+      <div class="vnd-meta">The Peachtree Vendor ID links this vendor to Peachtree for the weekly bill export. Our Account # and Terms print on POs.</div>
     </div>
 
     <div class="client-detail-section">
@@ -525,6 +547,7 @@ function _captureVendorForm() {
   _vendorDraft = {
     name: val('vdName'), nickname: val('vdNick'), phone: val('vdPhone'), website: val('vdWebsite'),
     account_number: val('vdAccount'), payment_terms: val('vdTerms'),
+    peachtree_vendor_id: val('vdPtId'), pricing: val('vdPricing'),
     address: val('vdAddress'), city: val('vdCity'), state: val('vdState'), zip: val('vdZip'),
     notes: val('vdNotes'), status: val('vdStatus'),
     // 17025 fields may be hidden (no flagged type ticked) — keep what we had.
@@ -561,6 +584,8 @@ async function saveVendorDrawer() {
     nickname: nz(d.nickname),
     phone: nz(d.phone), website: nz(d.website),
     account_number: nz(d.account_number), payment_terms: nz(d.payment_terms),
+    peachtree_vendor_id: nz((d.peachtree_vendor_id || '').toUpperCase()),
+    pricing: d.pricing === 'trusted' ? 'trusted' : 'quote_required',
     address: nz(d.address), city: nz(d.city), state: nz(d.state), zip: nz(d.zip),
     notes: nz(d.notes),
     status: d.status || 'approved',
@@ -625,6 +650,12 @@ async function saveVendorDrawer() {
 }
 
 function _vendorSaveError(error, name) {
+  if (error && error.code === '23505' && /peachtree/i.test((error.message || '') + (error.details || ''))) {
+    const ptId = (document.getElementById('vdPtId')?.value || '').trim().toUpperCase();
+    const other = vendorStore.find(v => (v.peachtree_vendor_id || '').toUpperCase() === ptId && v.id !== _vendorDrawerId);
+    vToast('⚠ Peachtree Vendor ID ' + ptId + ' is already used' + (other ? ' by ' + other.name : ''));
+    return;
+  }
   if (error && error.code === '23505') {
     const dup = vendorStore.find(v => v.name.trim().toLowerCase() === name.trim().toLowerCase());
     vToast('⚠ A vendor named "' + name + '" already exists' + (dup ? ' (' + (VENDOR_STATUS[dup.status]?.label || dup.status) + ')' : ''));
@@ -632,6 +663,25 @@ function _vendorSaveError(error, name) {
   }
   vErr('Could not save vendor', error);
 }
+
+// Peachtree's style: first 3 letters of the first two words (KEYTEC, ETSLIN),
+// a digit added on a clash (FLU, FLU0). Only checks vendors already in
+// Workspace — Linda confirms it's free in Peachtree when she approves.
+function _vendorSuggestPtId() {
+  const name = (document.getElementById('vdName')?.value || '').toUpperCase().replace(/&/g, ' ');
+  const words = name.replace(/[^A-Z0-9 ]/g, ' ').split(/\s+/)
+    .filter(w => w && !['THE', 'INC', 'LLC', 'CO', 'CORP', 'CORPORATION', 'COMPANY', 'LTD'].includes(w));
+  if (!words.length) { vToast('Enter the vendor name first'); return; }
+  let base = words.length > 1 ? words[0].slice(0, 3) + words[1].slice(0, 3) : words[0].slice(0, 6);
+  base = base.slice(0, 18);
+  const taken = new Set(vendorStore.filter(v => v.id !== _vendorDrawerId && v.peachtree_vendor_id)
+    .map(v => v.peachtree_vendor_id.toUpperCase()));
+  let id = base, n = 0;
+  while (taken.has(id) && n < 99) id = base + (n++);
+  const el = document.getElementById('vdPtId');
+  if (el) { el.value = id; el.focus(); }
+}
+window._vendorSuggestPtId = _vendorSuggestPtId;
 
 async function deleteVendor(id) {
   if (!vCanDelete()) return;
@@ -825,8 +875,12 @@ function openVendorTypesModal() {
 function _renderVendorTypesModal() {
   const rows = [...vendorTypeStore].sort((a, b) => a.sort_order - b.sort_order);
   const used = id => vendorServiceStore.filter(s => s.service_type_id === id).length;
+  const glOpts = cur => vendorGlStore
+    .filter(g => g.active || g.account_id === cur)
+    .map(g => `<option value="${vEsc(g.account_id)}" ${g.account_id === cur ? 'selected' : ''}>${vEsc(g.account_id)} — ${vEsc(g.description)}</option>`).join('');
   _openVendorModal('Service Types', `
-    <div class="vnd-meta">Types marked <strong>17025</strong> give their vendors the accreditation fields and evaluation log. Retire a type instead of deleting it — existing links are kept.</div>
+    <div class="vnd-meta">Types marked <strong>17025</strong> give their vendors the accreditation fields and evaluation log. <strong>Cal</strong> marks calibration lines on POs. The <strong>G/L</strong> account is the default for PO lines of that type (Linda can change it on a bill). Retire a type instead of deleting it — existing links are kept.</div>
+    ${vendorGlStore.length ? '' : '<div class="vnd-meta" style="color:var(--amber)">No G/L accounts loaded yet — run the chart-of-accounts load first.</div>'}
     <div class="vnd-types-list">
       ${rows.map((t, i) => `<div class="vnd-type-row-edit ${t.active ? '' : 'retired'}">
         <div class="vnd-order">
@@ -836,6 +890,13 @@ function _renderVendorTypesModal() {
         <input class="f-input" value="${vEsc(t.name)}" onchange="updateVendorType('${t.id}',{name:this.value})" />
         <label class="vnd-check" title="Requires ISO 17025 evaluation"><input type="checkbox" ${t.requires_17025_eval ? 'checked' : ''}
           onchange="updateVendorType('${t.id}',{requires_17025_eval:this.checked})" /> 17025</label>
+        <label class="vnd-check" title="Calibration line type: prints the EMC-WI-004 calibration instruction on POs"><input type="checkbox" ${t.is_calibration ? 'checked' : ''}
+          onchange="updateVendorType('${t.id}',{is_calibration:this.checked})" /> Cal</label>
+        <select class="f-input" style="max-width:220px" title="Default G/L account for PO lines of this type"
+          onchange="updateVendorType('${t.id}',{gl_account:this.value||null})">
+          <option value="">G/L — none</option>
+          ${glOpts(t.gl_account)}
+        </select>
         <label class="vnd-check"><input type="checkbox" ${t.active ? 'checked' : ''}
           onchange="updateVendorType('${t.id}',{active:this.checked})" /> Active</label>
         <span class="vnd-sub" title="Vendors using this type">${used(t.id)}</span>
@@ -846,7 +907,7 @@ function _renderVendorTypesModal() {
       <label class="vnd-check"><input type="checkbox" id="vtNewIso" /> 17025</label>
       <button class="btn btn-primary" onclick="addVendorType()">Add</button>
     </div>`,
-    `<button class="btn btn-ghost" style="margin-left:auto" onclick="closeVendorModal()">Done</button>`, 600);
+    `<button class="btn btn-ghost" style="margin-left:auto" onclick="closeVendorModal()">Done</button>`, 900);
 }
 
 // After a service type change: refresh the modal, the list, and an open vendor drawer

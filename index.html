@@ -1335,12 +1335,15 @@
 
 <!-- ===== ADD EMPLOYEE MODAL ===== -->
 <div class="modal-backdrop" id="employeeModal" onclick="if(event.target===this)closeEmployeeModal()">
-  <div class="modal" style="width:460px">
+  <div class="modal" style="width:900px">
     <div class="modal-header">
       <div class="modal-title" id="empModalTitle">Add Employee</div>
       <button class="modal-close" onclick="closeEmployeeModal()">&#x2715;</button>
     </div>
     <div class="modal-body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:18px 32px;align-items:start">
+      <!-- Left column: who they are -->
+      <div style="display:flex;flex-direction:column;gap:18px;min-width:0">
       <div id="empAvPreview" class="emp-modal-av-preview" style="background:#5b4fcf">AL</div>
       <div class="field">
         <label class="field-label">Full Name <span style="color:var(--red)">*</span></label>
@@ -1379,32 +1382,39 @@
         <input class="f-input" id="empPhone" type="text" placeholder="+1 (555) 000-0000" maxlength="30" />
       </div>
       <div class="field">
-        <label class="field-label">Hire Date</label>
-        <input class="f-input" id="empHireDate" type="date" />
-      </div>
-
-      <div class="field">
-        <label class="field-label">Termination Date <span style="font-size:10px;color:var(--muted);font-weight:400">(sets employee as inactive)</span></label>
-        <input class="f-input" id="empTermDate" type="date" />
-      </div>
-      <div class="field">
-        <label class="field-label">Role</label>
-        <select class="f-input" id="empPermLevel" style="cursor:pointer">
-          <option value="">— No role assigned —</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Employment Type</label>
-        <select class="f-input" id="empType" style="cursor:pointer">
-          <option value="fulltime">Full Time</option>
-          <option value="parttime">Part Time</option>
-        </select>
-      </div>
-      <div class="field">
         <label class="field-label">Avatar Color</label>
         <div class="color-swatches" id="empColorSwatches"></div>
       </div>
-      <div class="field" style="margin-top:4px">
+      </div>
+
+      <!-- Right column: employment, approvals, purchasing -->
+      <div style="display:flex;flex-direction:column;gap:18px;min-width:0">
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Hire Date</label>
+          <input class="f-input" id="empHireDate" type="date" />
+        </div>
+        <div class="field">
+          <label class="field-label">Termination Date <span style="font-size:10px;color:var(--muted);font-weight:400">(sets inactive)</span></label>
+          <input class="f-input" id="empTermDate" type="date" />
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label class="field-label">Role</label>
+          <select class="f-input" id="empPermLevel" style="cursor:pointer">
+            <option value="">— No role assigned —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">Employment Type</label>
+          <select class="f-input" id="empType" style="cursor:pointer">
+            <option value="fulltime">Full Time</option>
+            <option value="parttime">Part Time</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
         <label class="field-label">Reports To</label>
         <select class="f-input" id="empApprover" style="cursor:pointer">
           <option value="">— None —</option>
@@ -1420,6 +1430,30 @@
           <input type="checkbox" id="empIsPaperTs" style="width:15px;height:15px;margin-top:2px;cursor:pointer;accent-color:var(--amber)" />
           <span>Paper Timesheet<span style="display:block;font-size:11px;color:var(--muted)">Their Reports To person enters this employee's time for them.</span></span>
         </label>
+      </div>
+
+      <!-- Purchasing (Batch 4) -->
+      <div style="border-top:1px solid var(--border);padding-top:14px;display:flex;flex-direction:column;gap:14px">
+        <div style="font-size:14px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text)">Purchasing</div>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;color:var(--text)">
+          <input type="checkbox" id="empCanPurchase" onchange="_empPurchasingToggle()" style="width:15px;height:15px;margin-top:2px;cursor:pointer;accent-color:var(--amber)" />
+          <span>Can make purchase requests<span style="display:block;font-size:11px;color:var(--muted)">Off = they can't start a purchase request.</span></span>
+        </label>
+        <div class="field-row" id="empPurchasingFields">
+          <div class="field" style="flex:0 0 140px">
+            <label class="field-label">Limit $</label>
+            <input class="f-input" id="empPurchaseLimit" type="number" min="0" step="50" placeholder="0" />
+          </div>
+          <div class="field">
+            <label class="field-label">PR Approver</label>
+            <select class="f-input" id="empPurchaseApprover" style="cursor:pointer">
+              <option value="">— None —</option>
+            </select>
+          </div>
+        </div>
+        <div id="empPurchaseHelp" style="font-size:11px;color:var(--muted);margin-top:-6px">Requests at or under the limit are approved automatically and get a PO number. Anything over goes to the PR Approver. Only people with the Approve PRs permission are listed.</div>
+      </div>
+      </div>
       </div>
     </div>
     <div class="modal-footer">

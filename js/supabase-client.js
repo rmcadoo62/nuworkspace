@@ -347,6 +347,9 @@ async function loadAllData() {
       isOwner: !!r.is_owner,
       isActive: r.is_active !== false,
       terminationDate: r.termination_date||'',
+      canPurchase: r.can_purchase !== false,
+      purchaseLimit: parseFloat(r.purchase_limit)||0,
+      purchaseApproverId: r.purchase_approver_id||null,
     }));
 
     // Clients & Contacts

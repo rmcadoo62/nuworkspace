@@ -2499,6 +2499,7 @@ function openEmployeeModal(id) {
     ).join('');
   const _isAppr = document.getElementById('empIsApprover'); if(_isAppr) _isAppr.checked = emp ? !!emp.isApprover : false;
   const _isPaper = document.getElementById('empIsPaperTs'); if(_isPaper) _isPaper.checked = emp ? !!emp.isPaperTs : false;
+  _empFillPurchasing(emp);
   // Populate role dropdown from permissionRoles
   const _perm = document.getElementById('empPermLevel');
   if (_perm) {
@@ -2509,6 +2510,48 @@ function openEmployeeModal(id) {
   document.getElementById('employeeModal').classList.add('open');
   setTimeout(() => document.getElementById('empName').focus(), 80);
 }
+
+// ===== PURCHASING (Batch 4) — employee card fields =====
+// PR Approver choices: active employees whose role has Approve PRs, never the
+// person themselves. A saved approver who has since lost the permission is
+// still shown (flagged) so opening the card doesn't silently drop them.
+function _empRoleCan(e, cap) {
+  const r = (typeof permissionRoles !== 'undefined' ? permissionRoles : []).find(x => x.id === e.roleId);
+  return !!(r && r.capabilities && r.capabilities[cap]);
+}
+function _empFillPurchasing(emp) {
+  const cb  = document.getElementById('empCanPurchase');
+  const lim = document.getElementById('empPurchaseLimit');
+  const sel = document.getElementById('empPurchaseApprover');
+  if (!cb || !lim || !sel) return;
+  cb.checked = emp ? emp.canPurchase !== false : true;
+  lim.value  = emp ? (emp.purchaseLimit || 0) : 0;
+  const cur  = emp ? (emp.purchaseApproverId || '') : '';
+  const opts = employees
+    .filter(e => e.isActive !== false && (!emp || e.id !== emp.id) && _empRoleCan(e, 'approve_purchases'))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (cur && !opts.some(e => e.id === cur)) {
+    const kept = employees.find(e => e.id === cur);
+    if (kept) opts.push({ ...kept, _noPerm: true });
+  }
+  sel.innerHTML = '<option value="">— None —</option>' + opts.map(e =>
+    `<option value="${e.id}" ${e.id === cur ? 'selected' : ''}>${e.name}${e._noPerm ? ' (no Approve PRs permission)' : ''}</option>`).join('');
+  const help = document.getElementById('empPurchaseHelp');
+  if (help) help.dataset.none = opts.length ? '' : '1';
+  _empPurchasingToggle();
+}
+function _empPurchasingToggle() {
+  const on = !!document.getElementById('empCanPurchase')?.checked;
+  const row = document.getElementById('empPurchasingFields');
+  if (row) { row.style.opacity = on ? '' : '.45'; row.querySelectorAll('input,select').forEach(x => x.disabled = !on); }
+  const help = document.getElementById('empPurchaseHelp');
+  if (help) help.textContent = !on
+    ? 'Purchase requests are turned off for this person.'
+    : help.dataset.none
+      ? 'No one has the Approve PRs permission yet — turn it on in Setup → Permissions, then pick an approver here.'
+      : 'Requests at or under the limit are approved automatically and get a PO number. Anything over goes to the PR Approver. Only people with the Approve PRs permission are listed.';
+}
+window._empPurchasingToggle = _empPurchasingToggle;
 
 function closeEmployeeModal() {
   document.getElementById('employeeModal').classList.remove('open');
@@ -2594,6 +2637,15 @@ async function saveEmployee() {
   const _termDate  = document.getElementById('empTermDate') ? document.getElementById('empTermDate').value : '';
   const _isActive  = _termDate ? false : (document.getElementById('empActive') ? document.getElementById('empActive').value !== 'false' : true);
   const _color     = empColor;
+  const _canPurchase = document.getElementById('empCanPurchase') ? document.getElementById('empCanPurchase').checked : true;
+  const _limitEl     = document.getElementById('empPurchaseLimit');
+  const _purchLimit  = _limitEl ? Math.max(0, Math.round((parseFloat(_limitEl.value) || 0) * 100) / 100) : 0;
+  const _purchApprover = document.getElementById('empPurchaseApprover') ? (document.getElementById('empPurchaseApprover').value || null) : null;
+
+  if (_editingId && _purchApprover && _purchApprover === _editingId) {
+    toast('⚠ Someone cannot be their own PR Approver');
+    return;
+  }
 
   if (!_name) {
     const inp = document.getElementById('empName');
@@ -2630,12 +2682,15 @@ async function saveEmployee() {
     approver_id: document.getElementById('empApprover') ? (document.getElementById('empApprover').value || null) : null,
     is_approver: document.getElementById('empIsApprover') ? document.getElementById('empIsApprover').checked : false,
     is_paper_ts: document.getElementById('empIsPaperTs') ? document.getElementById('empIsPaperTs').checked : false,
+    can_purchase: _canPurchase,
+    purchase_limit: _purchLimit,
+    purchase_approver_id: _purchApprover,
   };
 
   if (_editingId) {
     editingEmpId = _editingId;
     const idx = employees.findIndex(e => e.id === _editingId);
-    if (idx > -1) employees[idx] = {...employees[idx], ...data, empType: _empType, roleId: _roleId, terminationDate: _termDate, isActive: _isActive, isPaperTs: document.getElementById('empIsPaperTs')?.checked||false, isApprover: document.getElementById('empIsApprover')?.checked||false, approverId: document.getElementById('empApprover')?.value||null};
+    if (idx > -1) employees[idx] = {...employees[idx], ...data, empType: _empType, roleId: _roleId, terminationDate: _termDate, isActive: _isActive, isPaperTs: document.getElementById('empIsPaperTs')?.checked||false, isApprover: document.getElementById('empIsApprover')?.checked||false, approverId: document.getElementById('empApprover')?.value||null, canPurchase: _canPurchase, purchaseLimit: _purchLimit, purchaseApproverId: _purchApprover};
     if (sb) {
       const { error } = await sb.from('employees').update(dbPayload).eq('id', _editingId);
       if (error) { console.error('saveEmployee update error:', error); toast('⚠ Save error: ' + error.message); return; }
@@ -2658,6 +2713,9 @@ async function saveEmployee() {
           approverId: fresh.approver_id||null,
           terminationDate: fresh.termination_date||'',
           personalEmail: fresh.personal_email||'',
+          canPurchase: fresh.can_purchase !== false,
+          purchaseLimit: parseFloat(fresh.purchase_limit)||0,
+          purchaseApproverId: fresh.purchase_approver_id||null,
         };
       }
     }
@@ -2681,6 +2739,10 @@ async function saveEmployee() {
           approverId: d.approver_id||null,
           isApprover: !!d.is_approver,
           isPaperTs: !!d.is_paper_ts,
+          isActive: d.is_active !== false,
+          canPurchase: d.can_purchase !== false,
+          purchaseLimit: parseFloat(d.purchase_limit)||0,
+          purchaseApproverId: d.purchase_approver_id||null,
         });
       }
     } else {

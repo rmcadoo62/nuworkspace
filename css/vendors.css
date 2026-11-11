@@ -80,7 +80,7 @@
 /* modal sits above the drawer (drawer z-index 9101) */
 .vnd-modal-backdrop{z-index:9300;}
 .vnd-types-list{display:flex;flex-direction:column;gap:8px;}
-.vnd-type-row-edit{display:grid;grid-template-columns:auto 1fr auto auto 28px;align-items:center;gap:10px;}
+.vnd-type-row-edit{display:grid;grid-template-columns:auto 1fr auto auto minmax(160px,220px) auto 28px;align-items:center;gap:10px;}
 .vnd-type-row-edit.retired .f-input{opacity:.55;}
 .vnd-type-row-edit .vnd-sub{text-align:right;font-family:'JetBrains Mono',monospace;}
 .vnd-order{display:flex;flex-direction:column;}
@@ -90,6 +90,6 @@
 
 @media (max-width:767px){
   .vnd-type-row-edit{grid-template-columns:auto 1fr;}
-  .vnd-type-row-edit .vnd-check,.vnd-type-row-edit .vnd-sub{grid-column:2;}
+  .vnd-type-row-edit .vnd-check,.vnd-type-row-edit .vnd-sub,.vnd-type-row-edit select{grid-column:2;}
   .vnd-filter-label{width:auto;}
 }
