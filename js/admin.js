@@ -2664,8 +2664,8 @@ function renderPermissionsPanel() {
 
     const capRows = groups.map(group => {
       const defs = CAPABILITY_DEFS.filter(c => c.group === group);
-      return `<div style="margin-bottom:16px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--muted);margin-bottom:8px;">${group}</div>
+      return `<div style="margin-bottom:18px;">
+        <div style="font-size:14px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--text);padding:6px 0 6px;margin-bottom:8px;border-bottom:1px solid var(--border);">${group}</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
           ${defs.map(c => `
             <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;padding:5px 8px;border-radius:6px;transition:background .12s;" onmouseover="this.style.background='var(--surface3)'" onmouseout="this.style.background=''">
