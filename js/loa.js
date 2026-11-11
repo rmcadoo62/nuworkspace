@@ -84,13 +84,15 @@ function lDays(d) {
   if (!d) return null;
   return Math.round((new Date(d + 'T00:00:00') - new Date(lToday() + 'T00:00:00')) / 86400000);
 }
-function lAddMonths(d, m) {
+// Due date for an interval item: the LAST DAY of the month the interval lands in,
+// whatever day the cal was done (Scott, Nov 10 2026) — so due dates don't creep
+// earlier through the calendar each cycle. 12 months from 2026-11-10 -> 2027-11-30.
+// Matches next_due in the loa_asset_status view.
+function lDueDate(d, m) {
   if (!d || !m) return '';
   const dt = new Date(d + 'T00:00:00');
-  const day = dt.getDate();
-  dt.setMonth(dt.getMonth() + Number(m));
-  if (dt.getDate() < day) dt.setDate(0);   // Jan 31 + 1 month -> Feb 28
-  return dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+  const last = new Date(dt.getFullYear(), dt.getMonth() + Number(m) + 1, 0);   // day 0 = last day of previous month
+  return last.getFullYear() + '-' + String(last.getMonth() + 1).padStart(2, '0') + '-' + String(last.getDate()).padStart(2, '0');
 }
 function lMoney(n) { return n == null || n === '' ? '' : '$' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function lVendorName(id) {
@@ -890,7 +892,7 @@ function _loaVendorOptions(sel) {
 
 function _loaCheckInForm(a, open) {
   const today = lToday();
-  const due = a.cal_type === 'interval' ? lAddMonths(today, a.cal_interval_months) : '';
+  const due = a.cal_type === 'interval' ? lDueDate(today, a.cal_interval_months) : '';
   return `<div class="loa-form">
     <div class="loa-form-title">Check in from calibration</div>
     <div class="loa-meta" style="margin:-4px 0 10px">Sent ${lFmt(open.sent_date)}${open.vendor_id ? ' to ' + lEsc(lVendorName(open.vendor_id)) : ''}.</div>
@@ -901,7 +903,7 @@ function _loaCheckInForm(a, open) {
     </div>
     <div class="client-field-row">
       <div class="client-field"><label>Due Date</label><input type="date" id="lcDue" value="${due}" />
-        ${a.cal_type === 'interval' ? `<span class="loa-hint">Cal date + ${a.cal_interval_months} months. Change if the cert says otherwise.</span>` : ''}</div>
+        ${a.cal_type === 'interval' ? `<span class="loa-hint">End of the month, ${a.cal_interval_months} months after the cal date. Change if needed.</span>` : ''}</div>
       <div class="client-field"><label>Result *</label><select id="lcResult" class="loa-select"
         onchange="document.getElementById('lcFailWrap').style.display=this.value==='fail'?'':'none'"><option value="">— choose —</option>
         ${Object.entries(LOA_RESULTS).map(([k, l]) => `<option value="${k}">${l}</option>`).join('')}</select></div>
@@ -920,7 +922,7 @@ function _loaCheckInForm(a, open) {
 function _loaAutoDue(calDate) {
   const a = loaAssets.find(x => x.asset_id === _loaDrawerId);
   const el = document.getElementById('lcDue');
-  if (a && el && a.cal_type === 'interval' && calDate) el.value = lAddMonths(calDate, a.cal_interval_months);
+  if (a && el && a.cal_type === 'interval' && calDate) el.value = lDueDate(calDate, a.cal_interval_months);
 }
 
 async function checkInLoaCal(recId) {
@@ -960,7 +962,7 @@ function _loaCalForm(a, r) {
   const isNew = !r;
   const inHouse = r ? r.in_house : !a.cal_vendor_id;
   const calDate = r?.cal_date || (isNew ? lToday() : '');
-  const due = r ? (r.due_date || '') : (a.cal_type === 'interval' ? lAddMonths(calDate, a.cal_interval_months) : '');
+  const due = r ? (r.due_date || '') : (a.cal_type === 'interval' ? lDueDate(calDate, a.cal_interval_months) : '');
   const vend = r ? r.vendor_id : a.cal_vendor_id;
   return `<div class="loa-form">
     <div class="loa-form-title">${isNew ? 'Record a calibration' : 'Edit calibration record'}</div>
@@ -1070,7 +1072,7 @@ function openLoaCheckInModal(ids) {
   const rowHtml = id => {
     const a = loaAssets.find(x => x.asset_id === id) || { asset_id: id };
     const s = loaStatus[id] || {};
-    const due = a.cal_type === 'interval' ? lAddMonths(today, a.cal_interval_months) : '';
+    const due = a.cal_type === 'interval' ? lDueDate(today, a.cal_interval_months) : '';
     return `<tr class="loa-ci-row" data-id="${lEsc(id)}">
       <td><span class="loa-mono">${lEsc(id)}</span><div class="loa-ci-desc">${lEsc(a.description || '')}</div>
         <div class="loa-ci-desc">sent ${lFmt(s.out_for_cal_since)}</div></td>
@@ -1104,7 +1106,7 @@ function openLoaCheckInModal(ids) {
   const n = _loaCheckInIds.length;
   _openLoaModal(n === 1 ? 'Check in from calibration' : `Check in ${n} items from calibration`, `
     <div id="loaCiForm" oninput="_loaCiValidate()" onchange="_loaCiValidate()">
-      <div class="loa-meta">Due dates fill in as each item's cal date + its interval. Change any that differ on the cert.
+      <div class="loa-meta">Due dates fill in as the last day of the month, one interval after each item's cal date (12 months from Nov 10 → Nov 30 next year). Change any if needed.
         A <b>Fail</b> sets the asset Out of Service.</div>
       <div class="loa-ci-wrap">${sections}</div>
     </div>`,
@@ -1129,7 +1131,7 @@ function _loaCiRowCal(inp) {
   const tr = inp.closest('tr');
   const a = loaAssets.find(x => x.asset_id === tr.dataset.id);
   const due = tr.querySelector('.ciDue');
-  if (a && due && due.dataset.auto && a.cal_type === 'interval' && inp.value) due.value = lAddMonths(inp.value, a.cal_interval_months);
+  if (a && due && due.dataset.auto && a.cal_type === 'interval' && inp.value) due.value = lDueDate(inp.value, a.cal_interval_months);
 }
 
 // Fail opens the reason line under the row.
