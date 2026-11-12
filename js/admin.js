@@ -2610,6 +2610,7 @@ const CAPABILITY_DEFS = [
   { key: 'approve_purchases',    label: 'Approve PRs',               group: 'Purchasing' },
   { key: 'view_purchases',       label: 'View All Purchases (Accounting)', group: 'Purchasing' },
   { key: 'bill_purchases',       label: 'Bill & Close POs',          group: 'Purchasing' },
+  { key: 'inspect_purchases',    label: 'Inspect & Accept Purchases', group: 'Purchasing' },
 ];
 
 function openPermissionsPanel() {

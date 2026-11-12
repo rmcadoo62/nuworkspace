@@ -1298,7 +1298,7 @@ function applyPermissions() {
   const navMyPur = document.getElementById('navMyPurchases');
   if (navMyPur) navMyPur.style.display = (currentEmployee && currentEmployee.canPurchase !== false) ? 'flex' : 'none';
   const navPur = document.getElementById('navPurchases');
-  if (navPur) navPur.style.display = (can('view_purchases') || can('bill_purchases')) ? 'flex' : 'none';
+  if (navPur) navPur.style.display = (can('view_purchases') || can('bill_purchases') || can('inspect_purchases')) ? 'flex' : 'none';
   if (typeof refreshMyPurchasesBadge === 'function') { try { refreshMyPurchasesBadge(); } catch (e) {} }
 
   applySchedAccessToNav();

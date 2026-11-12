@@ -30,6 +30,7 @@ let purLineTypes  = [];     // vendor_service_types
 let _purLoaded    = false;
 let _purListMode  = 'mine'; // 'mine' | 'all'
 let _purFilter    = { mine: 'open', all: 'waiting' };
+let _purInspectDefaulted = false;   // inspect-only users land on Awaiting inspection once
 let _purSearch    = '';
 let _purWin       = null;   // { po, lines, isNew, editing, removed:Set }
 
@@ -97,7 +98,11 @@ function pProject(id) { return (typeof projects !== 'undefined' ? projects : [])
 function pNo(po) { return po ? (po.po_number || po.pr_number || 'New request') : ''; }
 function pIsViewOnly() { return typeof isImpersonating === 'function' && isImpersonating(); }
 function pCanPurchase() { const me = pMe(); return !!me && me.canPurchase !== false; }
+function pCanInspect() { return !pIsViewOnly() && pCan('inspect_purchases'); }
 function pCanSeeAll() { return pCan('view_purchases') || pCan('bill_purchases'); }
+// The full list is also open to inspectors (to find POs waiting on incoming inspection);
+// it does not give them close/cancel rights on other people's POs (_purCanWork).
+function pCanList() { return pCanSeeAll() || pCan('inspect_purchases'); }
 
 function pStatusText(po) {
   if (!po) return '';
@@ -164,7 +169,8 @@ async function openPurchasesPanel(el) {
   _purShowPanel('panel-purchases', 'navPurchases', 'Purchases', el);
   _purListMode = 'all';
   const body = document.getElementById('purchasesBody');
-  if (!pCanSeeAll()) { if (body) body.innerHTML = '<div class="pur-empty">Your role does not include View All Purchases.</div>'; return; }
+  if (!pCanList()) { if (body) body.innerHTML = '<div class="pur-empty">Your role does not include View All Purchases.</div>'; return; }
+  if (!pCanSeeAll() && !_purInspectDefaulted) { _purFilter.all = 'inspect'; _purInspectDefaulted = true; }
   if (body) body.innerHTML = '<div class="pur-empty">Loading…</div>';
   await purEnsureRefs();
   await purLoadList();
@@ -179,8 +185,9 @@ const PUR_FILTERS = {
   ],
   all: [
     ['waiting', 'Waiting for approval', po => po.status === 'pending_approval'],
+    ['inspect', 'Awaiting inspection', po => ['ordered', 'received'].includes(po.status) && Number(po.open_lines) - Number(po.accepted_lines) > 0],
     ['open',    'Open POs',  po => ['approved', 'ordered', 'received'].includes(po.status)],
-    ['tobill',  'To bill',   po => ['ordered', 'received'].includes(po.status) && Number(po.open_lines) > 0],
+    ['tobill',  'To bill',   po => ['ordered', 'received'].includes(po.status) && Number(po.accepted_lines) > 0],
     ['drafts',  'Drafts & quotes', po => ['draft', 'awaiting_quote', 'rejected'].includes(po.status)],
     ['closed',  'Closed',    po => ['closed', 'cancelled'].includes(po.status)],
     ['all',     'All',       () => true],
@@ -379,7 +386,9 @@ function renderPurchaseWindow() {
   // lines
   const typeOpts = sel => '<option value="">— Type —</option>' + purLineTypes.filter(t => t.active || t.id === sel)
     .map(t => `<option value="${t.id}" ${t.id === sel ? 'selected' : ''}>${pEsc(t.name)}</option>`).join('');
-  const canRecv = _purCanWork() && ['ordered', 'received'].includes(po.status);
+  const lineLive = ['ordered', 'received'].includes(po.status);
+  const canRecv = pCanInspect() && lineLive;          // incoming inspection sign-off
+  const canCloseL = _purCanWork() && lineLive;        // close a line (billed / no bill)
   const lineRows = w.lines.map((l, i) => {
     const t = pType(l.line_type_id);
     const amt = (Number(l.qty) || 0) * (Number(l.unit_price) || 0);
@@ -397,13 +406,13 @@ function renderPurchaseWindow() {
     return `<tr>
       <td class="pur-dim">${i + 1}</td>
       <td>${t ? `<span class="pur-type ${t.is_calibration ? 'cal' : ''}">${pEsc(t.name)}</span>` : '—'}</td>
-      <td>${pEsc(l.description || '')}${l.status === 'closed' ? `<div class="pur-dim">Closed: ${pEsc(l.closed_reason || '')}</div>` : ''}</td>
+      <td>${pEsc(l.description || '')}${l.status === 'closed' ? `<div class="pur-dim">Closed: ${pEsc(l.closed_reason || '')}</div>` : ''}${l.received_by ? `<div class="pur-dim">Accepted by ${pEsc(pEmpName(l.received_by) || '?')}${l.received_at ? ' · ' + pEsc(new Date(l.received_at).toLocaleDateString()) : ''}</div>` : ''}${l.inspection_note && l.status === 'open' ? `<div class="pur-warn-line">⚠ Inspection: ${pEsc(l.inspection_note)}</div>` : ''}</td>
       <td class="mono">${pEsc(l.loa_asset_id || '')}</td>
       <td class="num">${pEsc(Number(l.qty))}</td>
       <td class="num">${l.unit_price == null ? '—' : pNum(l.unit_price)}</td>
       <td>${PUR_BASIS[l.price_basis] || ''}</td>
       <td class="num strong">${l.unit_price == null ? '—' : pNum(amt)}</td>
-      ${['approved', 'ordered', 'received', 'closed'].includes(po.status) ? `<td>${_purLineStatus(l, i, canRecv)}</td>` : ''}</tr>`;
+      ${['approved', 'ordered', 'received', 'closed'].includes(po.status) ? `<td>${_purLineStatus(l, i, canRecv, canCloseL)}</td>` : ''}</tr>`;
   }).join('');
   const showStatusCol = !ed && ['approved', 'ordered', 'received', 'closed'].includes(po.status);
   const lines = `
@@ -414,7 +423,7 @@ function renderPurchaseWindow() {
         <tr class="pur-total"><td colspan="${ed ? 6 : 7}" class="num">Total</td><td class="num" id="purTotal">${pMoney(total)}</td>${ed ? '<td></td>' : ''}${showStatusCol ? '<td></td>' : ''}</tr></tbody>
     </table></div>
     ${ed ? `<button class="pur-add" onclick="_purAddLine()">+ Add line</button>` : ''}
-    ${canRecv && w.lines.some(l => l.status === 'open') ? `<button class="pur-add" onclick="purReceiveAll()">✓ Receive all open lines</button>` : ''}`;
+    ${canRecv && w.lines.some(l => l.status === 'open') ? `<button class="pur-add" onclick="purReceiveAll()">✓ Inspected – all OK</button>` : ''}`;
 
   // notes + attachments
   const notes = `
@@ -467,13 +476,21 @@ function renderPurchaseWindow() {
   if (po.id && typeof attMount === 'function') attMount('purchase_order', po.id, 'purAtt', { canAdd: !pIsViewOnly() });
 }
 
-function _purLineStatus(l, i, canRecv) {
-  if (l.status === 'received') return `<span class="pur-chip ordered">Received</span>`;
+// Line state: Open → (incoming inspection) Accepted → (billed in Peachtree) Closed.
+// Only people with Inspect & accept sign off; Close… on an accepted line = billed,
+// on an open line = closed with no bill (no charge, cancelled, not repairable).
+function _purLineStatus(l, i, canRecv, canClose) {
+  if (l.status === 'received') return `<span class="pur-chip ordered">Accepted</span>`
+    + (canClose ? ` <button class="pur-mini ghost" onclick="purCloseLine(${i})" title="Billed in Peachtree — close this line">Close…</button>` : '');
   if (l.status === 'billed') return `<span class="pur-chip closed">Billed</span>`;
   if (l.status === 'closed') return `<span class="pur-chip closed">Closed</span>`;
-  if (!canRecv) return `<span class="pur-chip draft">Open</span>`;
-  return `<button class="pur-mini" onclick="purReceiveLine(${i})">Receive</button>
-    <button class="pur-mini ghost" onclick="purCloseLine(${i})" title="Close with no bill (no charge, cancelled…)">Close…</button>`;
+  const b = [];
+  if (canRecv) {
+    b.push(`<button class="pur-mini" onclick="purReceiveLine(${i})">Inspected – OK</button>`);
+    b.push(`<button class="pur-mini ghost" onclick="purInspectNote(${i})" title="Something is wrong — note it; the line stays open">Problem…</button>`);
+  }
+  if (canClose) b.push(`<button class="pur-mini ghost" onclick="purCloseLine(${i})" title="Close with no bill (no charge, cancelled, not repairable)">Close…</button>`);
+  return b.length ? b.join(' ') : `<span class="pur-chip draft">Awaiting inspection</span>`;
 }
 
 function _purButtons() {
@@ -512,7 +529,7 @@ function _purButtons() {
   }
   if (['ordered', 'received'].includes(po.status)) {
     if (_purCanWork()) b.push(btn('Cancel PO…', 'purCancel()', 'btn-ghost pur-danger'));
-    if (_purCanWork() && w.lines.some(l => ['open', 'received'].includes(l.status))) b.push(btn('Close PO…', 'purClosePo()'));
+    if (_purCanWork() && w.lines.some(l => l.status === 'received')) b.push(btn('Close PO…', 'purClosePo()'));
     if (_purCanWork() && typeof plCreate === 'function' && w.lines.some(l => l.loa_asset_id)) b.push(btn('Packing list', 'purPackingList()'));
     b.push('<span style="flex:1"></span>');
     b.push(btn('Print PO', 'purPrint()'));
@@ -769,25 +786,41 @@ async function _purAfterReceive(id) {
   await _purReload(id);
 }
 async function purReceiveLine(i) {
-  const l = _purWin?.lines[i];
-  if (!l) return;
-  const { error } = await sb.from('purchase_order_lines').update({ status: 'received' }).eq('id', l.id);
+  const l = _purWin?.lines[i], me = pMe();
+  if (!l || !pCanInspect()) return;
+  const { error } = await sb.from('purchase_order_lines').update({ status: 'received', received_by: me?.id || null }).eq('id', l.id);
   if (error) { pErr('Could not receive', error); return; }
   await _purAfterReceive(_purWin.po.id);
 }
 async function purReceiveAll() {
+  const me = pMe();
+  if (!pCanInspect()) return;
   const ids = (_purWin?.lines || []).filter(l => l.status === 'open').map(l => l.id);
   if (!ids.length) return;
-  const { error } = await sb.from('purchase_order_lines').update({ status: 'received' }).in('id', ids);
-  if (error) { pErr('Could not receive', error); return; }
+  if (!confirm(`Inspected and OK: accept all ${ids.length} open line${ids.length === 1 ? '' : 's'} on ${pNo(_purWin.po)}?`)) return;
+  const { error } = await sb.from('purchase_order_lines').update({ status: 'received', received_by: me?.id || null }).in('id', ids);
+  if (error) { pErr('Could not accept the lines', error); return; }
   await _purAfterReceive(_purWin.po.id);
-  pToast('✓ All lines received');
+  pToast('✓ All lines accepted');
+}
+// Inspection found a problem: note it, the line stays open (Linda sees the note and holds payment).
+async function purInspectNote(i) {
+  const l = _purWin?.lines[i];
+  if (!l || !pCanInspect()) return;
+  const note = prompt('What is wrong? (wrong item, damaged, no cal cert…) — leave empty to clear the note', l.inspection_note || '');
+  if (note === null) return;
+  const { error } = await sb.from('purchase_order_lines').update({ inspection_note: note.trim() || null }).eq('id', l.id);
+  if (error) { pErr('Could not save the note', error); return; }
+  await _purReload(_purWin.po.id);
 }
 async function purCloseLine(i) {
   const l = _purWin?.lines[i], me = pMe();
   if (!l) return;
-  const reason = (prompt('Close this line with no bill — why? (e.g. no charge, not repairable, cancelled)') || '').trim();
-  if (!reason) return;
+  const accepted = l.status === 'received';
+  const reason = ((accepted
+    ? prompt('Close this line — billed in Peachtree? Add the invoice number.', 'Billed in Peachtree, inv ')
+    : prompt('This line was not accepted at inspection, so it closes with NO bill paid. Why? (no charge, not repairable, cancelled)')) || '').trim();
+  if (!reason || reason === 'Billed in Peachtree, inv') return;
   const { error } = await sb.from('purchase_order_lines').update({ status: 'closed', closed_reason: reason, closed_by: me?.id || null }).eq('id', l.id);
   if (error) { pErr('Could not close the line', error); return; }
   await _purAfterReceive(_purWin.po.id);
@@ -798,14 +831,18 @@ async function purCloseLine(i) {
 async function purClosePo() {
   const w = _purWin, me = pMe();
   if (!w || !_purCanWork()) return;
-  const ids = w.lines.filter(l => ['open', 'received'].includes(l.status)).map(l => l.id);
-  if (!ids.length) return;
-  const reason = (prompt(`Close ${ids.length === 1 ? 'the last line' : 'all ' + ids.length + ' remaining lines'} of ${pNo(w.po)} — why?`, 'Billed in Peachtree, inv ') || '').trim();
+  // Only lines accepted at incoming inspection can be closed as billed.
+  const ids = w.lines.filter(l => l.status === 'received').map(l => l.id);
+  const waiting = w.lines.filter(l => l.status === 'open').length;
+  if (!ids.length) { pToast('Nothing has been accepted at inspection yet'); return; }
+  const reason = (prompt(`Close ${ids.length === 1 ? 'the accepted line' : 'all ' + ids.length + ' accepted lines'} of ${pNo(w.po)}`
+    + (waiting ? ` (${waiting} line${waiting === 1 ? '' : 's'} still waiting on inspection stay open)` : '') + ' — billed in Peachtree? Add the invoice number.',
+    'Billed in Peachtree, inv ') || '').trim();
   if (!reason || reason === 'Billed in Peachtree, inv') return;
   const { error } = await sb.from('purchase_order_lines').update({ status: 'closed', closed_reason: reason, closed_by: me?.id || null }).in('id', ids);
   if (error) { pErr('Could not close the PO', error); return; }
   await _purReload(w.po.id);
-  pToast('✓ ' + pNo(w.po) + ' closed');
+  pToast(waiting ? '✓ Accepted lines closed — ' + waiting + ' still waiting on inspection' : '✓ ' + pNo(w.po) + ' closed');
 }
 
 // Packing list for the LOA items on this PR / PO (tied to it, carries its number).
@@ -1090,7 +1127,7 @@ ${isRfq ? '' : `<div class="sig"><span>Authorized Signature</span><span class="l
 Object.assign(window, {
   openMyPurchasesPanel, openPurchasesPanel, openPurchaseWindow, purNewRequest, purCloseWindow, renderPurchasesList,
   _purSetFilter, _purSet, _purVendorChanged, _purPickJob, _purLine, _purAddLine, _purRemoveLine, purProposeVendor,
-  purSave, purSubmit, purApprove, purReject, purRecall, purCancel, purDeleteDraft, purMarkSent, purClosePo, purReceiveLine,
+  purSave, purSubmit, purApprove, purReject, purRecall, purCancel, purDeleteDraft, purMarkSent, purClosePo, purInspectNote, purReceiveLine,
   purReceiveAll, purCloseLine, purPackingList, purPrint, renderApprovalsPurchasesTab, purPendingApprovalCount,
   _purQuick, refreshMyPurchasesBadge, purFromLoaSelection, purConfirmLoaGroups, _renderPurLoaConfirm,
 });
