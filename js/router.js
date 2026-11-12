@@ -33,6 +33,9 @@ function routerNavigate(hash) {
       case 'scheduler':   if (typeof openSchedulerPanel  === 'function') openSchedulerPanel();  break;
       case 'loa':         if (typeof openLoaPanel        === 'function') openLoaPanel();        break;
       case 'vendors':     if (typeof openVendorsPanel    === 'function') openVendorsPanel();    break;
+      case 'mypurchases': if (typeof openMyPurchasesPanel === 'function') openMyPurchasesPanel(); break;
+      case 'purchases':   if (typeof openPurchasesPanel  === 'function') openPurchasesPanel();  break;
+      case 'purchase':    if (parts[1] && typeof openPurchaseWindow === 'function') openPurchaseWindow(parts[1]); break;
       case 'reports': {
         // Each report is its own page now (#reports/billing, #reports/stale…).
         const rTab = parts[1];
@@ -109,6 +112,8 @@ function routerHookFunctions() {
     ['openSchedulerPanel',      'scheduler'],
     ['openLoaPanel',            'loa'],
     ['openVendorsPanel',        'vendors'],
+    ['openMyPurchasesPanel',    'mypurchases'],
+    ['openPurchasesPanel',      'purchases'],
     ['openReportsPanel',        'reports'],
     ['openSetupPanel',          'setup'],
     ['openMyInfoPanel',         'myinfo'],

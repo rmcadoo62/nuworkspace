@@ -167,6 +167,8 @@ function plBuildHeader(shipTo, extra, unsaved) {
     source: extra?.source || 'manual',
     project_id: extra?.project_id || null,
     cust_order_no: extra?.cust_order_no || plJobPo(extra?.project_id) || null,
+    po_pr_number: extra?.po_pr_number || null,
+    purchase_order_id: extra?.purchase_order_id || null,
     shipped_via: extra?.shipped_via || null,
     date_shipped: extra?.date_shipped || null,
     notes: extra?.notes || null,

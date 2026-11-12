@@ -633,7 +633,8 @@ async function _fetchPendingVacationCount() {
 
 async function updateApprovalsBadge() {
   const _mgr = (typeof isManager === 'function') && isManager();
-  if ((!isApprover && !_mgr) || !currentEmployee) return;
+  const _prAppr = (typeof can === 'function') && can('approve_purchases');
+  if ((!isApprover && !_mgr && !_prAppr) || !currentEmployee) return;
   const tsPending = _pendingTimesheetCountForApprover();
   // Refresh the cached vacation count, then sum for the badge total.
   _cachedPendingVacationCount = await _fetchPendingVacationCount();
@@ -642,7 +643,11 @@ async function updateApprovalsBadge() {
   if (_mgr && typeof _fetchPendingReviewCount === 'function') revPending = await _fetchPendingReviewCount();
   let discPending = 0;
   if (_mgr && typeof _fetchPendingDisciplineCount === 'function') discPending = await _fetchPendingDisciplineCount();
-  const total = tsPending + _cachedPendingVacationCount + revPending + discPending;
+  // Purchase requests waiting for this person (Batch 4, js/purchasing.js).
+  let prPending = 0;
+  if (_prAppr && typeof purPendingApprovalCount === 'function') prPending = await purPendingApprovalCount();
+  window._cachedPendingPrCount = prPending;
+  const total = tsPending + _cachedPendingVacationCount + revPending + discPending + prPending;
   const badge = document.getElementById('approvalsBadge');
   if (badge) {
     badge.textContent = total;
@@ -665,13 +670,21 @@ function _repaintApprovalsBadges() {
   const vacCount  = _cachedPendingVacationCount || 0;
   const revCount  = (typeof _cachedPendingReviewCount !== 'undefined') ? (_cachedPendingReviewCount || 0) : 0;
   const discCount = (typeof _cachedPendingDisciplineCount !== 'undefined') ? (_cachedPendingDisciplineCount || 0) : 0;
-  const total = tsPending + vacCount + revCount + discCount;
+  const prCount   = window._cachedPendingPrCount || 0;
+  const total = tsPending + vacCount + revCount + discCount + prCount;
 
   const sidebarBadge = document.getElementById('approvalsBadge');
   if (sidebarBadge) {
     sidebarBadge.textContent = total;
     sidebarBadge.style.display = total > 0 ? 'inline-flex' : 'none';
     if (total > 0) sidebarBadge.style.background = 'rgba(91,156,246,.2)';
+  }
+
+  const prTabBtn = document.getElementById('approvalsTab-purchases');
+  if (prTabBtn) {
+    const ex = prTabBtn.querySelector('.approvals-tab-badge');
+    if (prCount > 0) { if (ex) ex.textContent = prCount; else prTabBtn.insertAdjacentHTML('beforeend', `<span class="approvals-tab-badge">${prCount}</span>`); }
+    else if (ex) ex.remove();
   }
 
   const vacTabBtn = document.getElementById('approvalsTab-vacation');
@@ -743,6 +756,12 @@ function renderApprovalsPanel() {
   const discCount = (typeof _cachedPendingDisciplineCount !== 'undefined') ? (_cachedPendingDisciplineCount || 0) : 0;
   // A non-manager can't land on the manager-only tabs.
   if ((activeTab === 'reviews' || activeTab === 'discipline') && !showReviews) { window._approvalsActiveTab = 'timesheets'; }
+  // Purchase Requests tab (Batch 4) — people with Approve PRs.
+  const showPr = (typeof can === 'function') && can('approve_purchases') && typeof renderApprovalsPurchasesTab === 'function';
+  const prCount = window._cachedPendingPrCount || 0;
+  if (activeTab === 'purchases' && !showPr) { window._approvalsActiveTab = 'timesheets'; }
+  // Someone who only approves purchases (not timesheets) lands on that tab.
+  if (showPr && !isApprover && !((typeof isManager === 'function') && isManager())) { window._approvalsActiveTab = 'purchases'; }
 
   const tabBtn = (id, label, count, isActive) => {
     const badgeHtml = count > 0
@@ -762,6 +781,7 @@ function renderApprovalsPanel() {
         ${tabBtn('vacation',   '✈️ Vacation Requests', vacCount, activeNow === 'vacation')}
         ${showReviews ? tabBtn('reviews', '📝 Reviews', revCount, activeNow === 'reviews') : ''}
         ${showReviews ? tabBtn('discipline', '⚠️ Discipline', discCount, activeNow === 'discipline') : ''}
+        ${showPr ? tabBtn('purchases', '🛒 Purchase Requests', prCount, activeNow === 'purchases') : ''}
       </div>
       <div id="approvalsTabContent" class="approvals-tab-content"></div>
     </div>`;
@@ -774,6 +794,8 @@ function renderApprovalsPanel() {
     _renderApprovalsReviewsTab();
   } else if (activeNow === 'discipline' && typeof _renderApprovalsDisciplineTab === 'function') {
     _renderApprovalsDisciplineTab();
+  } else if (activeNow === 'purchases' && showPr) {
+    renderApprovalsPurchasesTab();
   }
 }
 

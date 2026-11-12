@@ -228,6 +228,8 @@ document.addEventListener('DOMContentLoaded', function () {
     { name: 'openSchedulerPanel',     label: 'Scheduler'           },
     { name: 'openLoaPanel',           label: 'LOA'                 },
     { name: 'openVendorsPanel',       label: 'Vendors'             },
+    { name: 'openMyPurchasesPanel',   label: 'My Purchase Requests' },
+    { name: 'openPurchasesPanel',     label: 'Purchases'           },
     { name: 'openSetupPanel',         label: 'Setup'               },
     { name: 'openMyInfoPanel',        label: 'My Info'             },
     { name: 'openAuditLogPanel',      label: 'Audit Log'           },
@@ -378,9 +380,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // Hash -> department. My Workspace pages (Home, Dashboard, Projects,
   // Scheduler, LOA, Shipping, Timesheet...) leave the current tab alone.
   const HASH_DEPT = {
-    vendors: 'production',
+    vendors: 'billing',
     'reports/overview': 'production', 'reports/stale': 'production', 'reports/revenue': 'production',
-    'reports/billing': 'billing',
+    'reports/billing': 'billing', purchases: 'billing',
     clients: 'quotes', surveys: 'quotes',
     employees: 'hr', 'reports/employees': 'hr', 'reports/timesheets': 'hr',
     closingreport: 'production',

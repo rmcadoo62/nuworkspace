@@ -432,6 +432,7 @@ function _renderLoaPanel(wrap) {
       ${selSend ? `<button class="emp-add-btn" onclick="openLoaSendModal()">Send out for cal${selIn ? ' (' + selSend + ')' : ''}</button>` : ''}
       ${selIn ? `<button class="emp-add-btn loa-checkin-btn" onclick="openLoaCheckInModal()">Check in from cal${selSend ? ' (' + selIn + ')' : ''}</button>` : ''}
       ${typeof plFromLoaSelection === 'function' && can('create_packing_lists') ? `<button class="emp-add-btn loa-secondary" onclick="plFromLoaSelection()">&#x1F4C4; Packing list</button>` : ''}
+      ${typeof purFromLoaSelection === 'function' && currentEmployee && currentEmployee.canPurchase !== false ? `<button class="emp-add-btn loa-secondary" onclick="purFromLoaSelection()">&#x1F6D2; Purchase request</button>` : ''}
       <button class="loa-link-btn" onclick="_loaSelected.clear();renderLoaPanel()">Clear</button>
     </div>` : ''}
 

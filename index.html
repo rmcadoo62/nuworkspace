@@ -39,6 +39,7 @@
   <link rel="stylesheet" href="css/vendors.css">
   <link rel="stylesheet" href="css/packing.css">
   <link rel="stylesheet" href="css/attachments.css">
+  <link rel="stylesheet" href="css/purchasing.css">
 </head>
 <body>
 
@@ -193,6 +194,7 @@
     <div class="nav-item" id="navScheduler" onclick="openSchedulerPanel(this)"><span class="icon">&#x1F4C6;</span> Scheduler</div>
     <div class="nav-item" id="navLoa" onclick="openLoaPanel(this)" style="display:none"><span class="icon">&#x1F527;</span> LOA</div>
     <div class="nav-item" id="navShipping" onclick="openShippingPanel(this)"><span class="icon">&#x1F4E6;</span> Shipping</div>
+    <div class="nav-item" id="navMyPurchases" style="display:none" onclick="openMyPurchasesPanel(this)"><span class="icon">&#x1F6D2;</span> My Purchase Requests <span class="nav-badge" id="myPurchasesBadge" style="display:none">0</span></div>
     <div class="nav-item" id="navMyTeam" style="display:none" onclick="openMyTeamPanel(this)"><span class="icon">&#x1F465;</span> My Team</div>
     <div class="nav-item" id="navMyInfo" onclick="openMyInfoPanel(this)"><span class="icon">&#x1F464;</span> My Info</div>
     <div class="nav-item" id="navApprovals" style="display:none" onclick="openApprovalsPanel(this)"><span class="icon">&#x2705;</span> Approvals <span class="nav-badge" id="approvalsBadge" style="display:none">0</span></div>
@@ -205,13 +207,14 @@
     <div class="nav-item" id="navRptStale" style="display:none" onclick="openReportPage('stale',this)"><span class="icon">&#x1F4A4;</span> Stale Projects</div>
     <div class="nav-item" id="navClosingReport" onclick="openClosingReport(this)"><span class="icon">&#x1F4CB;</span> Closing Report <span class="nav-badge" id="closingBadge" style="display:none">0</span></div>
     <div class="nav-item" id="navRptRevenue" style="display:none" onclick="openReportPage('revenue',this)"><span class="icon">&#x1F4C8;</span> Revenue Projection</div>
-    <div class="nav-item" id="navVendors" onclick="openVendorsPanel(this)" style="display:none"><span class="icon">&#x1F3ED;</span> Vendors</div>
   </div>
   <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
-    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Billing</div>
+    <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">Accounting</div>
   </div>
-  <div class="nav-section" data-section="billing" data-label="Billing">
+  <div class="nav-section" data-section="billing" data-label="Accounting">
     <div class="nav-item" id="navRptBilling" style="display:none" onclick="openReportPage('billing',this)"><span class="icon">&#x1F4B3;</span> Billing Queue</div>
+    <div class="nav-item" id="navPurchases" style="display:none" onclick="openPurchasesPanel(this)"><span class="icon">&#x1F6D2;</span> Purchases</div>
+    <div class="nav-item" id="navVendors" onclick="openVendorsPanel(this)" style="display:none"><span class="icon">&#x1F3ED;</span> Vendors</div>
   </div>
   <div class="brand-block" style="padding:16px 12px 4px;text-align:left;">
     <div style="font-family:'DM Sans',sans-serif;font-size:16px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--text);line-height:1;">NUForce</div>
@@ -795,6 +798,14 @@
     <!-- CLIENTS PANEL -->
     <div class="view-panel" id="panel-clients">
       <div class="emp-panel" id="clientsPanelBody"></div>
+    </div>
+
+    <!-- PURCHASES PANELS — rendered by js/purchasing.js (Batch 4) -->
+    <div class="view-panel" id="panel-mypurchases">
+      <div class="pur-page" id="myPurchasesBody"></div>
+    </div>
+    <div class="view-panel" id="panel-purchases">
+      <div class="pur-page" id="purchasesBody"></div>
     </div>
 
     <!-- VENDORS PANEL — rendered by js/vendors.js -->
@@ -1598,6 +1609,7 @@
   <script src="js/vendors.js"></script>
   <script src="js/packing.js"></script>
   <script src="js/attachments.js"></script>
+  <script src="js/purchasing.js"></script>
   <script src="js/mytime.js?v=21"></script>
 
 </div><!-- /app-body -->

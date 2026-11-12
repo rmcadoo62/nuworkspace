@@ -436,7 +436,7 @@ function renderNotifPanel() {
   list.innerHTML = notifStore.map(n => {
     const proj = projects.find(p => p.id === n.projId);
     const timeStr = new Date(n.ts).toLocaleString('en-US', { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' });
-    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|empHr:[a-f0-9-]+|surveyResp:[a-f0-9-]+|dm:[a-f0-9-]+|myinfo:hrrecords|issueTracker|closingReport)$/, '');
+    const displayPreview = (n.preview || '').replace(/\|\|(empId:[a-f0-9-]+|empHr:[a-f0-9-]+|surveyResp:[a-f0-9-]+|dm:[a-f0-9-]+|purchase:[a-f0-9-]+|myinfo:hrrecords|issueTracker|closingReport)$/, '');
     return '<div class="notif-item' + (n.read ? '' : ' unread') + '" onclick="notifClick(\x27' + n.id + '\x27,\x27' + (n.projId||'') + '\x27)">' +
       '<div class="notif-item-avatar" style="background:' + (n.fromColor||'#888') + ';color:#fff">' + (n.fromInitials||'?') + '</div>' +
       '<div class="notif-item-body">' +
@@ -461,6 +461,12 @@ function notifClick(notifId, projId) {
   // the approver (clicking on a "X requested vacation" notification) to the
   // Approvals panel → Vacation Requests tab where approval actions live.
   const preview = n?.preview || '';
+  // Purchase request / PO notice (Batch 4) — preview ends ||purchase:<id>
+  const purMatch = preview.match(/\|\|purchase:([a-f0-9-]+)$/);
+  if (purMatch) {
+    if (typeof openPurchaseWindow === 'function') openPurchaseWindow(purMatch[1]);
+    return;
+  }
   const empMatch = preview.match(/\|\|empId:([a-f0-9-]+)$/);
   if (empMatch) {
     const requestingEmpId = empMatch[1];

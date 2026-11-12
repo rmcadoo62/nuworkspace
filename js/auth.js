@@ -1292,6 +1292,15 @@ function applyPermissions() {
   const navVendors = document.getElementById('navVendors');
   if (navVendors) navVendors.style.display = can('view_vendors') ? 'flex' : 'none';
 
+  // Purchasing (Batch 4): My Purchase Requests follows the employee card's
+  // "Can make purchase requests"; Accounting → Purchases needs View All
+  // Purchases or Bill & Close POs.
+  const navMyPur = document.getElementById('navMyPurchases');
+  if (navMyPur) navMyPur.style.display = (currentEmployee && currentEmployee.canPurchase !== false) ? 'flex' : 'none';
+  const navPur = document.getElementById('navPurchases');
+  if (navPur) navPur.style.display = (can('view_purchases') || can('bill_purchases')) ? 'flex' : 'none';
+  if (typeof refreshMyPurchasesBadge === 'function') { try { refreshMyPurchasesBadge(); } catch (e) {} }
+
   applySchedAccessToNav();
 
   // Initialize the Customer Surveys eligible-count badge. Function in
@@ -1356,7 +1365,7 @@ function _recomputeIsApprover() {
 // (login, View-As enter, View-As exit) so sidebar items match currentEmployee.
 function _applyIdentityNav() {
   const navApp = document.getElementById('navApprovals');
-  if (navApp) navApp.style.display = (isApprover || (typeof isManager === 'function' && isManager())) ? 'flex' : 'none';
+  if (navApp) navApp.style.display = (isApprover || (typeof isManager === 'function' && isManager()) || (typeof can === 'function' && can('approve_purchases'))) ? 'flex' : 'none';
   const navTs = document.getElementById('navTimesheetItem');
   if (navTs) navTs.style.display = (currentEmployee && currentEmployee.isOwner) ? 'none' : 'flex';
 
