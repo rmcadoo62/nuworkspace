@@ -284,7 +284,10 @@ function _loaSelectAll(on) {
 
 // The list exactly as shown: current filters, search and sort (used by the page and Print list).
 function _loaSortedList() {
-  return _loaFiltered().sort((a, b) => {
+  return _loaSortAssets(_loaFiltered());
+}
+function _loaSortAssets(arr) {
+  return arr.sort((a, b) => {
     const x = _loaSortVal(a, _loaSort.key), y = _loaSortVal(b, _loaSort.key);
     return (x < y ? -1 : x > y ? 1 : 0) * _loaSort.dir || a.asset_id.localeCompare(b.asset_id);
   });
@@ -326,9 +329,12 @@ function _renderLoaPanel(wrap) {
   const list = _loaSortedList();
   const shown = list.slice(0, _loaShowLimit);
 
-  // Keep only selections that are still visible and sendable.
-  const visibleIds = new Set(list.map(a => a.asset_id));
-  [..._loaSelected].forEach(id => { if (!visibleIds.has(id)) _loaSelected.delete(id); });
+  // Ticks survive search and filter changes (so a packing list can be built from several
+  // searches — Russ, Nov 12). Only drop items that are gone or can no longer be ticked.
+  [..._loaSelected].forEach(id => {
+    const a = loaAssets.find(x => x.asset_id === id);
+    if (!a || !_loaTickable(a)) _loaSelected.delete(id);
+  });
 
   const tickables = list.filter(_loaTickable);
   const tickTotal = tickables.length, tickSel = tickables.filter(a => _loaSelected.has(a.asset_id)).length;
@@ -1231,9 +1237,9 @@ function _loaFilterSummary() {
 }
 
 function printLoaList() {
-  // Some ticked → print just those (in the on-screen order). Nothing ticked → the whole view.
-  const all = _loaSortedList();
-  const list = _loaSelected.size ? all.filter(a => _loaSelected.has(a.asset_id)) : all;
+  // Some ticked → print all of those, even ones hidden by the current search/filters
+  // (in the on-screen sort order). Nothing ticked → the whole view.
+  const list = _loaSelected.size ? _loaSortAssets(loaAssets.filter(a => _loaSelected.has(a.asset_id))) : _loaSortedList();
   if (!list.length) return;
   _loaCopyList(list);   // clipboard first, while we're still inside the click
   const dueF = _loaFilter.due;
