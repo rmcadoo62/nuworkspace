@@ -277,14 +277,8 @@ function openIssueDetail(issueId) {
 
     <div class="field" style="margin-bottom:20px">
       <label class="field-label">Reply to submitter (optional)</label>
-      <textarea class="f-input" id="issueAdminNotes" placeholder="Leave blank to save status/priority without notifying. Any text here sends as a notification to the submitter when you Save."
+      <textarea class="f-input" id="issueAdminNotes" placeholder="Sent to the submitter as a notification when you Save (marking Done also tells them it's fixed). Leave blank to just save status/priority."
         onchange="markIssueChanged()" rows="5" style="resize:vertical;font-family:'DM Sans',sans-serif">${esc(issue.admin_notes || '')}</textarea>
-    </div>
-
-    <div class="field" id="shipNoteField" style="display:none;margin-bottom:20px">
-      <label class="field-label">Ship Note (will appear in What's New)</label>
-      <textarea class="f-input" id="issueShipNote" placeholder="User-facing description of the fix or feature..."
-        onchange="markIssueChanged()" rows="2" style="resize:vertical;font-family:'DM Sans',sans-serif">${esc(issue.ship_note || '')}</textarea>
     </div>
 
     ${resolvedDate ? `
@@ -299,9 +293,6 @@ function openIssueDetail(issueId) {
   const prioritySel = document.getElementById('issuePriority');
   if (statusSel) statusSel.value = issue.status;
   if (prioritySel) prioritySel.value = issue.priority;
-
-  // Show ship note field if status is done
-  updateShipNoteVisibility();
 
   // Use the project's modal system (.open class) instead of style.display
   modal.classList.add('open');
@@ -318,15 +309,6 @@ function closeIssueDetailModal() {
 function markIssueChanged() {
   const saveBtn = document.getElementById('saveIssueBtn');
   if (saveBtn) saveBtn.style.display = 'inline-block';
-  updateShipNoteVisibility();
-}
-
-function updateShipNoteVisibility() {
-  const statusSelect = document.getElementById('issueStatus');
-  const shipNoteField = document.getElementById('shipNoteField');
-  if (statusSelect && shipNoteField) {
-    shipNoteField.style.display = statusSelect.value === 'done' ? 'block' : 'none';
-  }
 }
 
 async function saveIssueChanges() {
@@ -335,14 +317,12 @@ async function saveIssueChanges() {
   const statusSelect = document.getElementById('issueStatus');
   const prioritySelect = document.getElementById('issuePriority');
   const notesTextarea = document.getElementById('issueAdminNotes');
-  const shipNoteTextarea = document.getElementById('issueShipNote');
 
   if (!statusSelect || !prioritySelect || !notesTextarea) return;
 
   const newStatus = statusSelect.value;
   const newPriority = prioritySelect.value;
   const newNotes = notesTextarea.value.trim();
-  const newShipNote = shipNoteTextarea ? shipNoteTextarea.value.trim() : '';
 
   const wasCompleted = selectedIssue.status === 'done';
   const nowCompleted = newStatus === 'done';
@@ -356,7 +336,6 @@ async function saveIssueChanges() {
       status: newStatus,
       priority: newPriority,
       admin_notes: newNotes || null,
-      ship_note: newShipNote || null,
       resolved_at: nowCompleted && !wasCompleted ? new Date().toISOString() :
                    !nowCompleted && wasCompleted ? null : selectedIssue.resolved_at
     };
@@ -368,45 +347,33 @@ async function saveIssueChanges() {
 
     if (error) throw error;
 
-    // Log ship note intent (What's New array is currently hardcoded in nav.js)
-    if (nowCompleted && !wasCompleted && newShipNote) {
-      console.log('Add to What\'s New:', {
-        date: new Date().toISOString().split('T')[0],
-        tag: selectedIssue.type === 'bug' ? 'Bug Fix' : 'Feature',
-        text: newShipNote
-      });
-    }
-
-    // Notify submitter if status just flipped to Done (resolution notification)
-    if (nowCompleted && !wasCompleted && selectedIssue.submitter_id) {
+    // Notify the submitter (Nov 16: the reply now always reaches them).
+    //  - Marked Done this save: "has been fixed", plus the reply if there is one.
+    //  - Otherwise, reply text changed: the reply.
+    // The reply is sent in full. The Home "Your Open Submissions" card hides
+    // Done items, so for a closed issue this notification is where they read it.
+    const justDone = nowCompleted && !wasCompleted;
+    if (selectedIssue.submitter_id && (justDone || replyChanged)) {
       const typeEmoji = selectedIssue.type === 'bug' ? '🐛' : '💡';
       const actionText = selectedIssue.type === 'bug' ? 'fixed' : 'completed';
-
-      await sb.from('chatter_notifs').insert([{
-        employee_id: selectedIssue.submitter_id,
-        msg_id: null,
-        from_name: 'System',
-        from_color: '#10b981',
-        from_initials: '✓',
-        preview: `${typeEmoji} Your ${selectedIssue.type} report "${selectedIssue.title}" has been ${actionText}||issueTracker`,
-        is_read: false
-      }]);
-    }
-
-    // Notify submitter if the reply text changed (and we didn't already send the resolution notif above for this save)
-    if (replyChanged && selectedIssue.submitter_id && !(nowCompleted && !wasCompleted)) {
-      const typeEmoji = selectedIssue.type === 'bug' ? '🐛' : '💡';
       const russEmp = (typeof employees !== 'undefined')
         ? employees.find(e => e.email === 'rmcadoo@nulabs.com')
         : null;
+      // The notification panel renders previews as HTML; keep the reply as plain text.
+      const safeReply = newNotes.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const head = justDone
+        ? `${typeEmoji} Your ${selectedIssue.type} report "${selectedIssue.title}" has been ${actionText}`
+        : `${typeEmoji} Reply on "${selectedIssue.title}"`;
+      const preview = replyChanged ? `${head}: ${safeReply}` : head;
+      const fromRuss = replyChanged || !justDone;
 
       await sb.from('chatter_notifs').insert([{
         employee_id: selectedIssue.submitter_id,
         msg_id: null,
-        from_name: russEmp ? russEmp.name : 'Russ McAdoo',
-        from_color: russEmp?.color || '#fb923c',
-        from_initials: russEmp?.initials || 'RM',
-        preview: `${typeEmoji} Reply on "${selectedIssue.title}": ${newNotes.slice(0, 60)}${newNotes.length > 60 ? '…' : ''}||issueTracker`,
+        from_name: fromRuss ? (russEmp ? russEmp.name : 'Russ McAdoo') : 'System',
+        from_color: fromRuss ? (russEmp?.color || '#fb923c') : '#10b981',
+        from_initials: fromRuss ? (russEmp?.initials || 'RM') : '✓',
+        preview: preview + '||issueTracker',
         is_read: false
       }]);
     }
