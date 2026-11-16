@@ -385,6 +385,12 @@ function plNewIncoming() {
   plOpenNew(null, [], { source: 'manual', direction: 'incoming' });
 }
 
+// Packing Lists tab → "+ Outgoing list": a blank outgoing draft (Scott, Nov 13) —
+// pick the vendor/client or type a Ship To, then add lines by hand.
+function plNewOutgoing() {
+  plOpenNew(null, [], { source: 'manual', direction: 'outgoing' });
+}
+
 // Received incoming list → a new outgoing draft back to the same customer, same lines, linked.
 async function plCreateReturn() {
   const h = plCur();
@@ -902,12 +908,13 @@ async function renderPackingListsTab() {
     <div class="pl-head">
       <div>
         <div class="pl-h1">📄 Packing Lists</div>
-        <div class="pl-meta">Outgoing: start from LOA (select assets) or a test article. Incoming: from a test article or + Incoming list. One number series; restarts each January.</div>
+        <div class="pl-meta">Outgoing: + Outgoing list, or start from LOA (select assets) or a test article. Incoming: + Incoming list or from a test article. One number series; restarts each January.</div>
       </div>
       <div class="pl-head-right">
         <input class="emp-search pl-search" placeholder="Search PL #, to/from, job, PO/PR, tracking…" value="${plEsc(_plSearch)}"
           oninput="_plSearch=this.value;renderPackingListsTab()" />
-        ${plCanCreate() ? `<button class="btn btn-ghost pl-outline" onclick="plNewIncoming()" title="Document customer property dropped off without paperwork">&#x1F4E5; + Incoming list</button>` : ''}
+        ${plCanCreate() ? `<button class="btn btn-ghost pl-outline" onclick="plNewOutgoing()" title="A blank outgoing list: pick who it ships to and add the lines">&#x1F4E4; + Outgoing list</button>
+          <button class="btn btn-ghost pl-outline" onclick="plNewIncoming()" title="Document customer property dropped off without paperwork">&#x1F4E5; + Incoming list</button>` : ''}
       </div>
     </div>
     <div class="vnd-filter-bar">${chip('open', 'Drafts')}${chip('shipped', 'Shipped / Received')}${chip('onsite', '&#x1F4CD; On site')}${chip('void', 'Void')}${chip('all', 'All')}</div>
@@ -961,6 +968,7 @@ window.openPackingList = openPackingList;
 window.plFromLoaSelection = plFromLoaSelection;
 window.plFromArticle = plFromArticle;
 window.plNewIncoming = plNewIncoming;
+window.plNewOutgoing = plNewOutgoing;
 window.plCreateReturn = plCreateReturn;
 window.plCreateForSendOut = plCreateForSendOut;
 window.renderPackingListsTab = renderPackingListsTab;
