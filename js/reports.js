@@ -438,9 +438,17 @@ async function renderTimesheetsReport(filterDept, filterStatus) {
   // ANY employee has submitted — otherwise recent weeks are invisible.
   // (Matches the live-refresh window above, which rebuilds tsData for both weeks.)
   const allWeekKeys = [...new Set([...entries.map(e => e.weekKey), getWeekKey(0), getWeekKey(-1)])];
+  // weekKey is the Sunday that starts the week; the week ends 6 days later.
+  // No placeholder for a week that ended before the employee's hire date —
+  // otherwise a new hire shows "Not Submitted" for every past week (11/16/2026,
+  // Keith Monteleone). Employees with no hire date keep the old behaviour.
+  const weekEndIso = wk => { const d = new Date(wk + 'T00:00:00'); d.setDate(d.getDate() + 6);
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0'); };
   allWeekKeys.forEach(wk => {
     const submittedIds = new Set(entries.filter(e => e.weekKey === wk).map(e => e.employeeId));
+    const wkEnd = weekEndIso(wk);
     eligibleEmps.forEach(emp => {
+      if (emp.hireDate && wkEnd < emp.hireDate) return;
       if (!submittedIds.has(emp.id)) {
         entries.push({
           employeeId:    emp.id,

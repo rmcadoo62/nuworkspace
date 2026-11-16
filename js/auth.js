@@ -1280,6 +1280,10 @@ function applyPermissions() {
   const navNuforce = document.getElementById('navNuforce');
   if (navNuforce) navNuforce.style.display = can('access_nuforce') ? 'flex' : 'none';
 
+  // EMI Layout Audit (Jordan's EMI layout, view-only in Workspace) — view_emi_audit
+  const navEmiAudit = document.getElementById('navEmiAudit');
+  if (navEmiAudit) navEmiAudit.style.display = can('view_emi_audit') ? 'flex' : 'none';
+
   // Quote Workup (Customer Request Review) — gated by the access_crr capability
   const navCrr = document.getElementById('navCrr');
   if (navCrr) navCrr.style.display = can('access_crr') ? 'flex' : 'none';

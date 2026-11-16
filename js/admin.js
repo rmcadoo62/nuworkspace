@@ -2596,6 +2596,7 @@ const CAPABILITY_DEFS = [
   { key: 'view_cmmc',          label: 'View CMMC Compliance',  group: 'Compliance' },
   { key: 'access_nuforce',     label: 'Access NUForce',        group: 'Apps' },
   { key: 'access_crr',         label: 'EMI Quote WU',          group: 'Apps' },
+  { key: 'view_emi_audit',     label: 'EMI Layout Audit',      group: 'Apps' },
   { key: 'nuforce_approve_quotes', label: 'Approve Quotes (NUForce)', group: 'Apps' },
   { key: 'nuforce_send_quotes',    label: 'Send Approved Quotes (NUForce)', group: 'Apps' },
   { key: 'view_loa',           label: 'View LOA',              group: 'LOA' },

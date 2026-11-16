@@ -222,6 +222,7 @@
   <div class="nav-section" data-section="quotes" data-label="NUForce">
     <div class="nav-item" id="navClients" onclick="openClientsPanel(this)"><span class="icon">&#x1F3E2;</span> Clients</div>
     <div class="nav-item" id="navCrr" onclick="openCrrPanel(this)" style="display:none"><span class="icon survey-count" id="crrBadge">0</span> EMI Quote WU</div>
+    <div class="nav-item" id="navEmiAudit" onclick="openEmiAuditPanel(this)" style="display:none"><span class="icon">&#x1F4D0;</span> EMI Layout Audit</div>
     <div class="nav-item" id="navNuforce" onclick="openNuforce()" style="display:none"><span class="icon">&#x1F680;</span> Open NUForce <span style="font-size:11px;opacity:.55;margin-left:1px">&#x2197;</span></div>
     <div class="nav-item" id="navCustomerSurveys" onclick="openSurveyQueuePanel(this)"><span class="icon survey-count" id="surveysBadge">0</span> Surveys</div>
   </div>
@@ -275,6 +276,16 @@
         </div>
         <div id="quotesTableContainer"></div>
       </div>
+    </div>
+
+    <!-- EMI LAYOUT AUDIT PANEL (js/emi-audit.js) -->
+    <div class="view-panel" id="panel-emiaudit" style="flex-direction:column;overflow:hidden">
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border)">
+        <span style="font-size:11px;color:var(--muted);margin-right:auto">Changes you make here are not saved after you leave Workspace.</span>
+        <button type="button" onclick="reloadEmiAudit()" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 12px;font-size:11px;color:var(--text);cursor:pointer">&#x21BB; Reload</button>
+      </div>
+      <div id="emiAuditMsg" style="padding:24px;color:var(--muted);font-size:13px">Loading…</div>
+      <iframe id="emiAuditFrame" title="EMI Layout Audit" sandbox="allow-scripts allow-popups allow-modals allow-forms allow-downloads" referrerpolicy="no-referrer" style="display:none;flex:1;width:100%;border:0;background:#fff"></iframe>
     </div>
 
     <!-- EMI QUOTE WORKUP (CRR) PANEL -->
@@ -1575,7 +1586,7 @@
   <script src="js/version.js"></script>
   <script src="js/nulabs-session-storage.js"></script>
   <script src="js/supabase-client.js?v=20261110"></script> 
-  <script src="js/auth.js"></script>
+  <script src="js/auth.js?v=20261116"></script>
   <script src="js/app.js"></script>
   <script src="js/pdf-viewer.js"></script>
   <script src="js/projects.js"></script>
@@ -1586,20 +1597,21 @@
   <script src="js/timesheet.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/clients.js"></script>
-  <script src="js/reports.js"></script>
+  <script src="js/reports.js?v=20261116"></script>
   <script src="js/mytasks.js"></script>
   <script src="js/myteam.js"></script>
   <script src="js/search.js"></script>
   <script src="js/chatter.js?v=20261110"></script>
   <script src="js/dm.js"></script>
-  <script src="js/admin.js"></script>
+  <script src="js/admin.js?v=20261116"></script>
   <script src="js/scheduler.js"></script>
   <script src="js/home.js"></script>
   <script src="js/jobpack.js"></script>
   <script src="js/nav.js"></script>
-  <script src="js/router.js"></script>
+  <script src="js/router.js?v=20261116"></script>
   <script src="js/quotes.js"></script>
   <script src="js/crr.js"></script>
+  <script src="js/emi-audit.js?v=20261116"></script>
   <script src="js/compliance.js?v=20261110"></script>
   <script src="js/feedback.js"></script>
   <script src="js/surveys.js"></script>

@@ -70,6 +70,7 @@ function routerNavigate(hash) {
       case 'quotes':      if (typeof openQuotesPanel        === 'function') openQuotesPanel();        break;
       case 'closingreport': if (typeof openClosingReport    === 'function') openClosingReport();      break;
       case 'surveys':       if (typeof openSurveyQueuePanel === 'function') openSurveyQueuePanel();   break;
+      case 'emiaudit':      if (typeof openEmiAuditPanel === 'function') openEmiAuditPanel();         break;
       case 'cashflow':      if (typeof openCashFlowPanel    === 'function') openCashFlowPanel();      break;
       case 'bookings':      if (typeof openBookingReportPanel === 'function') openBookingReportPanel(); break;
       case 'salesbycat':    if (typeof openSalesByCategoryPanel === 'function') openSalesByCategoryPanel(); break;
@@ -123,6 +124,7 @@ function routerHookFunctions() {
     ['openQuotesPanel',         'quotes'],
     ['openClosingReport',       'closingreport'],
     ['openSurveyQueuePanel',    'surveys'],
+    ['openEmiAuditPanel',       'emiaudit'],
     ['openCashFlowPanel',       'cashflow'],
     ['openBookingReportPanel',  'bookings'],
     ['openSalesByCategoryPanel','salesbycat'],
