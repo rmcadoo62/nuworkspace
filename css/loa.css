@@ -30,6 +30,7 @@
 .loa-tile-l{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-weight:600;}
 .loa-tile.bad .loa-tile-n{color:var(--red);}
 .loa-tile.warn .loa-tile-n{color:var(--amber);}
+.loa-tile.warn-lite .loa-tile-n{color:var(--amber);opacity:.7;}
 .loa-tile.info .loa-tile-n{color:var(--blue);}
 .loa-tile.muted .loa-tile-n{color:var(--muted);}
 
@@ -71,6 +72,7 @@
 .loa-due{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:5px;white-space:nowrap;font-family:'JetBrains Mono',monospace;}
 .loa-due.overdue{color:var(--red);background:rgba(208,64,64,0.1);}
 .loa-due.soon{color:var(--amber);background:var(--amber-glow);}
+.loa-due.next{color:var(--amber);}
 .loa-due.ok{color:var(--green);}
 .loa-due.out{color:var(--blue);background:rgba(58,127,212,0.1);font-family:'DM Sans',sans-serif;}
 .loa-oos{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);background:var(--surface2);padding:2px 7px;border-radius:9px;white-space:nowrap;}

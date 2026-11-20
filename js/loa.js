@@ -49,7 +49,6 @@ const LOA_CAL_TYPES = {
 };
 const LOA_STATUS = { in_service: 'In Service', out_of_service: 'Out of Service' };
 const LOA_RESULTS = { pass: 'Pass', adjusted: 'Adjusted', limited: 'Limited', fail: 'Fail' };
-const LOA_DUE_SOON_DAYS = 30;
 
 // ---------- helpers ----------
 function loaCanView()   { return typeof can === 'function' ? can('view_loa')   : false; }
@@ -116,6 +115,12 @@ function lCalTypeLabel(a) {
   }
   return LOA_CAL_TYPES[a.cal_type] || a.cal_type;
 }
+// 'YYYY-MM' of the month after the given 'YYYY-MM-DD'.
+function lNextMonth(d) {
+  let y = +d.slice(0, 4), m = +d.slice(5, 7) + 1;
+  if (m > 12) { m = 1; y++; }
+  return y + '-' + String(m).padStart(2, '0');
+}
 // Due state for colouring: only in-service interval assets can be due/overdue.
 function lDueState(a) {
   const s = loaStatus[a.asset_id];
@@ -124,7 +129,11 @@ function lDueState(a) {
   if (a.status !== 'in_service' || a.cal_type !== 'interval' || !s.next_due) return '';
   const d = lDays(s.next_due);
   if (d < 0) return 'overdue';
-  if (d <= LOA_DUE_SOON_DAYS) return 'soon';
+  // Due dates fall on the last day of the month, so the quick filters go by
+  // calendar month (Scott, Nov 19): 'soon' = due this month, 'next' = next month.
+  const t = lToday(), ym = s.next_due.slice(0, 7);
+  if (ym <= t.slice(0, 7)) return 'soon';
+  if (ym === lNextMonth(t)) return 'next';
   return 'ok';
 }
 
@@ -322,6 +331,7 @@ function _renderLoaPanel(wrap) {
     in_service: inService.length,
     overdue: inService.filter(a => lDueState(a) === 'overdue').length,
     soon: inService.filter(a => lDueState(a) === 'soon').length,
+    next: inService.filter(a => lDueState(a) === 'next').length,
     out: loaAssets.filter(a => lDueState(a) === 'out').length,
     notype: inService.filter(a => !a.cal_type).length,
   };
@@ -348,7 +358,7 @@ function _renderLoaPanel(wrap) {
   const selStart = wasFocused ? searchEl.selectionStart : null;
 
   const tile = (key, label, n, cls) => {
-    const active = (key === 'overdue' || key === 'soon' || key === 'out') ? _loaFilter.due.has(key)
+    const active = (key === 'overdue' || key === 'soon' || key === 'next' || key === 'out') ? _loaFilter.due.has(key)
                  : key === 'notype' ? _loaFilter.calType.has('none') : false;
     return `<button class="loa-tile ${cls || ''} ${active ? 'active' : ''}" onclick="_loaTile('${key}')">
       <span class="loa-tile-n">${n}</span><span class="loa-tile-l">${label}</span></button>`;
@@ -415,7 +425,8 @@ function _renderLoaPanel(wrap) {
     <div class="loa-tiles">
       ${tile('in_service', 'In service', counts.in_service)}
       ${tile('overdue', 'Overdue', counts.overdue, 'bad')}
-      ${tile('soon', 'Due in ' + LOA_DUE_SOON_DAYS + ' days', counts.soon, 'warn')}
+      ${tile('soon', 'Due this month', counts.soon, 'warn')}
+      ${tile('next', 'Due next month', counts.next, 'warn-lite')}
       ${tile('out', 'Out for cal', counts.out, 'info')}
       ${tile('notype', 'No cal type', counts.notype, 'muted')}
     </div>
@@ -467,7 +478,7 @@ function _renderLoaPanel(wrap) {
 function _loaFilterOptions(key, vendorIds) {
   switch (key) {
     case 'status':   return Object.entries(LOA_STATUS);
-    case 'due':      return [['overdue', 'Overdue'], ['soon', 'Due in ' + LOA_DUE_SOON_DAYS + ' days'], ['out', 'Out for cal']];
+    case 'due':      return [['overdue', 'Overdue'], ['soon', 'Due this month'], ['next', 'Due next month'], ['out', 'Out for cal']];
     case 'calType':  return [...Object.entries(LOA_CAL_TYPES), ['none', '— No cal type —']];
     case 'location': return [...loaLocations.map(l => [l.id, l.name + (l.active ? '' : ' (retired)')]), ['none', '— No location —']];
     case 'vendor':   return [['in_house', 'NU Labs (in-house)'], ...(vendorIds || []).map(v => [v.id, v.name])];
