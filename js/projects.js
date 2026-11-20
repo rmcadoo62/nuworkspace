@@ -176,7 +176,6 @@ const PROJ_COL_DEFS = [
   { key: 'hours',         label: 'Act. Hours',           ptc: 'hours',    default: true,  width: '90px'  },
   { key: 'remaining',     label: 'Remaining Rev.',       ptc: 'remain',   default: true,  width: '110px' },
   // Previously optional columns — unchanged defaults
-  { key: 'pm',            label: 'PM',                   ptc: 'pm',       default: false, width: '110px' },
   { key: 'tentativeTest', label: 'Schedule',            ptc: 'tenttest', default: false, width: '150px' },
   { key: 'testcomplete',  label: 'Test Comp. Date',      ptc: 'testcomp', default: false, width: '120px' },
   { key: 'dcas',          label: 'DCAS',                 ptc: 'dcas',     default: true,  width: '80px',
@@ -464,7 +463,6 @@ function renderProjectsTable() {
     else if (projSortCol === 'client')   { va = ia.client||''; vb = ib.client||''; }
     else if (projSortCol === 'dcas')     { va = ia.dcas||''; vb = ib.dcas||''; }
     else if (projSortCol === 'po')       { va = ia.po||''; vb = ib.po||''; }
-    else if (projSortCol === 'pm')            { va = ia.pm||''; vb = ib.pm||''; }
     else if (projSortCol === 'tentativeTest') { va = scheduleSortKey(a.id); vb = scheduleSortKey(b.id); }
     else if (projSortCol === 'testcomplete')  { va = ia.testcompleteDate||''; vb = ib.testcompleteDate||''; }
     else if (projSortCol === 'witness')       { va = ia.customerWitness||''; vb = ib.customerWitness||''; }
@@ -536,7 +534,6 @@ function renderProjectsTable() {
         else if (field === 'quote')   cell = (info.quoteNumber||'').toLowerCase();
         else if (field === 'desc')    cell = (p.desc||info.desc||'').toLowerCase();
         else if (field === 'article') cell = (info.testArticleDesc||'').toLowerCase();
-        else if (field === 'pm')      cell = (info.pm||'').toLowerCase();
         else if (field === 'tentativeTest') cell = fmtScheduleCell(p.id).text.toLowerCase();
         else if (field === 'testcomplete')  cell = (info.testcompleteDate||'').toLowerCase();
         else if (field === 'witness')       cell = (info.customerWitness||'').toLowerCase();
@@ -633,9 +630,6 @@ function renderProjectsTable() {
       const billed    = info.billedRevenue   || 0;
       const remaining = expected - billed;
       return `<td class="projtbl-amount" style="color:${remaining<0?'var(--red)':'var(--amber)'}">${expected>0?fmtMoney(remaining):'—'}</td>`;
-    } else if (c.key === 'pm') {
-      val = info.pm || '—';
-      rawValue = info.pm;
     } else if (c.key === 'tentativeTest') {
       const sc = fmtScheduleCell(p.id);
       val = `<span style="font-size:11px;font-weight:600;color:${sc.color}">${sc.text}</span>`;
@@ -1063,7 +1057,6 @@ function _applyProjColFiltersToDOM() {
       else if (field === 'quote')   cell = (info.quoteNumber||'').toLowerCase();
       else if (field === 'desc')    cell = ((p?.desc||'')||(info.desc||'')).toLowerCase();
       else if (field === 'article') cell = (info.testArticleDesc||'').toLowerCase();
-      else if (field === 'pm')      cell = (info.pm||'').toLowerCase();
       else if (field === 'tentativeTest') cell = fmtScheduleCell(projId).text.toLowerCase();
       else if (field === 'testcomplete')  cell = (info.testcompleteDate||'').toLowerCase();
       else if (field === 'witness')       cell = (info.customerWitness||'').toLowerCase();
@@ -1586,7 +1579,7 @@ async function saveProject() {
   });
 
   projects.push({ id: saved.id, name, color: pColor, emoji: pEmoji, desc, createdAt: new Date().toISOString().split('T')[0] });
-  projectInfo[saved.id] = { pm:'', po:'', contract:'', phase:'Waiting on TP Approval', status:'jobprep',
+  projectInfo[saved.id] = { po:'', contract:'', phase:'Waiting on TP Approval', status:'jobprep',
     startDate: today, endDate: '', tentativeTestDate: '', client:'', clientContact:'', clientEmail:'',
     clientPhone:'', billingType:'Fixed Fee', invoiced:'', remaining:'', notes:'', desc,
     dcas:'', customerWitness:'', tpApproval:'', dpas:'', cui:'', testDesc:'', testArticleDesc:'', quoteNumber:'' };

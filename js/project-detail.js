@@ -6,7 +6,7 @@ const projectInfo = {}; // loaded from Supabase
 // Default empty info for newly created projects
 function defaultInfo(proj) {
   return {
-    pm: '', po: '', contract: '', phase: 'Waiting on TP Approval', status: 'jobprep',
+    po: '', contract: '', phase: 'Waiting on TP Approval', status: 'jobprep',
     startDate: '', endDate: '', tentativeTestDate: '', client: '', clientContact: '', clientEmail: '',
     clientPhone: '', billingType: 'Fixed Fee', invoiced: '', remaining: '',
     notes: '', desc: proj.desc || '',
@@ -453,33 +453,6 @@ function renderInfoSheet(projId) {
       <div class="info-section">
         <div class="info-section-title">Project Details</div>
         <div class="info-fields">
-          <div class="info-field" data-key="pm">
-            <div class="info-field-label">Project Manager</div>
-            <div id="pmDropdownWrap" class="pm-dropdown-wrap">
-              ${(()=>{
-                const pm = employees.find(e => e.name === info.pm);
-                const av  = pm ? pm.initials : (info.pm ? info.pm.slice(0,2).toUpperCase() : '?');
-                const col = pm ? pm.color : '#7a7a85';
-                const lbl = info.pm || '<span style="color:var(--border)">—</span>';
-                if (!canEditInfo) {
-                  return `<div class="pm-selected" id="pmSelected" style="cursor:default">
-                    <div class="pm-selected-av" id="pmSelectedAv" style="background:${col}">${av}</div>
-                    <div class="pm-selected-name" id="pmSelectedName">${lbl}</div>
-                  </div>`;
-                }
-                return `<div class="pm-selected" id="pmSelected" onclick="openPmDropdown('${projId}')">
-                  <div class="pm-selected-av" id="pmSelectedAv" style="background:${col}">${av}</div>
-                  <div class="pm-selected-name" id="pmSelectedName">${lbl}</div>
-                  <div class="pm-selected-caret">&#x25BE;</div>
-                </div>
-                <div class="pm-dropdown" id="pmDropdown">
-                  <input class="pm-dropdown-search" id="pmSearch" placeholder="Search employees…" oninput="renderPmOptions(this.value)" />
-                  <div class="pm-list" id="pmList"></div>
-                  <div class="pm-clear" onclick="clearPm()">&#x2715; Clear selection</div>
-                </div>`;
-              })()}
-            </div>
-          </div>
           ${clickField('PO Number', info.po, 'po', 'PO Number…')}
           ${clickField('Quote Number', info.quoteNumber, 'quoteNumber', 'Quote Number…')}
           ${field('Billing Type', info.billingType, 'billingType')}
@@ -715,7 +688,7 @@ async function inlineEditInfoField(projId, key, el, placeholder) {
     if (!projectInfo[projId]) projectInfo[projId] = {};
     projectInfo[projId][key] = val;
     // Map key to DB column
-    const colMap = { po: 'po_number', quoteNumber: 'quote_number', pm: 'pm', contract: 'contract_value', billingType: 'billing_type' };
+    const colMap = { po: 'po_number', quoteNumber: 'quote_number', contract: 'contract_value', billingType: 'billing_type' };
     const col = colMap[key] || key;
     if (sb) await sb.from('project_info').update({ [col]: val || null }).eq('project_id', projId);
     renderInfoSheet(projId);
@@ -776,7 +749,7 @@ async function inlineEditDesc(projId, key, el) {
 
 function makeFieldsEditable(projId) {
   const info = projectInfo[projId];
-  const editableKeys = ['pm','po','billingType','client','clientContact','clientEmail','clientPhone','quoteNumber'];
+  const editableKeys = ['po','billingType','client','clientContact','clientEmail','clientPhone','quoteNumber'];
   const textareaKeys = [];
   const dateKeys = ['startDate','endDate','tentativeTestDate','testcompleteDate'];
 
@@ -846,7 +819,7 @@ async function collectAndSave(projId) {
   // Persist to Supabase
   if (!sb) return;
   const row = {
-    pm: info.pm, po_number: info.po, contract_amount: info.contract,
+    po_number: info.po, contract_amount: info.contract,
     billing_type: info.billingType, remaining: info.remaining,
     client: info.client, client_contact: info.clientContact,
     client_email: info.clientEmail, client_phone: info.clientPhone,
@@ -3113,7 +3086,7 @@ function ittInitResizers(){
   });
 }
 
-const PTBL_MINS = {name:80,status:80,client:80,po:50,quote:50,desc:80,article:80,pm:60,tenttest:80,testcomp:80,dcas:50,witness:80,tpappr:60,dpas:50,cui:50,credit:60,needpo:60,contact:80,exp:70,billed:70,hours:60,remain:70};
+const PTBL_MINS = {name:80,status:80,client:80,po:50,quote:50,desc:80,article:80,tenttest:80,testcomp:80,dcas:50,witness:80,tpappr:60,dpas:50,cui:50,credit:60,needpo:60,contact:80,exp:70,billed:70,hours:60,remain:70};
 const PTBL_DEFAULTS = {name:'220px',status:'130px',client:'160px',po:'90px',quote:'90px',desc:'180px',article:'180px',exp:'100px',billed:'100px',hours:'90px',remain:'110px'};
 function ptblGetW() { try { return Object.assign({}, PTBL_DEFAULTS, JSON.parse(localStorage.getItem('ptblCols')||'{}')); } catch { return Object.assign({}, PTBL_DEFAULTS); } }
 function ptblSetW(w) { Object.entries(w).forEach(([k,v]) => document.documentElement.style.setProperty('--ptc-'+k, v)); }
@@ -4083,25 +4056,9 @@ async function openEmailContactModal(arg) {
     || sendable[0];
   _emailModalContactId = defaultCt.id;
 
-  // CC defaults: sender always pre-checked. In project mode, if the project's
-  // PM name matches an active employee with an email, pre-check them too.
+  // CC defaults: sender always pre-checked.
   _emailModalCcIds = (currentEmployee && currentEmployee.id) ? [currentEmployee.id] : [];
   _emailModalCcPickerOpen = false;
-  if (projId) {
-    const _projInfo = projectInfo[projId] || {};
-    const pmName = (_projInfo.pm || '').trim().toLowerCase();
-    if (pmName) {
-      const pmEmp = (typeof employees !== 'undefined' ? employees : []).find(e =>
-        (e.name || '').trim().toLowerCase() === pmName
-        && e.isActive !== false
-        && !e.terminationDate
-        && e.email && e.email.trim()
-      );
-      if (pmEmp && !_emailModalCcIds.includes(pmEmp.id)) {
-        _emailModalCcIds.push(pmEmp.id);
-      }
-    }
-  }
 
   // Lazy-load templates if not yet initialized
   try {
@@ -4498,14 +4455,12 @@ function _getEligibleCcEmployees() {
 function _renderEmailCcSectionInner() {
   const projId = _emailModalProjId;
   const info = projectInfo[projId] || {};
-  const pmName = (info.pm || '').trim().toLowerCase();
   const meId = currentEmployee && currentEmployee.id;
   const all = _getEligibleCcEmployees();
 
   const tagsFor = (e) => {
     const tags = [];
     if (e.id === meId) tags.push('you');
-    if (pmName && (e.name || '').trim().toLowerCase() === pmName) tags.push('PM');
     return tags;
   };
 
@@ -4514,8 +4469,8 @@ function _renderEmailCcSectionInner() {
     .map(id => all.find(e => e.id === id))
     .filter(Boolean)
     .sort((a, b) => {
-      const aRank = (a.id === meId ? 0 : (tagsFor(a).includes('PM') ? 1 : 2));
-      const bRank = (b.id === meId ? 0 : (tagsFor(b).includes('PM') ? 1 : 2));
+      const aRank = (a.id === meId ? 0 : 1);
+      const bRank = (b.id === meId ? 0 : 1);
       if (aRank !== bRank) return aRank - bRank;
       return (a.name || '').localeCompare(b.name || '');
     });

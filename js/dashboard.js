@@ -1882,7 +1882,7 @@ async function refreshDashboard(btn) {
 
     infoRows.forEach(r => {
       projectInfo[r.project_id] = {
-        pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
+        po: r.po_number||'', contract: r.contract_amount||'',
         phase: r.phase||'Waiting on TP Approval', status: r.status||'active',
         startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
         client: r.client||'', clientContact: r.client_contact||'',

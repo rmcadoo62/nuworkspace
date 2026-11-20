@@ -774,7 +774,6 @@ function renderInProgressReport() {
         projName:   proj.name || '—',
         projId:     t.proj,
         clientName: info.clientName || info.client || '—',
-        pm:         info.pm || '',
         empName:    emp.name || t.assign || '—',
         catKey:     (t.salesCat || '').toString().trim(),
       };
@@ -877,7 +876,6 @@ function renderInProgressReport() {
         projName:   proj.name || '—',
         projId:     t.proj,
         clientName: info.clientName || info.client || '—',
-        pm:         info.pm || '',
         empName:    emp.name || t.assign || '—',
         catKey:     cat,
         ageAnchor,
@@ -979,7 +977,6 @@ function renderInProgressReport() {
           projId:     t.projId,
           projName:   t.projName,
           clientName: t.clientName,
-          pm:         t.pm,
           tasks:      [],
           subtotal:   0,
         };
@@ -1003,7 +1000,6 @@ function renderInProgressReport() {
             <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
               <div style="font-weight:600;font-size:13.5px;color:var(--text)">📁 ${escapeHtml(g.projName)}</div>
               <div style="font-size:11.5px;color:var(--muted)">${escapeHtml(g.clientName)}</div>
-              ${g.pm ? `<div style="font-size:11px;color:var(--muted)">PM: ${escapeHtml(g.pm)}</div>` : ''}
               <div style="font-size:11px;color:var(--muted)">${g.tasks.length} task${g.tasks.length!==1?'s':''}</div>
             </div>
           </td>
@@ -1220,7 +1216,6 @@ async function renderRevenueProjectionReport() {
     return {
       ...t,
       projName: proj.name || '—',
-      pm: info.pm || '',
       scheduledEnd: sched,                             // YYYY-MM-DD, last day of work
       scheduledMonth: sched ? sched.slice(0,7) : null, // YYYY-MM, month revenue lands
       needsReschedule,
@@ -1251,7 +1246,6 @@ async function renderRevenueProjectionReport() {
     <tr>
       <td style="padding:8px 14px;font-size:12.5px;color:var(--text)">
         <span style="color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px">${t.projName}</span>
-        ${t.pm ? `<span style="color:var(--muted);font-size:11px"> · ${t.pm}</span>` : ''}
         <div>${t.name||''}${t.needsReschedule ? ' <span style="font-size:10.5px;font-weight:600;color:var(--amber);background:rgba(201,168,0,0.12);padding:1px 6px;border-radius:4px;margin-left:4px">&#x21BB; Needs rescheduled</span>' : ''}</div>
       </td>
       <td style="padding:8px 14px;font-size:12px;color:var(--muted);text-align:right">${t.salesCat||'—'}</td>
@@ -1685,7 +1679,7 @@ async function renderStaleProjects() {
 
   let rows = '';
   if (staleRows.length === 0) {
-    rows = '<tr><td colspan="7" style="padding:48px;text-align:center;color:var(--muted)">' +
+    rows = '<tr><td colspan="6" style="padding:48px;text-align:center;color:var(--muted)">' +
       '<div style="font-size:32px;margin-bottom:12px">&#x2705;</div>' +
       '<div style="font-size:14px;font-weight:600;color:var(--text)">All projects have recent activity!</div>' +
       '<div style="font-size:12px;margin-top:4px">No projects found without activity in the last ' + days + ' days.</div>' +
@@ -1704,7 +1698,6 @@ async function renderStaleProjects() {
         '<td style="padding:11px 14px">' +
           '<span style="font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;background:' + stColor + '22;color:' + stColor + '">' + stLabel + '</span>' +
         '</td>' +
-        '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '&mdash;') + '</td>' +
         '<td style="padding:11px 14px;text-align:center">' +
           '<span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:' + ageBg + '">' + r.age + 'd</span>' +
         '</td>' +
@@ -1744,7 +1737,6 @@ async function renderStaleProjects() {
           '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
             '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>' +
             '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Status</th>' +
-            '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
             '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Days Silent</th>' +
             '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Last Activity</th>' +
             '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">What Happened</th>' +
@@ -1819,7 +1811,7 @@ function buildAiContext() {
     const ready  = tasks.filter(t => t.status==='complete' && t.revenueType!=='nocharge').reduce((s,t)=>s+(t.fixedPrice||0),0);
     return {
       n:p.name, st:info.status||'unknown', ph:(info.phase||'').slice(0,40),
-      pm:(info.pm||'').slice(0,20), cl:(info.clientName||info.client||'').slice(0,40),
+      cl:(info.clientName||info.client||'').slice(0,40),
       tt:tasks.length, td:done, to:tasks.filter(t=>t.overdue&&!t.done).length,
       br:Math.round(billed), rb:Math.round(ready), ch:info.creditHold||false,
     };
@@ -1941,7 +1933,7 @@ function buildAiContext() {
     JSON.stringify(histBilledByCat),
     "",
     "=== OPEN PROJECTS (" + openProjects.length + ") ===",
-    "fields: n=name, st=projectStatus, ph=phase, pm=PM, cl=client, tt=totalTasks, td=done, to=overdue, br=billedRevenue$, rb=readyToBill$, ch=creditHold",
+    "fields: n=name, st=projectStatus, ph=phase, cl=client, tt=totalTasks, td=done, to=overdue, br=billedRevenue$, rb=readyToBill$, ch=creditHold",
     JSON.stringify(projSummary),
     "",
     "=== OPEN-PROJECT TASKS (" + openTasks.length + " of " + allOpenTasks.length + (tasksTruncated ? ", TRUNCATED" : "") + ") ===",
@@ -2108,7 +2100,7 @@ async function loadClosedProjects(el) {
     closedInfo.forEach(r => {
       if (!projectInfo[r.project_id]) {
         projectInfo[r.project_id] = {
-          pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
+          po: r.po_number||'', contract: r.contract_amount||'',
           phase: r.phase||'Waiting on TP Approval', status: r.status||'closed',
           startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
           client: r.client||'', clientContact: r.client_contact||'',
@@ -2441,7 +2433,6 @@ async function renderClosingReport() {
       '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>' +
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Client</th>' +
-        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Test Complete Date</th>' +
         '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Days</th>' +
         '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Open Tasks</th>' +
@@ -2453,7 +2444,6 @@ async function renderClosingReport() {
         return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="selectProjectById(\'' + r.p.id + '\')">' +
           '<td style="padding:11px 14px"><span style="font-size:13px;font-weight:600;color:var(--text)">' + (r.p.emoji ? r.p.emoji + ' ' : '') + r.p.name + '</span></td>' +
           '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.client || '—') + '</td>' +
-          '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '—') + '</td>' +
           '<td style="padding:11px 14px;font-size:12px;color:var(--muted);font-family:JetBrains Mono,monospace">' + fmtDate(r.info.testcompleteDate) + '</td>' +
           '<td style="padding:11px 14px;text-align:center"><span style="font-family:JetBrains Mono,monospace;font-size:13px;font-weight:700;color:' + ageBg + '">' + (r.days !== null ? r.days + 'd' : '—') + '</span></td>' +
           '<td style="padding:11px 14px;text-align:center;font-size:13px;font-weight:600;color:' + (r.openTasks.length > 0 ? 'var(--red)' : 'var(--muted)') + '">' + (r.openTasks.length || '—') + '</td>' +
@@ -2471,7 +2461,6 @@ async function renderClosingReport() {
       '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>' +
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Client</th>' +
-        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
         '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Open Tasks</th>' +
         '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Ready to Bill</th>' +
         '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Survey</th>' +
@@ -2493,7 +2482,6 @@ async function renderClosingReport() {
         return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="selectProjectById(\'' + r.p.id + '\')">' +
           '<td style="padding:11px 14px"><span style="font-size:13px;font-weight:600;color:var(--text)">' + (r.p.emoji ? r.p.emoji + ' ' : '') + r.p.name + '</span></td>' +
           '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.client || '—') + '</td>' +
-          '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '—') + '</td>' +
           '<td style="padding:11px 14px;text-align:center;font-size:13px;font-weight:600;color:' + (r.openTasks.length > 0 ? 'var(--red)' : 'var(--muted)') + '">' + (r.openTasks.length || '—') + '</td>' +
           '<td style="padding:11px 14px;text-align:right;font-size:13px;font-weight:600;color:' + (r.readyToBill > 0 ? '#c084fc' : 'var(--muted)') + '">' + fmt$(r.readyToBill) + '</td>' +
           surveyIconCell(r.p, r.info) +
@@ -2510,7 +2498,6 @@ async function renderClosingReport() {
       '<thead><tr style="background:var(--surface2);border-bottom:2px solid var(--border)">' +
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Project</th>' +
         '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Client</th>' +
-        '<th style="text-align:left;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">PM</th>' +
         '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Ready to Bill</th>' +
         '<th style="text-align:center;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Survey</th>' +
         '<th style="text-align:right;padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:var(--muted)">Action</th>' +
@@ -2523,7 +2510,6 @@ async function renderClosingReport() {
         return '<tr style="border-bottom:1px solid var(--border);cursor:pointer" onclick="selectProjectById(\'' + r.p.id + '\')">' +
           '<td style="padding:11px 14px"><span style="font-size:13px;font-weight:600;color:var(--text)">' + (r.p.emoji ? r.p.emoji + ' ' : '') + r.p.name + '</span></td>' +
           '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.client || '—') + '</td>' +
-          '<td style="padding:11px 14px;font-size:12px;color:var(--muted)">' + (r.info.pm || '—') + '</td>' +
           '<td style="padding:11px 14px;text-align:right;font-size:13px;font-weight:600;color:' + (r.readyToBill > 0 ? '#c084fc' : 'var(--muted)') + '">' + fmt$(r.readyToBill) + '</td>' +
           surveyIconCell(r.p, r.info) +
           '<td style="padding:11px 14px;text-align:right">' + approveReject + '</td>' +
@@ -2638,7 +2624,6 @@ function generateClosingPdf(projId) {
   doc.setFontSize(10);
   const infoLines = [
     ['Client', info.client || '—'],
-    ['PM', info.pm || '—'],
     ['Start Date', fmtD(info.startDate)],
     ['End Date', fmtD(info.endDate)],
     ['Test Complete Date', fmtD(info.testcompleteDate)],

@@ -2756,81 +2756,6 @@ async function saveEmployee() {
 }
 
 
-// ===== PM DROPDOWN =====
-// ===== PM DROPDOWN =====
-let pmDropdownProjId = null;
-
-function openPmDropdown(projId) {
-  if (typeof requireInfoEdit === 'function' && !requireInfoEdit()) return;
-  pmDropdownProjId = projId;
-  const info = projectInfo[projId];
-  const drop = document.getElementById('pmDropdown');
-  const search = document.getElementById('pmSearch');
-  search.value = '';
-  renderPmOptions('');
-  drop.classList.add('open');
-  document.getElementById('pmSelected').classList.add('open');
-  setTimeout(() => search.focus(), 50);
-
-  // Close on outside click
-  setTimeout(() => {
-    document.addEventListener('click', closePmDropdownOutside, {once: true});
-  }, 10);
-}
-
-function closePmDropdownOutside(e) {
-  const wrap = document.getElementById('pmDropdownWrap');
-  if (wrap && !wrap.contains(e.target)) closePmDropdown();
-  else document.addEventListener('click', closePmDropdownOutside, {once: true});
-}
-
-function closePmDropdown() {
-  const drop = document.getElementById('pmDropdown');
-  const sel  = document.getElementById('pmSelected');
-  if (drop) drop.classList.remove('open');
-  if (sel)  sel.classList.remove('open');
-}
-
-function renderPmOptions(query) {
-  const q = query.toLowerCase();
-  const info = projectInfo[pmDropdownProjId];
-  const currentPm = info ? info.pm : '';
-  const filtered = employees.filter(e =>
-    e.name.toLowerCase().includes(q) || e.role.toLowerCase().includes(q)
-  );
-  document.getElementById('pmList').innerHTML = filtered.length === 0
-    ? `<div style="padding:12px 14px;font-size:12.5px;color:var(--muted)">No employees found</div>`
-    : filtered.map(e => `
-        <div class="pm-opt ${e.name === currentPm ? 'selected' : ''}" onclick="selectPm('${e.id}')">
-          <div class="pm-opt-av" style="background:${e.color}">${e.initials}</div>
-          <div class="pm-opt-name">${e.name}</div>
-          <div class="pm-opt-role">${e.role}</div>
-          ${e.name === currentPm ? '<div class="pm-opt-check">&#x2713;</div>' : ''}
-        </div>`).join('');
-}
-
-window.selectPm = function selectPm(empId) {
-  if (typeof requireInfoEdit === 'function' && !requireInfoEdit()) return;
-  const emp = employees.find(e => e.id === empId);
-  if (!emp || !pmDropdownProjId) return;
-  if (!projectInfo[pmDropdownProjId]) projectInfo[pmDropdownProjId] = defaultInfo(projects.find(p=>p.id===pmDropdownProjId)||{});
-  projectInfo[pmDropdownProjId].pm = emp.name;
-  closePmDropdown();
-  // Update the displayed value without full re-render
-  const nameEl = document.getElementById('pmSelectedName');
-  const avEl   = document.getElementById('pmSelectedAv');
-  if (nameEl) nameEl.textContent = emp.name;
-  if (avEl)   { avEl.textContent = emp.initials; avEl.style.background = emp.color; }
-  toast('Project Manager set to ' + emp.name);
-}
-
-function clearPm() {
-  if (typeof requireInfoEdit === 'function' && !requireInfoEdit()) return;
-  if (!pmDropdownProjId) return;
-  if (projectInfo[pmDropdownProjId]) projectInfo[pmDropdownProjId].pm = '';
-  closePmDropdown();
-  renderInfoSheet(pmDropdownProjId);
-}
 
 
 
@@ -2906,22 +2831,6 @@ window.deleteEmployee = async function(id) {
   toast('Employee removed');
 };
 
-// Patch selectPm
-const _origSelectPm = typeof selectPm !== "undefined" ? selectPm : ()=>{};
-window.selectPm = async function(empId) {
-  if (typeof requireInfoEdit === 'function' && !requireInfoEdit()) return;
-  const emp = employees.find(e => e.id === empId);
-  if (!emp || !pmDropdownProjId) return;
-  if (!projectInfo[pmDropdownProjId]) projectInfo[pmDropdownProjId] = defaultInfo(projects.find(p=>p.id===pmDropdownProjId)||{});
-  projectInfo[pmDropdownProjId].pm = emp.name;
-  if (sb) await sb.from('project_info').upsert({project_id: pmDropdownProjId, pm: emp.name},{onConflict:'project_id'});
-  closePmDropdown();
-  const nameEl = document.getElementById('pmSelectedName');
-  const avEl   = document.getElementById('pmSelectedAv');
-  if (nameEl) nameEl.textContent = emp.name;
-  if (avEl)   { avEl.textContent = emp.initials; avEl.style.background = emp.color; }
-  toast('Project Manager set to ' + emp.name);
-};
 
 
 // ===== VACATION REQUESTS =====

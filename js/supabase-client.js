@@ -219,7 +219,7 @@ async function loadAllData() {
     const loadedProjectIds = new Set(infoRows.map(r => r.project_id));
     infoRows.forEach(r => {
       projectInfo[r.project_id] = {
-        pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
+        po: r.po_number||'', contract: r.contract_amount||'',
         phase: r.phase||'Waiting on TP Approval', status: r.status||'active',
         startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
         client: r.client||'', clientContact: r.client_contact||'',
@@ -520,7 +520,7 @@ async function loadClosedProject(projId) {
     // Merge project_info
     infoRows.forEach(r => {
       projectInfo[r.project_id] = {
-        pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
+        po: r.po_number||'', contract: r.contract_amount||'',
         phase: r.phase||'Waiting on TP Approval', status: r.status||'active',
         startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
         client: r.client||'', clientContact: r.client_contact||'',
@@ -661,7 +661,7 @@ async function loadFullProjectTimesheets(projId) {
 // below and resyncCoreData(), so the two can never silently drift apart.
 function _mapProjectInfoRow(r) {
   return {
-    pm: r.pm||'', po: r.po_number||'', contract: r.contract_amount||'',
+    po: r.po_number||'', contract: r.contract_amount||'',
     phase: r.phase||'Waiting on TP Approval', status: r.status||'active',
     startDate: r.start_date||'', endDate: r.end_date||'', tentativeTestDate: r.tentative_test_date||'',
     client: r.client||'', clientContact: r.client_contact||'',

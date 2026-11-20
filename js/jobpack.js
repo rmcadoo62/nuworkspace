@@ -380,7 +380,7 @@ ${endRows}</table>
 <div class="jp-section-label" style="padding:2px 3px;margin-bottom:2px">REMARKS</div>
 <div style="min-height:42px;border:1px solid #bbb;padding:2px;margin-bottom:6px"></div>
 <div class="jp-section-label" style="padding:2px 3px;margin-bottom:2px">TEST ENGINEER</div>
-<div class="jp-auto" style="padding:2px 3px;margin-bottom:6px;font-size:8.5px;font-weight:600;color:#0a3d6b">${info.pm||''}</div>
+<div class="jp-auto" style="padding:2px 3px;margin-bottom:6px;font-size:8.5px;font-weight:600;color:#0a3d6b"></div>
 <div style="font-size:8px;color:#666;border-top:1px solid #ccc;padding-top:3px">Sheet: ______________________</div>`;
   return `<div class="jp-form"><table style="table-layout:fixed">
 <colgroup><col style="width:5%"><col style="width:11%"><col style="width:10%"><col style="width:10%"><col style="width:11%"><col style="width:10%"><col style="width:10%"><col style="width:33%"></colgroup>
