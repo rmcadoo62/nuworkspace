@@ -20,7 +20,10 @@ function openHomePanel(navEl) {
   if (_homeRefreshTimer) clearInterval(_homeRefreshTimer);
   _homeRefreshTimer = setInterval(() => {
     const panel = document.getElementById('panel-home');
-    if (panel && panel.classList.contains('active')) refreshHomeChatter();
+    if (panel && panel.classList.contains('active')) {
+      refreshHomeChatter();
+      refreshHomeWeather();
+    }
   }, 15 * 60 * 1000);
 }
 window.openHomePanel = openHomePanel;
@@ -669,7 +672,8 @@ function _readWeatherCache() {
 }
 
 async function fetchHomeWeather() {
-  if (_homeWeatherCache) return _homeWeatherCache;
+  // No in-memory short-circuit here: the 30-min localStorage TTL below is the
+  // only cache, so returning to Home or the 15-min timer picks up new readings.
 
   // Fresh enough cache from a previous load? Use it, skip the network.
   const cached = _readWeatherCache();
@@ -696,6 +700,15 @@ async function fetchHomeWeather() {
     if (cached && cached.data) { _homeWeatherCache = cached.data; return cached.data; }
     return null;
   }
+}
+
+// Swap just the weather card in place (called by the 15-min Home timer).
+// fetchHomeWeather honors the 30-min TTL, so this adds no extra API calls.
+async function refreshHomeWeather() {
+  const weather = await fetchHomeWeather();
+  if (!weather) return;
+  const card = document.querySelector('.home-weather-card');
+  if (card) card.outerHTML = renderWeatherCard(weather);
 }
 
 function weatherIcon(code) {
